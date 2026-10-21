@@ -304,11 +304,10 @@ class Engine:
         rel = f".hub/outputs/{cid}.txt"
         try:
             p = self.workdir.resolve(rel)
-            p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_text(text, encoding="utf-8")
+            projects.safe_write(self.workdir.root, p, text.encode("utf-8"))
             short, _ = clip(text, limit)
             return short + f"\n\n(The full output is in {rel} - read it with read_file and offset/limit.)"
-        except OSError:
+        except (OSError, ValueError):
             return clip(text, limit)[0]
 
     def _watch(self, name: str, args: dict, result: ToolResult) -> None:
@@ -569,8 +568,7 @@ def attachment_block(wd: projects.Workdir, up: dict) -> dict:
     if p.exists() and p.read_bytes() != data:
         rel = f".hub/attachments/{up['sha'][:8]}-{name}"
         p = wd.resolve(rel)
-    p.parent.mkdir(parents=True, exist_ok=True)
     if not p.exists():
-        p.write_bytes(data)
+        projects.safe_write(wd.root, p, data)
     kind = "image" if (up.get("mime") or "").startswith("image/") else "file"
     return {"type": kind, "sha": up["sha"], "mime": up.get("mime"), "name": name, "size": up.get("size"), "path": rel}

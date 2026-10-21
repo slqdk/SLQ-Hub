@@ -118,18 +118,23 @@ Add a proxy host:
 
 Under **Advanced** (long answers stream, and uploads can be large):
 
-    client_max_body_size 200m;
+    client_max_body_size 600m;
     proxy_read_timeout 3600s;
     proxy_send_timeout 3600s;
     proxy_buffering off;
 
 The model API (`/v1`, `/api`) is refused when it arrives through the proxy.
-That is deliberate: apps use the LAN address.
+That is deliberate: apps use the LAN address. (Settings → Apps and keys can
+allow it through the proxy, with a key, if you ever need that.)
+
+SLQ Sync (`/api/sync`) works through the proxy with a device token, so PCs
+outside the LAN can sync.
 
 ## 5. Connect FamilyLog
 
-1. In the Hub: **Settings → API keys → New key**. Use the name `familylog` and
-   priority `normal`, then copy the key (it is shown once).
+1. In the Hub: **Settings → Apps and keys → New key**. Use the name `familylog`
+   and priority `normal`, then copy the key (it is shown once). The page also
+   shows the exact addresses to use.
 2. In FamilyLog: **Settings**, then set **Ollama address** to
    `http://30.11.0.140:11434/k/<the key>` and press **Test**. The Hub's models
    appear.

@@ -209,3 +209,69 @@ async def test_release_twice_is_harmless_and_context_manager_releases():
         assert t.need == "llm:a"
     await t.release()
     assert not s.running
+
+
+async def test_two_leases_that_both_want_comfy_do_not_wait_on_each_other():
+    card = FakeCard()
+    s = sched(card)
+    a = await s.acquire("web", "agent", "llm:a", "interactive", lease=True)
+    b = await s.acquire("web", "agent", "llm:a", "interactive", lease=True)
+    fam = asyncio.create_task(s.acquire("fam", "chat", "llm:a"))
+    sa = asyncio.create_task(a.switch("comfy"))
+    await settle()
+    sb = asyncio.create_task(b.switch("comfy"))
+    await asyncio.wait_for(sa, 1)                    # a gets ComfyUI (one slot) ...
+    await settle()
+    assert s.current == "comfy" and not sb.done()    # ... b waits for that slot
+    back = asyncio.create_task(a.switch("llm:a"))    # a is done with its image
+    await asyncio.wait_for(sb, 1)                    # now b renders
+    await settle()
+    assert not back.done()
+    await b.switch("llm:a")                          # b is done too: both back on the model
+    await asyncio.wait_for(back, 1)
+    assert s.current == "llm:a" and a.job.need == b.job.need == "llm:a"
+    await a.release()
+    await b.release()
+    t = await asyncio.wait_for(fam, 1)              # the app's call was never lost
+    await t.release()
+    assert card.log.count(("load", "comfy")) == 1
+
+
+async def test_a_lease_switching_to_a_full_residency_waits_for_a_slot():
+    s = sched()
+    a = await s.acquire("web", "agent", "llm:a", "interactive", lease=True)
+    await a.switch("comfy")
+    # A second lease on the model wants ComfyUI while a is still rendering.
+    c = asyncio.create_task(s.acquire("web", "agent", "llm:a", "interactive", lease=True))
+    await settle()
+    assert not c.done()                               # the card is on ComfyUI for a's lease
+    back = asyncio.create_task(a.switch("llm:a"))
+    tc = await asyncio.wait_for(c, 1)
+    await asyncio.wait_for(back, 1)
+    sw = asyncio.create_task(tc.switch("comfy"))
+    sa = asyncio.create_task(a.switch("comfy"))
+    await settle(50)
+    done = [x for x in (sw, sa) if x.done()]
+    assert len(done) == 1 and s.current == "comfy"   # one slot: one of them renders
+    await (tc if sw.done() else a).release()
+    await asyncio.wait_for(sa if sw.done() else sw, 1)
+    await a.release()
+    await tc.release()
+
+
+async def test_a_crashed_model_is_noticed_and_loaded_again():
+    card = FakeCard()
+    card.dead = set()
+
+    async def alive(need):
+        return need not in card.dead
+    card.alive = alive
+    s = sched(card)
+    t = await s.acquire("fam", "chat", "llm:a")
+    await t.release()
+    assert card.log == [("load", "llm:a")]
+    card.dead.add("llm:a")                            # llama-server died (OOM)
+    s.suspect()                                       # a client could not reach it
+    t = await asyncio.wait_for(s.acquire("fam", "chat", "llm:a"), 1)
+    await t.release()
+    assert card.log == [("load", "llm:a"), ("load", "llm:a")]      # noticed, loaded again, served

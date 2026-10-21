@@ -1,0 +1,170 @@
+// An assistant turn: thinking, text, the strip of tool calls, artifacts.
+import { useState, type ReactNode } from "react";
+import { AppWindow, Brain, ChevronDown, ChevronRight, Code2, FileText, GitBranch, Image as ImageIcon, Shapes } from "lucide-react";
+import { api, mediaUrl, type ArtifactRef } from "../lib/api";
+import { seconds } from "../lib/format";
+import { toolLabel, toolSummary, type Item, type ToolView } from "../lib/turns";
+import { useApp } from "../state";
+import { Markdown } from "./Markdown";
+import { Lamp, type LampState } from "./ui";
+
+export interface TurnActions {
+  runId?: string | null;                       // set while live: approvals go to this run
+  openArtifact: (ref: ArtifactRef) => void;
+  live?: boolean;
+}
+
+export function Items({ items, actions }: { items: Item[]; actions: TurnActions }) {
+  const lastText = [...items].reverse().find((i) => i.kind === "text");
+  return (
+    <>
+      {items.map((it, i) => {
+        switch (it.kind) {
+          case "thinking":
+            return <Thinking key={i} text={it.text} live={actions.live && i === items.length - 1} />;
+          case "text":
+            return <Markdown key={i} text={it.text} live={actions.live && it === lastText && i === items.length - 1} />;
+          case "tools": {
+            // The task list and finished artifacts show as their own blocks.
+            const shown = it.tools.filter((t) => t.name !== "todo_write" && !(t.name === "artifact" && t.display?.artifact));
+            if (!shown.length) return null;
+            return <div className="strip" key={i}>{shown.map((t) => <ToolRow key={t.id} tool={t} actions={actions} />)}</div>;
+          }
+          case "artifact":
+            return <ArtifactCard key={i} refx={it.ref} onOpen={() => actions.openArtifact(it.ref)} />;
+          case "todos":
+            return (
+              <ul className="todos" key={i} aria-label="Task list">
+                {it.items.map((t, j) => (
+                  <li key={j} data-status={t.status}>
+                    <Lamp size="sm" state={t.status === "completed" ? "run" : t.status === "in_progress" ? "wait" : "off"} />
+                    <span>{t.content}</span>
+                  </li>
+                ))}
+              </ul>
+            );
+          case "notice":
+            return <div key={i} className={`notice ${it.tone === "fault" ? "fault" : ""}`}>
+              <Lamp state={it.tone === "fault" ? "fault" : it.tone === "wait" ? "wait" : "off"} />{it.text}</div>;
+        }
+        return null;
+      })}
+    </>
+  );
+}
+
+function Thinking({ text, live }: { text: string; live?: boolean }) {
+  const [open, setOpen] = useState(false);
+  const words = text.trim().split(/\s+/).length;
+  return (
+    <div className="thinking">
+      <button onClick={() => setOpen((o) => !o)} aria-expanded={open || !!live}>
+        <Brain size={15} /> {live ? "Thinking" : `Thought for ${words} words`}
+        {open || live ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+      </button>
+      {(open || live) && <div className="thinking-body">{live ? text.slice(-1500) : text}</div>}
+    </div>
+  );
+}
+
+const STATE_LAMP: Record<string, LampState> = { streaming: "wait", running: "run", approval: "act", done: "off", error: "fault" };
+
+function ToolRow({ tool, actions }: { tool: ToolView; actions: TurnActions }) {
+  const [open, setOpen] = useState(false);
+  const busy = tool.state === "running" || tool.state === "streaming";
+  const lamp = tool.state === "done" ? "off" : STATE_LAMP[tool.state];
+  const summary = toolSummary(tool) || (tool.state === "streaming" ? "..." : "");
+  return (
+    <div className="tool">
+      <button className="tool-head" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+        {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+        <span className="row" style={{ gap: 8 }}>
+          <Lamp state={tool.state === "done" ? "run" : lamp} size="sm" pulse={busy} />
+          <span className="tool-name">{tool.subagent ? `Subagent: ${tool.subagent.description}` : toolLabel(tool.name)}</span>
+        </span>
+        <span className="tool-sum">{tool.subagent ? "" : summary}</span>
+        <span className="tool-time">{tool.state === "approval" ? "waiting for you" : tool.seconds != null ? seconds(tool.seconds) : busy ? "running" : ""}</span>
+      </button>
+      {tool.state === "approval" && actions.runId && <Approval tool={tool} runId={actions.runId} />}
+      {tool.children && tool.children.length > 0 && (open || busy) && (
+        <div className="tool-body"><div className="sub-run"><Items items={tool.children} actions={{ ...actions }} /></div></div>
+      )}
+      {open && <ToolDetail tool={tool} />}
+      {!open && tool.images && tool.images.length > 0 && (
+        <div className="tool-body"><ToolImages images={tool.images} /></div>
+      )}
+    </div>
+  );
+}
+
+function ToolImages({ images }: { images: { sha: string; caption?: string }[] }) {
+  return (
+    <div className="tool-images">
+      {images.map((im) => (
+        <a key={im.sha} href={mediaUrl(im.sha)} target="_blank" rel="noreferrer" title={im.caption}>
+          <img src={mediaUrl(im.sha)} alt={im.caption ?? "image from the tool"} loading="lazy" />
+        </a>
+      ))}
+    </div>
+  );
+}
+
+function ToolDetail({ tool }: { tool: ToolView }) {
+  const args = tool.args ? JSON.stringify(tool.args, null, 2) : tool.argsText;
+  const hits = tool.display?.library_hits;
+  return (
+    <div className="tool-body">
+      {args && args !== "{}" && <><div className="label">Input</div><pre>{args}</pre></>}
+      {tool.result != null && <><div className="label">{tool.state === "error" ? "Error" : "Result"}</div>
+        <pre>{tool.result.length > 20000 ? tool.result.slice(0, 20000) + "\n..." : tool.result}</pre></>}
+      {hits && hits.length > 0 && <div className="small muted">
+        {hits.map((h, i) => <div key={i}>[{i + 1}] {h.filename}{h.page ? `, page ${h.page}` : ""} <span className="faint">({h.via.join(" + ")})</span></div>)}
+      </div>}
+      {tool.images && tool.images.length > 0 && <ToolImages images={tool.images} />}
+    </div>
+  );
+}
+
+function Approval({ tool, runId }: { tool: ToolView; runId: string }) {
+  const { toast } = useApp();
+  const [busy, setBusy] = useState(false);
+  const answer = async (decision: "allow" | "always" | "deny") => {
+    setBusy(true);
+    try {
+      await api(`/hub/api/runs/${runId}/approve`, { body: { call_id: tool.id, decision } });
+    } catch (e) {
+      toast((e as Error).message, "fault");
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="tool-body">
+      <div className="approval" role="alert">
+        <p><b>{toolLabel(tool.name)}</b> wants to run. It reaches outside the sandbox, so it asks first.</p>
+        {tool.args && Object.keys(tool.args).length > 0 && <pre>{JSON.stringify(tool.args, null, 2)}</pre>}
+        <div className="row wrap">
+          <button className="btn primary small" disabled={busy} onClick={() => answer("allow")}>Allow once</button>
+          <button className="btn small" disabled={busy} onClick={() => answer("always")}>Always allow this tool</button>
+          <button className="btn danger small" disabled={busy} onClick={() => answer("deny")}>Deny</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const KIND_ICON: Record<string, ReactNode> = {
+  html: <AppWindow size={18} />, react: <AppWindow size={18} />, svg: <Shapes size={18} />,
+  mermaid: <GitBranch size={18} />, markdown: <FileText size={18} />, code: <Code2 size={18} />,
+};
+const KIND_NAME: Record<string, string> = { html: "Web page", react: "React app", svg: "SVG drawing", mermaid: "Diagram",
+  markdown: "Document", code: "Code" };
+
+function ArtifactCard({ refx, onOpen }: { refx: ArtifactRef; onOpen: () => void }) {
+  return (
+    <button className="artifact-card" onClick={onOpen}>
+      <span className="kind">{KIND_ICON[refx.type] ?? <ImageIcon size={18} />}</span>
+      <span><b>{refx.title}</b><span className="small muted">{KIND_NAME[refx.type] ?? refx.type}, version {refx.version}</span></span>
+      <span className="btn small">Open</span>
+    </button>
+  );
+}

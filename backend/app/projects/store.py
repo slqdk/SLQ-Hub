@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import json
 import mimetypes
+import os
 import shutil
+import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -162,10 +164,7 @@ class Workdir:
     def write(self, rel: str, data: bytes | str, author: str = "hub", origin: str = "hub",
               message: str = "") -> Path:
         p = self.resolve(rel)
-        p.parent.mkdir(parents=True, exist_ok=True)
-        tmp = p.with_name(p.name + ".hub-tmp")
-        tmp.write_bytes(data.encode("utf-8") if isinstance(data, str) else data)
-        tmp.replace(p)
+        safe_write(self.root, p, data.encode("utf-8") if isinstance(data, str) else data)
         self.checkin(author, origin, message or f"wrote {self.rel(p)}")
         return p
 
@@ -201,6 +200,30 @@ class Workdir:
         rev = syncstore.snapshot(self.project_id, self.root, author=author, origin=origin, message=message)
         touch_project(self.project_id)
         return rev
+
+
+def safe_write(root: Path, p: Path, data: bytes) -> None:
+    """Write `p` inside `root` without following a symlink that a sandboxed
+    process (the same uid, the same folder) may have planted: a fresh temp
+    file (O_EXCL) in the checked folder, then a rename over the target - a
+    rename replaces a symlink rather than writing through it."""
+    root = root.resolve()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    parent = p.parent.resolve()
+    if parent != root and root not in parent.parents:
+        raise ValueError(f"{p.name}: the folder is outside the working folder")
+    fd, tmp = tempfile.mkstemp(dir=parent, prefix=f".{p.name[:80]}.", suffix=".hub-tmp")
+    try:
+        os.fchmod(fd, 0o644)
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        os.replace(tmp, parent / p.name)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def mime_of(path: str) -> str:

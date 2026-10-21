@@ -6,7 +6,7 @@ the residency the server belongs to (CPU-only aux servers excepted).
 from __future__ import annotations
 
 import json
-from typing import AsyncIterator
+from typing import AsyncIterator, Callable
 
 import httpx
 
@@ -31,6 +31,17 @@ def _error_text(body: bytes, status: int) -> str:
 class LlmClient:
     def __init__(self, transport: httpx.AsyncBaseTransport | None = None):
         self._transport = transport
+        # Called when a model server cannot be reached at all (crashed?), so the
+        # scheduler checks it before sending the next job there.
+        self.on_unreachable: Callable[[], None] | None = None
+
+    def _unreachable(self, exc: Exception) -> LlmError:
+        if self.on_unreachable and isinstance(exc, (httpx.ConnectError, httpx.RemoteProtocolError, httpx.ReadError)):
+            try:
+                self.on_unreachable()
+            except Exception:  # noqa: BLE001
+                pass
+        return LlmError(f"the model server is not answering ({exc.__class__.__name__})", 502)
 
     def client(self, timeout: httpx.Timeout | float | None = None) -> httpx.AsyncClient:
         return httpx.AsyncClient(timeout=timeout if timeout is not None else httpx.Timeout(None, connect=10),
@@ -62,7 +73,7 @@ class LlmClient:
                             raise LlmError(err.get("message", str(err)) if isinstance(err, dict) else str(err))
                         yield chunk
         except httpx.HTTPError as exc:
-            raise LlmError(f"the model server is not answering ({exc.__class__.__name__})", 502) from exc
+            raise self._unreachable(exc) from exc
 
     async def chat(self, base_url: str, payload: dict) -> dict:
         body = {**payload, "stream": False}
@@ -71,7 +82,7 @@ class LlmClient:
             async with self.client() as c:
                 r = await c.post(base_url + "/v1/chat/completions", json=body)
         except httpx.HTTPError as exc:
-            raise LlmError(f"the model server is not answering ({exc.__class__.__name__})", 502) from exc
+            raise self._unreachable(exc) from exc
         if r.status_code >= 400:
             raise LlmError(_error_text(r.content, r.status_code), r.status_code)
         return r.json()

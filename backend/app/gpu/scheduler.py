@@ -21,8 +21,11 @@ Concepts (docs/DESIGN.md section 3):
 
 Admission (re-run whenever something changes):
 
-1. A lease asking to switch goes first: nothing new starts, the other
-   running jobs finish, the card switches, the lease continues.
+1. Leases asking to switch go first: nothing new starts. A lease whose
+   target is loaded continues as soon as a slot of it is free. Otherwise the
+   card switches once every running job is either finished or itself
+   waiting for a switch (so two leases that both want ComfyUI cannot wait on
+   each other) - to the target of the lease that asked first.
 2. The head is the waiting job with the best (effective priority, arrival).
    If it needs what is loaded and a slot is free, it starts.
 3. If it needs something else: while a lease holds the card (it cannot
@@ -58,6 +61,7 @@ class Backend(Protocol):
     async def load(self, need: str) -> None: ...
     async def unload(self, need: str) -> None: ...
     def slots(self, need: str) -> int: ...
+    # optional: async def alive(self, need: str) -> bool  (is what is loaded still there?)
 
 
 @dataclass(eq=False)
@@ -78,6 +82,7 @@ class Job:
     admitted: asyncio.Future | None = None
     switch_to: str | None = None
     switch_fut: asyncio.Future | None = None
+    switch_at: float = 0.0
 
     def info(self, now: float, position: int | None = None) -> dict:
         return {
@@ -137,6 +142,7 @@ class Scheduler:
         self._loop: asyncio.AbstractEventLoop | None = None
         self._listeners: set[asyncio.Queue] = set()
         self._timer: asyncio.TimerHandle | None = None
+        self._suspect = False
 
     # ------------------------------------------------------------ public
     async def acquire(self, owner: str, kind: str, need: str, priority: str | int = "normal",
@@ -215,6 +221,12 @@ class Scheduler:
         """Test helper: until nothing waits or runs."""
         while self.pending or self.running or self.switching:
             await asyncio.sleep(0.005)
+
+    def suspect(self) -> None:
+        """Something could not reach what is loaded (a crashed llama-server):
+        check it before the next job is sent there."""
+        self._suspect = True
+        self._notify()
 
     async def preload(self, need: str) -> None:
         """Load something without a job (start-up): only when the card is idle."""
@@ -324,17 +336,27 @@ class Scheduler:
         elif job.state == "running":                  # admitted just as it gave up
             self._release(job, why)
 
+    def _users(self, need: str | None, but: Job | None = None) -> int:
+        """Running jobs working on `need` (not waiting to switch away)."""
+        return sum(1 for j in self.running.values()
+                   if j is not but and j.switch_to is None and j.need == need)
+
     async def _switch_lease(self, job: Job, need: str) -> None:
         if job.state != "running":
             raise SchedulerError("only a running job can switch")
         if not job.lease:
             raise SchedulerError("only a lease can switch residency")
-        if need == self.current and self.switching is None:
+        if job.need == need and need == self.current and self.switching is None:
+            return
+        if (need == self.current and self.switching is None and not self._suspect
+                and not any(j.switch_to for j in self.running.values())
+                and self._users(need, but=job) < self.backend.slots(need)):
             job.need = need
             return
         loop = asyncio.get_running_loop()
         job.switch_to = need
         job.switch_fut = loop.create_future()
+        job.switch_at = self.clock()
         self._notify()
         await job.switch_fut
 
@@ -363,31 +385,56 @@ class Scheduler:
             self.switching = None
             self._broadcast()
 
+    async def _check_alive(self) -> None:
+        self._suspect = False
+        alive = getattr(self.backend, "alive", None)
+        if self.current is None or alive is None:
+            return
+        try:
+            ok = await alive(self.current)
+        except Exception:  # noqa: BLE001
+            ok = False
+        if not ok:
+            log.warning("%s is no longer loaded (crashed?) - it is loaded again when needed", self.current)
+            self.last_error = f"{self.current} stopped unexpectedly; it is loaded again"
+            self.current = None
+            self._broadcast()
+
     async def _admit(self) -> None:
         while True:
             now = self.clock()
+            if self._suspect and self.switching is None:
+                await self._check_alive()
 
-            # 1. A lease asking to switch goes first.
-            sw = next((j for j in self.running.values() if j.switch_to is not None), None)
-            if sw is not None:
-                target, fut = sw.switch_to, sw.switch_fut
+            # 1. Leases asking to switch go first.
+            waiters = sorted((j for j in self.running.values() if j.switch_to is not None),
+                             key=lambda j: (j.switch_at, j.id))
+            if waiters:
+                progressed = False
+                for w in waiters:                   # targets that are loaded: continue while slots allow
+                    if (w.switch_to == self.current and self.current is not None
+                            and self._users(self.current) < self.backend.slots(self.current)):
+                        fut = w.switch_fut
+                        w.need, w.switch_to, w.switch_fut = w.switch_to, None, None
+                        if fut and not fut.done():
+                            fut.set_result(True)
+                        progressed = True
+                if progressed:
+                    self._broadcast()
+                    continue
+                if any(j.switch_to is None for j in self.running.values()):
+                    return                          # jobs still working on the loaded model finish first
+                first = waiters[0]
+                target = first.switch_to
                 if target == self.current:
-                    sw.need, sw.switch_to, sw.switch_fut = target, None, None
-                    if fut and not fut.done():
-                        fut.set_result(True)
-                    continue
-                if len(self.running) > 1:
-                    return                          # the others finish first
+                    return                          # no slot of it is free; a release wakes us
                 err = await self._switch(target)
-                if sw.switch_fut is not fut:       # released or cancelled meanwhile
-                    continue
-                sw.switch_to, sw.switch_fut = None, None
-                if fut and not fut.done():
-                    if err is None:
-                        sw.need = target
-                        fut.set_result(True)
-                    else:
-                        fut.set_exception(err)
+                if err is not None:                 # the load failed: tell everyone who wanted it
+                    for w in waiters:
+                        if w.switch_to == target and w.switch_fut and not w.switch_fut.done():
+                            fut = w.switch_fut
+                            w.switch_to, w.switch_fut = None, None
+                            fut.set_exception(err)
                 continue
 
             waiting = self._ordered(now)

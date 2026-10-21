@@ -47,8 +47,9 @@ ask() {  # ask VAR "question" default  - an exported VAR wins without asking
 
 # ---------------------------------------------------------------- checks
 [[ $EUID -eq 0 ]] || die "run this as root on the Proxmox host."
-command -v qm >/dev/null && command -v pvesh >/dev/null && command -v pvesm >/dev/null \
-    || die "qm/pvesh/pvesm not found - this must run on the Proxmox VE host."
+for tool in qm pvesh pvesm; do
+    command -v "$tool" >/dev/null || die "$tool not found - this must run on the Proxmox VE host."
+done
 
 section "=== SLQ Hub - create the VM ==="
 [[ $DRY -eq 1 ]] && warn "Dry run: nothing is changed."
@@ -150,7 +151,8 @@ runcmd:
   - [bash, -c, \"test -d /opt/slq-hub/.git || git clone $REPO_URL /opt/slq-hub\"]
 "
 if [[ $DRY -eq 1 ]]; then
-    echo "  + write $SNIPPET_DIR/$SNIPPET:"; sed 's/^/      /' <<<"$vendor"
+    echo "  + write $SNIPPET_DIR/$SNIPPET:"
+    while IFS= read -r line; do echo "      $line"; done <<<"$vendor"
 else
     printf '%s' "$vendor" > "$SNIPPET_DIR/$SNIPPET"
 fi
@@ -215,7 +217,7 @@ else
     for _ in $(seq 1 90); do
         ip="$(qm guest cmd "$VMID" network-get-interfaces 2>/dev/null \
             | grep -oE '"ip-address" *: *"[0-9]+(\.[0-9]+){3}"' | grep -oE '[0-9]+(\.[0-9]+){3}' \
-            | grep -v '^127\.' | grep -v '^172\.' | head -n1 || true)"
+            | grep -v '^127\.' | head -n1 || true)"     # Docker is not installed yet: no bridges
         [[ -n "$ip" ]] && break
         sleep 5
     done

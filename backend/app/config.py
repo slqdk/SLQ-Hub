@@ -48,6 +48,9 @@ class Env:
     admin_password_hash: str = ""
     version: str = "dev"
     static_dir: Path | None = None
+    lan_host: str = ""                 # the VM's LAN address, for "how to connect" in the UI
+    ui_port: int = 8080                # published ports on the VM
+    ollama_port: int = 11434
 
     @property
     def db_path(self) -> Path:
@@ -100,6 +103,9 @@ def load_env() -> Env:
         admin_password_hash=e.get("HUB_ADMIN_PASSWORD_HASH", ""),
         version=_read_version(),
         static_dir=static,
+        lan_host=e.get("HUB_LAN_HOST", ""),
+        ui_port=int(e.get("HUB_PORT") or 8080),
+        ollama_port=int(e.get("HUB_OLLAMA_PORT") or 11434),
     )
 
 

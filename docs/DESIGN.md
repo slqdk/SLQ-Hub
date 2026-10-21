@@ -134,12 +134,14 @@ for statistics.
 
 ### What clients see
 
-- The web UI shows "Waiting — 2 ahead" in the composer, and a queue drawer
-  with the running and waiting jobs, owner, model, wait time, and a cancel
-  button.
+- The web UI shows the turn's state under the answer ("Waiting for the card,
+  number 2 in line", "Getting the card ready", "Working"), and the GPU plate
+  at the bottom of the sidebar shows what is loaded, the slots in use and how
+  many wait. It opens the queue: running and waiting jobs with owner,
+  priority, model, wait time and a cancel button.
 - An API caller just waits. Its HTTP request stays open until the job starts,
-  and streaming then begins as normal. `max_queue_wait` (default 30 min)
-  answers 503 after that.
+  and streaming then begins as normal. After `queue.max_wait_s` (default
+  30 min) it gets 503.
 
 ### Example
 
@@ -154,15 +156,16 @@ ComfyUI, renders, and switches back on the agent's next model call.
 
 ## 4. Models
 
-Defaults (`backend/app/llm/catalog.py`, editable in Settings → Models):
+Defaults (`backend/app/catalog/models.json`; Settings → Models changes the
+server parameters per model, stored in `data/models.override.json`):
 
 | Id | File | Context | Notes |
 |---|---|---|---|
 | `qwen3.8-27b` | `unsloth/Qwen3.8-27B-GGUF` `Qwen3.8-27B-UD-Q4_K_M.gguf` (16.5 GB) + `mmproj-F16.gguf` (0.9 GB) | 80K shared pool (`-c 81920 -np 2 -kvu`) | KV q8_0, flash attention on. Vision, tools, thinking. |
 | `qwen3.6-35b-a3b` | `unsloth/Qwen3.6-35B-A3B-GGUF` `Qwen3.6-35B-A3B-UD-IQ4_XS.gguf` (17.7 GB) + `mmproj-F16.gguf` | 64K | Fast MoE (3B active). Q4_K_M plus mmproj is too tight on 24 GB. |
-| `embed-text` | `Qwen/Qwen3-Embedding-0.6B-GGUF` `Qwen3-Embedding-0.6B-Q8_0.gguf` | — | CPU (`--device none`), always running. |
-| `rerank` | `ggml-org/Qwen3-Reranker-0.6B-Q8_0-GGUF` | — | CPU, always running. |
-| `embed-vl` | `mradermacher/Qwen3-VL-Embedding-2B-GGUF` Q8_0 + mmproj | — | Page images for libraries. CPU for queries; GPU (queued, background) for bulk indexing. |
+| `embed-text` | `Qwen/Qwen3-Embedding-0.6B-GGUF` `Qwen3-Embedding-0.6B-Q8_0.gguf` | — | CPU (`--device none`); started when needed, stopped after 15 idle minutes. |
+| `rerank` | `ggml-org/Qwen3-Reranker-0.6B-Q8_0-GGUF` | — | CPU, the same way. |
+| `embed-vl` | `mradermacher/Qwen3-VL-Embedding-2B-GGUF` Q8_0 + mmproj | — | Page images for libraries. Always CPU for queries; indexing on the CPU by default, or on the GPU as a background queue job (Settings → Assistant → Libraries). |
 
 VRAM budget for Qwen3.8-27B (from its config: 16 full-attention layers × 4
 KV heads × 256 head dim): weights 15.3 GiB + mmproj 0.9 + recurrent state
@@ -192,7 +195,7 @@ All of it goes through the queue.
 | Anthropic | `POST /v1/messages` (streaming, tools, images, thinking), `POST /v1/messages/count_tokens` |
 
 **Authentication.** Every app gets a key (`slqhub_…`), created in
-Settings → API keys with a name, a priority and an optional IP restriction.
+Settings → Apps and keys with a name, a priority and an optional IP restriction.
 It is accepted three ways:
 
 - `Authorization: Bearer slqhub_…`, which the OpenAI SDKs send.
@@ -201,8 +204,9 @@ It is accepted three ways:
   send no auth header, so FamilyLog only needs its "Ollama address" changed to
   `http://<hub>:11434/k/<key>`, with no code change.
 
-**LAN guard.** API routes answer only to clients in `api_allowed_cidrs`
-(LAN, WireGuard, VPN). Behind Nginx Proxy Manager the real client address
+**LAN guard.** API routes answer only to clients in `HUB_LAN_CIDRS` (LAN,
+WireGuard, VPN; set in `/srv/slq-hub/.env`), unless Settings → Apps and keys
+allows the API through the proxy. Behind Nginx Proxy Manager the real client address
 comes from `X-Forwarded-For`, trusted only from the proxy's IP, so the
 subdomain serves the UI but not the API.
 
@@ -235,23 +239,32 @@ Every web chat turn is an agent task: one queue job holding a lease.
 
 1. Build the prompt.
 2. Call the model (streamed).
-3. Run the tool calls it makes, in parallel where they are independent.
+3. Run the tool calls it makes, one after another (MCP tools ask first).
 4. Append the results and repeat until the model answers without tools,
    or a step limit is reached.
 
-The UI receives every event as it happens over SSE (`text`, `thinking`,
-`tool_call`, `tool_result`, `image`, `artifact`, `todo`, `step`, `queued`,
-`escalated`, `done`). A reload replays from the last event it saw.
+The UI receives every event as it happens over SSE
+(`GET /hub/api/runs/{id}/events`): `queued` (with the position), `started`,
+`step`, `thinking`, `text`, `tool_start`, `tool_args`, `tool_call`,
+`approval_needed`, `tool_result`, `artifact`, `todo`, `subagent`, `usage`,
+`compacted`, `escalated`, `title`, `message_saved`, and finally `done`,
+`error` or `cancelled`. A reload replays the run's events (kept for an hour
+after it ends), and the stored messages are written step by step, so a
+stopped or crashed turn keeps what it did.
 
-**Prompt assembly**, in this order:
+**Prompt assembly** (`backend/app/agent/prompt.py`), in this order:
 
-1. Base instructions.
-2. Environment: date, project, sandbox paths.
-3. The project's instructions.
-4. The index of enabled skills (name + description only).
-5. The memory index.
-6. Tool schemas.
-7. History, compacted if needed.
+1. Base instructions with the date, the working folder and its sandbox path,
+   images and artifacts guidance.
+2. The memory index (file names and first lines).
+3. The skills on offer (name + description only).
+4. Cloud help, where escalation is on.
+5. The project's instructions.
+6. The summary of the condensed part of the chat, if any.
+7. Then the history; tool schemas go in the request's `tools`.
+
+The system prompt holds no clock beyond the date, so llama-server reuses its
+cached prefix from step to step.
 
 **Tools**
 
@@ -262,11 +275,12 @@ The UI receives every event as it happens over SSE (`text`, `thinking`,
 | `bash` | Runs in the sandbox in the project folder, with a timeout and output limits. Long output goes to a file, and the model gets the head, the tail and the path. |
 | `view_image`, `image_transform`, `image_ocr` | Look at an image; crop, resize, rotate, convert and compress (Pillow); Tesseract OCR (dan+eng). |
 | `image_generate`, `image_edit`, `image_remove_background` | ComfyUI through the queue (the lease switches residency). |
-| `skill` | Loads a skill's SKILL.md. Its other files are read with `read_file`. |
-| `memory_*` | View, create, replace text in, and delete memory files. Global memory plus per-project memory. |
+| `skill` | Loads a skill's SKILL.md, or one of its other files (`skill(name, file)`). |
+| `memory` | One tool with commands: view, create, str_replace, insert, delete, rename. Global memory (`/memories`) plus per-project memory (`/memories/project`). |
+| `library_search` | Present when the chat or project has libraries: text and page-image search, with page images for the vision model. |
 | `artifact` | Create or update an HTML, React, SVG, Mermaid, Markdown or code artifact, with versions. Shown in the side panel in a sandboxed iframe. React and Babel are served locally, so it works offline. |
 | `todo_write` | A visible checklist for long tasks. It helps a 27B model keep track of them. |
-| `task` | A subagent with a fresh context and a subset of tools, inside the same lease. Returns a summary. |
+| `task` | A subagent with a fresh context and the tools except artifact, todo_write, image generation, task and escalate, inside the same lease. Its steps show nested under the call; only its report goes back. |
 | MCP tools | From configured servers: streamable HTTP, or stdio servers that run inside the sandbox through a pipe in the sandbox daemon. These ask first, with "Always allow" per tool. |
 | `escalate` | Present only where cloud escalation is on. |
 
@@ -277,28 +291,28 @@ bash, image tools, web. MCP tools ask the first time.
 quick chats. A toggle in the composer overrides it. Qwen3.8 tends to
 overthink, so the default effort is `medium`.
 
-**Compaction.** At 75% of the model's context, older turns are summarised by
-the model into a summary message that is stored with the chat. Old tool
-outputs are cut to stubs first. A "Context compacted" step is shown.
+**Compaction.** At 75% of the model's context (Settings → Assistant), old tool
+outputs are shortened first; if that is not enough, everything before the
+latest user message is summarised by the model into the chat's summary, which
+goes into the system prompt from then on. The UI shows a notice.
 
-**Steps.** Above each answer there is a collapsible tree:
-
-- queue wait and model load;
-- for each model call, prompt tokens (and how many came from cache),
-  generated tokens and tok/s, from llama-server's `timings`;
-- for each tool call, its duration.
+**Steps.** Every run stores its steps: queue wait, model loads, each model
+call (prompt tokens, cached tokens, generated tokens, tokens/s from
+llama-server's `timings`) and each tool call with its duration. The UI shows
+a summary line under each answer (model, time, tokens, tokens/s); the full
+list is in the chat's `runs` from the API.
 
 **Cloud escalation** (web chats in projects with "Cloud escalation" on):
 
 - **Triggers.** It starts when the model calls `escalate`, when three tool
-  calls in a row fail, when the same call is repeated three times, or when
-  the conversation outgrows the local context.
+  calls in a row fail, or when the same call is made three times in six.
 - **What happens.** The rest of the turn runs on the configured provider:
   Anthropic (Claude) or an OpenAI-compatible endpoint (DeepSeek, OpenRouter).
   Tools still run locally.
 - **The card.** The lease is released, so the card is free while the cloud
   works.
-- **Visibility.** Every escalation shows a badge with the reason and cost.
+- **Visibility.** Every escalation shows a notice with the model and the
+  reason, and the run's steps record it.
 
 ---
 
@@ -306,7 +320,10 @@ outputs are cut to stubs first. A "Context compacted" step is shown.
 
 A project is a set of instructions, files, chats, enabled skills, memory and
 settings (default model, cloud escalation). Its files live in
-`data/projects/<id>/` and the sandbox sees the same folder.
+`data/workspace/projects/<id>/`, which the sandbox sees as
+`/workspace/projects/<id>`. A chat outside a project has its own scratch folder,
+`data/workspace/chats/<id>/` (deleted with the chat). Attachments and long tool
+outputs go to `.hub/` inside the folder, which sync ignores.
 
 `backend/app/projects/syncstore.py` is SLQ Companion's `syncstore.py`:
 
@@ -351,9 +368,8 @@ restore, and the sync devices.
 - **Workflows** are built in code from the confirmed API-format graphs
   (`backend/app/images/workflows.py`), so the number of reference images can
   vary. Before each job they are checked against ComfyUI's `/object_info`, so
-  a renamed node gives a clear error instead of a broken render. A workflow
-  exported from ComfyUI ("Export (API)") can replace a built-in one: the binder
-  finds the prompt, seed, size and image inputs.
+  a renamed node gives a clear error instead of a broken render. (Custom
+  workflows exported from ComfyUI are a possible later addition.)
 - **Classical processing** (crop, scale, rotate, convert, compress, OCR) runs
   without the GPU: Pillow in the Hub, Tesseract in the sandbox.
 - **Outputs.** Generated images appear in the chat and are saved in the
@@ -367,13 +383,16 @@ restore, and the sync devices.
   read with PyMuPDF and python-docx. Each page is rendered to an image, and
   its text is extracted and chunked.
 - **Index.** Text chunks are embedded with `embed-text` on the CPU. Page images
-  are embedded with `embed-vl`, a GPU job at background priority, or the CPU
-  when the card is busy for long. Vectors are stored in SQLite (numpy
+  are embedded with `embed-vl`, on the CPU by default (slow, but it never
+  disturbs a chat), or on the GPU as a background queue job that gives the card
+  back every 90 seconds. Vectors are stored in SQLite as float16 (numpy
   brute-force search is enough at this scale).
 - **Query.** The question is embedded for both indexes. The results are merged
   (reciprocal rank fusion) and re-ranked by `rerank` on chunk text.
-- **Answer.** The answer comes from the top pages, given to Qwen3.8 as text plus
-  page images, with `[document p.N]` citations that link to the page.
+- **Answer.** `library_search` returns the best passages with file and page,
+  plus up to two page images of the best visual matches for the vision model,
+  and asks for citations as (file, page). What the re-ranker calls irrelevant
+  goes below page-only hits (scanned pages, pictures), which it cannot judge.
 - **Use.** A library can be attached to a project or a chat. The agent gets a
   `library_search` tool.
 
@@ -381,19 +400,31 @@ restore, and the sync devices.
 
 ## 10. Web UI
 
-The layout follows Claude:
+The layout follows Claude; the look is a control cabinet: RAL 7035 grey
+chrome, white paper for the work, engraved label plates (Barlow Semi
+Condensed), and indicator lamps with their IEC 60073 meanings - green
+running, amber waiting, blue your action is needed (a tool asks), red fault.
 
-- **Sidebar.** New chat, projects, recent chats, libraries, settings.
-- **Chat.** Streaming markdown, code, images, collapsible thinking and tool
-  cards, and the steps tree.
-- **Composer.** Attachments, paste screenshots, model picker, think toggle,
-  skills picker.
-- **Side panel.** Artifacts or project files.
-- **Header.** Queue indicator and drawer.
+- **Sidebar.** New chat, search (titles and messages), projects, recent chats
+  by date, libraries, settings, and the GPU plate (what is loaded, slot lamps,
+  queue; it opens the queue).
+- **Chat.** Streaming markdown with code, tables and KaTeX maths, collapsible
+  thinking, tool calls as a terminal strip (one row per call, expandable to
+  input and output), approvals inline, artifact cards, task lists, a summary
+  line per answer, retry and edit-and-resend.
+- **Composer.** Attach, paste or drop files, the model, thinking (off, a
+  little, normal, hard), libraries and extra skills for the chat.
+- **Side panel.** Artifacts (sandboxed iframe, versions, source, save to the
+  folder) or the folder's files.
+- **Project page.** Chats, files (tree, CodeMirror editor, upload, history and
+  restore per file), settings, revisions, sync devices.
+- **Libraries.** Documents with indexing progress and a search to try.
 
-Settings are grouped by topic: models (download with progress, per-model
-parameters), API keys, CORS, cloud provider, MCP servers, skills, memory,
-workflows, sandbox, system (VRAM, disk, versions, logs).
+Settings: models (download with progress, load, free the GPU, server
+parameters), queue, apps and keys (with connection examples and CORS),
+assistant (agent, libraries, web, sandbox, images), skills, memory, MCP
+servers (and the tools you always allow), cloud, system (services, VRAM,
+disk, logs, theme, password).
 
 On mobile it shows one column, and the panels become overlays. It is an
 installable PWA (manifest, icons, a service worker that caches only the app
@@ -427,7 +458,9 @@ shell).
 1. `proxmox/create-vm.sh` on the host.
 2. `install.sh` in the VM. It installs the HWE kernel, amdgpu-dkms, Docker,
    the firewall unit, the secrets, the images, the models and the admin
-   password, then runs smoke tests.
+   password, then runs the self-test (`python -m app.cli selftest`: every
+   service, the sandbox's isolation, one answer from the model with its
+   tokens/s).
 3. Nginx Proxy Manager.
 4. Point FamilyLog at the Hub.
 
@@ -464,16 +497,22 @@ and per-model llama-server logs, viewable in Settings → System.
   checkpoints are the fallback; the DiT is 14 GB, which still fits without the
   LLM loaded.
 - **Throughput.** Expect roughly 30–38 tok/s generation for Qwen3.8-27B Q4 on
-  this card (community numbers). `install.sh` runs `llama-bench` once so the
-  real numbers are known.
+  this card (community numbers). The self-test and every answer's summary
+  line report the real numbers.
+- **MCP stdio servers** run through the sandbox daemon's pipe API; tested
+  against a fake server only.
+- **Streaming through Nginx Proxy Manager** needs `proxy_buffering off` (in
+  docs/INSTALL.md); the Hub also sends `X-Accel-Buffering: no`.
 
 ---
 
 ## 14. Build order
 
+All five parts are built (0.1.0); see docs/HANDOFF.md for what has and has not
+run on the real hardware.
+
 1. Install path: VM script, `install.sh`, compose, images, `update.sh`, guide.
 2. Hub core: settings, auth, scheduler, llm supervisor, the three API formats.
-   **FamilyLog and Coagent can use the Hub from here.**
 3. Web UI: login, chat, queue, settings, models.
 4. Harness: tools, projects + sync, skills, memory, artifacts, subagents,
    compaction, MCP, escalation.

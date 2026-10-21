@@ -53,6 +53,21 @@ class GpuBackend:
         elif kind == "embedgpu":
             await self.runner.stop("embed-gpu")
 
+    async def alive(self, need: str) -> bool:
+        """Is what the scheduler thinks is loaded still there?"""
+        kind = need.partition(":")[0]
+        if kind == "comfy":
+            try:
+                await self.comfy.system_stats()
+                return True
+            except ComfyError:
+                return False
+        name = {"llm": MAIN[0], "embedgpu": "embed-gpu"}.get(kind)
+        if name is None:
+            return True
+        st = await self.runner.status()
+        return ((st.get("processes") or {}).get(name) or {}).get("state") == "running"
+
     def slots(self, need: str) -> int:
         kind, _, ident = need.partition(":")
         if kind == "llm":

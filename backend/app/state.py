@@ -80,6 +80,7 @@ def build_hub(env: Env, transports: Transports | None = None) -> Hub:
     scheduler = Scheduler(backend, affinity_window=float(q.get("affinity_window_s", 20)),
                           aging_s=float(q.get("aging_s", 120)), on_finish=_log_job)
     llm = LlmClient(transport=t.llm)
+    llm.on_unreachable = scheduler.suspect
     aux = AuxManager(runner, catalog)
     return Hub(env=env, settings=settings, catalog=catalog, runner=runner, comfy=comfy, backend=backend,
                scheduler=scheduler, llm=llm, aux=aux, transports=t)

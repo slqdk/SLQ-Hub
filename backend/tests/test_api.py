@@ -254,3 +254,14 @@ async def test_queue_switches_models_for_different_apps(client, api_key, fakes, 
     models = [s["args"][1] for s in fakes.sup["starts"] if s["name"] == "main"]
     assert models == ["/models/llm/Qwen3.8-27B-UD-Q4_K_M.gguf", "/models/llm/Qwen3.6-35B-A3B-UD-IQ4_XS.gguf"]
     assert app.state.hub.scheduler.current == "llm:qwen3.6-35b-a3b"
+
+
+def test_password_hashes_survive_env_files_and_old_hashes_still_work():
+    from app import auth
+    h = auth.hash_password("correct horse battery", n=2**10)
+    assert h.startswith("scrypt:") and "$" not in h and auth.hash_is_valid(h)
+    assert auth.verify_password("correct horse battery", h) and not auth.verify_password("wrong", h)
+    old = h.replace(":", "$")                      # the first format
+    assert auth.hash_is_valid(old) and auth.verify_password("correct horse battery", old)
+    mangled = "scrypt$32768$8$1+BJ$abc"              # what Compose made of an unquoted $-hash
+    assert not auth.hash_is_valid(mangled) and not auth.verify_password("x", mangled)

@@ -253,10 +253,11 @@ def checkin(pid: int, workdir: Path, files: list[dict], author: str, origin: str
                     target.unlink()
             else:
                 blobs.store(content)
-                target.parent.mkdir(parents=True, exist_ok=True)
-                tmp = target.with_name(target.name + ".slqsync-tmp")
-                tmp.write_bytes(content)
-                os.replace(tmp, target)
+                from .store import safe_write
+                try:
+                    safe_write(workdir, target, content)
+                except ValueError as exc:
+                    raise SyncError(str(exc)) from exc
         rev = None
         if accepted:
             with db.connect() as con:

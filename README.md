@@ -20,3 +20,15 @@ other app on the network calls models through the Hub's queue.
 | [docs/API.md](docs/API.md) | Connecting other apps |
 | [docs/DESIGN.md](docs/DESIGN.md) | Architecture and the decisions behind it |
 | [docs/HANDOFF.md](docs/HANDOFF.md) | Current state, what is verified and what is not |
+| [docs/CHANGELOG.md](docs/CHANGELOG.md) | What changed in each version |
+
+## Development
+
+    cd backend && pip install -r requirements.txt -r requirements-dev.txt
+    python -m pytest -q -p no:cacheprovider        # the tests
+    cd ../frontend && npm install && npx vite build
+    cd ../backend && python -m tests.devserver      # the Hub with fake services on :8080
+
+`tests.devserver` runs the whole app against fake llama-server, ComfyUI,
+sandbox and search services, so the UI can be worked on without a GPU
+(sign in as `soren` / `correct horse battery`).

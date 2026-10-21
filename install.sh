@@ -92,7 +92,7 @@ pw = os.environ["HUB_PW"].encode()
 salt = os.urandom(16)
 n, r, p = 2**15, 8, 1
 dk = hashlib.scrypt(pw, salt=salt, n=n, r=r, p=p, maxmem=64 * 1024 * 1024, dklen=32)
-print("scrypt$%d$%d$%d$%s$%s" % (n, r, p, base64.b64encode(salt).decode(), base64.b64encode(dk).decode()))
+print("scrypt:%d:%d:%d:%s:%s" % (n, r, p, base64.b64encode(salt).decode(), base64.b64encode(dk).decode()))
 ')"
     unset pw1 pw2
     mkdir -p "$HUB_ROOT"
@@ -105,6 +105,7 @@ TZ=Europe/Copenhagen
 RENDER_GID=$(getent group render | cut -d: -f3)
 HUB_PORT=8080
 HUB_OLLAMA_PORT=11434
+HUB_LAN_HOST=$(hostname -I | awk '{print $1}')
 HUB_PUBLIC_URL=${url:-https://hub.slq.dk}
 HUB_TRUSTED_PROXIES=${proxy:-30.11.0.103}
 HUB_LAN_CIDRS=${cidrs:-30.11.0.0/20,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8}
@@ -112,7 +113,7 @@ HUB_SECRET_KEY=$(openssl rand -hex 32)
 HUB_INTERNAL_TOKEN=$(openssl rand -hex 32)
 SEARXNG_SECRET=$(openssl rand -hex 32)
 HUB_ADMIN_USER=${user:-soren}
-HUB_ADMIN_PASSWORD_HASH=$hash
+HUB_ADMIN_PASSWORD_HASH='$hash'
 LLAMA_IMAGE=ghcr.io/ggml-org/llama.cpp:server-rocm-b11783
 COMFYUI_REF=v0.42.3
 TORCH_INDEX=https://download.pytorch.org/whl/rocm7.14
@@ -215,8 +216,9 @@ stage_gpu() {
     [[ -e /dev/kfd ]] || die "/dev/kfd does not exist - ROCm cannot see the GPU.
          If the VM just got the GPU from VM 104, reboot the Proxmox host once (RDNA3 reset problem)."
     ok "/dev/kfd present"
-    ls /dev/dri/renderD* >/dev/null 2>&1 || die "no /dev/dri/renderD* device."
-    ok "render node: $(ls /dev/dri/renderD* | tr '\n' ' ')"
+    local nodes=(/dev/dri/renderD*)
+    [[ -e "${nodes[0]}" ]] || die "no /dev/dri/renderD* device."
+    ok "render node: ${nodes[*]}"
     local vram=""
     for f in /sys/class/drm/card*/device/mem_info_vram_total; do
         [[ -r "$f" ]] && vram="$(( $(cat "$f") / 1024 / 1024 / 1024 )) GB"

@@ -213,3 +213,21 @@ def test_the_real_client_round_trip(live, tmp_path):
     assert m.main(["--config", cfg, "sync"]) == 0
     assert (srv / "src" / "main.py").read_text() == "merged"
     assert len(s.revisions(p["id"])) >= 5
+
+
+def test_writes_do_not_follow_symlinks_planted_by_the_sandbox(app, tmp_path):
+    p = store.create_project("Planted")
+    ws = app.state.hub.env.workspace_dir
+    wd = store.Workdir(store.project_dir(ws, p["id"]), p["id"], ws)
+    secret = tmp_path / "settings.json"
+    secret.write_text("original")
+    (wd.root / "notes.txt.hub-tmp").symlink_to(secret)          # the old temp-file trick
+    wd.write("notes.txt", "hello")
+    assert secret.read_text() == "original" and (wd.root / "notes.txt").read_text() == "hello"
+    (wd.root / "link.txt").symlink_to(secret)                   # the target itself
+    with pytest.raises(ValueError):
+        wd.write("link.txt", "pwned")
+    (wd.root / "outside").symlink_to(tmp_path)                  # a folder on the way
+    with pytest.raises(ValueError):
+        wd.write("outside/settings.json", "pwned")
+    assert secret.read_text() == "original"

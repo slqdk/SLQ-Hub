@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 import collections
 import hashlib
+import logging
 import hmac
 import os
 import secrets
@@ -18,6 +19,8 @@ import time
 from datetime import datetime, timedelta, timezone
 
 from . import db
+
+log = logging.getLogger("hub.auth")
 
 SESSION_COOKIE = "hub_session"
 SESSION_DAYS = 30
@@ -29,17 +32,40 @@ PRIORITIES = ("interactive", "normal", "background")
 # ---------------------------------------------------------------- passwords
 
 def hash_password(password: str, n: int = 2**15, r: int = 8, p: int = 1) -> str:
+    """scrypt:n:r:p:salt:key - colons, not dollars: the hash travels through
+    .env files, where Docker Compose would read $... as variables."""
     salt = os.urandom(16)
     dk = hashlib.scrypt(password.encode(), salt=salt, n=n, r=r, p=p,
                         maxmem=64 * 1024 * 1024, dklen=32)
-    return f"scrypt${n}${r}${p}${base64.b64encode(salt).decode()}${base64.b64encode(dk).decode()}"
+    return f"scrypt:{n}:{r}:{p}:{base64.b64encode(salt).decode()}:{base64.b64encode(dk).decode()}"
+
+
+def _parts(stored: str) -> list[str] | None:
+    sep = ":" if stored.startswith("scrypt:") else "$" if stored.startswith("scrypt$") else None
+    if sep is None:
+        return None
+    parts = stored.split(sep)
+    return parts if len(parts) == 6 and all(parts) else None
+
+
+def hash_is_valid(stored: str) -> bool:
+    parts = _parts(stored or "")
+    if not parts:
+        return False
+    try:
+        int(parts[1]), int(parts[2]), int(parts[3])
+        base64.b64decode(parts[4], validate=True), base64.b64decode(parts[5], validate=True)
+    except (ValueError, TypeError):
+        return False
+    return True
 
 
 def verify_password(password: str, stored: str) -> bool:
     try:
-        algo, n, r, p, salt_b64, dk_b64 = stored.split("$")
-        if algo != "scrypt":
+        parts = _parts(stored or "")
+        if not parts:
             return False
+        _, n, r, p, salt_b64, dk_b64 = parts
         dk = hashlib.scrypt(password.encode(), salt=base64.b64decode(salt_b64), n=int(n), r=int(r),
                             p=int(p), maxmem=64 * 1024 * 1024, dklen=len(base64.b64decode(dk_b64)))
         return hmac.compare_digest(dk, base64.b64decode(dk_b64))
@@ -56,6 +82,10 @@ def _sha(token: str) -> str:
 def ensure_admin(username: str, password_hash: str) -> None:
     """Create the admin from the environment when there is no user yet."""
     if not username or not password_hash:
+        return
+    if not hash_is_valid(password_hash):
+        log.error("HUB_ADMIN_PASSWORD_HASH is not a valid password hash, so no admin was created. Set a new "
+                  "password with: python -m app.cli set-password (or sign up from the LAN in the web UI).")
         return
     with db.connect() as con:
         if con.execute("SELECT COUNT(*) FROM users").fetchone()[0]:

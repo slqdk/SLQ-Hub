@@ -170,8 +170,7 @@ async def upload(kind: str, fid: int, request: Request, files: list[UploadFile] 
         name = Path(f.filename or "upload").name
         rel = f"{dir.strip('/')}/{name}" if dir.strip("/") else name
         p = _safe(wd.resolve, rel)
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_bytes(data)
+        _safe(store.safe_write, wd.root, p, data)
         saved.append(wd.rel(p))
     wd.checkin("user", "web", f"uploaded {', '.join(saved)[:200]}")
     return {"saved": saved}

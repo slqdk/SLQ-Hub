@@ -14,6 +14,8 @@ from .projects import blobs
 from .state import get_hub
 
 router = APIRouter()
+INLINE = {"image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp", "image/avif", "application/pdf",
+          "text/plain"}
 
 
 def sign(secret: str, sha: str, ttl: int = 3600) -> str:
@@ -39,8 +41,11 @@ async def blob(sha: str, request: Request, exp: int = 0, sig: str = "", download
     meta = chats.get_upload(sha) or {}
     mime = meta.get("mime") or "application/octet-stream"
     headers = {"Cache-Control": "private, max-age=31536000, immutable", "X-Content-Type-Options": "nosniff"}
-    if not mime.startswith("image/"):
+    # Stored files come from the web and from tools: nothing may run as the Hub.
+    # CSP sandbox is harmless for <img>, and stops an SVG or HTML opened directly.
+    if mime != "application/pdf":
         headers["Content-Security-Policy"] = "sandbox"
-    if download or not mime.startswith(("image/", "text/plain", "application/pdf")):
-        headers["Content-Disposition"] = f'attachment; filename="{meta.get("filename", sha)}"'
+    if download or mime not in INLINE:
+        name = (meta.get("filename") or sha).replace('"', "")
+        headers["Content-Disposition"] = f'attachment; filename="{name}"'
     return Response(blobs.read(sha), media_type=mime, headers=headers)

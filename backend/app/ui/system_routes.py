@@ -288,6 +288,14 @@ async def system(request: Request):
     }
 
 
+@router.get("/hub/api/connection")
+async def connection(request: Request):
+    """How other apps reach the Hub (for the Apps page)."""
+    env = get_hub(request).env
+    return {"lanHost": env.lan_host, "uiPort": env.ui_port, "ollamaPort": env.ollama_port,
+            "publicUrl": env.public_url}
+
+
 @router.get("/hub/api/system/logs/{name}")
 async def logs(name: str, request: Request, tail: int = 300):
     return {"name": name, "text": await get_hub(request).runner.logs(name, tail)}
