@@ -57,12 +57,32 @@ async def events(request: Request):
 
 # ---------------------------------------------------------------- settings
 
+MASK = "********"
+
+
 def _masked(data: dict) -> dict:
     out = json.loads(json.dumps(data))
     for section, key in SECRET_SETTINGS:
         if out.get(section, {}).get(key):
-            out[section][key] = "********"
+            out[section][key] = MASK
+    for srv in (out.get("mcp") or {}).get("servers") or []:      # MCP headers and env hold API keys
+        for field in ("headers", "env"):
+            if isinstance(srv.get(field), dict):
+                srv[field] = {k: (MASK if v else v) for k, v in srv[field].items()}
     return out
+
+
+def _unmask_mcp(values: dict, current: dict) -> dict:
+    old = {s.get("name"): s for s in current.get("servers") or [] if isinstance(s, dict)}
+    for srv in values.get("servers") or []:
+        if not isinstance(srv, dict):
+            continue
+        prev = old.get(srv.get("name")) or {}
+        for field in ("headers", "env"):
+            if isinstance(srv.get(field), dict):
+                srv[field] = {k: ((prev.get(field) or {}).get(k, "") if v == MASK else v)
+                              for k, v in srv[field].items()}
+    return values
 
 
 @router.get("/hub/api/settings")
@@ -81,8 +101,10 @@ async def put_settings(body: SettingsPatch, request: Request):
     hub = get_hub(request)
     values = dict(body.values)
     for section, key in SECRET_SETTINGS:
-        if body.section == section and values.get(key) == "********":
+        if body.section == section and values.get(key) == MASK:
             values.pop(key)                      # unchanged secret
+    if body.section == "mcp":
+        values = _unmask_mcp(values, hub.settings.get("mcp"))
     try:
         hub.settings.update(body.section, values)
     except KeyError as exc:
@@ -91,6 +113,8 @@ async def put_settings(body: SettingsPatch, request: Request):
         q = hub.settings.get("queue")
         hub.scheduler.affinity_window = float(q.get("affinity_window_s", 20))
         hub.scheduler.aging_s = float(q.get("aging_s", 120))
+    if body.section == "mcp" and "mcp" in hub.extras:
+        asyncio.get_running_loop().create_task(hub.extras["mcp"].reload())
     return {"settings": _masked(hub.settings.all())}
 
 

@@ -76,7 +76,9 @@ def make_llama(script: dict) -> FastAPI:
     app = FastAPI()
     script.setdefault("requests", [])
 
-    def next_reply() -> dict:
+    def next_reply(body: dict) -> dict:
+        if script.get("responder"):
+            return script["responder"](body)
         replies = script.get("replies") or [{"content": "Hello from the fake model.", "reasoning": "thinking..."}]
         idx = min(len(script["requests"]) - 1, len(replies) - 1)
         return replies[idx]
@@ -110,10 +112,13 @@ def make_llama(script: dict) -> FastAPI:
     async def chat(request: Request):
         body = await request.json()
         script["requests"].append(body)
-        reply = next_reply()
+        reply = next_reply(body)
+        if reply.get("delay"):
+            import asyncio
+            await asyncio.sleep(reply["delay"])
         if reply.get("error"):
             return JSONResponse({"error": {"message": reply["error"]}}, status_code=500)
-        calls = [{"index": i, "id": f"call_{i}", "type": "function",
+        calls = [{"index": i, "id": f"call_{len(script['requests'])}_{i}", "type": "function",
                   "function": {"name": c["name"], "arguments": json.dumps(c.get("arguments", {}))}}
                  for i, c in enumerate(reply.get("tool_calls") or [])]
         finish = reply.get("finish") or ("tool_calls" if calls else "stop")
@@ -240,11 +245,116 @@ def make_sandbox(state: dict) -> FastAPI:
     async def exec_(request: Request):
         body = await request.json()
         state["execs"].append(body)
+        if state.get("delay"):
+            import asyncio
+            await asyncio.sleep(state["delay"])
         handler = state.get("handler")
         if handler:
             return handler(body)
         return {"exit_code": 0, "stdout": f"ran: {body['cmd']}\n", "stderr": "", "timed_out": False,
                 "duration_ms": 5, "truncated": False}
+
+    # A fake MCP stdio server: JSON-RPC lines in, lines out.
+    state.setdefault("procs", {})
+
+    @app.post("/proc/start")
+    async def proc_start(request: Request):
+        body = await request.json()
+        pid = f"p{len(state['procs']) + 1}"
+        state["procs"][pid] = {"cmd": body["cmd"], "out": "noise on stdout\n", "killed": False}
+        return {"id": pid}
+
+    @app.post("/proc/write")
+    async def proc_write(request: Request):
+        body = await request.json()
+        proc = state["procs"][body["id"]]
+        for line in body["data"].splitlines():
+            msg = json.loads(line)
+            reply = mcp_reply(msg, "stdio")
+            if reply is not None:
+                proc["out"] += json.dumps(reply) + "\n"
+        return {"ok": True}
+
+    @app.post("/proc/read")
+    async def proc_read(request: Request):
+        import asyncio
+        body = await request.json()
+        proc = state["procs"].get(body["id"])
+        if proc is None:
+            return JSONResponse({"error": "no such process"}, status_code=400)
+        for _ in range(10):
+            if proc["out"] or proc["killed"]:
+                break
+            await asyncio.sleep(0.02)
+        data, proc["out"] = proc["out"], ""
+        return {"data": data, "eof": proc["killed"] and not data, "exit_code": 0 if proc["killed"] else None}
+
+    @app.post("/proc/kill")
+    async def proc_kill(request: Request):
+        body = await request.json()
+        state["procs"][body["id"]]["killed"] = True
+        return {"ok": True}
+
+    return app
+
+
+def mcp_reply(msg: dict, flavour: str) -> dict | None:
+    """The fake MCP server's answers (both transports)."""
+    if "id" not in msg:
+        return None                                       # a notification
+    method = msg.get("method")
+    if method == "initialize":
+        result = {"protocolVersion": msg["params"]["protocolVersion"], "capabilities": {"tools": {}},
+                  "serverInfo": {"name": f"fake-{flavour}", "version": "1.0"}}
+    elif method == "tools/list":
+        result = {"tools": [
+            {"name": "add", "description": "Add two numbers",
+             "inputSchema": {"$schema": "http://json-schema.org/draft-07/schema#", "type": "object",
+                             "properties": {"a": {"type": "number"}, "b": {"type": "number"}}, "required": ["a", "b"]}},
+            {"name": "picture", "description": "Return a small picture", "inputSchema": {"type": "object"}}]}
+    elif method == "tools/call":
+        name, args = msg["params"]["name"], msg["params"].get("arguments") or {}
+        if name == "add":
+            result = {"content": [{"type": "text", "text": str(args.get("a", 0) + args.get("b", 0))}]}
+        elif name == "picture":
+            import base64
+            result = {"content": [{"type": "text", "text": "here"},
+                                  {"type": "image", "data": base64.b64encode(_png()).decode(), "mimeType": "image/png"}]}
+        else:
+            return {"jsonrpc": "2.0", "id": msg["id"], "error": {"code": -32602, "message": f"unknown tool {name}"}}
+    elif method == "ping":
+        result = {}
+    else:
+        return {"jsonrpc": "2.0", "id": msg["id"], "error": {"code": -32601, "message": "method not found"}}
+    return {"jsonrpc": "2.0", "id": msg["id"], "result": result}
+
+
+def make_mcp_http(state: dict) -> FastAPI:
+    """A Streamable HTTP MCP server: JSON for most answers, SSE for tools/call."""
+    app = FastAPI()
+    state.setdefault("calls", [])
+
+    @app.post("/mcp")
+    async def mcp(request: Request):
+        if state.get("auth") and request.headers.get("authorization") != state["auth"]:
+            return JSONResponse({"error": "unauthorised"}, status_code=401)
+        msg = await request.json()
+        state["calls"].append(msg)
+        reply = mcp_reply(msg, "http")
+        if reply is None:
+            return Response(status_code=202)
+        headers = {"Mcp-Session-Id": "sess-1"} if msg.get("method") == "initialize" else {}
+        if msg.get("method") == "tools/call":
+            async def gen():
+                yield b": keep-alive\n\n"
+                yield f"event: message\ndata: {json.dumps({'jsonrpc': '2.0', 'method': 'notifications/progress', 'params': {}})}\n\n".encode()
+                yield f"event: message\ndata: {json.dumps(reply)}\n\n".encode()
+            return StreamingResponse(gen(), media_type="text/event-stream", headers=headers)
+        return JSONResponse(reply, headers=headers)
+
+    @app.delete("/mcp")
+    async def end():
+        return Response(status_code=204)
 
     return app
 

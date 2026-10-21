@@ -141,7 +141,7 @@ class Scheduler:
     # ------------------------------------------------------------ public
     async def acquire(self, owner: str, kind: str, need: str, priority: str | int = "normal",
                       label: str = "", lease: bool = False, meta: dict | None = None,
-                      max_wait: float | None = None) -> Ticket:
+                      max_wait: float | None = None, on_job: Callable[[Job], None] | None = None) -> Ticket:
         """Wait for a turn on the card. Cancelling the awaiting task gives the
         place up; a job that already started is released."""
         self._ensure_pump()
@@ -150,6 +150,8 @@ class Scheduler:
         job = Job(id=next(self._ids), owner=owner, kind=kind, need=need, priority=prio, label=label,
                   lease=lease, enqueued_at=self.clock(), meta=dict(meta or {}), admitted=loop.create_future())
         self.pending.append(job)
+        if on_job is not None:
+            on_job(job)
         self._notify()
         try:
             if max_wait is None:

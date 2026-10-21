@@ -108,7 +108,6 @@ def load_env() -> Env:
 DEFAULTS: dict = {
     "models": {
         "default": "qwen3.8-27b",          # web chats and the agent
-        "fast": "qwen3.6-35b-a3b",         # titles, summaries
         "fallback_alias": "qwen3.8-27b",   # unknown model names from apps map here ("" = refuse)
         "preload": True,                   # load the default model when the Hub starts
     },
@@ -128,6 +127,7 @@ DEFAULTS: dict = {
         "thinking_in_chats": False,
         "effort": "medium",
         "tool_output_chars": 12000,
+        "user_name": "",                   # how the assistant calls the user ("" = the admin user name)
     },
     "cloud": {
         "provider": "anthropic",           # anthropic | openai (any OpenAI-compatible endpoint)
