@@ -152,6 +152,13 @@ DEFAULTS: dict = {
         "cfg": 1.0,
         "default_size": 1024,
     },
+    "libraries": {
+        "page_images": "cpu",              # cpu | gpu | off: embed page images for visual search (gpu = fast,
+                                           # but it unloads the chat model while indexing)
+        "results": 6,                      # hits per library_search
+        "images_in_results": 2,            # page images shown to the model with the hits
+        "rerank": True,
+    },
     "mcp": {
         "servers": [],                     # [{name, transport: http|stdio, url|command, headers, enabled}]
     },

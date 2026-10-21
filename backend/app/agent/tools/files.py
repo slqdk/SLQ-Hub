@@ -48,8 +48,8 @@ async def list_files(ctx: ToolContext, args: dict) -> ToolResult:
 
 
 def _pdf_text(data: bytes, first: int, last: int | None) -> tuple[str, int]:
-    import fitz  # PyMuPDF
-    doc = fitz.open(stream=data, filetype="pdf")
+    import pymupdf
+    doc = pymupdf.open(stream=data, filetype="pdf")
     n = doc.page_count
     last = min(n, last or n)
     parts = [f"--- page {i + 1} ---\n{doc[i].get_text()}" for i in range(max(0, first - 1), last)]

@@ -70,6 +70,44 @@ def make_supervisor(state: dict) -> FastAPI:
 
 # ---------------------------------------------------------------- llama-server
 
+def _words(text: str) -> list[str]:
+    import re
+    return [w for w in re.findall(r"[a-zæøå0-9]+", text.lower()) if len(w) > 2 and w not in {
+        "the", "and", "for", "with", "query", "instruct", "given", "search", "retrieve", "relevant", "passages",
+        "that", "answer", "represent", "user", "input", "document", "pages", "system", "assistant", "im_start",
+        "im_end"}]
+
+
+def fake_embedding(x) -> list[float]:
+    """A bag of words hashed into 32 dimensions; an image adds the colour of
+    its first pixel - enough to make retrieval testable."""
+    import zlib
+    v = [0.0] * 32
+    if isinstance(x, dict):
+        text = " ".join(p.get("text", "") for p in x.get("content", []) if p.get("type") == "text")
+        for p in x.get("content", []):
+            if p.get("type") == "image_url":
+                import base64
+                import io
+                from PIL import Image
+                data = base64.b64decode(p["image_url"]["url"].split(",", 1)[1])
+                r, g, b = Image.open(io.BytesIO(data)).convert("RGB").getpixel((0, 0))
+                v[0] += r / 64
+                v[1] += g / 64
+    else:
+        text = str(x)
+    for w in _words(text):
+        if w == "red":
+            v[0] += 4
+        elif w == "green":
+            v[1] += 4
+        else:
+            v[2 + zlib.crc32(w.encode()) % 30] += 1.0
+    if not any(v):
+        v[31] = 1.0
+    return v
+
+
 def make_llama(script: dict) -> FastAPI:
     """script["replies"]: list of replies used in order (the last repeats).
     A reply is {"content": str, "reasoning": str, "tool_calls": [{"name","arguments"}], "finish": str}."""
@@ -101,12 +139,16 @@ def make_llama(script: dict) -> FastAPI:
     async def embeddings(request: Request):
         body = await request.json()
         inp = body["input"] if isinstance(body["input"], list) else [body["input"]]
-        return {"data": [{"index": i, "embedding": [float(len(str(x)) % 7), 1.0, 0.5]} for i, x in enumerate(inp)]}
+        script.setdefault("embedded", []).extend(inp)
+        return {"data": [{"index": i, "embedding": fake_embedding(x)} for i, x in enumerate(inp)]}
 
     @app.post("/v1/rerank")
     async def rerank(request: Request):
         body = await request.json()
-        return {"results": [{"index": i, "relevance_score": 1.0 / (i + 1)} for i, _ in enumerate(body["documents"])]}
+        q = set(_words(body["query"]))
+        scored = [{"index": i, "relevance_score": min(0.99, 0.5 + 0.2 * len(q & set(_words(d)))) if q & set(_words(d))
+                   else 0.05} for i, d in enumerate(body["documents"])]
+        return {"results": sorted(scored, key=lambda r: -r["relevance_score"])}
 
     @app.post("/v1/chat/completions")
     async def chat(request: Request):

@@ -1,7 +1,6 @@
 """web_search (SearXNG) and web_fetch (SSRF-guarded, readable text)."""
 from __future__ import annotations
 
-import io
 import ipaddress
 import re
 
@@ -76,8 +75,8 @@ async def web_fetch(ctx: ToolContext, args: dict) -> ToolResult:
         up = chats.save_upload(data, final.rsplit("/", 1)[-1][:80] or "image", ctype.split(";")[0])
         return ToolResult(f"The image at {final} is shown below.", images=[{"sha": up["sha"], "mime": up["mime"]}])
     if "pdf" in ctype or final.lower().endswith(".pdf"):
-        import fitz
-        doc = fitz.open(stream=io.BytesIO(data).read(), filetype="pdf")
+        import pymupdf
+        doc = pymupdf.open(stream=data, filetype="pdf")
         text = "\n".join(f"--- page {i + 1} ---\n{p.get_text()}" for i, p in enumerate(doc))
     elif "html" in ctype or data.lstrip()[:15].lower().startswith((b"<!doctype", b"<html")):
         text = html_to_text(data.decode("utf-8", "replace"), final)

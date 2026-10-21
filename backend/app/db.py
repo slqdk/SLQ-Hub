@@ -192,10 +192,12 @@ _M001_CORE = """
 
 _M002_LIBRARIES = """
         CREATE TABLE libraries (
-            id         INTEGER PRIMARY KEY AUTOINCREMENT,
-            name       TEXT NOT NULL,
-            settings   TEXT NOT NULL DEFAULT '{}',
-            created_at TEXT NOT NULL
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            name        TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            settings    TEXT NOT NULL DEFAULT '{}',
+            created_at  TEXT NOT NULL,
+            updated_at  TEXT NOT NULL
         );
         CREATE TABLE library_docs (
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -203,12 +205,17 @@ _M002_LIBRARIES = """
             filename   TEXT NOT NULL,
             sha        TEXT NOT NULL,
             mime       TEXT NOT NULL,
+            size       INTEGER NOT NULL DEFAULT 0,
             pages      INTEGER NOT NULL DEFAULT 0,
+            chunks     INTEGER NOT NULL DEFAULT 0,
             status     TEXT NOT NULL DEFAULT 'queued',
             progress   REAL NOT NULL DEFAULT 0,
             error      TEXT,
-            created_at TEXT NOT NULL
+            meta       TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL,
+            indexed_at TEXT
         );
+        CREATE INDEX library_docs_lib ON library_docs(library_id);
         CREATE TABLE library_chunks (
             id      INTEGER PRIMARY KEY AUTOINCREMENT,
             doc_id  INTEGER NOT NULL REFERENCES library_docs(id) ON DELETE CASCADE,
@@ -223,14 +230,11 @@ _M002_LIBRARIES = """
             doc_id  INTEGER NOT NULL REFERENCES library_docs(id) ON DELETE CASCADE,
             page    INTEGER NOT NULL,
             image   TEXT NOT NULL,
+            width   INTEGER,
+            height  INTEGER,
             emb     BLOB
         );
         CREATE INDEX library_pages_doc ON library_pages(doc_id, page);
-        CREATE TABLE chat_libraries (
-            chat_id    INTEGER REFERENCES chats(id) ON DELETE CASCADE,
-            project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE,
-            library_id INTEGER NOT NULL REFERENCES libraries(id) ON DELETE CASCADE
-        );
 """
 
 
