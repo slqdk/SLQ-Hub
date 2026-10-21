@@ -1,0 +1,23 @@
+# SearXNG for SLQ Hub's web_search tool. Internal only (no published port).
+# The secret comes from SEARXNG_SECRET in /srv/slq-hub/.env.
+use_default_settings: true
+
+general:
+  instance_name: "SLQ Hub search"
+
+server:
+  secret_key: "overridden-by-SEARXNG_SECRET"
+  limiter: false          # internal service; no Valkey needed
+  public_instance: false
+  image_proxy: false
+
+search:
+  safe_search: 0
+  autocomplete: ""
+  default_lang: "auto"
+  formats:
+    - html
+    - json
+
+ui:
+  static_use_hash: true

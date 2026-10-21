@@ -1,0 +1,139 @@
+{
+  "version": 1,
+  "notes": "Model catalog. File paths are verified against Hugging Face (2026-10-21). 'dest' is relative to the models root (/srv/slq-hub/models on the VM, /models in the containers). Sizes are decimal bytes, used for progress only.",
+  "llm": [
+    {
+      "id": "qwen3.8-27b",
+      "name": "Qwen3.8 27B",
+      "description": "Main model: vision, tools, thinking on/off, 262K native context.",
+      "default": true,
+      "files": [
+        {"repo": "unsloth/Qwen3.8-27B-GGUF", "path": "Qwen3.8-27B-UD-Q4_K_M.gguf", "dest": "llm/Qwen3.8-27B-UD-Q4_K_M.gguf", "size": 16460000000},
+        {"repo": "unsloth/Qwen3.8-27B-GGUF", "path": "mmproj-F16.gguf", "dest": "llm/Qwen3.8-27B-mmproj-F16.gguf", "size": 930000000, "role": "mmproj"}
+      ],
+      "server": {
+        "ctx": 81920,
+        "parallel": 2,
+        "kv_unified": true,
+        "cache_type": "q8_0",
+        "gpu_layers": "all",
+        "flash_attn": "on",
+        "cache_ram_mib": 4096,
+        "extra": []
+      },
+      "context_per_request": 65536,
+      "capabilities": ["chat", "vision", "tools", "thinking"],
+      "thinking": {"default": true, "efforts": ["low", "medium", "xhigh"], "default_effort": "medium"},
+      "sampling": {
+        "thinking": {"temperature": 1.0, "top_p": 0.95, "top_k": 20, "min_p": 0.0, "presence_penalty": 0.0},
+        "instruct": {"temperature": 0.7, "top_p": 0.8, "top_k": 20, "min_p": 0.0, "presence_penalty": 1.5}
+      },
+      "aliases": ["qwen3.8", "qwen3.8:latest", "qwen3.8:27b", "qwen3.8-27b:latest"],
+      "family": "qwen35",
+      "parameter_size": "27B",
+      "quantization": "UD-Q4_K_M"
+    },
+    {
+      "id": "qwen3.6-35b-a3b",
+      "name": "Qwen3.6 35B-A3B",
+      "description": "Fast MoE (3B active): simple and background work.",
+      "default": true,
+      "files": [
+        {"repo": "unsloth/Qwen3.6-35B-A3B-GGUF", "path": "Qwen3.6-35B-A3B-UD-IQ4_XS.gguf", "dest": "llm/Qwen3.6-35B-A3B-UD-IQ4_XS.gguf", "size": 17730000000},
+        {"repo": "unsloth/Qwen3.6-35B-A3B-GGUF", "path": "mmproj-F16.gguf", "dest": "llm/Qwen3.6-35B-A3B-mmproj-F16.gguf", "size": 900000000, "role": "mmproj"}
+      ],
+      "server": {
+        "ctx": 65536,
+        "parallel": 2,
+        "kv_unified": true,
+        "cache_type": "q8_0",
+        "gpu_layers": "all",
+        "flash_attn": "on",
+        "cache_ram_mib": 4096,
+        "extra": []
+      },
+      "context_per_request": 65536,
+      "capabilities": ["chat", "vision", "tools", "thinking"],
+      "thinking": {"default": false, "efforts": [], "default_effort": null},
+      "sampling": {
+        "thinking": {"temperature": 1.0, "top_p": 0.95, "top_k": 20, "min_p": 0.0, "presence_penalty": 1.5},
+        "instruct": {"temperature": 0.7, "top_p": 0.8, "top_k": 20, "min_p": 0.0, "presence_penalty": 1.5}
+      },
+      "aliases": ["qwen3.6", "qwen3.6:latest", "qwen3.6:35b", "qwen3.6:35b-a3b"],
+      "family": "qwen35moe",
+      "parameter_size": "35B-A3B",
+      "quantization": "UD-IQ4_XS"
+    }
+  ],
+  "aux": [
+    {
+      "id": "embed-text",
+      "name": "Qwen3 Embedding 0.6B",
+      "description": "Text embeddings for libraries. Runs on the CPU, always on.",
+      "default": true,
+      "kind": "embedding",
+      "files": [
+        {"repo": "Qwen/Qwen3-Embedding-0.6B-GGUF", "path": "Qwen3-Embedding-0.6B-Q8_0.gguf", "dest": "llm/Qwen3-Embedding-0.6B-Q8_0.gguf", "size": 639000000}
+      ],
+      "args": ["--embedding", "--pooling", "last", "-c", "8192", "-b", "8192", "-ub", "8192", "--device", "none", "-t", "4", "--cache-ram", "0"],
+      "query_instruction": "Given a search query, retrieve relevant passages that answer the query"
+    },
+    {
+      "id": "rerank",
+      "name": "Qwen3 Reranker 0.6B",
+      "description": "Re-ranks library search results. Runs on the CPU, always on.",
+      "default": true,
+      "kind": "rerank",
+      "files": [
+        {"repo": "ggml-org/Qwen3-Reranker-0.6B-Q8_0-GGUF", "path": "qwen3-reranker-0.6b-q8_0.gguf", "dest": "llm/qwen3-reranker-0.6b-q8_0.gguf", "size": 640000000}
+      ],
+      "args": ["--reranking", "-c", "8192", "-b", "8192", "-ub", "8192", "--device", "none", "-t", "4", "--cache-ram", "0"]
+    },
+    {
+      "id": "embed-vl",
+      "name": "Qwen3-VL Embedding 2B",
+      "description": "Embeds page images for multimodal library search. CPU by default.",
+      "default": true,
+      "kind": "embedding-vl",
+      "files": [
+        {"repo": "mradermacher/Qwen3-VL-Embedding-2B-GGUF", "path": "Qwen3-VL-Embedding-2B.Q8_0.gguf", "dest": "llm/Qwen3-VL-Embedding-2B.Q8_0.gguf", "size": 1834000000},
+        {"repo": "mradermacher/Qwen3-VL-Embedding-2B-GGUF", "path": "Qwen3-VL-Embedding-2B.mmproj-f16.gguf", "dest": "llm/Qwen3-VL-Embedding-2B.mmproj-f16.gguf", "size": 819000000, "role": "mmproj"}
+      ],
+      "args": ["--embedding", "--pooling", "last", "-c", "8192", "-b", "4096", "-ub", "4096", "--device", "none", "-t", "6", "--cache-ram", "0"]
+    }
+  ],
+  "comfy": [
+    {
+      "id": "qwen-image-2.1",
+      "name": "Qwen-Image 2.1",
+      "description": "Generation and editing in one checkpoint (int8). 25 steps.",
+      "default": true,
+      "files": [
+        {"repo": "Comfy-Org/Qwen-Image-2.1", "path": "diffusion_models/qwen_image_2.1_int8_convrot.safetensors", "dest": "comfy/diffusion_models/qwen_image_2.1_int8_convrot.safetensors", "size": 7260000000},
+        {"repo": "Comfy-Org/Qwen-Image-2.1", "path": "text_encoders/qwen3vl_8b_int8_convrot.safetensors", "dest": "comfy/text_encoders/qwen3vl_8b_int8_convrot.safetensors", "size": 9350000000},
+        {"repo": "Comfy-Org/Qwen-Image-2.1", "path": "vae/qwen_image_2.1_vae_bf16.safetensors", "dest": "comfy/vae/qwen_image_2.1_vae_bf16.safetensors", "size": 680000000}
+      ]
+    },
+    {
+      "id": "qwen-image-2.1-turbo",
+      "name": "Qwen-Image 2.1 Turbo",
+      "description": "8-step checkpoint for fast drafts. Shares the text encoder and VAE.",
+      "default": true,
+      "requires": ["qwen-image-2.1"],
+      "files": [
+        {"repo": "Comfy-Org/Qwen-Image-2.1", "path": "diffusion_models/qwen_image_2.1_turbo_int8_convrot.safetensors", "dest": "comfy/diffusion_models/qwen_image_2.1_turbo_int8_convrot.safetensors", "size": 7260000000}
+      ]
+    },
+    {
+      "id": "flux2-klein-4b",
+      "name": "FLUX.2 [klein] 4B",
+      "description": "Optional fast model (4 steps, Apache 2.0): generation and multi-reference editing.",
+      "default": false,
+      "files": [
+        {"repo": "Comfy-Org/flux2-klein", "path": "split_files/diffusion_models/flux-2-klein-4b.safetensors", "dest": "comfy/diffusion_models/flux-2-klein-4b.safetensors", "size": 7750000000},
+        {"repo": "Comfy-Org/flux2-klein", "path": "split_files/text_encoders/qwen_3_4b.safetensors", "dest": "comfy/text_encoders/qwen_3_4b.safetensors", "size": 8040000000},
+        {"repo": "Comfy-Org/flux2-dev", "path": "split_files/vae/flux2-vae.safetensors", "dest": "comfy/vae/flux2-vae.safetensors", "size": 340000000}
+      ]
+    }
+  ]
+}

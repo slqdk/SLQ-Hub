@@ -1,0 +1,12 @@
+[Unit]
+Description=SLQ Hub - keep the agent sandbox off the LAN
+After=docker.service
+PartOf=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/slq-hub-firewall.sh
+
+[Install]
+WantedBy=docker.service
