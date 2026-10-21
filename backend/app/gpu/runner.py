@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 
 import httpx
@@ -79,8 +80,29 @@ class Runner:
                 st = await self.status()
                 proc = (st.get("processes") or {}).get(name)
                 if not proc or proc.get("state") != "running":
-                    tail = await self.logs(name, 40)
+                    tail = await self.logs(name, 80)
                     raise RunnerError(f"llama-server '{name}' stopped while loading "
-                                      f"(exit {proc.get('returncode') if proc else '?'}):\n{tail[-3000:]}")
+                                      f"(exit {proc.get('returncode') if proc else '?'}): {_why(tail)}")
                 await asyncio.sleep(poll)
         raise RunnerError(f"llama-server '{name}' was not ready within {int(timeout)} s")
+
+
+_STAMP = re.compile(r"^\d+\.\d+\.\d+\.\d+ ([EWID]) +(.*)$")
+
+
+def _why(log: str) -> str:
+    """The lines of a llama-server log that say why it stopped: its E-level
+    lines (without the "fit params" retry noise), else the last lines."""
+    errors, plain = [], []
+    for raw in log.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        m = _STAMP.match(line)
+        text = m.group(2).strip() if m else line
+        plain.append(text)
+        if (m and m.group(1) == "E") or (not m and line.lower().startswith(("error", "terminate"))):
+            if "fit params" not in text:
+                errors.append(text)
+    picked = list(dict.fromkeys(errors))[:4] or plain[-6:]
+    return " | ".join(picked)[:1500]

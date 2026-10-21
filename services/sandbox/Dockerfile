@@ -23,12 +23,13 @@ RUN userdel -r ubuntu 2>/dev/null || true \
     && useradd -m -u 1000 -s /bin/bash sandbox
 
 # A Python the agent can extend (pip install works as the sandbox user).
+# uv brings uvx, which most Python MCP servers are started with.
 RUN python3 -m venv /opt/py \
     && /opt/py/bin/pip install --upgrade pip wheel \
     && /opt/py/bin/pip install \
         numpy pandas scipy matplotlib pillow opencv-python-headless \
         openpyxl python-docx pymupdf pytesseract requests beautifulsoup4 lxml \
-        pyyaml tabulate \
+        pyyaml tabulate uv \
     && chown -R sandbox:sandbox /opt/py
 
 ENV PATH=/opt/py/bin:$PATH

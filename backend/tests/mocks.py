@@ -196,8 +196,13 @@ def make_llama(script: dict) -> FastAPI:
                                              "function": {"name": c["function"]["name"], "arguments": ""}}]})
                 for i in range(0, len(args), 8):
                     yield chunk({"tool_calls": [{"index": c["index"], "function": {"arguments": args[i:i + 8]}}]})
-            yield chunk({}, finish, timings=timings)
-            yield f"data: {json.dumps({'choices': [], 'usage': usage})}\n\n".encode()
+            # as llama-server b11783 does: the finish chunk is empty, and usage and
+            # timings come together in a last chunk without choices
+            yield chunk({}, finish)
+            last = {"choices": [], "id": "chatcmpl-1", "object": "chat.completion.chunk", "model": body.get("model"),
+                    "usage": {**usage, "prompt_tokens_details": {"cached_tokens": timings["cache_n"]}},
+                    "timings": timings}
+            yield f"data: {json.dumps(last)}\n\n".encode()
             yield b"data: [DONE]\n\n"
 
         return StreamingResponse(gen(), media_type="text/event-stream")

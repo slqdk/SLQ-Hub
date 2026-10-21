@@ -27,6 +27,10 @@ Proxmox host is the real test. Expect to fix things there; the self-test
 | Libraries | 5 tests with keyword-hashing fake embedders: text and page-image indexing, fused search, re-ranking, replacing and deleting documents, GPU indexing through the queue, broken files. |
 | Web UI | `tsc` + `vite build`; every page and the main flows clicked through in Chromium (Playwright) against `python -m tests.devserver` (the Hub with fake services): sign-in, chat with markdown/maths/code, tool strip, artifact panel, approvals, subagent, image tool, projects (files, editor, settings, sync), libraries, all settings tabs, dark mode, phone width. |
 | Shell scripts | `shellcheck`. `create-vm.sh --dry-run` prints every command. |
+| Compose | `docker compose config` (v2.40.3) with a `.env` written the way `install.sh` writes it: renders, and the admin password hash arrives intact. |
+| llama.cpp | b11783 built from source (CPU): every command line the Hub builds parses; the real supervisor started the real llama-server through the Hub's scheduler, runner and client with a tiny random model - load, streaming (the real chunk format), a killed server noticed and reloaded, unload. Embeddings (strings and `content` arrays) and `/v1/rerank` answer in the shapes the Hub expects. |
+| ComfyUI | v0.42.3 on CPU with placeholder model files: all seven workflow graphs (Qwen-Image 2.1 generate, turbo, edit with 1 and 3 images, background removal, FLUX.2 klein generate and edit) pass ComfyUI's own validation. Not rendered (no real weights). |
+| MCP over stdio | A real stdio MCP server through the real sandbox daemon (`execd.py`): initialize, a server-to-client ping, tools, an 18 KB result. |
 
 ## Not verified - check these on the real system
 
@@ -34,16 +38,16 @@ Proxmox host is the real test. Expect to fix things there; the self-test
    from VM 104, cloud-init snippets on `local`, the guest agent IP wait.
 2. **install.sh** end to end on Ubuntu 24.04: HWE kernel 7.0, amdgpu-dkms 31.60
    building against it, `/dev/kfd`, PCIe atomics, Docker CE, the firewall unit.
-3. **llama.cpp on the card** (`server-rocm-b11783`): the exact flags
-   (`-kvu`, `--cache-ram`, `-ctk/-ctv q8_0`, `-fa on`), VRAM use (~21 GiB
-   expected for Qwen3.8-27B with an 80K pool), real tokens/s.
+3. **llama.cpp on the card** (`server-rocm-b11783`): the flags parse (checked
+   on a CPU build), but VRAM use (~21 GiB expected for Qwen3.8-27B with an 80K
+   pool), ROCm itself and real tokens/s are unknown until the first load.
 4. **Qwen3.8 templates**: tool calls parsed by llama-server (`--jinja`),
    `reasoning_content` passed back within a turn, `reasoning_effort`
    (low/medium/xhigh), `enable_thinking`. The Hub also parses text tool calls
    (Qwen3-Coder XML and Hermes JSON) as a fallback.
-5. **ComfyUI**: the torch ROCm 7.14 wheels, Qwen-Image 2.1 int8 files and the
-   workflow node names (checked against v0.42.3's source, not run), VRAM
-   release with `/free` before the LLM loads again.
+5. **ComfyUI on the card**: the torch ROCm 7.14 wheels, the Qwen-Image 2.1 int8
+   kernels on gfx1100, a real render, VRAM release with `/free` before the LLM
+   loads again. (The graphs themselves pass ComfyUI's validation.)
 6. **Embeddings and re-ranking** with the real GGUFs: the Qwen3-VL-Embedding
    chat format written out in `app/rag/library.py`, the re-ranker's score scale
    (log-odds or probability: both handled).

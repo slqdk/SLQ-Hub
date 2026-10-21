@@ -135,7 +135,7 @@ for statistics.
 ### What clients see
 
 - The web UI shows the turn's state under the answer ("Waiting for the card,
-  number 2 in line", "Getting the card ready", "Working"), and the GPU plate
+  2 jobs ahead", "Getting the card ready", "Working"), and the GPU plate
   at the bottom of the sidebar shows what is loaded, the slots in use and how
   many wait. It opens the queue: running and waiting jobs with owner,
   priority, model, wait time and a cancel button.

@@ -120,6 +120,9 @@ class Catalog:
         args += ["-c", str(int(s.get("ctx", 32768))), "-np", str(int(s.get("parallel", 1)))]
         if s.get("kv_unified"):
             args.append("-kvu")
+            per = self.context_per_request(model_id)
+            if per < int(s.get("ctx", 32768)):           # one request may not take the whole shared pool
+                args += ["--kv-unified-per-slot", str(per)]
         if s.get("cache_type"):
             args += ["-ctk", str(s["cache_type"]), "-ctv", str(s["cache_type"])]
         args += ["-ngl", str(s.get("gpu_layers", "all")), "-fa", str(s.get("flash_attn", "on"))]

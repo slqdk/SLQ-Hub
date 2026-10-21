@@ -262,6 +262,9 @@ stage_models() {
 # ================================================================ start
 stage_start() {
     section "Starting"
+    local lan
+    lan="$(hostname -I | awk '{print $1}')"
+    [[ -n "$lan" && "$(env_get HUB_LAN_HOST)" != "$lan" ]] && env_set HUB_LAN_HOST "$lan"
     compose up -d
     systemctl restart slq-hub-firewall.service || warn "the sandbox firewall did not apply - see: journalctl -u slq-hub-firewall"
     local port
@@ -317,7 +320,7 @@ cat <<EOF
   Through the proxy : $(env_get HUB_PUBLIC_URL)   (set it up in Nginx Proxy Manager: docs/INSTALL.md step 4)
   Sign in as        : $(env_get HUB_ADMIN_USER)
 
-  Other apps (FamilyLog, Coagent): create a key in Settings -> API keys, then see docs/API.md.
+  Other apps (FamilyLog, Coagent): create a key in Settings -> Apps and keys, then see docs/API.md.
   Updates           : sudo bash $REPO/update.sh
   Logs              : sudo bash $REPO/update.sh compose logs -f hub
 EOF

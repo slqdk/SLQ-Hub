@@ -281,7 +281,8 @@ class McpServer:
             if not (self.cfg.get("command") or "").strip():
                 raise McpError("no command set")
             return SandboxConnection(hub.env.sandbox_url, hub.env.internal_token, self.cfg["command"],
-                                     self.cfg.get("env") or {}, transport=hub.transports.sandbox)
+                                     self.cfg.get("env") or {}, cwd=self.cfg.get("cwd") or "/workspace",
+                                     transport=hub.transports.sandbox)
         if not (self.cfg.get("url") or "").startswith(("http://", "https://")):
             raise McpError("the URL must start with http:// or https://")
         return HttpConnection(self.cfg["url"], self.cfg.get("headers") or {}, transport=hub.transports.web)

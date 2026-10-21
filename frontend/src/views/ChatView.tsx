@@ -415,7 +415,8 @@ function LiveState({ live, queueCurrent, names }: { live: LiveRun; queueCurrent:
     const loading = live.position === 0 || (live.position == null && queueCurrent !== null);
     return (
       <div className="run-state"><Lamp state="wait" />
-        {live.position && live.position > 0 ? `Waiting for the card, number ${live.position} in line`
+        {live.position && live.position > 0
+          ? `Waiting for the card, ${live.position} job${live.position === 1 ? "" : "s"} ahead`
           : loading ? "Getting the card ready" : "Waiting for the card"}
         <span className="faint num">{seconds(secs)}</span>
       </div>
