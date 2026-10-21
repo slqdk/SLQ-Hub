@@ -1,0 +1,211 @@
+"""The GPU queue: order, slots, priorities, model switches, affinity, leases,
+aging, cancellation and load failures - against a fake card."""
+import asyncio
+
+import pytest
+
+from app.gpu.scheduler import QueueTimeout, Scheduler, SchedulerError
+
+
+class FakeCard:
+    def __init__(self, slots=None, fail=()):
+        self.loaded = None
+        self.log = []
+        self._slots = slots or {}
+        self.fail = set(fail)
+
+    async def load(self, need):
+        await asyncio.sleep(0)
+        if need in self.fail:
+            raise RuntimeError("boom")
+        self.loaded = need
+        self.log.append(("load", need))
+
+    async def unload(self, need):
+        await asyncio.sleep(0)
+        self.loaded = None
+        self.log.append(("unload", need))
+
+    def slots(self, need):
+        return self._slots.get(need, 2 if need.startswith("llm:") else 1)
+
+
+class Clock:
+    def __init__(self):
+        self.t = 1000.0
+
+    def __call__(self):
+        return self.t
+
+
+async def settle(n=20):
+    for _ in range(n):
+        await asyncio.sleep(0)
+
+
+def sched(card=None, **kw):
+    kw.setdefault("clock", Clock())
+    return Scheduler(card or FakeCard(), **kw)
+
+
+async def test_two_slots_then_wait():
+    s = sched()
+    t1 = await s.acquire("web", "chat", "llm:a")
+    t2 = await s.acquire("fam", "chat", "llm:a")
+    third = asyncio.create_task(s.acquire("fam", "chat", "llm:a"))
+    await settle()
+    assert not third.done()
+    assert len(s.running) == 2 and len(s.pending) == 1
+    await t1.release()
+    t3 = await asyncio.wait_for(third, 1)
+    await t2.release()
+    await t3.release()
+    assert s.backend.log == [("load", "llm:a")]
+
+
+async def test_priority_beats_arrival_when_card_is_full():
+    s = sched(FakeCard(slots={"llm:a": 1}))
+    busy = await s.acquire("x", "chat", "llm:a")
+    bg = asyncio.create_task(s.acquire("idx", "embed", "llm:a", "background"))
+    await settle()
+    s.clock.t += 1
+    web = asyncio.create_task(s.acquire("web", "agent", "llm:a", "interactive"))
+    await settle()
+    await busy.release()
+    first = await asyncio.wait_for(asyncio.wait({bg, web}, return_when=asyncio.FIRST_COMPLETED), 1)
+    done, _ = first
+    assert web in done and bg not in done
+    await web.result().release()
+    await (await asyncio.wait_for(bg, 1)).release()
+
+
+async def test_switch_waits_for_running_jobs_then_unloads():
+    card = FakeCard()
+    s = sched(card, affinity_window=0)
+    a = await s.acquire("web", "chat", "llm:a")
+    b_task = asyncio.create_task(s.acquire("fam", "chat", "llm:b"))
+    await settle()
+    assert not b_task.done() and card.loaded == "llm:a"
+    await a.release()
+    b = await asyncio.wait_for(b_task, 1)
+    assert card.log == [("load", "llm:a"), ("unload", "llm:a"), ("load", "llm:b")]
+    assert s.current == "llm:b"
+    await b.release()
+
+
+async def test_affinity_lets_same_model_work_use_a_free_slot():
+    clock = Clock()
+    s = sched(clock=clock, affinity_window=20, aging_s=0)
+    a1 = await s.acquire("web", "chat", "llm:a")
+    b_task = asyncio.create_task(s.acquire("fam", "chat", "llm:b"))
+    await settle()
+    clock.t += 1
+    a2_task = asyncio.create_task(s.acquire("fam", "chat", "llm:a"))
+    await settle()
+    assert a2_task.done(), "inside the window a same-model job takes the free slot"
+    a2 = a2_task.result()
+    await a2.release()
+    clock.t += 30                      # window over: nothing new for llm:a starts
+    a3_task = asyncio.create_task(s.acquire("fam", "chat", "llm:a"))
+    await settle()
+    assert not a3_task.done()
+    await a1.release()
+    b = await asyncio.wait_for(b_task, 1)
+    assert s.current == "llm:b"
+    await b.release()
+    a3 = await asyncio.wait_for(a3_task, 1)
+    await a3.release()
+
+
+async def test_lease_lets_same_model_calls_in_and_switches_to_comfy():
+    card = FakeCard()
+    clock = Clock()
+    s = sched(card, clock=clock, affinity_window=0, aging_s=0)
+    lease = await s.acquire("web", "agent", "llm:a", "interactive", lease=True)
+    # another model waits (window 0) ...
+    b_task = asyncio.create_task(s.acquire("fam", "chat", "llm:b"))
+    await settle()
+    # ... but a call for the loaded model uses slot 2 while the lease holds the card
+    fam = await asyncio.wait_for(s.acquire("fam", "chat", "llm:a"), 1)
+    # the lease wants an image: waits for slot 2 to finish
+    sw = asyncio.create_task(lease.switch("comfy"))
+    await settle()
+    assert not sw.done() and card.loaded == "llm:a"
+    await fam.release()
+    await asyncio.wait_for(sw, 1)
+    assert card.loaded == "comfy" and lease.need == "comfy"
+    assert not b_task.done()
+    await lease.switch("llm:a")
+    assert card.loaded == "llm:a"
+    await lease.release()
+    b = await asyncio.wait_for(b_task, 1)
+    assert card.loaded == "llm:b"
+    await b.release()
+
+
+async def test_aging_lets_an_old_background_job_through():
+    clock = Clock()
+    s = sched(FakeCard(slots={"llm:a": 1}), clock=clock, aging_s=60)
+    busy = await s.acquire("x", "chat", "llm:a")
+    old_bg = asyncio.create_task(s.acquire("idx", "embed", "llm:a", "background"))
+    await settle()
+    clock.t += 130                     # two levels: background -> interactive
+    new_normal = asyncio.create_task(s.acquire("fam", "chat", "llm:a", "normal"))
+    await settle()
+    await busy.release()
+    done, _ = await asyncio.wait({old_bg, new_normal}, return_when=asyncio.FIRST_COMPLETED, timeout=1)
+    assert old_bg in done and new_normal not in done
+    await old_bg.result().release()
+    await (await asyncio.wait_for(new_normal, 1)).release()
+
+
+async def test_cancel_a_waiting_job():
+    s = sched(FakeCard(slots={"llm:a": 1}))
+    busy = await s.acquire("x", "chat", "llm:a")
+    w = asyncio.create_task(s.acquire("fam", "chat", "llm:a"))
+    await settle()
+    w.cancel()
+    await settle()
+    assert w.cancelled() and not s.pending
+    await busy.release()
+    assert not s.running
+
+
+async def test_load_failure_fails_that_job_only():
+    card = FakeCard(fail={"llm:bad"})
+    s = sched(card, affinity_window=0)
+    with pytest.raises(SchedulerError):
+        await s.acquire("fam", "chat", "llm:bad")
+    ok = await asyncio.wait_for(s.acquire("fam", "chat", "llm:a"), 1)
+    assert s.current == "llm:a"
+    await ok.release()
+
+
+async def test_max_wait_gives_up():
+    s = sched(FakeCard(slots={"llm:a": 1}))
+    busy = await s.acquire("x", "chat", "llm:a")
+    with pytest.raises(QueueTimeout):
+        await s.acquire("fam", "chat", "llm:a", max_wait=0.05)
+    assert not s.pending
+    await busy.release()
+
+
+async def test_snapshot_shows_positions_and_owners():
+    s = sched(FakeCard(slots={"llm:a": 1}))
+    busy = await s.acquire("web", "agent", "llm:a", "interactive", label="Chat 1")
+    w = asyncio.create_task(s.acquire("familylog", "chat", "llm:a"))
+    await settle()
+    snap = s.snapshot()
+    assert snap["current"] == "llm:a"
+    assert snap["running"][0]["owner"] == "web" and snap["running"][0]["label"] == "Chat 1"
+    assert snap["pending"][0]["owner"] == "familylog" and snap["pending"][0]["position"] == 1
+    await busy.release()
+    await (await asyncio.wait_for(w, 1)).release()
+
+
+async def test_release_twice_is_harmless_and_context_manager_releases():
+    s = sched()
+    async with await s.acquire("web", "chat", "llm:a") as t:
+        assert t.need == "llm:a"
+    await t.release()
+    assert not s.running

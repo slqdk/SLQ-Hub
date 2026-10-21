@@ -19,7 +19,7 @@ set -euo pipefail
 DRY=0
 [[ "${1:-}" == "--dry-run" ]] && DRY=1
 
-REPO_URL="${REPO_URL:-https://github.com/slqdk/slq-hub}"
+REPO_URL="${REPO_URL:-https://github.com/slqdk/SLQ-Hub}"
 IMG_NAME="ubuntu-24.04-server-cloudimg-amd64.img"
 IMG_BASE="https://cloud-images.ubuntu.com/releases/noble/release"
 IMG_DIR="/var/lib/vz/template/iso"

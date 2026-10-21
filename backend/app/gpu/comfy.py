@@ -1,0 +1,212 @@
+"""Client for the headless ComfyUI in the `comfyui` container.
+
+Only the scheduler's image jobs call run(); the scheduler has made sure no
+LLM is on the card first.
+"""
+from __future__ import annotations
+
+import asyncio
+import json
+import time
+import uuid
+from typing import Awaitable, Callable
+
+import httpx
+
+try:  # websockets >= 13
+    from websockets.asyncio.client import connect as ws_connect
+except ImportError:  # pragma: no cover
+    ws_connect = None
+
+
+class ComfyError(RuntimeError):
+    pass
+
+
+ProgressFn = Callable[[int, int, str | None], Awaitable[None] | None]
+
+
+class Comfy:
+    def __init__(self, url: str, transport: httpx.AsyncBaseTransport | None = None, use_ws: bool = True):
+        self.url = url.rstrip("/")
+        self._transport = transport
+        self.use_ws = use_ws and ws_connect is not None and transport is None
+        self._object_info: dict | None = None
+        self._object_info_at = 0.0
+
+    def client(self, timeout: float = 30) -> httpx.AsyncClient:
+        return httpx.AsyncClient(timeout=timeout, transport=self._transport)
+
+    async def _get(self, path: str, timeout: float = 30, **kw) -> httpx.Response:
+        try:
+            async with self.client(timeout) as c:
+                r = await c.get(self.url + path, **kw)
+        except httpx.HTTPError as exc:
+            raise ComfyError(f"ComfyUI at {self.url} is not answering ({exc.__class__.__name__})") from exc
+        if r.status_code >= 400:
+            raise ComfyError(f"ComfyUI {path}: {r.status_code} {r.text[:300]}")
+        return r
+
+    async def system_stats(self) -> dict:
+        return (await self._get("/system_stats", timeout=10)).json()
+
+    async def object_info(self, max_age: float = 300) -> dict:
+        if self._object_info is None or time.monotonic() - self._object_info_at > max_age:
+            self._object_info = (await self._get("/object_info", timeout=60)).json()
+            self._object_info_at = time.monotonic()
+        return self._object_info
+
+    async def free(self) -> None:
+        try:
+            async with self.client(15) as c:
+                await c.post(self.url + "/free", json={"unload_models": True, "free_memory": True})
+        except httpx.HTTPError:
+            pass        # not running = nothing on the card
+
+    async def interrupt(self, prompt_id: str | None = None) -> None:
+        try:
+            async with self.client(10) as c:
+                await c.post(self.url + "/interrupt", json={"prompt_id": prompt_id} if prompt_id else {})
+        except httpx.HTTPError:
+            pass
+
+    async def upload_image(self, data: bytes, filename: str, mime: str = "image/png") -> str:
+        try:
+            async with self.client(60) as c:
+                r = await c.post(self.url + "/upload/image", files={"image": (filename, data, mime)},
+                                 data={"overwrite": "true", "type": "input"})
+        except httpx.HTTPError as exc:
+            raise ComfyError(f"upload to ComfyUI failed ({exc.__class__.__name__})") from exc
+        if r.status_code >= 400:
+            raise ComfyError(f"ComfyUI refused the upload: {r.status_code} {r.text[:300]}")
+        body = r.json()
+        return f"{body['subfolder']}/{body['name']}" if body.get("subfolder") else body["name"]
+
+    async def queue(self, graph: dict, client_id: str) -> str:
+        try:
+            async with self.client(60) as c:
+                r = await c.post(self.url + "/prompt", json={"prompt": graph, "client_id": client_id})
+        except httpx.HTTPError as exc:
+            raise ComfyError(f"ComfyUI is not answering ({exc.__class__.__name__})") from exc
+        if r.status_code >= 400:
+            raise ComfyError("ComfyUI refused the workflow: " + _describe_errors(r))
+        return r.json()["prompt_id"]
+
+    async def history(self, prompt_id: str) -> dict:
+        return (await self._get(f"/history/{prompt_id}")).json().get(prompt_id) or {}
+
+    async def view(self, filename: str, subfolder: str = "", kind: str = "output") -> bytes:
+        return (await self._get("/view", timeout=120,
+                                params={"filename": filename, "subfolder": subfolder, "type": kind})).content
+
+    async def run(self, graph: dict, on_progress: ProgressFn | None = None, timeout: float = 1800) -> list[tuple[str, bytes]]:
+        """Queue a workflow, wait for it, and return its output images."""
+        client_id = uuid.uuid4().hex
+        prompt_id: str | None = None
+        try:
+            if self.use_ws:
+                prompt_id = await self._run_ws(graph, client_id, on_progress, timeout)
+            else:
+                prompt_id = await self.queue(graph, client_id)
+                await self._poll(prompt_id, timeout)
+            hist = await self.history(prompt_id)
+            status = hist.get("status") or {}
+            if status.get("status_str") == "error":
+                raise ComfyError("ComfyUI reported an error: " + _status_message(status))
+            images: list[tuple[str, bytes]] = []
+            for out in (hist.get("outputs") or {}).values():
+                for img in out.get("images") or []:
+                    if img.get("type") not in (None, "output"):
+                        continue
+                    data = await self.view(img["filename"], img.get("subfolder", ""), img.get("type", "output"))
+                    images.append((img["filename"], data))
+            if not images:
+                raise ComfyError("the workflow finished without an output image")
+            return images
+        except asyncio.CancelledError:
+            if prompt_id:
+                await asyncio.shield(self.interrupt(prompt_id))
+            raise
+
+    async def _poll(self, prompt_id: str, timeout: float) -> None:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            hist = await self.history(prompt_id)
+            status = hist.get("status") or {}
+            if status.get("completed") or status.get("status_str") in ("success", "error"):
+                return
+            await asyncio.sleep(1.0)
+        await self.interrupt(prompt_id)
+        raise ComfyError(f"the image job did not finish within {int(timeout)} s")
+
+    async def _run_ws(self, graph: dict, client_id: str, on_progress: ProgressFn | None, timeout: float) -> str:
+        ws_url = self.url.replace("http://", "ws://").replace("https://", "wss://") + f"/ws?clientId={client_id}"
+        try:
+            ws = await ws_connect(ws_url, max_size=64 * 1024 * 1024, open_timeout=10)
+        except Exception:                       # no websocket: poll instead
+            prompt_id = await self.queue(graph, client_id)
+            await self._poll(prompt_id, timeout)
+            return prompt_id
+        async with ws:
+            prompt_id = await self.queue(graph, client_id)
+            deadline = time.monotonic() + timeout
+            while True:
+                left = deadline - time.monotonic()
+                if left <= 0:
+                    await self.interrupt(prompt_id)
+                    raise ComfyError(f"the image job did not finish within {int(timeout)} s")
+                try:
+                    msg = await asyncio.wait_for(ws.recv(), timeout=min(left, 30))
+                except asyncio.TimeoutError:
+                    hist = await self.history(prompt_id)       # missed the end?
+                    if (hist.get("status") or {}).get("completed"):
+                        return prompt_id
+                    continue
+                if isinstance(msg, bytes):
+                    continue                                    # preview frames
+                try:
+                    ev = json.loads(msg)
+                except ValueError:
+                    continue
+                kind, data = ev.get("type"), ev.get("data") or {}
+                if data.get("prompt_id") not in (None, prompt_id):
+                    continue
+                if kind == "progress" and on_progress:
+                    res = on_progress(int(data.get("value", 0)), int(data.get("max", 0)), data.get("node"))
+                    if asyncio.iscoroutine(res):
+                        await res
+                elif kind == "execution_error":
+                    raise ComfyError(f"{data.get('node_type', 'a node')} failed: "
+                                     f"{data.get('exception_message', '').strip()[:500]}")
+                elif kind == "execution_interrupted":
+                    raise ComfyError("the image job was interrupted")
+                elif kind == "execution_success" and data.get("prompt_id") == prompt_id:
+                    return prompt_id
+                elif kind == "executing" and data.get("node") is None and data.get("prompt_id") == prompt_id:
+                    return prompt_id
+
+
+def _describe_errors(r: httpx.Response) -> str:
+    try:
+        body = r.json()
+    except ValueError:
+        return f"{r.status_code} {r.text[:300]}"
+    parts = []
+    err = body.get("error")
+    if isinstance(err, dict):
+        parts.append(err.get("message") or "")
+        if err.get("details"):
+            parts.append(str(err["details"]))
+    elif err:
+        parts.append(str(err))
+    for node_id, ne in (body.get("node_errors") or {}).items():
+        for e in ne.get("errors") or []:
+            parts.append(f"node {node_id} ({ne.get('class_type')}): {e.get('message')} {e.get('details', '')}")
+    return "; ".join(p for p in parts if p)[:1500] or str(r.status_code)
+
+
+def _status_message(status: dict) -> str:
+    for kind, data in status.get("messages") or []:
+        if kind == "execution_error":
+            return f"{data.get('node_type')}: {data.get('exception_message', '')}"[:500]
+    return status.get("status_str") or "unknown"

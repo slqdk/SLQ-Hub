@@ -21,7 +21,7 @@ Every command below is a single line. Paste one at a time.
 
 Open a shell on the Proxmox host (web UI → node → Shell, or SSH as root):
 
-    curl -fsSL https://raw.githubusercontent.com/slqdk/slq-hub/main/proxmox/create-vm.sh -o /root/create-vm.sh
+    curl -fsSL https://raw.githubusercontent.com/slqdk/SLQ-Hub/main/proxmox/create-vm.sh -o /root/create-vm.sh
 
 To see every command the script would run, without changing anything:
 
