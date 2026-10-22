@@ -7,6 +7,7 @@
 # reboots once (new kernel + AMD GPU driver); log in again and run the same
 # command - it continues. Running it again later only repeats what is missing.
 #
+#   vm       checks the VM first: the AMD card, q35, Secure Boot off, disk space
 #   config   a few questions -> /srv/slq-hub/.env (secrets generated here)
 #   system   HWE kernel 7.0, amdgpu-dkms, Docker, the sandbox firewall   (reboot)
 #   gpu      checks that the GPU is usable for ROCm (/dev/kfd, PCIe atomics)
@@ -63,6 +64,87 @@ info "Repo: $REPO   Data: $HUB_ROOT   Log: $LOG"
 # shellcheck disable=SC1091
 . /etc/os-release
 [[ "${VERSION_ID:-}" == "24.04" ]] || warn "this is $PRETTY_NAME - SLQ Hub is built for Ubuntu 24.04."
+
+# ================================================================ vm
+# Before anything is installed: is this VM what the Hub needs? create-vm.sh
+# makes it so; docs/INSTALL.md ("A VM made by hand") says how to do it by hand.
+# A wrong setting found here costs a minute, not a driver build and a reboot.
+SYSFS="${HUB_SYSFS:-/sys}"      # the tests point these two at a fake tree
+PROCFS="${HUB_PROCFS:-/proc}"
+gb_free() {  # gb_free PATH - free GB on the file system that holds PATH (or its nearest parent)
+    local p="$1"
+    while [[ ! -e "$p" ]]; do p="$(dirname "$p")"; done
+    df -P -BG "$p" | awk 'NR==2 {sub(/G$/, "", $4); print $4}'
+}
+stage_vm() {
+    section "VM check"
+    local d gpu=""
+    for d in "$SYSFS"/bus/pci/devices/*; do
+        [[ -r "$d/vendor" && -r "$d/class" ]] || continue
+        if [[ "$(<"$d/vendor")" == 0x1002 && "$(<"$d/class")" == 0x03* ]]; then gpu="${d##*/}"; break; fi
+    done
+    [[ -n "$gpu" ]] || die "there is no AMD graphics card in this VM. On the Proxmox host: shut this VM
+         down, shut down the VM that has the card now, and add the card here (Hardware -> Add ->
+         PCI Device: All Functions, ROM-Bar, PCI-Express; not Primary GPU). Then run this again."
+    ok "AMD graphics card at $gpu"
+
+    local hb="$SYSFS/bus/pci/devices/0000:00:00.0" id=""
+    [[ -r "$hb/vendor" && -r "$hb/device" ]] && id="$(<"$hb/vendor"):$(<"$hb/device")"
+    case "$id" in
+        0x8086:0x1237)
+            die "the VM's machine type is i440fx. The card needs q35: only q35 has PCI Express, and
+         ROCm needs its atomics. On the Proxmox host: Hardware -> Machine -> q35, and tick
+         PCI-Express on the card. The network interface may get a new name; if the network does
+         not come up, check 'ip -br link' on the console and fix /etc/netplan/*.yaml." ;;
+        0x8086:0x29c0)
+            ok "machine type q35" ;;
+    esac
+
+    if [[ -d "$SYSFS/firmware/efi" ]]; then
+        local sb="$SYSFS/firmware/efi/efivars/SecureBoot-8be4df61-93ca-11d2-aa0d-00e098032b8c"
+        if [[ -r "$sb" && "$(od -An -t u1 -j4 -N1 "$sb" | tr -d ' ')" == 1 ]]; then
+            die "Secure Boot is on. AMD's driver module is not signed for it, so it would not load.
+         Turn it off: reboot the VM, press Esc at the Proxmox logo, Device Manager -> Secure Boot
+         Configuration -> untick Attempt Secure Boot, F10, Esc, Reset. Then run this again."
+        fi
+        ok "UEFI, Secure Boot off"
+    else
+        warn "the VM starts with legacy BIOS (SeaBIOS), not UEFI (OVMF) as designed. It may still
+         work - the GPU check after the reboot is what counts."
+    fi
+
+    local cpu cores ram
+    cpu="$(awk -F': ' '/^model name/ {print $2; exit}' "$PROCFS/cpuinfo" 2>/dev/null)"
+    cores="$(grep -c '^processor' "$PROCFS/cpuinfo" 2>/dev/null || true)"
+    ram="$(awk '/^MemTotal:/ {printf "%.0f", $2 / 1048576}' "$PROCFS/meminfo" 2>/dev/null)"
+    if grep -qw avx2 "$PROCFS/cpuinfo" 2>/dev/null; then
+        ok "CPU: ${cpu:-?}, ${cores:-?} cores; RAM: ${ram:-?} GiB"
+    else
+        warn "the CPU has no AVX2 - is the VM's CPU type 'host'? (Proxmox: Hardware -> Processors ->
+         Type.) What the CPU does for the models is slower without it. (${cpu:-?}, ${ram:-?} GiB RAM)"
+    fi
+
+    local need="${HUB_MIN_FREE_GB:-150}" a b free src
+    a="$(gb_free "$HUB_ROOT")"
+    b="$(gb_free /var/lib/docker)"
+    if [[ ! "$a" =~ ^[0-9]+$ || ! "$b" =~ ^[0-9]+$ ]]; then
+        warn "could not read the free disk space (df) - not checked"
+        return 0
+    fi
+    free=$(( a < b ? a : b ))
+    if (( free < need )); then
+        src="$(findmnt -n -o SOURCE --target / 2>/dev/null || true)"
+        if [[ "$src" == /dev/mapper/* ]]; then
+            die "only $free GB free for the models and the container images; the Hub needs about $need GB.
+         / is on LVM, and Ubuntu's installer leaves most of a large disk unused in the volume
+         group. To give / the rest:   sudo lvextend -r -l +100%FREE $src
+         Then run this again. (sudo HUB_MIN_FREE_GB=0 bash $REPO/install.sh skips this check.)"
+        fi
+        die "only $free GB free for the models and the container images; the Hub needs about $need GB.
+         Give the VM a bigger disk. (sudo HUB_MIN_FREE_GB=0 bash $REPO/install.sh skips this check.)"
+    fi
+    ok "$free GB free for the models and the container images"
+}
 
 # ================================================================ config
 stage_config() {
@@ -292,6 +374,7 @@ stage_selftest() {
 }
 
 # ================================================================ run
+if ! done_stage system; then stage_vm; fi
 if ! done_stage config; then stage_config; mark config; fi
 if ! done_stage system; then
     stage_system

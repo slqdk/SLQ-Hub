@@ -58,7 +58,59 @@ What happens next:
 > Reboot the Proxmox host once. VM 104 no longer starts at boot, and the Hub
 > VM does.
 
+### Or: make the VM by hand
+
+A VM made in the Proxmox UI and installed from the Ubuntu Server ISO works
+too, if it matches what the script makes. Set this up **before** installing
+Ubuntu: the BIOS type cannot be changed afterwards without reinstalling.
+
+| Setting | Value | Why |
+|---|---|---|
+| BIOS | OVMF (UEFI), EFI disk with **Pre-Enroll keys off** | Secure Boot off: AMD's driver module is not signed |
+| Machine | `q35` | PCI Express for the card; ROCm needs its atomics |
+| Processors | type **host**, 8–12 cores | AVX2 and the rest of the real CPU |
+| Memory | 40960 MB, ballooning off | passthrough locks all of it anyway |
+| Disk | 500 GB, VirtIO SCSI single | models and images need ~150 GB to begin with |
+| Display | Default | the Proxmox console during the Ubuntu install |
+| PCI device | the RX 7900 XTX: All Functions, ROM-Bar, PCI-Express, **not** Primary GPU | |
+| Options | Start at boot on, QEMU Guest Agent on | |
+
+For a VM that already exists, on the host (here VM 222 with its disks on
+`VMDisc01`; this shuts VM 104 down and copies its GPU lines without
+`x-vga`):
+
+    qm stop 222
+    qm shutdown 104 --timeout 180 --forceStop 1
+    qm set 104 --onboot 0
+    qm set 222 --machine q35 --bios ovmf --efidisk0 VMDisc01:1,efitype=4m,pre-enrolled-keys=0 --cpu host --memory 40960 --balloon 0 --agent enabled=1 --onboot 1
+    qm config 104 | grep '^hostpci' | while read -r key val; do val="$(sed -E 's/(^|,)x-vga=(1|on)//; s/^,//' <<<"$val")"; [[ $val == *pcie=1* ]] || val="$val,pcie=1"; qm set 222 --"${key%:}" "$val"; done
+    qm config 222
+
+In the Ubuntu Server 24.04 installer:
+
+1. Language English, your keyboard.
+2. **Ubuntu Server** (not minimized). No third-party drivers.
+3. Network: a static IPv4 address (the one Nginx Proxy Manager will forward to).
+4. Storage: **Use an entire disk**, and **untick "Set up this disk as an LVM
+   group"**. With LVM the installer gives `/` only part of the disk. (Already
+   installed with LVM? `install.sh` notices and prints the command that grows it.)
+5. Your user, and tick **Install OpenSSH server**.
+6. Featured snaps: none. Not `docker` in particular: `install.sh` installs
+   Docker CE itself.
+
+After the reboot, log in over SSH and get the repo:
+
+    sudo apt update && sudo apt install -y git qemu-guest-agent
+    sudo git clone https://github.com/slqdk/SLQ-Hub /opt/slq-hub
+
+Then continue in step 2 at "Then start the installer". The installer checks
+the VM first (the card, `q35`, Secure Boot, disk space) and stops with what to
+fix.
+
 ## 2. Install (in the new VM)
+
+(A VM made by hand: you have cloned the repo already; skip to "Then start the
+installer".)
 
 From your PC:
 
@@ -178,6 +230,8 @@ versions) are in `/srv/slq-hub/.env`. After editing it, run:
 | Symptom | What to do |
 |---|---|
 | `create-vm.sh`: "PCI device already in use" | VM 104 is still running. Shut it down in the Proxmox UI and run the script again. |
+| The installer stops at "VM check" | It says what to change (the card, `q35`, Secure Boot, disk space). Fix it and run the installer again. |
+| The Proxmox console stays black while installing Ubuntu by hand | Remove the PCI device, install Ubuntu, then add the card again. |
 | The installer stops at "GPU check" with `/dev/kfd` missing | Reboot the Proxmox host once (RDNA3 reset problem), then run the installer again. |
 | The installer stops with "PCI rejects atomics" | The VM must be q35 with `pcie=1` on the GPU's hostpci line. Check `qm config <id>` on the host. |
 | "amdgpu-dkms did not build" | `dkms status` and the `make.log` it names. Send them to me. |
