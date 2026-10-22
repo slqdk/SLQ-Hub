@@ -269,6 +269,40 @@ async def test_ernie_image_with_its_prompt_enhancer(signed_in, app, fakes):
     assert items[0]["model"] == "qwen-image-2.1"
 
 
+
+async def test_the_chat_or_project_chooses_the_picture_model(signed_in, app, fakes):
+    hub = app.state.hub
+    for f in hub.catalog.get("comfy", "ernie-image-turbo")["files"]:
+        p = hub.env.models_dir / f["dest"]
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(b"fake")
+
+    def unet() -> str:
+        return next(n["inputs"]["unet_name"] for n in fakes.comfy["prompts"][-1].values()
+                    if n["class_type"] == "UNETLoader")
+
+    async def draw(chat_id: int) -> None:
+        fakes.llama["requests"] = []                                  # the fake answers by request number
+        fakes.llama["replies"] = [{"tool_calls": [{"name": "image_generate", "arguments": {"prompt": "a fox"}}]},
+                                  {"content": "Done."}, {"content": "Fox"}]
+        run = await finish(app, await say(signed_in, chat_id, "Draw a fox"))
+        assert run.status == "done", run.events[-1]
+
+    proj = (await signed_in.post("/hub/api/projects", json={"name": "Photos"})).json()
+    r = await signed_in.patch(f"/hub/api/projects/{proj['id']}", json={"settings": {"image_model": "ernie-image"}})
+    assert r.json()["settings"]["image_model"] == "ernie-image"
+    c = await new_chat(signed_in, project_id=proj["id"])
+    await draw(c["id"])
+    assert unet() == "ernie-image-turbo.safetensors"                 # the project's choice (Turbo is what is here)
+    r = await signed_in.patch(f"/hub/api/chats/{c['id']}", json={"settings": {"image_model": "qwen-image-2.1"}})
+    assert r.json()["settings"]["image_model"] == "qwen-image-2.1"
+    await draw(c["id"])
+    assert unet().startswith("qwen_image_2.1")                       # the chat's own choice wins
+    plain = await new_chat(signed_in)
+    await draw(plain["id"])
+    assert unet().startswith("qwen_image_2.1")                       # Settings' default
+
+
 # ---------------------------------------------------------------- MCP
 
 async def test_mcp_over_http_asks_first_and_can_be_always_allowed(signed_in, app, fakes):

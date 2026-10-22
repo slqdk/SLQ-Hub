@@ -124,6 +124,7 @@ function ProjectSettings({ project, onSaved }: { project: Project; onSaved: (p: 
   };
   const toggle = <T,>(list: T[], v: T) => (list.includes(v) ? list.filter((x) => x !== v) : [...list, v]);
   const llms = (models?.llm ?? []).filter((m) => m.installed);
+  const pictures = (models?.comfy ?? []).filter((m) => m.installed && !(m.requires ?? []).length);
   return (
     <div className="stack" style={{ maxWidth: "44rem", gap: 18 }}>
       <label className="field"><span>Name</span><input className="input" value={name} onChange={(e) => setName(e.target.value)} /></label>
@@ -142,6 +143,12 @@ function ProjectSettings({ project, onSaved }: { project: Project; onSaved: (p: 
             onChange={(e) => setS({ ...s, thinking: e.target.value === "" ? null : e.target.value === "on" })}>
             <option value="">The default (on in projects)</option><option value="on">On</option><option value="off">Off</option>
           </select></label>
+        <label className="field"><span>Model for pictures</span>
+          <select className="select" value={s.image_model ?? ""} onChange={(e) => setS({ ...s, image_model: e.target.value || null })}>
+            <option value="">As in Settings, Assistant</option>
+            {pictures.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+          </select>
+          <small>Chats in the project can still pick another with the picture button.</small></label>
       </div>
       <SwitchRow checked={s.cloud_escalation} onChange={(v) => setS({ ...s, cloud_escalation: v })}
         title="Let hard tasks go to the cloud model">

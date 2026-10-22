@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.0 - 2026-10-22
+
+- Choose the picture model per chat (a picture button under the text field,
+  shown when more than one picture model is downloaded) and per project
+  (project Settings). Settings -> Assistant -> Images stays the default.
+
 ## 0.3.0 - 2026-10-22
 
 - **ERNIE-Image and ERNIE-Image Turbo** (Baidu, 8B, Apache 2.0) as optional

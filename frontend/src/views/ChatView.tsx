@@ -136,6 +136,9 @@ export function ChatView({ chatId, projectId, openPanel }: { chatId?: number; pr
   });
 
   const llms = useMemo(() => (models?.llm ?? []).filter((m) => m.installed), [models]);
+  // Picture models: downloaded, and not a turbo that needs its base (that one is for fast drafts).
+  const pictureModels = useMemo(() => (models?.comfy ?? []).filter((m) => m.installed && !(m.requires ?? []).length), [models]);
+  const pictureDefault = project?.settings.image_model ?? (settings?.images?.model as string | undefined) ?? "qwen-image-2.1";
 
   const effective: ComposerSettings = useMemo(() => {
     const cs = { ...(data?.chat.settings ?? {}), ...draft } as Partial<ChatSettings>;
@@ -144,7 +147,7 @@ export function ChatView({ chatId, projectId, openPanel }: { chatId?: number; pr
     const def = settings?.models?.default ?? models?.defaults?.default ?? llms[0]?.id ?? "";
     const thinking = cs.thinking ?? ps?.thinking ?? (project ? agent.thinking_in_projects : agent.thinking_in_chats) ?? false;
     return { model: cs.model ?? ps?.model ?? def, thinking: !!thinking, effort: cs.effort ?? agent.effort ?? "medium",
-      skills: cs.skills ?? [], libraries: cs.libraries ?? [] };
+      skills: cs.skills ?? [], libraries: cs.libraries ?? [], image_model: cs.image_model ?? null };
   }, [data, draft, project, settings, models, llms]);
 
   const changeSettings = async (patch: Partial<ComposerSettings>) => {
@@ -327,7 +330,7 @@ export function ChatView({ chatId, projectId, openPanel }: { chatId?: number; pr
       <div className="composer-wrap">
         <div className="column">
           <Composer running={running} onSend={send} onStop={stop} settings={effective} onSettings={changeSettings}
-            models={llms} libraries={libraries} skills={skills} autoFocus
+            models={llms} pictureModels={pictureModels} pictureDefault={pictureDefault} libraries={libraries} skills={skills} autoFocus
             placeholder={project ? `Ask about ${project.name}, or give it a task` : undefined} />
           <div className="hint">Enter sends, Shift+Enter makes a new line. Paste or drop files to attach them.</div>
         </div>

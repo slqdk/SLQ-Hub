@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.3.0, 2026-10-22)
+## State (0.4.0, 2026-10-22)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -145,7 +145,7 @@ the host if the VM ever stops by itself.
     for a single-function device). KFD, llama.cpp and torch work without.
     Passing only `0000:0a:00.0` should give them - not tried, only worth it if
     something needs them.
-11. **Add from Hugging Face against the real site**: the tree API's pagination, a gated repository with and without `HF_TOKEN`, and a real multi-GB download through the Hub's own queue (`app/downloads.py`; the default models came through `tools/models.py` in the installer, so the in-app downloader has not moved a real file yet). The VRAM rating is a rule of thumb (weights vs. card), not a KV-cache calculation.
+11. **Add from Hugging Face against the real site**: it works there - Søren added `ornith-ai/Ornith-1.5-9B-GGUF` and `HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive` (both the BF16 file, 18.0 and 17.5 GB): looked up, downloaded by the Hub's own queue (so `app/downloads.py` has moved real multi-GB files), and Ornith loaded on the card (qwen35 architecture, llama.cpp b11783). Not tried: the tree API's pagination, a gated repository with and without `HF_TOKEN`. The VRAM rating is a rule of thumb (weights vs. card), not a KV-cache calculation.
 
 ## Where things are
 

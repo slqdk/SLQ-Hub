@@ -144,7 +144,7 @@ def main() -> None:
     base = Path(a.data or tempfile.mkdtemp(prefix="hub-dev-"))
     data, models = base / "data", base / "models"
     _install_fake_models(models, {"qwen3.8-27b", "qwen3.6-35b-a3b", "embed-text", "rerank", "embed-vl",
-                                  "qwen-image-2.1", "qwen-image-2.1-turbo"})
+                                  "qwen-image-2.1", "qwen-image-2.1-turbo", "ernie-image-turbo"})
     dist = ROOT / "frontend" / "dist"
     env = Env(data_dir=data, models_dir=models, llm_url="http://supervisor", llm_host="llm", comfy_url="http://comfy",
               searxng_url="http://searxng", sandbox_url="http://sandbox:7000", sandbox_ip="172.31.250.20",

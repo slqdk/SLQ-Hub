@@ -379,6 +379,11 @@ restore, and the sync devices.
     text encoder, the 3B prompt enhancer (6.9 GB) and the FLUX.2 VAE it shares
     with klein. Base: 25 steps, cfg 4, empty negative; Turbo: 8 steps, cfg 1,
     zeroed negative; euler/simple - as in the official templates.
+  - **Which model makes a picture**: the one the assistant names in the call
+    (when you ask for it by name), else the chat's choice (the picture button
+    under the text field), else the project's (project Settings), else
+    Settings → Assistant → Images. Turbo checkpoints that need their base
+    (Qwen-Image Turbo) are not offered there; they serve "fast" requests.
   - **ERNIE's prompt enhancer** is the "prompt writer" step: in the same
     ComfyUI graph, `TextGenerate` on the enhancer expands the prompt (its own
     Chinese instruction plus `{"prompt", "width", "height"}` as JSON, exactly

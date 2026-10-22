@@ -91,7 +91,7 @@ export interface Message { id: number; chat_id: number; role: "user" | "assistan
   run_id: string | null; created_at: string }
 
 export interface ChatSettings { model: string | null; thinking: boolean | null; effort: string | null; skills: string[];
-  libraries: number[] }
+  libraries: number[]; image_model: string | null }
 export interface Chat { id: number; project_id: number | null; title: string; settings: ChatSettings; summary?: string;
   created_at: string; updated_at: string }
 export interface ChatListItem { id: number; project_id: number | null; title: string; updated_at: string;
@@ -112,7 +112,7 @@ export interface ChatData { chat: Chat; messages: Message[]; artifacts: Artifact
   run: RunInfo | null; project: Project | null }
 
 export interface ProjectSettings { model: string | null; cloud_escalation: boolean; skills: string[]; libraries: number[];
-  thinking: boolean | null }
+  thinking: boolean | null; image_model: string | null }
 export interface Project { id: number; name: string; instructions: string; settings: ProjectSettings; created_at: string;
   updated_at: string; archived?: number; chats?: number; head?: number }
 

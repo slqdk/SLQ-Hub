@@ -151,6 +151,18 @@ def _pipeline(ctx: ToolContext):
     return ctx.hub.extras.get("images")
 
 
+def _picture_model(ctx: ToolContext, args: dict) -> str | None:
+    """The model asked for in the call, else the chat's, else the project's;
+    None leaves it to Settings -> Assistant -> Images."""
+    if args.get("model"):
+        return args["model"]
+    for owner in (ctx.chat, ctx.project):
+        chosen = ((owner or {}).get("settings") or {}).get("image_model")
+        if chosen:
+            return chosen
+    return None
+
+
 async def image_generate(ctx: ToolContext, args: dict) -> ToolResult:
     pipe = _pipeline(ctx)
     prompt = (args.get("prompt") or "").strip()
@@ -160,7 +172,7 @@ async def image_generate(ctx: ToolContext, args: dict) -> ToolResult:
     try:
         items = await pipe.generate(prompt, int(args.get("width") or 1024), int(args.get("height") or 1024),
                                     count=int(args.get("count") or 1), seed=args.get("seed"),
-                                    fast=bool(args.get("fast")), model=args.get("model"),
+                                    fast=bool(args.get("fast")), model=_picture_model(ctx, args),
                                     negative=args.get("negative") or "", ticket=ctx.ticket,
                                     on_progress=await _progress(ctx))
     except ImageError as exc:
@@ -189,7 +201,7 @@ async def image_edit(ctx: ToolContext, args: dict) -> ToolResult:
     from ...images.pipeline import ImageError
     try:
         items = await pipe.edit(args.get("prompt") or "", datas, seed=args.get("seed"), fast=bool(args.get("fast")),
-                                model=args.get("model"), ticket=ctx.ticket, on_progress=await _progress(ctx),
+                                model=_picture_model(ctx, args), ticket=ctx.ticket, on_progress=await _progress(ctx),
                                 count=int(args.get("count") or 1))
     except ImageError as exc:
         return ToolResult(f"Image editing failed: {exc}", is_error=True)

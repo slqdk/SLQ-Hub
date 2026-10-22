@@ -21,7 +21,8 @@ from pathlib import Path
 from .. import db
 from . import syncstore
 
-PROJECT_DEFAULTS = {"model": None, "cloud_escalation": False, "skills": [], "libraries": [], "thinking": None}
+PROJECT_DEFAULTS = {"model": None, "cloud_escalation": False, "skills": [], "libraries": [], "thinking": None,
+                    "image_model": None}
 TEXT_LIMIT = 2_000_000
 
 

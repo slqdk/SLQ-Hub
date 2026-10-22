@@ -1,7 +1,7 @@
 // Where messages are written: text, attachments (pick, paste, drop), the
 // model, how hard it thinks, and the libraries and skills for this chat.
 import { useEffect, useRef, useState } from "react";
-import { ArrowUp, BookOpen, Brain, Check, Cpu, Paperclip, Plus, Sparkles, Square, X } from "lucide-react";
+import { ArrowUp, BookOpen, Brain, Check, Cpu, Image as ImageIcon, Paperclip, Plus, Sparkles, Square, X } from "lucide-react";
 import { upload, type ModelEntry, type Skill, type Upload } from "../lib/api";
 import { bytes } from "../lib/format";
 import { Lamp, MenuButton } from "./ui";
@@ -12,6 +12,7 @@ export interface ComposerSettings {
   effort: string;
   skills: string[];
   libraries: number[];
+  image_model: string | null;      // null: the project's or Settings' model for pictures
 }
 
 interface Pending { key: number; name: string; size: number; preview: string | null; state: "uploading" | "done" | "failed";
@@ -19,14 +20,16 @@ interface Pending { key: number; name: string; size: number; preview: string | n
 
 const EFFORT_LABEL: Record<string, string> = { low: "Think a little", medium: "Think", xhigh: "Think hard", high: "Think hard" };
 
-export function Composer({ running, onSend, onStop, settings, onSettings, models, libraries, skills, placeholder,
-  autoFocus }: {
+export function Composer({ running, onSend, onStop, settings, onSettings, models, pictureModels = [], pictureDefault,
+  libraries, skills, placeholder, autoFocus }: {
   running: boolean;
   onSend: (text: string, uploads: Upload[]) => Promise<boolean>;
   onStop: () => void;
   settings: ComposerSettings;
   onSettings: (patch: Partial<ComposerSettings>) => void;
   models: ModelEntry[];
+  pictureModels?: ModelEntry[];     // downloaded models that make pictures
+  pictureDefault?: string;          // what this chat uses when it has no choice of its own
   libraries: { id: number; name: string }[];
   skills: Skill[];
   placeholder?: string;
@@ -84,6 +87,9 @@ export function Composer({ running, onSend, onStop, settings, onSettings, models
   const canThink = (model?.capabilities ?? []).includes("thinking");
   const thinkLabel = !canThink || !settings.thinking ? "No thinking" : EFFORT_LABEL[settings.effort] ?? "Think";
   const extras = settings.libraries.length + settings.skills.length;
+  const pictureId = settings.image_model ?? pictureDefault;
+  const picture = pictureModels.find((m) => m.id === pictureId) ?? pictureModels[0];
+  const pictureDefaultName = pictureModels.find((m) => m.id === pictureDefault)?.name ?? pictureDefault;
 
   return (
     <div className={`composer ${drag ? "drag" : ""}`}
@@ -165,6 +171,27 @@ export function Composer({ running, onSend, onStop, settings, onSettings, models
             </>
           )}
         </MenuButton>
+        {pictureModels.length > 1 && (
+          <MenuButton up label={<><ImageIcon size={15} /> <span className="ellipsis" style={{ maxWidth: 140 }}>{picture?.name ?? "Pictures"}</span></>}
+            title="Model for pictures">
+            {(close) => (
+              <>
+                <div className="menu-head">Pictures in this chat</div>
+                <button className="menu-item" role="menuitemradio" aria-checked={settings.image_model == null}
+                  onClick={() => { onSettings({ image_model: null }); close(); }}>
+                  {settings.image_model == null ? <Check size={15} /> : <span style={{ width: 15 }} />}
+                  <span>The default<small>{pictureDefaultName}</small></span></button>
+                {pictureModels.map((m) => (
+                  <button key={m.id} className="menu-item" role="menuitemradio" aria-checked={settings.image_model === m.id}
+                    onClick={() => { onSettings({ image_model: m.id }); close(); }}>
+                    {settings.image_model === m.id ? <Check size={15} /> : <ImageIcon size={15} />}
+                    <span>{m.name}<small>{m.description?.split(". ")[0]}</small></span>
+                  </button>
+                ))}
+              </>
+            )}
+          </MenuButton>
+        )}
         {canThink && (
           <MenuButton up label={<><Brain size={15} /> {thinkLabel}</>} title="Thinking">
             {(close) => (

@@ -21,7 +21,7 @@ from PIL import Image
 from .. import db
 from ..projects import blobs
 
-CHAT_DEFAULTS = {"model": None, "thinking": None, "effort": None, "skills": [], "libraries": []}
+CHAT_DEFAULTS = {"model": None, "thinking": None, "effort": None, "skills": [], "libraries": [], "image_model": None}
 
 
 def _chat(r) -> dict:
