@@ -63,11 +63,34 @@ and guest kernels 6.7+, no cause found there); the installer's kernel is 6.8
 with the in-box amdgpu, while the Hub runs kernel 7.0 with amdgpu-dkms 31.60.
 Precaution taken: `amdgpu.runpm=0` (written by `install.sh`, and by hand
 before the card goes back in), and Ubuntu is installed without the card. Asked
-Søren for `qm config 104` (the VM where the card worked), `lspci -nnk -s
-0a:00`, the host's `/proc/cmdline` and modprobe.d, the source of
-`device_specific`, and which kernel VM 104 ran - possible host changes (early
-vfio-pci binding of all the card's functions, `disable_idle_d3=1`) wait for
-that. Whether a plain reboot of VM 222 (which `install.sh` does once) hits the
+Søren for the host's passthrough setup. What it showed:
+
+- The card: `0a:00.0` `[1002:744c]` Sapphire NITRO+ RX 7900 XTX Vapor-X
+  `[1da2:e471]` (rev c8), `0a:00.1` HDMI audio `[1002:ab30]`; no other
+  functions.
+- Host command line: `BOOT_IMAGE=/boot/vmlinuz-6.8.12-37-pve
+  root=/dev/mapper/pve-root ro quiet iommu=pt` (GRUB, LVM root).
+- `/etc/modprobe.d/vfio.conf`: `options vfio-pci ids=1002:73bf,1002:ab28` -
+  the IDs of a Navi 21 card (RX 6800/6900), **not** this one - plus softdeps
+  for radeon, amdgpu and snd_hda_intel. amdgpu and radeon are blacklisted.
+  So nothing bound the 7900 XTX to vfio-pci at boot: the host's sound driver
+  took its audio function and the card was the host's boot console until a
+  VM started.
+- `/etc/systemd/system/vreset.service` writes `device_specific` (the
+  vendor-reset setup, probably for the earlier card).
+- `qm config 104` bottom half: 35000 MB, 470G on `VMDisc01`, onboot 0; the top
+  (bios, machine, cpu, hostpci, args) was cut off - asked for it again.
+
+Proposed host changes, in the reboot that puts the card back into VM 222:
+`options vfio-pci ids=1002:744c,1002:ab30,1002:73bf,1002:ab28
+disable_idle_d3=1` (the old IDs kept in case that card is still in the
+machine; `disable_idle_d3` because early binding would otherwise park the
+unused card in D3), `vfio vfio_iommu_type1 vfio_pci` in `/etc/modules`,
+`systemctl disable vreset.service`, `update-initramfs -u -k all`. Check after
+the reboot: both functions on vfio-pci before anything else, `Y` in
+`/sys/module/vfio_pci/parameters/disable_idle_d3`, no `snd_hda_intel
+0000:0a` or `device_specific` lines in the journal. Not done or verified yet.
+Whether a plain reboot of VM 222 (which `install.sh` does once) hits the
 reset problem is not known yet.
 
 ## What has been checked, and how
