@@ -110,6 +110,7 @@ async def test_lookup_add_download_and_remove(signed_in, app, fakes, api_key):
     m = r.json()["model"]
     assert m["custom"] and m["server"]["ctx"] == 40960 and m["context_per_request"] == 40960   # capped
     assert set(m["capabilities"]) == {"chat", "vision", "tools", "thinking"} and m["parameter_size"] == "1.5B"
+    assert m["architecture"] == "qwen3" and m["sampling"]["instruct"]["presence_penalty"] == 1.5     # its family's
     assert all(f["dest"].startswith("llm/hf/acme--Tiny-Coder-GGUF/") for f in m["files"])
     await _drain(hub)
     assert hub.catalog.installed(hub.catalog.get_llm("tiny-coder"))

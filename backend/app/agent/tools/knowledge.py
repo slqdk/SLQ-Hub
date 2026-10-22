@@ -108,7 +108,8 @@ async def todo_write(ctx: ToolContext, args: dict) -> ToolResult:
 register(Tool("skill", "Load an installed skill's instructions (SKILL.md), or one of its other files. Skills "
               "enabled for this chat are listed in the system prompt; load one when the task matches it.",
               obj({"name": {"type": "string"}, "file": {"type": "string", "description": "A file inside the skill"}},
-                  ["name"]), skill, available=lambda ctx: bool(_enabled_skills(ctx)), group="knowledge"))
+                  ["name"]), skill, available=lambda ctx: bool(_enabled_skills(ctx)), group="knowledge",
+              read_only=True))
 register(Tool("memory", "Your persistent memory across chats: Markdown files under /memories (about the user "
               "and their preferences) and /memories/project (this project). Check it when earlier context "
               "would help; save durable facts the user tells you, or asks you to remember. Keep files short "

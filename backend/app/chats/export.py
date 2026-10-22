@@ -199,7 +199,9 @@ def transcript(chat: dict, project: dict | None, rows: list[dict], runs: list[di
             out += ["", f"## Assistant - {_when(row['created_at'])}", ""]
         for b in blocks:
             t = b.get("type")
-            if t == "thinking" and b.get("text"):
+            if t == "notice" and b.get("text"):
+                out += [f"*(SLQ Hub: {b['text']})*", ""]
+            elif t == "thinking" and b.get("text"):
                 out += ["<details><summary>Thinking</summary>", "", b["text"].strip(), "", "</details>", ""]
             elif t == "text" and b.get("text"):
                 out += [b["text"], ""]

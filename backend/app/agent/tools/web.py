@@ -91,8 +91,8 @@ register(Tool("web_search", "Search the web (SearXNG). Returns titles, URLs and 
               "you used in your answer.",
               obj({"query": {"type": "string"}, "max_results": {"type": "integer"},
                    "time_range": {"type": "string", "enum": ["day", "week", "month", "year"]}}, ["query"]),
-              web_search, group="web"))
+              web_search, group="web", read_only=True))
 register(Tool("web_fetch", "Fetch a public web page, PDF or image and return its readable text (or show the "
               "image). Local network addresses are refused.",
               obj({"url": {"type": "string"}, "max_chars": {"type": "integer"}}, ["url"]),
-              web_fetch, group="web"))
+              web_fetch, group="web", read_only=True))

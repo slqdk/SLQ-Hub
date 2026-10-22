@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.9.1 - 2026-10-22
+
+- **A model stuck in a loop is stopped.** Chat 7, exported from the
+  Hub, showed why this matters. Ornith 1.5 9B fetched the same two pages
+  52 times in a row, with the same words each time, until the 60-step limit.
+  That took 15 minutes. Now:
+  - A look-up (web search, web fetch, reading or searching files, OCR, a
+    library search) repeated with nothing changed in between is not run
+    again. The model is told it already has that result. A failed look-up may
+    be retried once.
+  - After three refused repeats, or the same step three times, the model has
+    to answer without tools, with what it has. The chat shows a short note
+    saying so.
+- **Long chats can always be condensed.** The request that condenses a long
+  chat now fits the model's context. Without that, chat 7 (100K tokens on a
+  64K model) would have failed on the next message. A long single turn also
+  stays inside the context: the tool definitions are counted, and older
+  answers and their tool calls are shortened too when results alone are not
+  enough. "Condensed" is shown only when it really was.
+- **Sampling for models added from Hugging Face.** Qwen3-family models (Qwen3,
+  Qwen3.5 and fine-tunes such as Ornith) get Qwen's recommended sampling, as
+  the bundled models do, including presence penalty 1.5 against endless
+  repetition. Until now they got none, so llama-server's own defaults applied.
+  The architecture is read from the model file. Sampling flags under
+  Settings -> Models -> extra flags (`--temp`, `--presence-penalty`, ...) now
+  win over the model card's values for every model.
+
 ## 0.9.0 - 2026-10-22
 
 - **Export a chat** (the chat's ⋯ menu):

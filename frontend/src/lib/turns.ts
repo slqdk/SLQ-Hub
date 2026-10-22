@@ -91,7 +91,8 @@ export function buildTurns(messages: Message[], runs: RunRecord[], skipRun?: str
       out.push(cur);
     }
     for (const b of m.content) {
-      if (b.type === "thinking" && b.text) cur.items.push({ kind: "thinking", text: b.text });
+      if (b.type === "notice" && b.text) cur.items.push({ kind: "notice", tone: "info", text: b.text });
+      else if (b.type === "thinking" && b.text) cur.items.push({ kind: "thinking", text: b.text });
       else if (b.type === "text" && b.text) {
         cur.items.push({ kind: "text", text: b.text });
         cur.text += (cur.text ? "\n\n" : "") + b.text;
@@ -205,6 +206,9 @@ function applyStream(items: Item[], ev: RunEvent): void {
     }
     case "escalated":
       items.push({ kind: "notice", tone: "info", text: `Handed over to ${d.model}: ${d.reason}.` });
+      break;
+    case "loop":
+      items.push({ kind: "notice", tone: "info", text: `It was repeating itself (${d.reason}), so it was asked to answer with what it has.` });
       break;
     case "compacted":
       items.push({ kind: "notice", tone: "info", text: "The earlier part of the chat was condensed to make room." });

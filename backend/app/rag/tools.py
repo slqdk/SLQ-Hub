@@ -63,4 +63,4 @@ register(Tool("library_search", "Search the document libraries connected to this
                                                              "documents"},
                    "library": {"type": "string", "description": "Only this library (name); default: all connected"},
                    "top_k": {"type": "integer", "description": "Number of hits (default 6)"}}, ["query"]),
-              library_search, available=_available, group="knowledge"))
+              library_search, available=_available, group="knowledge", read_only=True))

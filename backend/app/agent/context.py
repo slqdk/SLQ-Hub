@@ -176,17 +176,82 @@ def compaction_split(rows: list[dict]) -> int | None:
     return older[-1] if older else None
 
 
+def schema_tokens(schemas: list[dict] | None) -> int:
+    """The room the tool definitions take in a request (they are not in the messages)."""
+    return int(len(json.dumps(schemas or [], ensure_ascii=False)) / CHARS_PER_TOKEN)
+
+
 def trim_tool_results(messages: list[dict], keep_last: int = 6, limit: int = 1500) -> list[dict]:
     """Shorten older tool outputs in the current turn (the full text stays in
     the chat history and .hub/outputs)."""
     tool_idx = [i for i, m in enumerate(messages) if m.get("role") == "tool"]
-    old = set(tool_idx[:-keep_last]) if len(tool_idx) > keep_last else set()
+    old = set(tool_idx[:max(0, len(tool_idx) - keep_last)])
     out = []
     for i, m in enumerate(messages):
         if i in old and isinstance(m.get("content"), str) and len(m["content"]) > limit:
             m = {**m, "content": m["content"][:limit] + f"\n... [trimmed {len(m['content']) - limit} characters]"}
         out.append(m)
     return out
+
+
+def _shrink_args(raw: str, limit: int) -> str:
+    """Tool call arguments with long strings cut (still valid JSON)."""
+    if len(raw or "") <= limit:
+        return raw
+    try:
+        args = json.loads(raw)
+    except ValueError:
+        return json.dumps({"_shortened": raw[:limit]})
+
+    def cut(v):
+        if isinstance(v, str) and len(v) > limit:
+            return v[:limit] + f"... [shortened by {len(v) - limit} characters]"
+        if isinstance(v, dict):
+            return {k: cut(x) for k, x in v.items()}
+        if isinstance(v, list):
+            return [cut(x) for x in v]
+        return v
+    return json.dumps(cut(args), ensure_ascii=False)
+
+
+def trim_assistant(messages: list[dict], keep_last: int = 4, limit: int = 400) -> list[dict]:
+    """Shorten older answers, their thinking and the arguments of their tool
+    calls - the last resort in a turn too long for the context."""
+    idx = [i for i, m in enumerate(messages) if m.get("role") == "assistant"]
+    old = set(idx[:max(0, len(idx) - keep_last)])
+    out = []
+    for i, m in enumerate(messages):
+        if i in old:
+            m = {k: v for k, v in m.items() if k != "reasoning_content"}
+            c = m.get("content")
+            if isinstance(c, str) and len(c) > limit:
+                m["content"] = c[:limit] + f"\n... [shortened by {len(c) - limit} characters]"
+            if m.get("tool_calls"):
+                m["tool_calls"] = [{**tc, "function": {**tc["function"],
+                                                       "arguments": _shrink_args(tc["function"].get("arguments") or "{}", limit)}}
+                                   for tc in m["tool_calls"]]
+        out.append(m)
+    return out
+
+
+def shrink_for_summary(messages: list[dict], budget: int) -> list[dict]:
+    """Old messages cut down to fit a summary request: tool output first (the
+    start of each result stays), then long answers, then the oldest messages
+    go - with a note that they did."""
+    msgs = trim_tool_results(messages, keep_last=0, limit=600)
+    if estimate_tokens(msgs) > budget:
+        msgs = trim_assistant(msgs, keep_last=2, limit=800)
+    dropped = 0
+    while msgs and estimate_tokens(msgs) > budget:
+        msgs = msgs[1:]
+        dropped += 1
+    while msgs and msgs[0].get("role") == "tool":       # a result without its call
+        msgs = msgs[1:]
+        dropped += 1
+    if dropped:
+        msgs = [{"role": "user", "content": f"({dropped} earlier messages are left out here: they did not fit.)"},
+                *msgs]
+    return msgs
 
 
 def chat_rows(chat_id: int, after_id: int = 0) -> list[dict]:

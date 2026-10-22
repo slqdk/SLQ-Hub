@@ -215,6 +215,8 @@ def make_entry(repo: str, choice: dict, mmproj: dict | None, model_id: str, name
     }
     if isinstance(params, (int, float)) and params > 0:
         entry["parameter_size"] = f"{params / 1e9:.1f}B"
+    if meta.get("architecture"):
+        entry["architecture"] = str(meta["architecture"])      # picks the family's sampling (catalog.py)
     if thinking:
         entry["thinking"] = {"default": False, "efforts": [], "default_effort": None}
     return entry

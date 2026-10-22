@@ -36,6 +36,20 @@ from .tools.base import clip
 log = logging.getLogger("hub.agent")
 Persist = Callable[[str, list[dict]], Awaitable[None]] | None
 STOPPED = "Stopped by the user before the tool finished."
+# Small models can get stuck repeating the same step. A look-up repeated with nothing changed in between is
+# refused; after LOOP_REPEATS refusals, or the same step LOOP_SAME_STEPS times, the model must answer.
+REPEATED = ("You already called {name} with exactly these arguments in this turn, and nothing has changed since, "
+            "so the result is the same as the earlier one above. Do not repeat a call: use what you have, try "
+            "something different, or answer.")
+MUST_ANSWER = ("(SLQ Hub: you are repeating the same steps and getting the same results. Stop using tools now. "
+               "Answer the user with what you have found so far, and say plainly what you could not find.)")
+NO_ANSWER = "(The model kept repeating the same tool calls and gave no answer. Ask again, or try another model.)"
+LOOP_REPEATS = 3
+LOOP_SAME_STEPS = 3
+
+
+def loop_notice(reason: str) -> str:
+    return f"It was repeating itself ({reason}), so it was asked to answer with what it has."
 
 
 def _ensure_tools_loaded() -> None:
@@ -66,7 +80,15 @@ class Engine:
         self.recent: list[str] = []
         self.last_prompt_tokens = 0
         self.ctx_limit = hub.catalog.context_per_request(model["id"])
+        self.schema_tokens = 0               # the tool definitions take room in every request too
         self._partial = {"text": "", "thinking": ""}
+        # Loop guard (see REPEATED): +1 epoch after every call that may change something; read-only calls
+        # remember the epoch they ran in; refused repeats and identical steps are counted.
+        self.epoch = 0
+        self.seen: dict[str, tuple[int, bool, int]] = {}   # look-up -> (epoch, it worked, tries)
+        self.repeats = 0
+        self.same_steps: dict[str, int] = {}
+        self.must_answer = ""
 
     # ------------------------------------------------------------ helpers
     def emit(self, kind: str, **data) -> None:
@@ -119,15 +141,21 @@ class Engine:
         tools = self.tools()
         by_name = {t.name: t for t in tools}
         schemas = self.schemas(tools)
+        self.schema_tokens = C.schema_tokens(schemas)
         final = ""
         for step in range(1, max_steps + 1):
             await self._inbox(messages, persist)
             messages = await self._fit(messages, compact)
+            forced = bool(self.must_answer)
+            if forced:                            # stuck in a loop: no tools this time, only an answer
+                messages.append({"role": "user", "content": MUST_ANSWER})
             try:
-                res = await self._model_step(messages, schemas, step)
+                res = await self._model_step(messages, [] if forced else schemas, step)
             except asyncio.CancelledError:
                 await self._save_partial(persist)
                 raise
+            if forced:
+                res = {**res, "tool_calls": [], "content": res.get("content") or NO_ANSWER}
             msg: dict = {"role": "assistant", "content": res["content"]}
             calls = res.get("tool_calls") or []
             if calls:
@@ -137,6 +165,8 @@ class Engine:
                 msg["reasoning_content"] = res["reasoning"]
             messages.append(msg)
             blocks: list[dict] = []
+            if forced:                            # shown in the chat, never sent to the model
+                blocks.append({"type": "notice", "text": loop_notice(self.must_answer)})
             if res.get("reasoning"):
                 blocks.append({"type": "thinking", "text": res["reasoning"]})
             if res.get("content"):
@@ -146,6 +176,13 @@ class Engine:
             if persist and blocks:
                 await persist("assistant", blocks)
             final = res.get("content") or final
+            if calls:
+                same = json.dumps([res.get("content") or "", [[c["name"], c.get("arguments") or ""] for c in calls]],
+                                  ensure_ascii=False)
+                self.same_steps[same] = self.same_steps.get(same, 0) + 1
+                if self.same_steps[same] >= LOOP_SAME_STEPS:
+                    names = ", ".join(dict.fromkeys(c["name"] for c in calls))
+                    self._loop(f"the same step ({names}) {self.same_steps[same]} times")
             if not calls:
                 if self.run.inbox and not self.depth and step < max_steps:
                     continue                      # the user wrote meanwhile: answer that too, in this turn
@@ -201,16 +238,25 @@ class Engine:
         if self.cloud is not None:
             return messages                       # cloud models have room; we do not summarise for them
         budget = int(self.ctx_limit * float(self.hub.settings.get("agent", "compact_at") or 0.75))
-        size = max(self.last_prompt_tokens, C.estimate_tokens(messages))
-        if size <= budget:
+
+        def size(msgs: list[dict]) -> int:
+            return C.estimate_tokens(msgs) + self.schema_tokens
+
+        if max(self.last_prompt_tokens, size(messages)) <= budget:
             return messages
         messages = C.trim_tool_results(messages)
-        if C.estimate_tokens(messages) > budget and compact is not None:
-            before = C.estimate_tokens(messages)
-            messages = await compact(messages)
-            self.emit("compacted", before=before, after=C.estimate_tokens(messages))
-        if C.estimate_tokens(messages) > budget:
+        if size(messages) > budget and compact is not None:
+            before = size(messages)
+            folded = await compact(messages)
+            if folded is not messages:                # within one long turn there is nothing to fold
+                self.emit("compacted", before=before, after=size(folded))
+            messages = folded
+        if size(messages) > budget:
             messages = C.trim_tool_results(messages, keep_last=2, limit=400)
+        if size(messages) > budget:               # a long turn: shorten its older answers and calls too
+            messages = C.trim_assistant(messages, keep_last=4, limit=400)
+        if size(messages) > budget:               # a small context: only the newest result and answer stay whole
+            messages = C.trim_assistant(C.trim_tool_results(messages, keep_last=1, limit=400), keep_last=1, limit=400)
         self.last_prompt_tokens = 0
         return messages
 
@@ -235,7 +281,7 @@ class Engine:
                 if time.monotonic() - t_switch > 1:
                     self.steps.append({"type": "load", "model": self.model["id"],
                                        "seconds": round(time.monotonic() - t_switch, 2)})
-            room = self.ctx_limit - C.estimate_tokens(messages)
+            room = self.ctx_limit - C.estimate_tokens(messages) - (self.schema_tokens if schemas else 0)
             pl = P.build(self.model, messages, tools=schemas or None, thinking=self.thinking, effort=self.effort,
                          sampling={"max_tokens": max(1024, min(32768, room))})
             acc = Accumulator()
@@ -286,6 +332,14 @@ class Engine:
                                     "object.", is_error=True)
             else:
                 self.emit("tool_call", id=cid, name=name, arguments=args)
+                key = name + json.dumps(args, sort_keys=True, ensure_ascii=False)
+                epoch, ok, tries = self.seen.get(key, (-1, False, 0))
+                if tool.read_only and epoch == self.epoch and (ok or tries >= 2):   # a failure may be retried once
+                    self.repeats += 1
+                    result = ToolResult(REPEATED.format(name=name), is_error=True)
+                    if self.repeats >= LOOP_REPEATS:
+                        self._loop(f"{self.repeats} repeated tool calls")
+                    return self._finish(name, cid, args, result, t0)
                 allowed = True
                 if tool.needs_approval and not always_allowed(name):
                     decision = await self.run.ask_approval(cid, name, args)
@@ -307,6 +361,13 @@ class Engine:
                     except Exception as exc:  # noqa: BLE001 - the model should see it
                         log.exception("tool %s failed", name)
                         result = ToolResult(f"{type(exc).__name__}: {exc}", is_error=True)
+                if tool.read_only:
+                    self.seen[key] = (self.epoch, not result.is_error, (tries if epoch == self.epoch else 0) + 1)
+                else:
+                    self.epoch += 1                   # it may have changed something: look-ups count again
+        return self._finish(name, cid, args, result, t0)
+
+    def _finish(self, name: str, cid: str, args: dict, result: ToolResult, t0: float) -> ToolResult:
         result.text = self._store_long(cid, result.text or "(no output)")
         secs = round(time.monotonic() - t0, 2)
         self.steps.append({"type": "tool", "name": name, "ok": not result.is_error, "seconds": secs,
@@ -315,6 +376,14 @@ class Engine:
                   images=result.images, display=result.display, seconds=secs)
         self._watch(name, args, result)
         return result
+
+    def _loop(self, reason: str) -> None:
+        """The model is stuck: its next step must be an answer, without tools."""
+        if self.must_answer:
+            return
+        self.must_answer = reason
+        self.steps.append({"type": "loop", "reason": reason, "depth": self.depth})
+        self.emit("loop", reason=reason)
 
     def _store_long(self, cid: str, text: str) -> str:
         limit = int(self.hub.settings.get("agent", "tool_output_chars") or 12000)
@@ -343,6 +412,7 @@ class Engine:
             self.state["escalate"] = f"the same {name} call was made three times"
 
     async def _escalate(self, messages: list[dict], reason: str) -> None:
+        self.must_answer, self.repeats, self.same_steps = "", 0, {}
         self.cloud = cloudmod.CloudClient(self.hub.settings, transport=self.hub.transports.web)
         self.emit("escalated", model=self.cloud.label, reason=reason)
         self.steps.append({"type": "escalated", "model": self.cloud.label, "reason": reason})
@@ -442,23 +512,28 @@ class Agent:
         return [{"role": "system", "content": sp},
                 *C.to_model_messages(rows, run.id, keep_from, vision=vision(entry))]
 
-    async def _compact(self, chat_id: int, engine: Engine, run: Run) -> list[dict]:
+    async def _compact(self, chat_id: int, engine: Engine, run: Run, messages: list[dict]) -> list[dict]:
         """Fold everything before the latest user message into the chat's
-        summary, then rebuild the messages."""
+        summary, then rebuild the messages. Within one long turn there is
+        nothing before it: the messages stay as they are (the caller trims)."""
         chat = chats.get_chat(chat_id)
         rows = chats.messages(chat_id, after_id=int(chat.get("summary_upto") or 0))
         split = C.compaction_split(rows)
         if split is None or engine.ticket is None:
-            return self.build_messages(chat, engine.project, engine.workdir, engine.model, run, engine.escalation)
+            return messages
         old = [r for r in rows if r["id"] <= split]
-        msgs = [{"role": "system", "content": "You condense conversations into notes."},
-                *C.to_model_messages(old, None, keep_images_from=10**12, vision=False),
-                {"role": "user", "content": C.SUMMARY_PROMPT}]
+        head = [{"role": "system", "content": "You condense conversations into notes."}]
         if chat.get("summary"):
-            msgs.insert(1, {"role": "user", "content": "Summary of what came before:\n" + chat["summary"]})
-            msgs.insert(2, {"role": "assistant", "content": "Noted."})
+            head += [{"role": "user", "content": "Summary of what came before:\n" + chat["summary"]},
+                     {"role": "assistant", "content": "Noted."}]
+        tail = [{"role": "user", "content": C.SUMMARY_PROMPT}]
+        # The request must fit the context: room for the notes it writes, a margin for the tokenizer.
+        notes = min(2000, engine.ctx_limit // 4)
+        room = int(engine.ctx_limit * 0.8) - notes - C.estimate_tokens(head + tail)
+        body = C.shrink_for_summary(C.to_model_messages(old, None, keep_images_from=10**12, vision=False), room)
+        msgs = [*head, *body, *tail]
         await engine.ticket.switch(engine.need)
-        pl = P.build(engine.model, msgs, thinking=False, sampling={"max_tokens": 2000})
+        pl = P.build(engine.model, msgs, thinking=False, sampling={"max_tokens": notes})
         acc = Accumulator()
         async for chunk in self.hub.llm.stream_chat(self.hub.main_url, pl):
             acc.feed(chunk)
@@ -544,7 +619,7 @@ class Agent:
             messages = self.build_messages(chat, project, wd, entry, run, escalation)
             max_steps = int(self.hub.settings.get("agent", "max_steps") or 60)
             await engine.loop(messages, persist, max_steps=max_steps,
-                              compact=lambda msgs: self._compact(chat["id"], engine, run))
+                              compact=lambda msgs: self._compact(chat["id"], engine, run, msgs))
             await self._title(chat, engine)
         except asyncio.CancelledError:
             status = "cancelled"

@@ -67,6 +67,7 @@ export interface AuthStatus { signedIn: boolean; user: User | null; version: str
 export type Block =
   | { type: "text"; text: string; while_working?: boolean }   // while_working: sent while a turn worked
   | { type: "thinking"; text: string }
+  | { type: "notice"; text: string }          // a note from the Hub in an answer (shown, never sent to the model)
   | { type: "image"; sha: string; mime?: string; name?: string; path?: string; size?: number; ref?: boolean }
   | { type: "file"; sha: string; mime?: string; name?: string; path?: string; size?: number }
   /** A file of the chat's working folder put in the message (its text then, when "inline"). */

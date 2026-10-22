@@ -35,10 +35,22 @@ def normalise_effort(effort: str | None, allowed: list[str]) -> str | None:
     return None
 
 
+# llama-server flags (Settings -> Models -> extra flags) that set a sampling value: when one is given, the
+# request leaves that value out, so the flag is what counts.
+FLAG_KEYS = {"--temp": "temperature", "--temperature": "temperature", "--top-p": "top_p", "--top-k": "top_k",
+             "--min-p": "min_p", "--presence-penalty": "presence_penalty", "--frequency-penalty": "frequency_penalty",
+             "--repeat-penalty": "repeat_penalty"}
+
+
 def sampling_defaults(model: dict, thinking: bool | None) -> dict:
     s = model.get("sampling") or {}
     mode = "thinking" if (thinking if thinking is not None else (model.get("thinking") or {}).get("default")) else "instruct"
-    return dict(s.get(mode) or {})
+    out = dict(s.get(mode) or {})
+    for flag in (model.get("server") or {}).get("extra") or []:
+        key = FLAG_KEYS.get(str(flag).split("=", 1)[0])
+        if key:
+            out.pop(key, None)
+    return out
 
 
 def build(model: dict, messages: list[dict], *, tools: list | None = None, tool_choice=None,

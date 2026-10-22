@@ -247,7 +247,7 @@ def _cutout_ready(ctx: ToolContext) -> bool:
 
 
 register(Tool("view_image", "Look at an image from the working folder (or an attached image by its id).",
-              obj({"path": {"type": "string"}}, ["path"]), view_image, group="images"))
+              obj({"path": {"type": "string"}}, ["path"]), view_image, group="images", read_only=True))
 register(Tool("image_transform", "Process an image without AI: crop, resize, rotate, flip, grayscale, "
               "autocontrast, brightness/contrast/color/sharpness (factor), blur, sharpen, pad to a square; and "
               "convert/compress (format png/jpeg/webp, quality). Saves the result in the working folder.",
@@ -260,7 +260,8 @@ register(Tool("image_transform", "Process an image without AI: crop, resize, rot
               image_transform, group="images"))
 register(Tool("image_ocr", "Read the text in an image with Tesseract OCR (default languages dan+eng). For "
               "photos and screenshots your own vision is often better; use OCR for long printed text.",
-              obj({"path": {"type": "string"}, "languages": {"type": "string"}}, ["path"]), image_ocr, group="images"))
+              obj({"path": {"type": "string"}, "languages": {"type": "string"}}, ["path"]), image_ocr, group="images",
+              read_only=True))
 def _generate_params(models: list[str]) -> dict:
     model: dict = {"type": "string", "enum": models} if models else {"type": "string"}
     return obj({"prompt": {"type": "string"}, "width": {"type": "integer"}, "height": {"type": "integer"},

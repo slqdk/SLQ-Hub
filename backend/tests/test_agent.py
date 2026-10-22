@@ -592,6 +592,160 @@ async def test_long_chats_are_compacted(signed_in, app, fakes, monkeypatch):
     assert [m["role"] for m in main["messages"]] == ["system", "user"]
 
 
+async def test_the_summary_request_fits_the_context(signed_in, app, fakes, monkeypatch):
+    """A chat whose earlier turn ran long (as a model stuck in a loop leaves it):
+    the request that condenses it must itself fit the model's context."""
+    from app.agent import context as C
+    hub = app.state.hub
+    monkeypatch.setattr(hub.catalog, "context_per_request", lambda model_id: 8000)
+    c = await new_chat(signed_in)
+    chats.add_message(c["id"], "user", [{"type": "text", "text": "Compare the two cars"}])
+    for i in range(40):
+        chats.add_message(c["id"], "assistant", [{"type": "text", "text": f"Fetching page {i}."},
+                                                 {"type": "tool_call", "id": f"c{i}", "name": "web_fetch",
+                                                  "arguments": json.dumps({"url": f"https://cars.test/{i}"})}])
+        chats.add_message(c["id"], "tool", [{"type": "tool_result", "tool_call_id": f"c{i}", "name": "web_fetch",
+                                             "text": f"page {i} " + "z" * 4000}])
+    chats.add_message(c["id"], "assistant", [{"type": "text", "text": "The last answer before the new question."}])
+
+    def responder(body):
+        if "Condense the conversation" in last_user(body):
+            return {"content": "SUMMARY of the car comparison."}
+        return {"content": "Fine."}
+    fakes.llama["responder"] = responder
+    run = await finish(app, await say(signed_in, c["id"], "Continue"))
+    assert run.status == "done", run.events[-1]
+    condense = next(b for b in fakes.llama["requests"] if "Condense the conversation" in last_user(b))
+    assert C.estimate_tokens(condense["messages"]) <= 8000 * 0.8 and condense["max_tokens"] == 2000
+    text = json.dumps(condense["messages"])
+    assert "The last answer before the new question." in text          # the newest of the old part stays
+    assert "earlier messages are left out here" in text and "page 39" in text
+    assert chats.get_chat(c["id"])["summary"] == "SUMMARY of the car comparison."
+    for body in fakes.llama["requests"]:
+        assert C.estimate_tokens(body["messages"]) + C.schema_tokens(body.get("tools")) <= 8000
+
+
+# ---------------------------------------------------------------- the loop guard
+
+async def test_a_repeated_look_up_is_refused_and_a_loop_ends_in_an_answer(signed_in, app, fakes):
+    """The model asks for the same search (and a failing read) step after
+    step, as Ornith 1.5 9B did for 60 steps: the search runs once, the failing
+    read may be retried once, then both are refused and the model has to
+    answer without tools."""
+    with_tools = []
+
+    def responder(body):
+        if "short title" in last_user(body):
+            return {"content": "Bilerne"}
+        with_tools.append(bool(body.get("tools")))
+        if not body.get("tools"):
+            return {"content": "Her er hvad jeg fandt, og hvad jeg ikke fandt."}
+        return {"content": "Lad mig finde tallene.",
+                "tool_calls": [{"name": "web_search", "arguments": {"query": "xc60 diesel co2"}},
+                               {"name": "read_file", "arguments": {"path": "tal.txt"}}]}
+    fakes.llama["responder"] = responder
+    c = await new_chat(signed_in)
+    run = await finish(app, await say(signed_in, c["id"], "Hvor meget forurener en XC60?"))
+    assert run.status == "done", run.events[-1]
+    assert with_tools == [True, True, True, False]
+    results = [b for m in chats.messages(c["id"]) if m["role"] == "tool" for b in m["content"]]
+    assert [(r["name"], r["is_error"], "already called" in r["text"]) for r in results] == [
+        ("web_search", False, False), ("read_file", True, False),        # step 1: both run (the file is missing)
+        ("web_search", True, True), ("read_file", True, False),          # step 2: the search is refused, a retry
+        ("web_search", True, True), ("read_file", True, True)]           # step 3: both refused
+    forced = [b for b in fakes.llama["requests"] if "short title" not in last_user(b)][-1]
+    assert "tools" not in forced and "Stop using tools now" in forced["messages"][-1]["content"]
+    assert texts(run).endswith("Her er hvad jeg fandt, og hvad jeg ikke fandt.")
+    stored = chats.runs_for_chat(c["id"])[0]["steps"]
+    assert {"type": "loop", "reason": "the same step (web_search, read_file) 3 times", "depth": 0} in stored
+    assert any(e["type"] == "loop" for e in run.events)
+    answer = chats.messages(c["id"])[-1]["content"]
+    assert answer[0] == {"type": "notice", "text": "It was repeating itself (the same step (web_search, read_file) "
+                                                   "3 times), so it was asked to answer with what it has."}
+    from app.agent import context as C
+    assert "repeating itself" not in json.dumps(C.to_model_messages(chats.messages(c["id"])))    # never sent on
+
+
+async def test_repeats_with_new_words_are_counted_too(signed_in, app, fakes):
+    """The words change, the search does not: three refused repeats are enough."""
+    n = {"step": 0}
+
+    def responder(body):
+        if "short title" in last_user(body):
+            return {"content": "Søgning"}
+        if not body.get("tools"):
+            return {"content": "Svaret."}
+        n["step"] += 1
+        return {"content": f"Forsøg {n['step']}.", "tool_calls": [{"name": "web_search", "arguments": {"query": "x"}}]}
+    fakes.llama["responder"] = responder
+    c = await new_chat(signed_in)
+    run = await finish(app, await say(signed_in, c["id"], "søg"))
+    assert n["step"] == 4 and texts(run).endswith("Svaret.")
+    assert {"type": "loop", "reason": "3 repeated tool calls", "depth": 0} in chats.runs_for_chat(c["id"])[0]["steps"]
+
+
+async def test_the_same_step_three_times_ends_in_an_answer(signed_in, app, fakes):
+    """A loop of calls that are not look-ups (they run each time) is still
+    stopped: the third identical step makes the model answer."""
+    calls = []
+
+    def responder(body):
+        if "short title" in last_user(body):
+            return {"content": "Echo"}
+        calls.append(bool(body.get("tools")))
+        if not body.get("tools"):
+            return {"content": "Done echoing."}
+        return {"content": "Again.", "tool_calls": [{"name": "bash", "arguments": {"command": "echo hi"}}]}
+    fakes.llama["responder"] = responder
+    c = await new_chat(signed_in)
+    run = await finish(app, await say(signed_in, c["id"], "echo"))
+    assert calls == [True, True, True, False]
+    bash = [b for m in chats.messages(c["id"]) if m["role"] == "tool" for b in m["content"]]
+    assert len(bash) == 3 and not any("already called" in b["text"] for b in bash)     # bash ran every time
+    assert {"type": "loop", "reason": "the same step (bash) 3 times", "depth": 0} in chats.runs_for_chat(c["id"])[0]["steps"]
+    assert texts(run).endswith("Done echoing.")
+
+
+async def test_the_same_look_up_after_a_change_runs_again(signed_in, app, fakes):
+    fakes.llama["replies"] = [
+        {"tool_calls": [{"name": "write_file", "arguments": {"path": "a.txt", "content": "one\n"}}]},
+        {"tool_calls": [{"name": "read_file", "arguments": {"path": "a.txt"}}]},
+        {"tool_calls": [{"name": "edit_file", "arguments": {"path": "a.txt", "old_string": "one", "new_string": "two"}}]},
+        {"tool_calls": [{"name": "read_file", "arguments": {"path": "a.txt"}}]},
+        {"content": "It says two now."}, {"content": "Edit"}]
+    c = await new_chat(signed_in)
+    run = await finish(app, await say(signed_in, c["id"], "write, read, change, read"))
+    assert run.status == "done"
+    reads = [b for m in chats.messages(c["id"]) if m["role"] == "tool" for b in m["content"] if b["name"] == "read_file"]
+    assert "one" in reads[0]["text"] and "two" in reads[1]["text"] and not reads[1]["is_error"]
+    assert not any(s["type"] == "loop" for s in chats.runs_for_chat(c["id"])[0]["steps"])
+
+
+async def test_a_long_turn_stays_inside_the_context(signed_in, app, fakes, monkeypatch):
+    """One question, many big tool results and long notes in a single turn:
+    nothing to condense, so the turn's own results and answers are shortened
+    - every request still fits, the tool definitions counted."""
+    from app.agent import context as C
+    hub = app.state.hub
+    monkeypatch.setattr(hub.catalog, "context_per_request", lambda model_id: 14000)
+    c = await new_chat(signed_in)
+    wd = hub.extras["agent"].workdir(chats.get_chat(c["id"]))
+    for i in range(12):
+        wd.write(f"page{i}.txt", f"page {i}\n" + "w" * 9000 + "\n", author="test", origin="test", message="page")
+    fakes.llama["replies"] = [{"content": f"Notes on page {i}: " + "n" * 1500,
+                               "tool_calls": [{"name": "read_file", "arguments": {"path": f"page{i}.txt"}}]}
+                              for i in range(12)] + [{"content": "All read."}, {"content": "Pages"}]
+    run = await finish(app, await say(signed_in, c["id"], "Read every page"))
+    assert run.status == "done", run.events[-1]
+    main = [b for b in fakes.llama["requests"] if "short title" not in last_user(b)]
+    assert len(main) == 13
+    for body in main:
+        assert C.estimate_tokens(body["messages"]) + C.schema_tokens(body.get("tools")) <= 14000
+    last = main[-1]["messages"]
+    assert "page 11" in last[-1]["content"]                                   # the newest result is whole
+    assert any("shortened by" in (m.get("content") or "") for m in last if m["role"] == "assistant")
+
+
 # ---------------------------------------------------------------- skills and memory
 
 async def test_skills_are_offered_loaded_and_can_be_switched_off(signed_in, app, fakes):

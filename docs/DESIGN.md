@@ -182,6 +182,12 @@ before that), and both slots share the pool.
 
 Sampling comes from the model cards. Qwen3.8 with thinking: temperature 1.0,
 top_p 0.95, top_k 20. Without thinking: 0.7 / 0.8 / 20, presence penalty 1.5.
+Models added from Hugging Face have no card values; those of the Qwen3 family
+(the GGUF architecture starts with `qwen3`: stored when added, or read from
+the file's header for models added before 0.9.1) get the same Qwen values.
+Others leave sampling to llama-server. A sampling flag among a model's extra
+llama-server flags (`--temp`, `--top-p`, `--top-k`, `--min-p`,
+`--presence-penalty`, ...) wins: the request then leaves that value out.
 The Qwen3.8 template accepts only `reasoning_effort` = `low`, `medium` or
 `xhigh` and fails on anything else, so the Hub never sends any other value.
 
@@ -256,6 +262,19 @@ Every web chat turn is an agent task: one queue job holding a lease.
 4. Append the results and repeat until the model answers without tools,
    or a step limit is reached.
 
+**Loop guard.** Small models can get stuck repeating a step (chat 7: Ornith
+1.5 9B fetched the same two pages 52 times). Tools that only look things up
+are marked `read_only` (web_search, web_fetch, read_file, list_files,
+search_files, view_image, image_ocr, skill, library_search). Each turn keeps
+an epoch that every other tool call advances. A read-only call repeated with
+the same arguments in the same epoch is refused with a result that says so; a
+failed one may be retried once. After three refusals, or the same step (text
+and calls) three times, the next request goes without tools and with a note
+to answer from what it has; any tool calls in that answer are dropped. The
+event `loop` and a `loop` step record it, and the answer carries a `notice`
+block (shown in the chat, never sent to a model). Cloud escalation, where on,
+resets the guard.
+
 The UI receives every event as it happens over SSE
 (`GET /hub/api/runs/{id}/events`): `queued` (with the position), `started`,
 `step`, `thinking`, `text`, `tool_start`, `tool_args`, `tool_call`,
@@ -304,10 +323,16 @@ bash, image tools, web. MCP tools ask the first time.
 quick chats. A toggle in the composer overrides it. Qwen3.8 tends to
 overthink, so the default effort is `medium`.
 
-**Compaction.** At 75% of the model's context (Settings → Assistant), old tool
+**Compaction.** At 75% of the model's context (Settings → Assistant) -
+counting the tool definitions, which are not in the messages - old tool
 outputs are shortened first; if that is not enough, everything before the
 latest user message is summarised by the model into the chat's summary, which
-goes into the system prompt from then on. The UI shows a notice.
+goes into the system prompt from then on. The UI shows a notice. The summary
+request itself must fit: old tool outputs are cut to their start, then long
+answers, then the oldest messages are left out (with a note). Within one long
+turn there is nothing before the user's message to fold, so the turn's own
+older results, then older answers and tool-call arguments, are shortened -
+in a small context down to only the newest result and answer whole.
 
 **Messages while it works.** A message sent while a turn runs does not wait
 for the end: it goes into the run's inbox (event `user_queued`), and the

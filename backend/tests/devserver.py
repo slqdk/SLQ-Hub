@@ -5,7 +5,8 @@
 Signs in as soren / "correct horse battery". The fake model answers by
 keyword: "files" (writes and runs a script), "game" (slow steps, to try
 sending a message while it works), "page" (makes an artifact),
-"think" (reasons first), "search" (web search), "picture" (an image), or
+"think" (reasons first), "search" (web search), "picture" (an image),
+"loop" (repeats the same searches until the Hub makes it answer), or
 anything else (a short markdown answer). The built UI (frontend/dist) is
 served when it exists; otherwise use `npm run dev` in frontend/.
 """
@@ -105,6 +106,13 @@ def responder(body: dict) -> dict:
         if tools_done == 1:
             return {"delay": 3, "tool_calls": [{"name": "bash", "arguments": {"command": "node game.js"}}]}
         return {"content": "The game runs.", "delay": 2}
+    asked = " ".join(m["content"] for m in msgs if m["role"] == "user" and isinstance(m["content"], str)).lower()
+    if "loop" in asked:                                 # a small model stuck repeating itself (the Hub stops it)
+        if not body.get("tools"):
+            return {"content": "I could not find the exact figure; here is what the two pages say."}
+        return {"content": "I have the numbers now. Let me fetch the exact figures to be precise.",
+                "tool_calls": [{"name": "web_search", "arguments": {"query": "volvo xc60 2.0 diesel co2"}},
+                               {"name": "web_search", "arguments": {"query": "tesla model 3 kwh per 100 km"}}]}
     if "slow" in low:
         return {"content": "That took a while, but here it is.", "delay": 5}
     if "add numbers" in low:

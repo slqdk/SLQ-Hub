@@ -17,6 +17,17 @@ import threading
 from pathlib import Path
 
 BUNDLED = Path(__file__).resolve().parent / "catalog" / "models.json"
+# Sampling for a model added from Hugging Face, whose entry has none: what its family recommends, as the
+# bundled Qwen cards use (Qwen3 and the many fine-tunes built on it: presence_penalty 1.5 against endless
+# repetition). Without it llama-server's own defaults apply, with no presence penalty at all.
+QWEN3_SAMPLING = {"thinking": {"temperature": 1.0, "top_p": 0.95, "top_k": 20, "min_p": 0.0, "presence_penalty": 1.5},
+                  "instruct": {"temperature": 0.7, "top_p": 0.8, "top_k": 20, "min_p": 0.0, "presence_penalty": 1.5}}
+
+
+def family_sampling(architecture: str | None) -> dict | None:
+    if (architecture or "").lower().startswith("qwen3"):          # qwen3, qwen3moe, qwen35, qwen35moe, qwen3next
+        return copy.deepcopy(QWEN3_SAMPLING)
+    return None
 EDITABLE_SERVER_KEYS = {"ctx", "parallel", "kv_unified", "cache_type", "gpu_layers", "flash_attn",
                         "cache_ram_mib", "extra"}
 
@@ -55,7 +66,15 @@ class Catalog:
         custom = self._read(self.custom_path)
         for c in custom.get("llm") or []:
             if isinstance(c, dict) and c.get("id") and c["id"] not in known and c.get("files") and c.get("server"):
-                data.setdefault("llm", []).append({**c, "custom": True})
+                entry = {**c, "custom": True}
+                if not entry.get("sampling"):
+                    arch = entry.get("architecture") or self._architecture(entry)
+                    if arch:
+                        entry["architecture"] = arch
+                    fam = family_sampling(arch)
+                    if fam:
+                        entry["sampling"] = fam
+                data.setdefault("llm", []).append(entry)
                 known.add(c["id"])
         for c in custom.get("comfy") or []:
             if isinstance(c, dict) and c.get("id") and c["id"] not in known and c.get("files") \
@@ -69,6 +88,15 @@ class Catalog:
             if isinstance(o.get("aliases"), list):
                 entry["aliases"] = [str(a) for a in o["aliases"]]
         return data
+
+    def _architecture(self, entry: dict) -> str | None:
+        """From the model file's own header (models added before 0.9.1 have none stored)."""
+        from . import gguf
+        first = next((f for f in entry.get("files") or [] if not f.get("role")), None)
+        if not first or not first.get("dest"):
+            return None
+        path = self.models_dir / first["dest"]
+        return gguf.architecture(path) if path.is_file() else None
 
     def reload(self) -> None:
         with self._lock:

@@ -188,12 +188,12 @@ register(Tool("list_files", "List the files in the working folder (the project, 
               obj({"path": {"type": "string", "description": "Sub-folder (default: the whole folder)"},
                    "pattern": {"type": "string", "description": "Glob for file names, e.g. *.py"},
                    "depth": {"type": "integer", "description": "How many levels deep (default 3)"}}),
-              list_files))
+              list_files, read_only=True))
 register(Tool("read_file", "Read a file from the working folder. Text comes back with line numbers; "
               "images are shown to you; PDFs and Word files are read as text. Use offset/limit for long files "
               "(lines; pages for PDFs).",
               obj({"path": {"type": "string"}, "offset": {"type": "integer"}, "limit": {"type": "integer"}},
-                  ["path"]), read_file))
+                  ["path"]), read_file, read_only=True))
 register(Tool("write_file", "Create or overwrite a text file in the working folder. Prefer edit_file for "
               "changes to an existing file.",
               obj({"path": {"type": "string"}, "content": {"type": "string", "description": "The whole file"}},
@@ -206,7 +206,7 @@ register(Tool("search_files", "Search the text files of the working folder with 
               "Returns file:line: text.",
               obj({"pattern": {"type": "string"}, "path": {"type": "string"}, "glob": {"type": "string"},
                    "case_sensitive": {"type": "boolean"}, "max_results": {"type": "integer"}}, ["pattern"]),
-              search_files))
+              search_files, read_only=True))
 register(Tool("move_file", "Move or rename a file or folder in the working folder.",
               obj({"source": {"type": "string"}, "destination": {"type": "string"}}, ["source", "destination"]),
               move_file))
