@@ -59,22 +59,38 @@ function headers(key: string | null, json: boolean): Record<string, string> {
   return h;
 }
 
+/** The page was opened on the Hub's home address (an IP or a local name), not through the proxy (hub.slq.dk). */
+export function servedAtHome(host = location.hostname): boolean {
+  return /^(\d{1,3}\.){3}\d{1,3}$/.test(host) || host.startsWith("[") || host === "localhost" ||
+    /\.(local|lan|home|internal)$/i.test(host) || !host.includes(".");
+}
+
 async function errorFrom(res: Response): Promise<HubError> {
   let text = "";
+  let clientIp = "";
+  let viaProxy = !servedAtHome();
   try {
     const body = await res.json();
     const e = body?.error ?? body?.detail;
     text = typeof e === "string" ? e : (e?.message ?? "");
+    if (typeof body?.client_ip === "string") clientIp = body.client_ip;
+    if (typeof body?.via_proxy === "boolean") viaProxy = body.via_proxy;
   } catch {
     /* not JSON */
   }
   if (res.status === 401) return new HubError("key", "The key does not work (it may have been deleted or switched off).", 401);
+  const seen = clientIp ? ` The Hub sees this phone at ${clientIp}.` : "";
   if (res.status === 403 && /only on the LAN/i.test(text)) {
-    return new HubError("lan", "The Hub answers only at home. Connect the phone to the home Wi-Fi.", 403);
+    if (viaProxy) {
+      return new HubError("lan", `This key works only on the home network, not through ${location.host}. In the Hub's ` +
+        `Settings (Apps and keys) it can be set to work away from home too.${seen}`, 403);
+    }
+    return new HubError("lan", `The Hub answers only at home. Connect the phone to the home Wi-Fi.${seen}`, 403);
   }
   if (res.status === 403 && /may not be used from/i.test(text)) {
-    const ip = text.split(" from ").pop() ?? "";
-    return new HubError("address", `This key may not be used from this phone's address (${ip}). Is it on the home Wi-Fi?`, 403);
+    const ip = clientIp || (text.split(" from ").pop() ?? "");
+    return new HubError("address", `This key may not be used from this phone's address (${ip}).` +
+      (viaProxy ? "" : " Is it on the home Wi-Fi?"), 403);
   }
   if (res.status === 503) return new HubError("busy", text || "The Hub is busy. Try again in a moment.", 503);
   return new HubError("other", text || `The Hub answered ${res.status}.`, res.status);
@@ -88,7 +104,8 @@ async function call(path: string, key: string | null, init: RequestInit = {}): P
       headers: { ...headers(key, init.body !== undefined), ...(init.headers as Record<string, string> | undefined) } });
   } catch (e) {
     if ((e as Error).name === "AbortError") throw e;
-    throw new HubError("offline", "The Hub does not answer. Is the phone on the home Wi-Fi?");
+    throw new HubError("offline", servedAtHome() ? "The Hub does not answer. Is the phone on the home Wi-Fi?"
+      : "The Hub does not answer. Is the phone online?");
   }
   if (!res.ok) throw await errorFrom(res);
   return res;

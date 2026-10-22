@@ -191,7 +191,8 @@ def delete_session(token: str | None) -> None:
 
 # ---------------------------------------------------------------- API keys
 
-def create_api_key(name: str, priority: str = "normal", allowed_ips: str = "") -> dict:
+def create_api_key(name: str, priority: str = "normal", allowed_ips: str = "", away: bool = False) -> dict:
+    """away: the key also works through the proxy (hub.slq.dk), from outside the home network."""
     name = " ".join((name or "").split())[:60]
     if not name:
         raise ValueError("a key needs a name")
@@ -200,25 +201,31 @@ def create_api_key(name: str, priority: str = "normal", allowed_ips: str = "") -
     raw = API_KEY_PREFIX + secrets.token_urlsafe(30)
     with db.connect() as con:
         try:
-            cur = con.execute("INSERT INTO api_keys (name, key_hash, prefix, priority, allowed_ips, created_at)"
-                              " VALUES (?,?,?,?,?,?)",
-                              (name, _sha(raw), raw[:14], priority, allowed_ips.strip(), db.utcnow()))
+            cur = con.execute("INSERT INTO api_keys (name, key_hash, prefix, priority, allowed_ips, away, created_at)"
+                              " VALUES (?,?,?,?,?,?,?)",
+                              (name, _sha(raw), raw[:14], priority, allowed_ips.strip(), int(bool(away)),
+                               db.utcnow()))
         except Exception as exc:
             if "UNIQUE" in str(exc):
                 raise ValueError(f"there is already a key called {name!r}") from exc
             raise
-    return {"id": cur.lastrowid, "name": name, "key": raw, "priority": priority}
+    return {"id": cur.lastrowid, "name": name, "key": raw, "priority": priority, "away": bool(away)}
 
 
 def list_api_keys() -> list[dict]:
     with db.connect() as con:
-        rows = con.execute("SELECT id, name, prefix, priority, allowed_ips, created_at, last_used, enabled"
+        rows = con.execute("SELECT id, name, prefix, priority, allowed_ips, away, created_at, last_used, enabled"
                            " FROM api_keys ORDER BY name").fetchall()
     return [dict(r) for r in rows]
 
 
 def update_api_key(key_id: int, **fields) -> bool:
-    allowed = {k: v for k, v in fields.items() if k in ("priority", "allowed_ips", "enabled", "name")}
+    allowed = {k: v for k, v in fields.items() if k in ("priority", "allowed_ips", "enabled", "name", "away")}
+    if "allowed_ips" in allowed:
+        allowed["allowed_ips"] = str(allowed["allowed_ips"] or "").strip()
+    for flag in ("enabled", "away"):
+        if flag in allowed:
+            allowed[flag] = int(bool(allowed[flag]))
     if "priority" in allowed and allowed["priority"] not in PRIORITIES:
         raise ValueError("bad priority")
     if not allowed:
@@ -237,17 +244,23 @@ def delete_api_key(key_id: int) -> bool:
 _last_used_write: dict[int, float] = {}
 
 
-def verify_api_key(raw: str | None) -> dict | None:
+def find_api_key(raw: str | None) -> dict | None:
+    """The enabled key with this value, without marking it used."""
     if not raw or not raw.startswith(API_KEY_PREFIX):
         return None
     with db.connect() as con:
         r = con.execute("SELECT * FROM api_keys WHERE key_hash=? AND enabled=1", (_sha(raw),)).fetchone()
-        if not r:
-            return None
-        if time.time() - _last_used_write.get(r["id"], 0) > 60:
-            _last_used_write[r["id"]] = time.time()
-            con.execute("UPDATE api_keys SET last_used=? WHERE id=?", (db.utcnow(), r["id"]))
-    return dict(r)
+    return dict(r) if r else None
+
+
+def touch_api_key(key_id: int) -> None:
+    """Remember when a key was last let in (written at most once a minute)."""
+    if time.time() - _last_used_write.get(key_id, 0) <= 60:
+        return
+    _last_used_write[key_id] = time.time()
+    with db.connect() as con:
+        con.execute("UPDATE api_keys SET last_used=? WHERE id=?", (db.utcnow(), key_id))
+
 
 
 # ---------------------------------------------------------------- sync device tokens

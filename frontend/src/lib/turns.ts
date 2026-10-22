@@ -239,6 +239,10 @@ export function reduceLive(live: LiveRun, ev: RunEvent): LiveRun {
       next.status = "running";
       next.model = d.model;
       break;
+    case "escalated":
+      if (d.model_id) next.model = d.model_id;          // handed over to another local model
+      applyStream(next.items, ev);                      // and the notice
+      break;
     case "subagent": {
       const t = findTool(next.items, d.id);
       if (t) t.subagent = { description: d.description, finished: d.state === "finished" };

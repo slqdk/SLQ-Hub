@@ -458,6 +458,18 @@ def make_hf(state: dict) -> FastAPI:
     def repo_of(owner: str, name: str) -> dict | None:
         return (state.get("repos") or {}).get(f"{owner}/{name}")
 
+    @app.get("/api/models")
+    async def search(request: Request):
+        """The model search: state["listing"] holds the records it matches against
+        (fields as the real API sends them without expand: id, downloads, likes, ...)."""
+        q = request.query_params
+        state.setdefault("searches", []).append(dict(q))
+        term = (q.get("search") or "").lower()
+        hits = [m for m in state.get("listing") or [] if term in m["id"].lower()
+                and (q.get("filter") != "gguf" or "gguf" in m.get("tags", []))]
+        hits.sort(key=lambda m: -m.get("downloads", 0))
+        return hits[:int(q.get("limit") or 50)]
+
     @app.get("/api/models/{owner}/{name}/tree/main")
     async def tree(owner: str, name: str, recursive: bool = False):
         r = repo_of(owner, name)

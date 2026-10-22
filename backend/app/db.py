@@ -238,9 +238,47 @@ _M002_LIBRARIES = """
 """
 
 
+# What each turn's model was told: its system prompt and tool names, stored when they change (at the start,
+# after a hand-over, a condensing, in a subagent) - for finding out later why a turn went as it did.
+# The system prompt and tools each turn worked with (for troubleshooting). The same prompt is stored once:
+# most turns of a day share it. A text goes when the last run that used it goes.
+_M003_RUN_PROMPTS = """
+        CREATE TABLE prompt_texts (
+            hash       TEXT PRIMARY KEY,
+            text       TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+        CREATE TABLE run_prompts (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id      TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+            depth       INTEGER NOT NULL DEFAULT 0,
+            step        INTEGER NOT NULL DEFAULT 0,
+            model       TEXT NOT NULL DEFAULT '',
+            reason      TEXT NOT NULL DEFAULT '',
+            system_hash TEXT NOT NULL REFERENCES prompt_texts(hash),
+            tools       TEXT NOT NULL DEFAULT '[]',
+            created_at  TEXT NOT NULL
+        );
+        CREATE INDEX run_prompts_run ON run_prompts(run_id, id);
+        CREATE INDEX run_prompts_text ON run_prompts(system_hash);
+        CREATE TRIGGER run_prompts_text_gone AFTER DELETE ON run_prompts
+        WHEN NOT EXISTS (SELECT 1 FROM run_prompts WHERE system_hash = OLD.system_hash)
+        BEGIN
+            DELETE FROM prompt_texts WHERE hash = OLD.system_hash;
+        END;
+"""
+
+# A key may also work away from home: through the proxy (hub.slq.dk), from anywhere.
+_M004_KEYS_AWAY = """
+        ALTER TABLE api_keys ADD COLUMN away INTEGER NOT NULL DEFAULT 0;
+"""
+
+
 MIGRATIONS = [
     (1, _M001_CORE),
     (2, _M002_LIBRARIES),
+    (3, _M003_RUN_PROMPTS),
+    (4, _M004_KEYS_AWAY),
 ]
 
 

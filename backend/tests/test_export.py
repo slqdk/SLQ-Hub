@@ -124,6 +124,19 @@ def test_streamed_pieces_are_joined_per_kind_and_call():
     assert out[1]["seq"] == 2 and out[1]["seq_to"] == 3 and out[1]["pieces"] == 2
 
 
+def test_the_model_servers_log_without_its_noise():
+    from app.chats.export import quiet_log
+    noise = "0.06.328.924 W find_slot: non-consecutive token position 4374 after 4373 for sequence 0 with 512 new tokens"
+    log = "\n".join(["I srv load_model: loaded multimodal model", *[noise] * 40, "I slot print_timing: id 0 | 81 tokens",
+                     noise, "I slot release: id 0"])
+    out = quiet_log(log)
+    assert "find_slot" not in out
+    assert out.splitlines() == ['(41 "non-consecutive token position" warnings left out: harmless, they come from '
+                                'the image tokens of vision models.)', "I srv load_model: loaded multimodal model",
+                                "I slot print_timing: id 0 | 81 tokens", "I slot release: id 0"]
+    assert quiet_log("a\nb\nc", keep=2) == "b\nc\n" and quiet_log("") == ""
+
+
 def test_names_and_pictures_left_out():
     assert slug("Mario spil på hjemmesiden!") == "mario-spil-paa-hjemmesiden"
     assert slug("") == "chat"

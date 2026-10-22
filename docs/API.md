@@ -5,8 +5,11 @@ they never fight over the card. The model API speaks three formats on the
 same port; pick whichever the app already speaks.
 
 Everything here answers only on the LAN and WireGuard (the networks in
-`HUB_LAN_CIDRS`), unless Settings → Apps and keys allows the API through the
-proxy.
+`HUB_LAN_CIDRS`). From outside, only through the proxy (hub.slq.dk), and only
+with a key set to **At home and away** (or any key, when Settings → Apps and
+keys allows every key from outside). A refused request gets 403 with the
+address the Hub saw (`client_ip`) and whether it came through the proxy
+(`via_proxy`).
 
 ## 1. Make a key
 
@@ -16,7 +19,8 @@ Settings → **Apps and keys** → **New key**. One key per app:
 |---|---|
 | App | A name; it shows in the queue as the job's owner. |
 | Priority | `interactive` (like a web chat), `normal` (most apps), `background` (batch work). Waiting requests gain one level every two minutes, so nothing waits forever. |
-| Only from these addresses | Optional: IPs or networks (`30.11.0.20, 10.8.0.0/24`). |
+| Where it works | **At home** (the LAN and WireGuard) or **At home and away** (also through the proxy, from anywhere: for a person's phone; keep app keys at home). Changeable in the list later. |
+| Only from these addresses | Optional: IPs or networks (`30.11.0.20, 10.8.0.0/24`), on top of the choice above. |
 
 The key (`slqhub_...`) is shown once. A key can be switched off or deleted
 at any time; requests with it then get 401.
@@ -105,7 +109,10 @@ this API: it sends the key as `Authorization: Bearer`, streams
 `/v1/chat/completions` and makes pictures with `/v1/images/generations`
 (`response_format: b64_json`). Its conversations stay on the phone. Give each
 person their own key; the new-key dialog has a phone link with the key in it
-(`/chat#key=slqhub_...` - the part after `#` never reaches a server).
+(`/chat#key=slqhub_...` - the part after `#` never reaches a server). For a
+key set to work away from home the link is `https://hub.slq.dk/chat#key=...`
+(`HUB_PUBLIC_URL`), which works at home too and, being HTTPS, can be installed
+as an app. A phone keeps its chats per address, so use one of the two.
 
 ## 5. Anthropic format
 

@@ -66,6 +66,70 @@ async def test_through_the_proxy_the_api_is_refused_but_the_ui_works(app, api_ke
         assert r.status_code == 200
 
 
+async def test_a_key_set_to_work_away_from_home(app, signed_in, api_key):
+    r = await signed_in.post("/hub/api/keys", json={"name": "Maria", "priority": "interactive", "away": True})
+    assert r.status_code == 200 and r.json()["away"] is True
+    away = r.json()["key"]
+    keys = {k["name"]: k for k in (await signed_in.get("/hub/api/keys")).json()}
+    assert keys["Maria"]["away"] == 1 and keys["familylog"]["away"] == 0 and keys["Maria"]["last_used"] is None
+    proxy = httpx.ASGITransport(app=app, client=("10.9.9.9", 4000))
+    outside = httpx.ASGITransport(app=app, client=("8.8.8.8", 4000))
+    async with httpx.AsyncClient(transport=proxy, base_url="http://hub") as c:
+        fwd = {"X-Forwarded-For": "203.0.113.7"}
+        # through the proxy from outside: the away key works, the home key and no key do not
+        assert (await c.get("/v1/models", headers={**fwd, "Authorization": f"Bearer {away}"})).status_code == 200
+        r = await c.get("/v1/models", headers={**fwd, "Authorization": f"Bearer {api_key}"})
+        assert r.status_code == 403
+        body = r.json()
+        assert "only on the LAN" in body["error"] and "203.0.113.7" in body["error"]
+        assert body["client_ip"] == "203.0.113.7" and body["via_proxy"] is True
+        assert (await c.get("/v1/models", headers=fwd)).status_code == 403
+        # a wrong key from outside learns nothing more than "LAN only"
+        r = await c.get("/v1/models", headers={**fwd, "Authorization": "Bearer slqhub_wrongwrongwrongwrong"})
+        assert r.status_code == 403
+        # the Ollama path form and a streamed chat work too
+        assert (await c.get(f"/k/{away}/api/tags", headers=fwd)).status_code == 200
+        r = await c.post("/v1/chat/completions", headers={**fwd, "Authorization": f"Bearer {away}"},
+                         json={"model": "qwen3.8-27b", "stream": True, "messages": [{"role": "user", "content": "hi"}]})
+        assert r.status_code == 200 and r.text.rstrip().endswith("data: [DONE]")
+    # used, and noted as used only once it was let in
+    keys = {k["name"]: k for k in (await signed_in.get("/hub/api/keys")).json()}
+    assert keys["Maria"]["last_used"] and keys["familylog"]["last_used"] is None
+    # away means through the proxy: a direct peer outside the LAN (or the sandbox) is still refused
+    async with httpx.AsyncClient(transport=outside, base_url="http://hub") as c:
+        assert (await c.get("/v1/models", headers={"Authorization": f"Bearer {away}"})).status_code == 403
+    sandbox = httpx.ASGITransport(app=app, client=("172.31.250.20", 4000))
+    async with httpx.AsyncClient(transport=sandbox, base_url="http://hub") as c:
+        assert (await c.get("/v1/models", headers={"Authorization": f"Bearer {away}"})).status_code == 403
+    # an address limit still applies away from home
+    kid = keys["Maria"]["id"]
+    assert (await signed_in.patch(f"/hub/api/keys/{kid}", json={"allowed_ips": "30.11.0.0/20"})).status_code == 200
+    async with httpx.AsyncClient(transport=proxy, base_url="http://hub") as c:
+        r = await c.get("/v1/models", headers={"X-Forwarded-For": "203.0.113.7", "Authorization": f"Bearer {away}"})
+        assert r.status_code == 403 and "may not be used from 203.0.113.7" in r.json()["error"]
+    # switched back to home only
+    assert (await signed_in.patch(f"/hub/api/keys/{kid}", json={"away": False, "allowed_ips": ""})).status_code == 200
+    assert {k["name"]: k for k in (await signed_in.get("/hub/api/keys")).json()}["Maria"]["away"] == 0
+    async with httpx.AsyncClient(transport=proxy, base_url="http://hub") as c:
+        r = await c.get("/v1/models", headers={"X-Forwarded-For": "203.0.113.7", "Authorization": f"Bearer {away}"})
+        assert r.status_code == 403
+        # ... and at home (a LAN client through the proxy) it works as before
+        r = await c.get("/v1/models", headers={"X-Forwarded-For": "30.11.0.50", "Authorization": f"Bearer {away}"})
+        assert r.status_code == 200
+
+
+async def test_allowing_every_key_from_outside_still_means_through_the_proxy(app, signed_in, api_key):
+    await signed_in.put("/hub/api/settings", json={"section": "api", "values": {"allow_external": True}},
+                        headers={"Origin": "http://hub"})
+    proxy = httpx.ASGITransport(app=app, client=("10.9.9.9", 4000))
+    async with httpx.AsyncClient(transport=proxy, base_url="http://hub") as c:
+        r = await c.get("/v1/models", headers={"X-Forwarded-For": "203.0.113.7", "Authorization": f"Bearer {api_key}"})
+        assert r.status_code == 200
+    outside = httpx.ASGITransport(app=app, client=("8.8.8.8", 4000))
+    async with httpx.AsyncClient(transport=outside, base_url="http://hub") as c:
+        assert (await c.get("/v1/models", headers={"Authorization": f"Bearer {api_key}"})).status_code == 403
+
+
 async def test_spoofed_forwarded_for_is_ignored_from_untrusted_peers(app, api_key):
     t = httpx.ASGITransport(app=app, client=("8.8.8.8", 4000))
     async with httpx.AsyncClient(transport=t, base_url="http://hub") as c:

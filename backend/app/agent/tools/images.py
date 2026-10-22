@@ -163,6 +163,19 @@ def _picture_model(ctx: ToolContext, args: dict) -> str | None:
     return None
 
 
+def _other_model_note(ctx: ToolContext, args: dict, used: str) -> str:
+    """Said in the result when the call named another model than the chat's: the user sees it, and so does the
+    model (and a troubleshooting export)."""
+    if not args.get("model"):
+        return ""
+    pipe = _pipeline(ctx)
+    mine = pipe.chosen(_picture_model(ctx, {}))
+    if used == mine or args["model"] == mine:
+        return ""
+    entry = pipe.entry(mine) or {}
+    return f" The call asked for {args['model']}; this chat's picture model is {entry.get('name') or mine}."
+
+
 async def image_generate(ctx: ToolContext, args: dict) -> ToolResult:
     pipe = _pipeline(ctx)
     prompt = (args.get("prompt") or "").strip()
@@ -182,8 +195,9 @@ async def image_generate(ctx: ToolContext, args: dict) -> ToolResult:
     where = f" Saved as {', '.join(paths)}." if paths else ""
     used = items[0].get("prompt_used")
     enhanced = f"\nERNIE-Image's prompt enhancer turned the prompt into: {used[:2000]}" if used else ""
+    other = _other_model_note(ctx, args, items[0]["model"])
     return ToolResult(f"Generated {len(items)} image(s) with {items[0]['model']} ({desc}). They are shown to the "
-                      f"user and below.{where}{enhanced}",
+                      f"user and below.{other}{where}{enhanced}",
                       images=[{"sha": it["sha"], "mime": "image/png"} for it in items],
                       display={"generated": [{"sha": it["sha"], "seed": it["seed"], "path": p}
                                              for it, p in zip(items, paths + [None] * len(items))]})
@@ -265,7 +279,9 @@ register(Tool("image_ocr", "Read the text in an image with Tesseract OCR (defaul
 def _generate_params(models: list[str]) -> dict:
     model: dict = {"type": "string", "enum": models} if models else {"type": "string"}
     return obj({"prompt": {"type": "string"}, "width": {"type": "integer"}, "height": {"type": "integer"},
-                "count": {"type": "integer", "description": "1-4"}, "seed": {"type": "integer"},
+                "count": {"type": "integer", "description": "1-4, default 1. More only when the user asks for "
+                                                             "several pictures or for options."},
+                "seed": {"type": "integer"},
                 "fast": {"type": "boolean"}, "negative": {"type": "string"}, "model": model,
                 "save_as": {"type": "string", "description": "Path in the working folder"}}, ["prompt"])
 

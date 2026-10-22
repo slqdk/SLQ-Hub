@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.9.1, 2026-10-22)
+## State (0.10.0, 2026-10-22)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -14,7 +14,11 @@ command line self-test. Since 0.8.0 there is also a chat page for phones
 (`/chat`) on the model API, for the rest of the household. A chat that behaves
 strangely can be exported from its ⋯ menu ("Export for troubleshooting": a ZIP
 with messages, runs, live events, the next turn's context, the queue and the
-model server's log) - ask for that first.
+model server's log, and since 0.10.0 what each model step was sent and the
+system prompts used) - ask for that first. A small model that gets stuck hands
+the turn over to a stronger one on the server (Settings → Assistant). A key
+can be set to work away from home, so the phone page works at
+`https://hub.slq.dk/chat`.
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
 host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU
@@ -23,9 +27,10 @@ host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU
 web search (38 results), ComfyUI (`cuda:0 AMD Radeon RX 7900 XTX : native`,
 torch 2.14.1+rocm7.14), Qwen3.8-27B answering at 33 tokens/s (a short reply),
 text embeddings (1024 dimensions). Web UI on the LAN:
-`http://30.11.0.222:8080`, admin user `adminsorenlyder`. Not done yet: Nginx
-Proxy Manager / hub.slq.dk, an image render, FamilyLog, and days of uptime
-(see "The D3 problem").
+`http://30.11.0.222:8080`, admin user `adminsorenlyder`. Since then:
+hub.slq.dk serves the UI through Nginx Proxy Manager, and pictures are made
+and edited on the card (chat 9, below). Not done yet: FamilyLog, and days of
+uptime (see "The D3 problem").
 
 ## The machine, as installed
 
@@ -97,19 +102,22 @@ the host if the VM ever stops by itself.
 |---|---|
 | Real hardware | VM 222 (above): `install.sh` 0.1.3 end to end - stages `vm`, `config`, `system`, `gpu`, `build`, `models`, `start`, `selftest` - and every self-test line passed (image generation skipped). So the VM check's sysfs reads work on a real q35/OVMF VM with the card, amdgpu-dkms 31.60 builds and loads on 7.0.0-38, ROCm sees the card (`/dev/kfd`), the llama.cpp ROCm image and the ComfyUI torch build use it, and the sandbox firewall holds. |
 | Scheduler | 14 unit tests: priorities, aging, slots, affinity, leases with in-lease switching (two leases that both want ComfyUI, a full residency), cancellation, preload, a crashed model server noticed and loaded again. |
-| Model APIs | 27 tests against a fake llama-server: Ollama (chat, generate, show, tags, embed, key in the path, `HEAD /`), OpenAI (chat, stream, tools, images, the extra fields of `/v1/models`), Anthropic (messages, stream, tools, thinking), LAN guard, CORS, key priority, the `/chat` route, the home network for keys. |
-| Agent | 31 tests: plain turns, tools in chat and project folders, revisions, stopping (in a tool and while writing), retry/edit, SSE replay, messages sent while a turn works (read after a tool step, while the last answer is written, after the end, with Stop), attachments, project files put in a message (text inline and fenced, too big or binary as pointers, pictures as images, refused paths, the pointer once the message is old), image generation switching the card and back, MCP over HTTP (approval, always-allow, masked secrets) and over stdio in the sandbox, escalation (explicit and automatic), subagents, compaction (and a summary request that fits the context: 40 big results before the new question, 8K context), a long single turn that stays inside a 14K context (12 results of 9,000 characters, tool definitions counted), the loop guard (the same search refused, a failing read retried once then refused, the forced answer without tools and its notice, repeats with new words, the same bash step three times, a read after an edit running again), skills, memory, artifacts. |
+| Model APIs | 29 tests against a fake llama-server: Ollama (chat, generate, show, tags, embed, key in the path, `HEAD /`), OpenAI (chat, stream, tools, images, the extra fields of `/v1/models`), Anthropic (messages, stream, tools, thinking), LAN guard, CORS, key priority, the `/chat` route, the home network for keys, keys that work away from home (through the proxy only - not from a direct outside peer or the sandbox; a wrong key from outside gets the same 403; an address list still applies; last used only once let in; switched back), every key from outside still only through the proxy. |
+| Agent | 39 tests: plain turns, tools in chat and project folders, revisions, stopping (in a tool and while writing), retry/edit, SSE replay, messages sent while a turn works (read after a tool step, while the last answer is written, after the end, with Stop), attachments, project files put in a message (text inline and fenced, too big or binary as pointers, pictures as images, refused paths, the pointer once the message is old), image generation switching the card and back, MCP over HTTP (approval, always-allow, masked secrets) and over stdio in the sandbox, escalation (explicit and automatic), subagents, compaction (and a summary request that fits the context: 40 big results before the new question, 8K context), a long single turn that stays inside a 14K context (12 results of 9,000 characters, tool definitions counted), the loop guard (the same search refused, a failing read retried once then refused, the forced answer without tools and its notice, repeats with new words, the same bash step three times, a read after an edit running again), hand-over to the stronger local model (a loop, three failed calls, the escalate tool; the card switches within the lease; its own system prompt and note, no reasoning of the other model; nobody to hand over to; local first, then the cloud), what each step was sent and why it stopped, a model's own thinking and sampling, system prompts stored once and removed with the chat, the note when a picture call names another model than the chat's, skills, memory, artifacts. |
 | SLQ Sync | 8 tests (one: writes never follow a symlink planted in the folder), including a round trip with the real `slq_sync.py` client from the SLQ Companion repo against a live server (clone, both-way edits, a conflict, its release). Skipped when that file is not next to this repo. |
 | Libraries | 5 tests with keyword-hashing fake embedders: text and page-image indexing, fused search, re-ranking, replacing and deleting documents, GPU indexing through the queue, broken files. |
 | Web UI | `tsc` + `vite build`; every page and the main flows clicked through in Chromium (Playwright) against `python -m tests.devserver` (the Hub with fake services): sign-in, chat with markdown/maths/code, tool strip, artifact panel, approvals, subagent, image tool, projects (files, editor, settings, sync), libraries, all settings tabs, dark mode, phone width. |
 | Shell scripts | `shellcheck`. `create-vm.sh --dry-run` prints every command. `install.sh`'s VM check: 12 cases against fake `/sys` and `/proc` trees (card present or not, its audio function alone, a card asleep in D3hot, i440fx, bare metal, Secure Boot on, legacy BIOS, no AVX2, low space with and without LVM). The `amdgpu.runpm=0` GRUB drop-in, sourced the way `grub-mkconfig` does, appends to the existing command line. The `qm config ... hostpci` one-liner in INSTALL.md against a fake `qm`. |
 | Self-test | Against `tests.devserver`: the chat line says "incl. loading" on a cold card and "already loaded" after a preload. |
-| Add from Hugging Face | 5 tests (`tests/test_models_hf.py`) against a fake huggingface.co built from the real tree of `unsloth/Qwen3.8-27B-GGUF` (fetched 2026-10-22: directories, a split BF16, an MTP draft, imatrix, two mmproj, LFS sizes) and the model-info `gguf` block: repo names and links, quant labels, grouping, the API (lookup, add with the context capped to the model's, download through the queue, the llama-server command line for a single file and a split, survives a restart, listed by `/api/tags`, removal of files and folders, refusals: gated, unknown, no GGUF, bad names, taken names, disk space). The dialog clicked through in Chromium against the dev server's fake repository. |
+| Add from Hugging Face | 6 tests (`tests/test_models_hf.py`), one of them the search by name (`/api/models` faked: words matched in the repo id, GGUF only, by downloads), against a fake huggingface.co built from the real tree of `unsloth/Qwen3.8-27B-GGUF` (fetched 2026-10-22: directories, a split BF16, an MTP draft, imatrix, two mmproj, LFS sizes) and the model-info `gguf` block: repo names and links, quant labels, grouping, the API (lookup, add with the context capped to the model's, download through the queue, the llama-server command line for a single file and a split, survives a restart, listed by `/api/tags`, removal of files and folders, refusals: gated, unknown, no GGUF, bad names, taken names, disk space). The dialog clicked through in Chromium against the dev server's fake repository. |
 | Files in a message | Clicked through in Chromium at 1920, 1280 and 390 px against the dev server: + -> Project files opens the panel, the search finds a file, its + and the file bar's Add to chat put files in the message (chips in the composer, a count in the panel), sending creates the chat with the panel still open, the message shows the files and a click opens one; the project page's Files tab has no + buttons. |
 | Image models from links | 5 tests (`tests/test_images_models.py`) against a fake Hugging Face (real safetensors headers, Range requests) and a fake Civitai (model and version API, a login-only download, the redirect to its storage): link parsing, the checkpoint check (SDXL, v-prediction, no text encoders, no VAE, refiner, SD 1.5, FLUX, LoRA), presets and their limits, lookup and add from both sites, the 401 that names `CIVITAI_TOKEN`, the token kept from the storage host, settings changes, removal (not while it is the Settings model), a chat with its own SDXL model (the graph, clip skip, tags, the SDXL size) and the tool description it gets. The dialog clicked through in Chromium at 1440 and 390 px. |
 | Phone chat page | 34 checks in Chromium (Playwright) with iPhone 13 and iPhone SE (dark) emulation against the dev server: Settings (the page's address, Only the home network, Copy the phone link); connecting (a wrong paste, an unknown key, the link - the key is kept and leaves the address); a streamed answer (Bearer key, thinking off by default, the system prompt, the default model, the title); Think on; the history sent; a photo (shrunk to JPEG, sent as `image_url`); a picture (portrait size, kept as data); the viewer's Save link; Stop and Try again; two chats kept over a reload, with their photo and picture; delete; copy; away from home (a 403 from the LAN guard); a key switched off (said in the chat, then the key screen after a reload); the composer at 320 px. The requests Enchanted (`HEAD /`, Bearer, `/api/tags`, `/api/chat`) and Reins (key in the path, `GET` of the base address) make, replayed with curl; read from their sources (Enchanted 2026-07 and its OllamaKit fork, Reins 2026-10). |
 | Sampling for added models | 2 tests (`tests/test_models_sampling.py`) and one more check in the Hugging Face test: the architecture read from a GGUF header (skipping a number and a string list before it; not a GGUF; missing), Qwen3-family values for a model added before 0.9.1 (from its file), with and without thinking; none for a llama model; an entry's own values kept; `--temp` and `--presence-penalty=` among the extra flags leave those values out. |
-| Chat export | 6 tests (`tests/test_export.py`): Markdown (thinking, tool calls and results, one section per turn, the turn line), the ZIP (every part; full tool arguments; the model card and safe settings - a cloud API key set in Settings appears nowhere in it; the picture as a file and linked in the transcript; context.json with the system prompt, history, tools and request, the picture left out; the event log with streamed pieces joined; the queue job of the run), 404/400/401, joining events, file names. Both menu items and the phone page's Export this chat clicked through in Chromium (downloads named after the chat, unzipped, the phone file has no whole key). |
+| Chat export | 7 tests (`tests/test_export.py`), one of them the model server's log without the vision models' position warnings: Markdown (thinking, tool calls and results, one section per turn, the turn line), the ZIP (every part; full tool arguments; the model card and safe settings - a cloud API key set in Settings appears nowhere in it; the picture as a file and linked in the transcript; context.json with the system prompt, history, tools and request, the picture left out; the event log with streamed pieces joined; the queue job of the run), 404/400/401, joining events, file names. Both menu items and the phone page's Export this chat clicked through in Chromium (downloads named after the chat, unzipped, the phone file has no whole key). |
+| Settings 0.10.0 | In Chromium against the dev server (12 checks): the hand-over setting (Qwen3.8 27B by default), a model's Settings dialog (sampling prefilled from the card, thinking "Always think first" and a new temperature saved, "Use the model's own sampling" back to the card with thinking kept, the composer of a new chat following the model's thinking), Add from Hugging Face searching "Ornith 1.5 9B" (two repositories listed, a click looks one up, Q8_0 preselected for 9B, BF16 "twice the size of Q8_0"), and a live hand-over (Qwen3.6 35B-A3B repeats a web search, refused twice, Qwen3.8 27B answers; the notice live and after a reload; the footer names both models). |
+| Keys away from home | In Chromium against the dev server started as if behind a proxy (`--proxy 127.0.0.1 --public-url https://hub.example.test --lan-host 192.168.1.10`; uvicorn without its own proxy handling, as in production) (16 checks): the Apps page and dialog text, "Where it works" hiding "Only the home network" when away, the phone link through the public address and the home-only link, the list's per-key choice, switching a home-network key to away removing that limit (and back), the phone page from outside (`X-Forwarded-For: 203.0.113.9`) with a home key ("not through ...", "The Hub sees this phone at 203.0.113.9"), Try again after the key was switched (the key from the link was kept), an answer from outside, an away key connecting straight away. |
+| Real hardware, chat 9 (2026-10-22) | Søren's troubleshooting export: FLUX.2 klein 4B made 3 pictures at 1024² in ~17 s (about 10 s to swap Ornith out and klein in, then ~0.45 s per step, 4 steps), Qwen-Image 2.1 edited one in 76 s (including the swap from klein), the LLM was back in 5-7 s each time. Ornith 1.5 9B (`ornith-1.5-9b-2`, probably Q8_0) generated 63-65 tokens/s, Qwen3.5 9B BF16 41 tokens/s; prompt processing ~2,000-3,250 tokens/s; a 1024² picture costs ~1,026 tokens for these vision models; the prompt cache reused 7,550 of 7,578 tokens between turns (none after a picture: the LLM was unloaded). |
 | Tab rows | In Chromium: the old CSS gave `.tabs` 1px of vertical overflow (scrollHeight 42, clientHeight 41 - a scrollbar with Windows' classic scrollbars, reported by Søren); the inset-shadow rule gives none. |
 | Compose | `docker compose config` (v2.40.3) with a `.env` written the way `install.sh` writes it: renders, and the admin password hash arrives intact. |
 | llama.cpp | b11783 built from source (CPU): every command line the Hub builds parses; the real supervisor started the real llama-server through the Hub's scheduler, runner and client with a tiny random model - load, streaming (the real chunk format), a killed server noticed and reloaded, unload. Embeddings (strings and `content` arrays) and `/v1/rerank` answer in the shapes the Hub expects. |
@@ -130,10 +138,12 @@ the host if the VM ever stops by itself.
    `reasoning_content` passed back within a turn, `reasoning_effort`
    (low/medium/xhigh), `enable_thinking`. The Hub also parses text tool calls
    (Qwen3-Coder XML and Hermes JSON) as a fallback.
-4. **ComfyUI on the card**: torch sees it, but no render yet (`sudo bash
+4. **ComfyUI on the card**: FLUX.2 klein 4B generates and Qwen-Image 2.1
+   edits on the card (chat 9, above), and the LLM loads again after it. Not
+   seen yet: Qwen-Image 2.1 generating (and whether its int8 kernels or the
+   bf16 fallback ran), the self-test's image line (`sudo bash
    /opt/slq-hub/update.sh compose exec hub python -m app.cli selftest
-   --images`): the Qwen-Image 2.1 int8 kernels on gfx1100, FLUX.2 klein (it
-   is installed), VRAM release with `/free` before the LLM loads again.
+   --images`).
    ERNIE-Image is untried too: whether the prompt enhancer answers in English
    for English requests, how long enhancer plus the 16 GB model take on
    gfx1100, and RAM with three large files in ComfyUI's cache. New in 0.6.0
@@ -194,6 +204,28 @@ the host if the VM ever stops by itself.
     be continued (its next message condenses 100K tokens on a 64K context).
     Ornith is a reasoning model (its card: it opens with a think block); with
     "Think" off in plain chats it runs without one.
+17. **Hand-over on the card**: how long the switch from a small model
+    (Ornith, Qwen3.6) to Qwen3.8 27B takes within a turn, and whether Qwen3.8
+    makes good use of a smaller model's steps. With a 9B model as the chat
+    default, a hand-over also means the next turn starts on the small model
+    again (the hand-over is per turn).
+18. **Search on Add from Hugging Face against the real site**: built from the
+    documented `/api/models` parameters (`search`, `filter=gguf`,
+    `sort=downloads`, `direction=-1`, `limit`) and checked against a fake;
+    this build environment could not reach huggingface.co.
+19. **Keys away from home through the real proxy**: what client address
+    Nginx Proxy Manager passes on. From outside it should be the phone's
+    public address. A phone at home that uses hub.slq.dk goes out and back
+    in through the router (hairpin NAT), so the Hub may see the router's LAN
+    address (then even a home-only key works there) or the public address
+    (then it needs "At home and away") - the refusal now says which address
+    the Hub saw. Not tried: the page installed from hub.slq.dk on Android,
+    and a picture request through the proxy (it is not streamed, so
+    `proxy_read_timeout` in the Advanced block must be long).
+20. **The size of the step records**: each model step now stores a small
+    `sent` record, and every turn a `run_prompts` row (the prompt text itself
+    once per distinct text). Expected to stay small; worth a look at
+    `data/hub.db` after some weeks.
 
 ## Where things are
 

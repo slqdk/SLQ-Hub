@@ -186,3 +186,25 @@ async def test_hugging_face_problems(signed_in, app, fakes, monkeypatch):
     r = await post()
     assert r.status_code == 400 and "Not enough disk space" in r.json()["detail"]
     assert app.state.hub.catalog.get_llm("tiny") is None
+
+
+async def test_searching_hugging_face_by_name(signed_in, fakes):
+    """Words instead of owner/name: the API is asked for the longest word, and
+    every word must be in the repository's name; the most downloaded first."""
+    fakes.hf["listing"] = [
+        {"id": "ornith-ai/Ornith-1.5-9B-GGUF", "downloads": 48210, "likes": 312, "tags": ["gguf"],
+         "createdAt": "2026-09-30T10:00:00.000Z"},
+        {"id": "bartowski/ornith-ai_Ornith-1.5-9B-GGUF", "downloads": 9120, "likes": 41, "tags": ["gguf"]},
+        {"id": "ornith-ai/Ornith-1.5-27B-GGUF", "downloads": 20511, "likes": 140, "tags": ["gguf"]},
+        {"id": "ornith-ai/Ornith-1.0-9B-GGUF", "downloads": 30122, "likes": 201, "tags": ["gguf"]},
+        {"id": "ornith-ai/Ornith-1.5-9B", "downloads": 15000, "likes": 260, "tags": ["safetensors"]}]
+    r = await signed_in.get("/hub/api/models/hf/search", params={"q": "Ornith 1.5 9B"})
+    assert r.status_code == 200, r.text
+    assert [h["repo"] for h in r.json()["results"]] == ["ornith-ai/Ornith-1.5-9B-GGUF",
+                                                        "bartowski/ornith-ai_Ornith-1.5-9B-GGUF"]
+    assert r.json()["results"][0] == {"repo": "ornith-ai/Ornith-1.5-9B-GGUF", "downloads": 48210, "likes": 312,
+                                      "updated": "2026-09-30T10:00:00.000Z", "gated": False}
+    asked = fakes.hf["searches"][-1]
+    assert asked["search"] == "ornith" and asked["filter"] == "gguf" and asked["sort"] == "downloads"
+    assert (await signed_in.get("/hub/api/models/hf/search", params={"q": "nothing like it"})).json()["results"] == []
+    assert (await signed_in.get("/hub/api/models/hf/search", params={"q": "  "})).json()["results"] == []

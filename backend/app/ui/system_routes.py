@@ -160,6 +160,15 @@ async def hf_lookup(repo: str, request: Request):
     return res
 
 
+@router.get("/hub/api/models/hf/search")
+async def hf_search(q: str, request: Request):
+    """GGUF models on Hugging Face matching some words, for the add dialog."""
+    try:
+        return {"results": await hf.search(q, transport=get_hub(request).transports.web)}
+    except hf.HFError as exc:
+        raise HTTPException(exc.status, str(exc))
+
+
 class HFAdd(BaseModel):
     repo: str
     file: str                      # the chosen quantisation: its first file
@@ -346,18 +355,23 @@ async def cancel_download(model_id: str, request: Request):
 class ModelPatch(BaseModel):
     server: dict | None = None
     aliases: list[str] | None = None
+    sampling: dict | None = None         # {"instruct": {...}, "thinking": {...}} - replaces the card's values
+    reset_sampling: bool = False         # back to the card's (or the family's) values
+    thinking_mode: str | None = None     # follow | on | off
 
 
 @router.put("/hub/api/models/{model_id}")
 async def update_model(model_id: str, body: ModelPatch, request: Request):
     hub = get_hub(request)
     try:
-        entry = hub.catalog.save_override(model_id, body.server, body.aliases)
+        entry = hub.catalog.save_override(model_id, body.server, body.aliases, body.sampling, body.reset_sampling,
+                                          body.thinking_mode)
     except KeyError:
         raise HTTPException(404, "No such model.")
     except ValueError as exc:
         raise HTTPException(400, str(exc))
-    return {"model": entry, "reloadNeeded": hub.loaded_model() == model_id}
+    # Sampling and thinking go with each request; only server settings need the model loaded again.
+    return {"model": entry, "reloadNeeded": body.server is not None and hub.loaded_model() == model_id}
 
 
 @router.post("/hub/api/models/{model_id}/load")
@@ -392,12 +406,14 @@ class KeyCreate(BaseModel):
     name: str
     priority: str = "normal"
     allowed_ips: str = ""
+    away: bool = False                      # also through the proxy (hub.slq.dk), from outside the home network
 
 
 class KeyPatch(BaseModel):
     priority: str | None = None
     allowed_ips: str | None = None
     enabled: bool | None = None
+    away: bool | None = None
 
 
 @router.get("/hub/api/keys")
@@ -408,14 +424,14 @@ async def list_keys():
 @router.post("/hub/api/keys")
 async def create_key(body: KeyCreate):
     try:
-        return auth.create_api_key(body.name, body.priority, body.allowed_ips)
+        return auth.create_api_key(body.name, body.priority, body.allowed_ips, away=body.away)
     except ValueError as exc:
         raise HTTPException(400, str(exc))
 
 
 @router.patch("/hub/api/keys/{key_id}")
 async def patch_key(key_id: int, body: KeyPatch):
-    fields = {k: (int(v) if isinstance(v, bool) else v) for k, v in body.model_dump().items() if v is not None}
+    fields = {k: v for k, v in body.model_dump().items() if v is not None}
     try:
         if not auth.update_api_key(key_id, **fields):
             raise HTTPException(404, "No such key.")

@@ -108,6 +108,9 @@ def responder(body: dict) -> dict:
         return {"content": "The game runs.", "delay": 2}
     asked = " ".join(m["content"] for m in msgs if m["role"] == "user" and isinstance(m["content"], str)).lower()
     if "loop" in asked:                                 # a small model stuck repeating itself (the Hub stops it)
+        if "handed this turn over" in json.dumps(msgs[-1]):   # the stronger model it was handed over to
+            return {"content": "Taking over: the XC60 diesel emits about 170 g CO2/km on the road; the Tesla's "
+                               "share depends on the Danish grid. Sources follow."}
         if not body.get("tools"):
             return {"content": "I could not find the exact figure; here is what the two pages say."}
         return {"content": "I have the numbers now. Let me fetch the exact figures to be precise.",
@@ -156,6 +159,29 @@ HF_DEMO = {"tiny_downloads": True, "repos": {"unsloth/Qwen3-Coder-30B-A3B-Instru
              "chat_template": "{% if tools %}<tools>{% endif %}"}}}}
 
 
+# Search ("Ornith 1.5 9B" in the dialog): the records the search API returns, and Ornith's own repository.
+HF_DEMO["repos"]["ornith-ai/Ornith-1.5-9B-GGUF"] = {
+    "tree": [_hf_file(f"Ornith-1.5-9B-{q}.gguf", gb) for q, gb in
+             (("Q4_K_M", 5.38), ("Q5_K_M", 6.18), ("Q6_K", 7.04), ("Q8_0", 9.12), ("BF16", 17.14))]
+            + [_hf_file("README.md", 0.00001)],
+    "gguf": {"architecture": "qwen35", "context_length": 262144, "total": 9_200_000_000,
+             "chat_template": "{% if tools %}<tools>{% endif %}{% if enable_thinking %}<think>{% endif %}"}}
+HF_DEMO["listing"] = [
+    {"id": "ornith-ai/Ornith-1.5-9B-GGUF", "downloads": 48210, "likes": 312, "tags": ["gguf"],
+     "createdAt": "2026-09-30T10:00:00.000Z"},
+    {"id": "bartowski/ornith-ai_Ornith-1.5-9B-GGUF", "downloads": 9120, "likes": 41, "tags": ["gguf"],
+     "createdAt": "2026-10-01T08:00:00.000Z"},
+    {"id": "ornith-ai/Ornith-1.5-27B-GGUF", "downloads": 20511, "likes": 140, "tags": ["gguf"],
+     "createdAt": "2026-09-30T10:00:00.000Z"},
+    {"id": "ornith-ai/Ornith-1.0-9B-GGUF", "downloads": 30122, "likes": 201, "tags": ["gguf"],
+     "createdAt": "2026-07-02T10:00:00.000Z"},
+    {"id": "ornith-ai/Ornith-1.5-9B", "downloads": 15000, "likes": 260, "tags": ["safetensors"],
+     "createdAt": "2026-09-30T10:00:00.000Z"},
+    {"id": "unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF", "downloads": 523000, "likes": 900, "tags": ["gguf"],
+     "createdAt": "2025-08-01T10:00:00.000Z"},
+]
+
+
 # Picture models from a link: a Hugging Face repository with an SDXL and an SD 1.5 checkpoint, and a Civitai
 # model with a Pony version and a Flux one (try https://civitai.com/models/257749 in Add image model).
 _T = {"dtype": "F16", "shape": [4], "data_offsets": [0, 8]}
@@ -188,6 +214,9 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=8080)
     ap.add_argument("--data", default="")
+    ap.add_argument("--public-url", default="", help="the address through the proxy, e.g. https://hub.example.test")
+    ap.add_argument("--proxy", default="", help="treat this peer as the trusted proxy (X-Forwarded-For is believed)")
+    ap.add_argument("--lan-host", default="", help="the Hub's LAN address, for the Apps page")
     a = ap.parse_args()
     base = Path(a.data or tempfile.mkdtemp(prefix="hub-dev-"))
     data, models = base / "data", base / "models"
@@ -196,7 +225,8 @@ def main() -> None:
     dist = ROOT / "frontend" / "dist"
     env = Env(data_dir=data, models_dir=models, llm_url="http://supervisor", llm_host="llm", comfy_url="http://comfy",
               searxng_url="http://searxng", sandbox_url="http://sandbox:7000", sandbox_ip="172.31.250.20",
-              internal_token="tok", secret_key="dev", public_url="", trusted_proxies=(),
+              internal_token="tok", secret_key="dev", public_url=a.public_url,
+              trusted_proxies=(a.proxy,) if a.proxy else (), lan_host=a.lan_host,
               lan_networks=tuple(_networks(["127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"])),
               admin_user="soren", admin_password_hash=auth.hash_password("correct horse battery", n=2**10),
               static_dir=dist if (dist / "index.html").is_file() else None)
@@ -209,7 +239,7 @@ def main() -> None:
     t = Transports(llm=router, runner=router, comfy=router, sandbox=router, web=router)
     app = create_app(env, t, startup=False)
     print(f"SLQ Hub (fake services) on http://127.0.0.1:{a.port}  data: {base}")
-    uvicorn.run(app, host="127.0.0.1", port=a.port, log_level="warning")
+    uvicorn.run(app, host="127.0.0.1", port=a.port, log_level="warning", proxy_headers=False)   # as in production
 
 
 if __name__ == "__main__":

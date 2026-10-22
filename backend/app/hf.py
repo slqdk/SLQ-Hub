@@ -177,6 +177,55 @@ async def lookup(repo: str, transport: httpx.AsyncBaseTransport | None = None) -
             "suggested": suggest(repo)}
 
 
+def looks_like_repo(text: str) -> bool:
+    """A repository (owner/name or a link) rather than words to search for."""
+    try:
+        parse_repo(text)
+        return True
+    except HFError:
+        return False
+
+
+def _words(text: str) -> str:
+    return " " + re.sub(r"[^a-z0-9.]+", " ", text.lower()).strip() + " "
+
+
+async def search(query: str, transport: httpx.AsyncBaseTransport | None = None, limit: int = 20) -> list[dict]:
+    """GGUF repositories whose name holds every word of the query, the most
+    downloaded first. The API matches one string, so it is asked for the
+    longest word and the rest are matched here ("Ornith 1.5 9B" finds
+    ornith-ai/Ornith-1.5-9B-GGUF and the requantisations of it)."""
+    words = [w for w in _words(query).split() if w]
+    if not words:
+        return []
+    params = {"search": max(words, key=len), "filter": "gguf", "sort": "downloads", "direction": "-1",
+              "limit": "100"}
+    async with httpx.AsyncClient(timeout=httpx.Timeout(20, connect=10), follow_redirects=True,
+                                 transport=transport) as c:
+        try:
+            r = await c.get(f"{HF}/api/models", params=params, headers=_headers())
+        except httpx.HTTPError as exc:
+            raise HFError(f"Could not reach Hugging Face ({exc.__class__.__name__}).", 502)
+    if r.status_code >= 400:
+        raise HFError(f"Hugging Face's search answered {r.status_code}.", 502)
+    try:
+        items = r.json()
+    except ValueError:
+        raise HFError("Hugging Face's search sent something that is not JSON.", 502)
+    out = []
+    for it in items if isinstance(items, list) else []:
+        repo = str(it.get("id") or it.get("modelId") or "")
+        name = _words(repo)
+        if not REPO_RE.match(repo) or not all(f" {w} " in name or w in name.replace(" ", "") for w in words):
+            continue
+        out.append({"repo": repo, "downloads": int(it.get("downloads") or 0), "likes": int(it.get("likes") or 0),
+                    "updated": it.get("lastModified") or it.get("createdAt") or None,
+                    "gated": bool(it.get("gated"))})
+        if len(out) >= limit:
+            break
+    return out
+
+
 def make_entry(repo: str, choice: dict, mmproj: dict | None, model_id: str, name: str, ctx: int,
                tools: bool, thinking: bool, meta: dict) -> dict:
     """A catalog entry like the bundled ones: files under llm/hf/<owner>--<name>/."""

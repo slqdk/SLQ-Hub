@@ -155,8 +155,12 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
     const ps = project?.settings;
     const agent = settings?.agent ?? {};
     const def = settings?.models?.default ?? models?.defaults?.default ?? llms[0]?.id ?? "";
-    const thinking = cs.thinking ?? ps?.thinking ?? (project ? agent.thinking_in_projects : agent.thinking_in_chats) ?? false;
-    return { model: cs.model ?? ps?.model ?? def, thinking: !!thinking, effort: cs.effort ?? agent.effort ?? "medium",
+    const model = cs.model ?? ps?.model ?? def;
+    // The chat's choice, the project's, the model's own (Settings -> Models), then Settings -> Assistant.
+    const mode = llms.find((m) => m.id === model)?.thinking_mode;
+    const thinking = cs.thinking ?? ps?.thinking ?? (mode ? mode === "on" : undefined)
+      ?? (project ? agent.thinking_in_projects : agent.thinking_in_chats) ?? false;
+    return { model, thinking: !!thinking, effort: cs.effort ?? agent.effort ?? "medium",
       skills: cs.skills ?? [], libraries: cs.libraries ?? [], image_model: cs.image_model ?? null };
   }, [data, draft, project, settings, models, llms]);
 

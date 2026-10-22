@@ -134,6 +134,7 @@ DEFAULTS: dict = {
         "effort": "medium",
         "tool_output_chars": 12000,
         "user_name": "",                   # how the assistant calls the user ("" = the admin user name)
+        "escalate_to": "qwen3.8-27b",      # a stuck turn goes on with this model ("" = it answers with what it has)
     },
     "cloud": {
         "provider": "anthropic",           # anthropic | openai (any OpenAI-compatible endpoint)

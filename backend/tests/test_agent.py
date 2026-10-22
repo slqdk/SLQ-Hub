@@ -347,7 +347,7 @@ async def test_image_generation_switches_the_card_and_back(signed_in, app, fakes
     assert run.status == "done", run.events[-1]
     assert len(fakes.comfy["prompts"]) == 1
     result = next(e for e in run.events if e["type"] == "tool_result")
-    assert result["data"]["ok"] and result["data"]["images"]
+    assert result["data"]["ok"] and result["data"]["images"] and "The call asked for" not in result["data"]["text"]
     # the model looked at the picture it made
     after = fakes.llama["requests"][1]["messages"]
     assert after[-1]["role"] == "user" and after[-1]["content"][1]["type"] == "image_url"
@@ -375,6 +375,8 @@ async def test_ernie_image_with_its_prompt_enhancer(signed_in, app, fakes):
     assert any(n["inputs"].get("unet_name") == "ernie-image-turbo.safetensors" for n in graph.values())
     result = next(e for e in run.events if e["type"] == "tool_result")
     assert result["data"]["ok"] and "prompt enhancer turned the prompt into: A red fox stands" in result["data"]["text"]
+    # the call named another model than the chat's (Settings: Qwen-Image 2.1): the result says so
+    assert "The call asked for ernie-image; this chat's picture model is Qwen-Image 2.1." in result["data"]["text"]
     tool_msg = next(m for m in fakes.llama["requests"][1]["messages"] if m["role"] == "tool")
     assert "A red fox stands in deep fresh snow" in json.dumps(tool_msg)
 
@@ -530,7 +532,8 @@ async def test_repeated_failures_escalate_automatically(signed_in, app, fakes):
     run = await finish(app, await say(signed_in, c["id"], "read it"))
     assert run.status == "done"
     assert len(fakes.llama["requests"]) == 3
-    assert next(e for e in run.events if e["type"] == "escalated")["data"]["reason"] == "three tool calls in a row failed"
+    # the third identical step is seen before its call fails a third time
+    assert next(e for e in run.events if e["type"] == "escalated")["data"]["reason"] == "the same step (read_file) 3 times"
 
 
 async def test_api_calls_never_escalate(signed_in, app, fakes, api_key):
@@ -817,3 +820,199 @@ async def test_deleting_a_chat_removes_its_folder(signed_in, app, fakes):
     assert not folder.exists() and chats.get_chat(c["id"]) is None
     lst = (await signed_in.get("/hub/api/chats")).json()
     assert all(x["id"] != c["id"] for x in lst)
+
+
+# ---------------------------------------------------------------- handing over to a stronger local model
+
+def _main_models(fakes) -> list[str]:
+    return [s["args"][1].rsplit("/", 1)[-1] for s in fakes.sup["starts"] if s["name"] == "main"]
+
+
+async def test_a_stuck_small_model_hands_over_to_the_strong_one(signed_in, app, fakes):
+    """The chat runs on the fast model; when it loops, the turn goes on with
+    Qwen3.8 27B (Settings -> Assistant), on the same lease, with its own
+    system prompt and a note - and the chat says so."""
+    hub = app.state.hub
+    hub.settings.update("models", {"default": "qwen3.6-35b-a3b"})
+
+    def responder(body):
+        if "short title" in last_user(body):
+            return {"content": "Biler"}
+        if body["model"] == "qwen3.8-27b":
+            return {"content": "Her er sammenligningen, med kilder."}
+        return {"content": "Lad mig hente tallene.", "reasoning": "fetch again",
+                "tool_calls": [{"name": "web_search", "arguments": {"query": "xc60 co2"}}]}
+    fakes.llama["responder"] = responder
+    c = await new_chat(signed_in)
+    run = await finish(app, await say(signed_in, c["id"], "XC60 mod Tesla?"))
+    assert run.status == "done", run.events[-1]
+    small = [b for b in fakes.llama["requests"] if b["model"] == "qwen3.6-35b-a3b"]
+    big = [b for b in fakes.llama["requests"] if b["model"] == "qwen3.8-27b" and "short title" not in last_user(b)]
+    assert len(small) == 3 and len(big) == 1
+    esc = next(t for t in small[0]["tools"] if t["function"]["name"] == "escalate")["function"]["description"]
+    assert "Qwen3.8 27B, a stronger model on this server" in esc
+    assert "Qwen3.8 27B, a stronger model on this server takes over" in small[0]["messages"][0]["content"]
+    first = big[0]
+    assert "You run as Qwen3.8 27B" in first["messages"][0]["content"]
+    assert "handed over to you by Qwen3.6 35B-A3B" in first["messages"][0]["content"]
+    assert "handed this turn over to you because the same step (web_search) 3 times" in first["messages"][-1]["content"]
+    assert not any("reasoning_content" in m for m in first["messages"])            # not the other model's thinking
+    assert "escalate" not in {t["function"]["name"] for t in first["tools"]}      # nobody stronger left (no cloud)
+    assert _main_models(fakes) == ["Qwen3.6-35B-A3B-UD-IQ4_XS.gguf", "Qwen3.8-27B-UD-Q4_K_M.gguf"]
+    esc_ev = next(e for e in run.events if e["type"] == "escalated")["data"]
+    assert esc_ev == {"model": "Qwen3.8 27B", "model_id": "qwen3.8-27b", "reason": "the same step (web_search) 3 times",
+                      "local": True}
+    steps = chats.runs_for_chat(c["id"])[0]["steps"]
+    assert {"type": "escalated", "model": "qwen3.8-27b", "from": "qwen3.6-35b-a3b",
+            "reason": "the same step (web_search) 3 times", "local": True} in steps
+    assert not any(s["type"] == "loop" for s in steps)                             # handed over, not forced
+    answer = chats.messages(c["id"])[-1]["content"]
+    assert answer[0] == {"type": "notice", "text": "Handed over from Qwen3.6 35B-A3B to Qwen3.8 27B: the same step "
+                                                   "(web_search) 3 times."}
+    assert answer[-1] == {"type": "text", "text": "Her er sammenligningen, med kilder."}
+    prompts = chats.prompts_for_chat(c["id"])
+    assert [(p["reason"], p["model"]) for p in prompts] == [("start", "qwen3.6-35b-a3b"), ("handed over", "qwen3.8-27b")]
+    assert "web_search" in prompts[0]["tools"] and "escalate" in prompts[0]["tools"]
+    assert "handed over to you by Qwen3.6 35B-A3B" in prompts[1]["system"]
+
+    # The same system prompt is stored once however many turns use it, and goes with the last of them.
+    from app import db
+    fakes.llama["responder"] = None
+    fakes.llama["replies"] = [{"content": "Ja."}]
+    hub.settings.update("models", {"default": "qwen3.8-27b"})
+    await finish(app, await say(signed_in, c["id"], "Tak"))
+    fakes.llama["replies"] = [{"content": "Ja igen."}]
+    await finish(app, await say(signed_in, c["id"], "Tak igen"))
+    prompts = chats.prompts_for_chat(c["id"])
+    assert len(prompts) == 4 and prompts[3]["system"] is None and prompts[3]["same_as"] == prompts[2]["id"]
+    with db.connect() as con:
+        texts = con.execute("SELECT COUNT(*) FROM prompt_texts").fetchone()[0]
+    assert texts == 3                                     # start, handed over, and the plain turns' prompt once
+    assert (await signed_in.delete(f"/hub/api/chats/{c['id']}")).status_code == 200
+    with db.connect() as con:
+        assert con.execute("SELECT COUNT(*) FROM run_prompts").fetchone()[0] == 0
+        assert con.execute("SELECT COUNT(*) FROM prompt_texts").fetchone()[0] == 0
+
+
+async def test_failing_calls_and_the_escalate_tool_hand_over_too(signed_in, app, fakes):
+    hub = app.state.hub
+    hub.settings.update("models", {"default": "qwen3.6-35b-a3b"})
+    n = {"i": 0}
+
+    def responder(body):
+        if "short title" in last_user(body):
+            return {"content": "Fil"}
+        if body["model"] == "qwen3.8-27b":
+            return {"content": "Done by the big one."}
+        n["i"] += 1
+        return {"tool_calls": [{"name": "read_file", "arguments": {"path": f"missing{n['i']}.txt"}}]}
+    fakes.llama["responder"] = responder
+    c = await new_chat(signed_in)
+    run = await finish(app, await say(signed_in, c["id"], "read the files"))
+    assert next(e for e in run.events if e["type"] == "escalated")["data"]["reason"] == "three tool calls in a row failed"
+    assert texts(run).endswith("Done by the big one.")
+
+    fakes.llama["requests"] = []
+    fakes.llama["responder"] = lambda body: ({"content": "Big answer."} if body["model"] == "qwen3.8-27b" else
+                                             {"tool_calls": [{"name": "escalate", "arguments": {"reason": "needs a real proof"}}]})
+    run = await finish(app, await say(signed_in, c["id"], "prove it"))
+    esc = next(e for e in run.events if e["type"] == "escalated")["data"]
+    assert esc["reason"] == "needs a real proof" and esc["model_id"] == "qwen3.8-27b"
+    result = [b for m in chats.messages(c["id"]) if m["role"] == "tool" for b in m["content"]][-1]
+    assert "Handing this turn over to Qwen3.8 27B" in result["text"]
+
+
+async def test_nobody_to_hand_over_to_means_an_answer_without_tools(signed_in, app, fakes):
+    hub = app.state.hub
+    hub.settings.update("models", {"default": "qwen3.6-35b-a3b"})
+    hub.settings.update("agent", {"escalate_to": ""})
+    fakes.llama["responder"] = lambda body: (
+        {"content": "Kort svar."} if not body.get("tools") else
+        {"content": "Igen.", "tool_calls": [{"name": "web_search", "arguments": {"query": "x"}}]})
+    c = await new_chat(signed_in)
+    run = await finish(app, await say(signed_in, c["id"], "søg"))
+    assert not any(e["type"] == "escalated" for e in run.events)
+    assert any(e["type"] == "loop" for e in run.events) and texts(run).endswith("Kort svar.")
+    assert all(b["model"] == "qwen3.6-35b-a3b" for b in fakes.llama["requests"])
+    assert "escalate" not in {t["function"]["name"] for t in fakes.llama["requests"][0]["tools"]}
+
+
+async def test_local_first_then_the_cloud(signed_in, app, fakes):
+    """In a project with cloud escalation: the small model's loop goes to
+    Qwen3.8 27B, and when that one keeps failing, to the cloud."""
+    hub = app.state.hub
+    hub.settings.update("models", {"default": "qwen3.6-35b-a3b"})
+    c = await _cloud_project(signed_in, app)
+    n = {"i": 0}
+
+    def responder(body):
+        if "short title" in last_user(body):
+            return {"content": "Svær"}
+        n["i"] += 1
+        if body["model"] == "qwen3.8-27b":
+            return {"tool_calls": [{"name": "read_file", "arguments": {"path": f"nope{n['i']}.txt"}}]}
+        return {"content": "Same.", "tool_calls": [{"name": "web_search", "arguments": {"query": "x"}}]}
+    fakes.llama["responder"] = responder
+    fakes.cloud["replies"] = [{"content": "The cloud finished it."}]
+    run = await finish(app, await say(signed_in, c["id"], "hard task"))
+    assert run.status == "done", run.events[-1]
+    escalations = [e["data"] for e in run.events if e["type"] == "escalated"]
+    assert [(e["model"], e["reason"]) for e in escalations] == [
+        ("Qwen3.8 27B", "the same step (web_search) 3 times"), ("openai:big-model", "three tool calls in a row failed")]
+    assert texts(run).endswith("The cloud finished it.")
+    assert "# Escalated" in fakes.cloud["requests"][0]["messages"][0]["content"]
+
+
+# ---------------------------------------------------------------- what each step sent, and the model's own settings
+
+async def test_steps_record_what_was_sent_and_why_it_stopped(signed_in, app, fakes):
+    fakes.llama["replies"] = [{"tool_calls": [{"name": "list_files", "arguments": {}}]}, {"content": "Tom mappe."},
+                              {"content": "Mappe"}]
+    c = await new_chat(signed_in)
+    await finish(app, await say(signed_in, c["id"], "hvad er der i mappen?"))
+    model_steps = [s for s in chats.runs_for_chat(c["id"])[0]["steps"] if s["type"] == "model"]
+    first, last = model_steps[0], model_steps[-1]
+    assert first["finish"] == "tool_calls" and last["finish"] == "stop"
+    sent = first["sent"]
+    assert sent["thinking"] is False and sent["sampling"] == {"temperature": 0.7, "top_p": 0.8, "top_k": 20,
+                                                              "min_p": 0.0, "presence_penalty": 1.5}
+    assert sent["tools"] > 10 and sent["messages"] == 2 and sent["max_tokens"] >= 1024 and sent["estimated_tokens"] > 0
+    prompt = chats.prompts_for_chat(c["id"])
+    assert len(prompt) == 1 and prompt[0]["reason"] == "start" and "SLQ Hub" in prompt[0]["system"]
+    r = await signed_in.get(f"/hub/api/chats/{c['id']}/export")
+    import io
+    import zipfile
+    data = json.loads(zipfile.ZipFile(io.BytesIO(r.content)).read("chat.json"))
+    assert data["prompts"][0]["system"] == prompt[0]["system"]
+    assert data["runs"][0]["steps"][1]["sent"]["sampling"]["presence_penalty"] == 1.5
+
+
+async def test_a_models_own_thinking_and_sampling(signed_in, app, fakes):
+    """Settings -> Models: thinking for chats without a choice of their own,
+    and sampling values that replace the card's - checked, and resettable."""
+    put = lambda body: signed_in.put("/hub/api/models/qwen3.8-27b", json=body, headers={"Origin": "http://hub"})  # noqa: E731
+    r = await put({"thinking_mode": "on", "sampling": {"instruct": {"temperature": 0.3, "top_k": "40", "min_p": ""},
+                                                       "thinking": {"temperature": 0.9}}})
+    assert r.status_code == 200, r.text
+    assert r.json()["reloadNeeded"] is False                     # no server change: nothing to reload
+    m = r.json()["model"]
+    assert m["thinking_mode"] == "on" and m["sampling_own"] is True
+    assert m["sampling"]["instruct"] == {"temperature": 0.3, "top_k": 40} and m["sampling_card"]["instruct"]["top_k"] == 20
+    fakes.llama["replies"] = [{"content": "Tænkt."}, {"content": "Titel"}]
+    c = await new_chat(signed_in)
+    await finish(app, await say(signed_in, c["id"], "hej"))
+    body = fakes.llama["requests"][0]
+    assert body["chat_template_kwargs"]["enable_thinking"] is True and body["temperature"] == 0.9   # the thinking values
+    fakes.llama["requests"] = []
+    await signed_in.patch(f"/hub/api/chats/{c['id']}", json={"settings": {"thinking": False}}, headers={"Origin": "http://hub"})
+    await finish(app, await say(signed_in, c["id"], "igen"))
+    body = fakes.llama["requests"][0]
+    assert body["chat_template_kwargs"]["enable_thinking"] is False                 # the chat's own choice wins
+    assert body["temperature"] == 0.3 and body["top_k"] == 40 and "min_p" not in body
+    # refused values, then back to the card's
+    assert (await put({"sampling": {"instruct": {"temperature": 5}}})).status_code == 400
+    assert (await put({"sampling": {"instruct": {"seed": 1}}})).status_code == 400
+    assert (await put({"sampling": {"fast": {}}})).status_code == 400
+    assert (await put({"thinking_mode": "maybe"})).status_code == 400
+    m = (await put({"reset_sampling": True, "thinking_mode": "follow"})).json()["model"]
+    assert m["sampling"]["instruct"]["temperature"] == 0.7 and "sampling_own" not in m and "thinking_mode" not in m

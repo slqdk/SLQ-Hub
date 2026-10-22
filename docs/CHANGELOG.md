@@ -1,5 +1,48 @@
 # Changelog
 
+## 0.10.0 - 2026-10-22
+
+- **A stuck model hands over to a stronger one.** Settings -> Assistant ->
+  "When the model gets stuck, hand over to" (default Qwen3.8 27B). A turn is
+  stuck when the model repeats itself, three tool calls in a row fail, or it
+  asks for help (the escalate tool). The turn then goes on with the stronger
+  model: the card switches within the turn, and the chat says "Handed over
+  from Ornith 1.5 9B to Qwen3.8 27B: ...". In projects with cloud escalation
+  the cloud comes after that. With nobody to hand over to, the model answers
+  with what it has, as in 0.9.1.
+- **Each model's own thinking and sampling.** Settings -> Models -> Settings
+  (the dialog that had the server settings). "Thinking in chats": follow the
+  chat and Settings, always think first, or never. Sampling with and without
+  thinking (temperature, top P, top K, min P, presence penalty), filled in
+  from the model card. "Use the model's own sampling" goes back to the card.
+- **Add from Hugging Face searches by name.** Type "Ornith 1.5 9B" and pick a
+  repository from the list (GGUF only, most downloaded first). owner/name or
+  a link still works. Q8_0 is preselected where it fits the card easily; a
+  16-bit file says that it is twice the size of Q8_0.
+- **Keys that work away from home.** Settings -> Apps and keys: each key works
+  "At home" or "At home and away". An away key also works through
+  hub.slq.dk, from anywhere. The phone link of an away key uses that address,
+  which is HTTPS, so the page can be installed as an app. Turning a key that
+  was limited to the home network into an away key removes that limit. The
+  other keys stay on the LAN. "Allow the model API from outside the LAN" is
+  now "Allow every key from outside the LAN"; like away keys, it works only
+  through the proxy.
+- **The phone page says why it is refused**: only at home, or not through
+  this address, plus the address the Hub sees the phone at. A key opened from
+  a link is kept even when the Hub refuses it, so "Try again" works once the
+  key is allowed.
+- **More in the troubleshooting export.** Each model step records what was
+  sent (sampling, thinking, effort, max tokens, how many tools and messages,
+  the estimated prompt size) and why it stopped. The system prompt and the
+  tools are kept when they change: at the start, at a hand-over, after
+  condensing. Each distinct prompt is stored once. The model server's log
+  leaves out the vision models' "non-consecutive token position" warnings,
+  which hid everything else; they are counted instead.
+- **From chat 9:**
+  - The assistant answers in the language of your latest message.
+  - It makes one picture unless you ask for more.
+  - A picture made with another model than the chat's says so in the result.
+
 ## 0.9.1 - 2026-10-22
 
 - **A model stuck in a loop is stopped.** Chat 7, exported from the

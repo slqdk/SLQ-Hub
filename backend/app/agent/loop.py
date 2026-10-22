@@ -61,6 +61,18 @@ def vision(model: dict) -> bool:
     return "vision" in (model.get("capabilities") or [])
 
 
+def local_target(hub: Hub, current: dict) -> dict | None:
+    """The stronger model on this server a stuck turn is handed over to
+    (Settings -> Assistant), when it is downloaded and not the one already working."""
+    want = str(hub.settings.get("agent", "escalate_to") or "").strip()
+    if not want:
+        return None
+    entry = hub.catalog.get_llm(hub.catalog.resolve(want) or want)
+    if not entry or entry["id"] == current["id"] or not hub.catalog.installed(entry):
+        return None
+    return entry
+
+
 class Engine:
     """Runs model steps and tool calls for one conversation: the turn's main
     agent (depth 0) or a subagent (depth 1)."""
@@ -89,6 +101,14 @@ class Engine:
         self.repeats = 0
         self.same_steps: dict[str, int] = {}
         self.must_answer = ""
+        # Hand-over (a loop, three failed calls, or the escalate tool): first to the stronger local model,
+        # then - in projects that allow it - to the cloud. A note goes with the next answer.
+        self.handed_over_from = ""            # the model's name this turn was handed over from
+        self.turn_options: dict = {}          # the turn's own choices (thinking, effort), for the next model
+        self.pending_notice = ""
+        self._step = 0
+        self._tool_names: list[str] = []
+        self._last_prompt: tuple | None = None
 
     # ------------------------------------------------------------ helpers
     def emit(self, kind: str, **data) -> None:
@@ -101,13 +121,30 @@ class Engine:
                            ticket=self.ticket, model=self.model, depth=self.depth, call_id=call_id, state=self.state,
                            engine=self)
 
+    def local_target(self) -> dict | None:
+        if self.depth or self.cloud is not None or self.handed_over_from:
+            return None
+        return local_target(self.hub, self.model)
+
+    def can_hand_over(self) -> bool:
+        return self.local_target() is not None or (self.escalation and self.cloud is None)
+
+    def handover_label(self) -> str:
+        """Who takes over if this model gets stuck (for its prompt and the escalate tool); "" = nobody."""
+        target = self.local_target()
+        if target is not None:
+            return f"{target['name']}, a stronger model on this server"
+        if self.escalation and self.cloud is None:
+            return "a stronger cloud model"
+        return ""
+
     def tools(self) -> list[Tool]:
         ctx = self.tool_context("")
         out = []
         for t in REGISTRY.values():
             if self.depth and not t.in_subagent:
                 continue
-            if t.name == "escalate" and (not self.escalation or self.cloud is not None):
+            if t.name == "escalate" and not self.can_hand_over():
                 continue
             try:
                 if t.available(ctx):
@@ -142,8 +179,10 @@ class Engine:
         by_name = {t.name: t for t in tools}
         schemas = self.schemas(tools)
         self.schema_tokens = C.schema_tokens(schemas)
+        self._note_prompt(messages, tools, "subagent" if self.depth else "start")
         final = ""
         for step in range(1, max_steps + 1):
+            self._step = step
             await self._inbox(messages, persist)
             messages = await self._fit(messages, compact)
             forced = bool(self.must_answer)
@@ -164,9 +203,11 @@ class Engine:
             if res.get("reasoning") and not self.cloud:
                 msg["reasoning_content"] = res["reasoning"]
             messages.append(msg)
-            blocks: list[dict] = []
-            if forced:                            # shown in the chat, never sent to the model
-                blocks.append({"type": "notice", "text": loop_notice(self.must_answer)})
+            notes = [self.pending_notice] if self.pending_notice else []
+            self.pending_notice = ""
+            if forced:
+                notes.append(loop_notice(self.must_answer))
+            blocks: list[dict] = [{"type": "notice", "text": n} for n in notes]   # shown, never sent to a model
             if res.get("reasoning"):
                 blocks.append({"type": "thinking", "text": res["reasoning"]})
             if res.get("content"):
@@ -182,7 +223,7 @@ class Engine:
                 self.same_steps[same] = self.same_steps.get(same, 0) + 1
                 if self.same_steps[same] >= LOOP_SAME_STEPS:
                     names = ", ".join(dict.fromkeys(c["name"] for c in calls))
-                    self._loop(f"the same step ({names}) {self.same_steps[same]} times")
+                    self._stuck(f"the same step ({names}) {self.same_steps[same]} times", loop=True)
             if not calls:
                 if self.run.inbox and not self.depth and step < max_steps:
                     continue                      # the user wrote meanwhile: answer that too, in this turn
@@ -211,11 +252,16 @@ class Engine:
                 messages.append({"role": "user", "content": [{"type": "text", "text": "(Images returned by the "
                                                                                       "tools above.)"}, *parts]})
             reason = self.state.pop("escalate", None)
-            if reason and self.cloud is None and self.escalation:
-                await self._escalate(messages, reason)
+            if reason:
+                if self.local_target() is not None:
+                    await self._hand_over(messages, reason)
+                elif self.escalation and self.cloud is None:
+                    await self._escalate(messages, reason)
                 tools = self.tools()
                 by_name = {t.name: t for t in tools}
                 schemas = self.schemas(tools)
+                self.schema_tokens = C.schema_tokens(schemas)
+                self._note_prompt(messages, tools, "escalated" if self.cloud is not None else "handed over")
         note = f"(Stopped after {max_steps} steps - ask me to continue if there is more to do.)"
         self.emit("text", text="\n\n" + note)
         if persist:
@@ -250,6 +296,7 @@ class Engine:
             folded = await compact(messages)
             if folded is not messages:                # within one long turn there is nothing to fold
                 self.emit("compacted", before=before, after=size(folded))
+                self._note_prompt(folded, None, "compacted")
             messages = folded
         if size(messages) > budget:
             messages = C.trim_tool_results(messages, keep_last=2, limit=400)
@@ -274,6 +321,7 @@ class Engine:
                     self._forward(kind, data)
             if res is None:
                 raise LlmError("the cloud model sent no answer")
+            sent = {"cloud": True, "tools": len(schemas), "messages": len(messages)}
         else:
             if self.ticket is not None:
                 t_switch = time.monotonic()
@@ -284,6 +332,7 @@ class Engine:
             room = self.ctx_limit - C.estimate_tokens(messages) - (self.schema_tokens if schemas else 0)
             pl = P.build(self.model, messages, tools=schemas or None, thinking=self.thinking, effort=self.effort,
                          sampling={"max_tokens": max(1024, min(32768, room))})
+            sent = sent_summary(pl, len(messages), len(schemas), self.ctx_limit - room)
             acc = Accumulator()
             async for chunk in self.hub.llm.stream_chat(self.hub.main_url, pl):
                 for kind, data in acc.feed(chunk):
@@ -299,7 +348,8 @@ class Engine:
                "prompt_tokens": u.get("prompt_tokens"), "cached_tokens": t.get("cache_n"),
                "completion_tokens": u.get("completion_tokens"),
                "prompt_tps": _rate(t, "prompt"), "tps": _rate(t, "predicted"),
-               "seconds": round(time.monotonic() - t0, 2)}
+               "seconds": round(time.monotonic() - t0, 2),
+               "sent": sent, "finish": res.get("finish_reason")}
         self.steps.append(rec)
         self.emit("usage", **{k: v for k, v in rec.items() if k not in ("type", "depth")})
         return res
@@ -338,7 +388,7 @@ class Engine:
                     self.repeats += 1
                     result = ToolResult(REPEATED.format(name=name), is_error=True)
                     if self.repeats >= LOOP_REPEATS:
-                        self._loop(f"{self.repeats} repeated tool calls")
+                        self._stuck(f"{self.repeats} repeated tool calls", loop=True)
                     return self._finish(name, cid, args, result, t0)
                 allowed = True
                 if tool.needs_approval and not always_allowed(name):
@@ -399,34 +449,110 @@ class Engine:
             return clip(text, limit)[0]
 
     def _watch(self, name: str, args: dict, result: ToolResult) -> None:
-        """Automatic escalation: three failed tool calls in a row, or the same
+        """Automatic hand-over: three failed tool calls in a row, or the same
         call three times in the last six."""
         self.fail_streak = self.fail_streak + 1 if result.is_error else 0
         sig = name + json.dumps(args, sort_keys=True, ensure_ascii=False)[:500]
         self.recent = (self.recent + [sig])[-6:]
-        if not self.escalation or self.cloud is not None or "escalate" in self.state:
-            return
         if self.fail_streak >= 3:
-            self.state["escalate"] = "three tool calls in a row failed"
+            self._stuck("three tool calls in a row failed", loop=False)
         elif self.recent.count(sig) >= 3:
-            self.state["escalate"] = f"the same {name} call was made three times"
+            self._stuck(f"the same {name} call was made three times", loop=False)
+
+    def _note_prompt(self, messages: list[dict], tools: list[Tool] | None, reason: str) -> None:
+        """Keep the system prompt and tool names the model works with, when they change."""
+        if tools is not None:
+            self._tool_names = [t.name for t in tools]
+        if not messages or messages[0].get("role") != "system":
+            return
+        system = str(messages[0].get("content") or "")
+        key = (system, tuple(self._tool_names), self.model["id"])
+        if key == self._last_prompt:
+            return
+        self._last_prompt = key
+        try:
+            chats.save_prompt(self.run.id, self.depth, self._step, self.model["id"], reason, system, self._tool_names)
+        except Exception:  # noqa: BLE001 - a record for later, never a reason to fail the turn
+            log.exception("could not store the prompt")
+
+    def _stuck(self, reason: str, loop: bool) -> None:
+        """Hand the turn over if someone can take it; otherwise a loop ends in an answer without tools."""
+        if self.must_answer or "escalate" in self.state:
+            return
+        if self.can_hand_over():
+            self.state["escalate"] = reason
+        elif loop:
+            self._loop(reason)
 
     async def _escalate(self, messages: list[dict], reason: str) -> None:
-        self.must_answer, self.repeats, self.same_steps = "", 0, {}
+        self.must_answer, self.repeats, self.same_steps, self.fail_streak, self.recent = "", 0, {}, 0, []
         self.cloud = cloudmod.CloudClient(self.hub.settings, transport=self.hub.transports.web)
         self.emit("escalated", model=self.cloud.label, reason=reason)
         self.steps.append({"type": "escalated", "model": self.cloud.label, "reason": reason})
+        self.pending_notice = f"Handed over to {self.cloud.label}: {reason}."
         agent: Agent | None = self.hub.extras.get("agent")
         if agent is not None and messages and messages[0].get("role") == "system":
             chat = chats.get_chat(self.chat["id"]) or self.chat
             messages[0] = {"role": "system", "content": agent.system_for(
-                chat, self.project, self.workdir, self.model, escalation=False, subagent=self.depth > 0,
-                cloud_model=self.cloud.label)}
+                chat, self.project, self.workdir, self.model, subagent=self.depth > 0, cloud_model=self.cloud.label)}
         messages.append({"role": "user", "content": f"(SLQ Hub: the local model handed this turn over to you "
                                                     f"because {reason}. Continue the task.)"})
         if self.ticket is not None:          # the card is free while the cloud works
             await self.ticket.release()
             self.ticket = None
+
+
+    async def _hand_over(self, messages: list[dict], reason: str) -> None:
+        """The turn goes on with the stronger local model, inside the same
+        lease (the card switches before the next step): its own system
+        prompt, a note on why, and no thinking of the other model."""
+        target = self.local_target()
+        if target is None:
+            return
+        before = self.model
+        agent: Agent | None = self.hub.extras.get("agent")
+        chat = chats.get_chat(self.chat["id"]) or self.chat
+        if agent is not None:
+            try:
+                _, self.thinking, self.effort = agent.resolve(chat, self.project, {**self.turn_options,
+                                                                                   "model": target["id"]})
+            except RuntimeError:
+                pass
+        self.model, self.need = target, self.hub.model_need(target["id"])
+        self.ctx_limit = self.hub.catalog.context_per_request(target["id"])
+        self.handed_over_from = before["name"]
+        self.must_answer, self.repeats, self.same_steps, self.fail_streak, self.recent = "", 0, {}, 0, []
+        self.emit("escalated", model=target["name"], model_id=target["id"], reason=reason, local=True)
+        self.steps.append({"type": "escalated", "model": target["id"], "from": before["id"], "reason": reason,
+                           "local": True})
+        self.pending_notice = f"Handed over from {before['name']} to {target['name']}: {reason}."
+        for m in messages:
+            m.pop("reasoning_content", None)
+        if not vision(target):
+            messages[:] = C.without_images(messages)
+        if agent is not None and messages and messages[0].get("role") == "system":
+            messages[0] = {"role": "system", "content": agent.system_for(
+                chat, self.project, self.workdir, target, handover_to=self.handover_label(),
+                taken_over_from=before["name"])}
+        messages.append({"role": "user", "content": f"(SLQ Hub: {before['name']} handed this turn over to you "
+                                                    f"because {reason}. The steps so far are above - check them "
+                                                    "rather than trust them. Continue the task and answer.)"})
+        job = getattr(self.ticket, "job", None)
+        if job is not None:
+            job.meta["model"] = target["id"]
+
+
+SENT_SAMPLING = ("temperature", "top_p", "top_k", "min_p", "presence_penalty", "frequency_penalty", "repeat_penalty")
+
+
+def sent_summary(pl: dict, messages: int, tools: int, estimated: int) -> dict:
+    """What a model step asked llama-server for (stored with the step, for later)."""
+    out = {"sampling": {k: pl[k] for k in SENT_SAMPLING if k in pl},
+           "thinking": (pl.get("chat_template_kwargs") or {}).get("enable_thinking"),
+           "max_tokens": pl.get("max_tokens"), "tools": tools, "messages": messages, "estimated_tokens": estimated}
+    if pl.get("reasoning_effort"):
+        out["effort"] = pl["reasoning_effort"]
+    return out
 
 
 def _rate(t: dict, kind: str) -> float | None:
@@ -487,13 +613,16 @@ class Agent:
             thinking = cs.get("thinking")
         if thinking is None:
             thinking = ps.get("thinking")
+        if thinking is None and entry.get("thinking_mode") in ("on", "off"):     # Settings -> Models
+            thinking = entry["thinking_mode"] == "on"
         if thinking is None:
             thinking = bool(s.get("agent", "thinking_in_projects" if project else "thinking_in_chats"))
         effort = options.get("effort") or cs.get("effort") or s.get("agent", "effort")
         return entry, thinking, effort
 
     def system_for(self, chat: dict, project: dict | None, wd: projects.Workdir, entry: dict, *,
-                   escalation: bool, subagent: bool = False, cloud_model: str = "") -> str:
+                   handover_to: str = "", subagent: bool = False, cloud_model: str = "",
+                   taken_over_from: str = "") -> str:
         skills = self.hub.extras["skills"].chosen(chat, project)
         mem = self.hub.extras["memory"].index(project["id"] if project else None)
         images = self.hub.extras.get("images")
@@ -502,11 +631,12 @@ class Agent:
                              sandbox_path=wd.sandbox_path, memory_index=mem, skills=skills, project=project,
                              summary="" if subagent else chat.get("summary") or "",
                              images_available=bool(images and images.available()),
-                             escalation=escalation, subagent=subagent, cloud_model=cloud_model)
+                             handover_to=handover_to, subagent=subagent, cloud_model=cloud_model,
+                             taken_over_from=taken_over_from)
 
     def build_messages(self, chat: dict, project: dict | None, wd: projects.Workdir, entry: dict, run: Run,
-                       escalation: bool) -> list[dict]:
-        sp = self.system_for(chat, project, wd, entry, escalation=escalation)
+                       handover_to: str = "", taken_over_from: str = "") -> list[dict]:
+        sp = self.system_for(chat, project, wd, entry, handover_to=handover_to, taken_over_from=taken_over_from)
         rows = chats.messages(chat["id"], after_id=int(chat.get("summary_upto") or 0))
         keep_from = rows[-12]["id"] if len(rows) > 12 else 0
         return [{"role": "system", "content": sp},
@@ -543,7 +673,8 @@ class Agent:
             chats.update_chat(chat_id, summary=merged, summary_upto=split)
         chat = chats.get_chat(chat_id)
         engine.chat = chat
-        return self.build_messages(chat, engine.project, engine.workdir, engine.model, run, engine.escalation)
+        return self.build_messages(chat, engine.project, engine.workdir, engine.model, run, engine.handover_label(),
+                                   engine.handed_over_from)
 
     async def _report_position(self, run: Run, holder: dict) -> None:
         last = None
@@ -609,6 +740,7 @@ class Agent:
             run.emit("started", model=entry["id"], waited=waited, thinking=thinking)
             engine = Engine(self.hub, run, chat, project, wd, entry, ticket, thinking=thinking, effort=effort,
                             escalation=escalation)
+            engine.turn_options = {k: options[k] for k in ("thinking", "effort") if options.get(k) is not None}
             engine.steps.append({"type": "queue", "seconds": waited})
 
             async def persist(role: str, blocks: list[dict]) -> dict:
@@ -616,7 +748,7 @@ class Agent:
                 run.emit("message_saved", id=m["id"], role=role)
                 return m
 
-            messages = self.build_messages(chat, project, wd, entry, run, escalation)
+            messages = self.build_messages(chat, project, wd, entry, run, engine.handover_label())
             max_steps = int(self.hub.settings.get("agent", "max_steps") or 60)
             await engine.loop(messages, persist, max_steps=max_steps,
                               compact=lambda msgs: self._compact(chat["id"], engine, run, msgs))

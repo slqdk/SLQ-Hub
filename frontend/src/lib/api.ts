@@ -144,9 +144,18 @@ export interface ModelEntry { id: string; name: string; description?: string; de
   files: { repo?: string; path?: string; url?: string; dest: string; size?: number; role?: string }[];
   server?: Record<string, unknown>; thinking?: { efforts?: string[]; default_effort?: string; default?: boolean };
   context_per_request?: number; parameter_size?: string; quantization?: string; aliases?: string[]; requires?: string[];
-  custom?: boolean; family?: string; abilities?: string[]; sdxl?: SdxlSettings;
+  custom?: boolean; family?: string; abilities?: string[]; sdxl?: SdxlSettings; architecture?: string;
+  /** Sampling per mode (instruct = without thinking): the card's, the family's, or set in Settings (sampling_own). */
+  sampling?: Partial<Record<"instruct" | "thinking", Sampling>>; sampling_card?: Partial<Record<"instruct" | "thinking", Sampling>>;
+  sampling_own?: boolean; thinking_mode?: "on" | "off";
   source?: { repo?: string; url: string; file?: string; added?: string; site?: "huggingface" | "civitai"; nsfw?: boolean;
     base?: string; version_id?: number } }
+
+export interface Sampling { temperature?: number; top_p?: number; top_k?: number; min_p?: number; presence_penalty?: number;
+  repeat_penalty?: number }
+
+/** GET /hub/api/models/hf/search: GGUF repositories matching some words. */
+export interface HFSearchHit { repo: string; downloads: number; likes: number; updated: string | null; gated: boolean }
 
 /** GET /hub/api/models/images/lookup: what an SDXL link points at. */
 export interface ImageOption { key: string; label: string; size: number; supported: boolean | null; reason: string;
@@ -166,7 +175,7 @@ export interface ModelsData { llm: ModelEntry[]; aux: ModelEntry[]; comfy: Model
   defaults: { default: string; fallback_alias: string; preload: boolean }; sdxl?: SdxlChoices }
 
 export interface ApiKey { id: number; name: string; prefix: string; priority: string; allowed_ips: string;
-  created_at: string; last_used: string | null; enabled: number }
+  away: number; created_at: string; last_used: string | null; enabled: number }
 
 export interface Skill { name: string; title: string; description: string; files: string[]; enabled: boolean }
 export interface MemoryFile { path: string; title: string; size: number }

@@ -24,6 +24,34 @@ QWEN3_SAMPLING = {"thinking": {"temperature": 1.0, "top_p": 0.95, "top_k": 20, "
                   "instruct": {"temperature": 0.7, "top_p": 0.8, "top_k": 20, "min_p": 0.0, "presence_penalty": 1.5}}
 
 
+# Sampling values that may be set per model in Settings -> Models, and their limits.
+SAMPLING_LIMITS = {"temperature": (0.0, 2.0), "top_p": (0.0, 1.0), "top_k": (0, 500), "min_p": (0.0, 1.0),
+                   "presence_penalty": (-2.0, 2.0), "repeat_penalty": (0.5, 2.0)}
+SAMPLING_MODES = ("instruct", "thinking")
+THINKING_MODES = ("follow", "on", "off")
+
+
+def clean_sampling(values) -> dict:
+    """One mode's sampling values from Settings, checked; empty fields are left out."""
+    if not isinstance(values, dict):
+        raise ValueError("sampling values must be an object")
+    out = {}
+    for key, raw in values.items():
+        if key not in SAMPLING_LIMITS:
+            raise ValueError(f"not a sampling value: {key}")
+        if raw is None or raw == "":
+            continue
+        lo, hi = SAMPLING_LIMITS[key]
+        try:
+            v = int(raw) if key == "top_k" else float(raw)
+        except (TypeError, ValueError):
+            raise ValueError(f"{key} must be a number")
+        if isinstance(raw, bool) or not lo <= v <= hi:
+            raise ValueError(f"{key} must be between {lo} and {hi}")
+        out[key] = v
+    return out
+
+
 def family_sampling(architecture: str | None) -> dict | None:
     if (architecture or "").lower().startswith("qwen3"):          # qwen3, qwen3moe, qwen35, qwen35moe, qwen3next
         return copy.deepcopy(QWEN3_SAMPLING)
@@ -87,6 +115,13 @@ class Catalog:
                 entry["server"].update({k: v for k, v in o["server"].items() if k in EDITABLE_SERVER_KEYS})
             if isinstance(o.get("aliases"), list):
                 entry["aliases"] = [str(a) for a in o["aliases"]]
+            if isinstance(o.get("sampling"), dict):          # set in Settings: it replaces the card's, per mode
+                entry["sampling_card"] = copy.deepcopy(entry.get("sampling") or {})
+                own = {m: v for m, v in o["sampling"].items() if m in SAMPLING_MODES and isinstance(v, dict)}
+                entry["sampling"] = {**(entry.get("sampling") or {}), **own}
+                entry["sampling_own"] = True
+            if o.get("thinking_mode") in ("on", "off"):          # think in chats regardless of Settings -> Assistant
+                entry["thinking_mode"] = o["thinking_mode"]
         return data
 
     def _architecture(self, entry: dict) -> str | None:
@@ -102,7 +137,9 @@ class Catalog:
         with self._lock:
             self._data = self._load()
 
-    def save_override(self, model_id: str, server: dict | None = None, aliases: list | None = None) -> dict:
+    def save_override(self, model_id: str, server: dict | None = None, aliases: list | None = None,
+                      sampling: dict | None = None, reset_sampling: bool = False,
+                      thinking_mode: str | None = None) -> dict:
         with self._lock:
             if not any(e["id"] == model_id for e in self._data.get("llm", [])):
                 raise KeyError(model_id)
@@ -118,6 +155,20 @@ class Catalog:
                 entry.setdefault("server", {}).update(server)
             if aliases is not None:
                 entry["aliases"] = [str(a).strip() for a in aliases if str(a).strip()]
+            if reset_sampling:
+                entry.pop("sampling", None)
+            elif sampling is not None:
+                bad = set(sampling) - set(SAMPLING_MODES)
+                if bad:
+                    raise ValueError(f"sampling modes are {' and '.join(SAMPLING_MODES)}, not {', '.join(sorted(bad))}")
+                entry["sampling"] = {mode: clean_sampling(values) for mode, values in sampling.items()}
+            if thinking_mode is not None:
+                if thinking_mode not in THINKING_MODES:
+                    raise ValueError(f"thinking_mode is one of {', '.join(THINKING_MODES)}")
+                if thinking_mode == "follow":
+                    entry.pop("thinking_mode", None)
+                else:
+                    entry["thinking_mode"] = thinking_mode
             self.override_path.parent.mkdir(parents=True, exist_ok=True)
             self.override_path.write_text(json.dumps(over, indent=1), encoding="utf-8")
         self.reload()

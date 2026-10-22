@@ -1,8 +1,8 @@
 // Settings: models, the queue, apps and keys, the agent, skills, memory, MCP, cloud, system.
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Copy, Download, Menu, Plus, RefreshCw, Upload as UploadIcon, X } from "lucide-react";
-import { api, type ApiKey, type HFLookup, type ImageLookup, type McpServerConfig, type McpStatus, type MemoryFile,
-  type ModelEntry, type SdxlChoices, type SdxlSettings, type Settings, type Skill } from "../lib/api";
+import { api, type ApiKey, type HFLookup, type HFSearchHit, type ImageLookup, type McpServerConfig, type McpStatus,
+  type MemoryFile, type ModelEntry, type Sampling, type SdxlChoices, type SdxlSettings, type Settings, type Skill } from "../lib/api";
 import { ago, bytes, residencyName } from "../lib/format";
 import { navigate } from "../lib/router";
 import { useApp, type Theme } from "../state";
@@ -173,7 +173,7 @@ function ModelsTab({ s }: { s: S }) {
         extra={(m) => <>
           {m.installed && (m.loaded ? <span className="tag"><Lamp state="run" size="sm" /> Loaded</span>
             : <button className="btn small" disabled={!!busy} onClick={() => load(m.id)}>{busy === `load-${m.id}` ? "Loading" : "Load"}</button>)}
-          {m.installed && <button className="btn quiet small" onClick={() => setAdvanced(m)}>Server settings</button>}
+          {m.installed && <button className="btn quiet small" onClick={() => setAdvanced(m)}>Settings</button>}
           {m.custom && <ConfirmButton className="btn quiet small" confirmText="Remove it and its files?"
             disabled={!!busy || m.loaded} onConfirm={() => remove(m)}>Remove</ConfirmButton>}
         </>} />
@@ -186,7 +186,8 @@ function ModelsTab({ s }: { s: S }) {
           <ConfirmButton className="btn quiet small" confirmText="Remove it and its file?" disabled={!!busy}
             onConfirm={() => remove(m)}>Remove</ConfirmButton>
         </> : null} />
-      {advanced && <ServerSettings model={advanced} onClose={() => setAdvanced(null)} onSaved={() => { setAdvanced(null); refreshModels(); }} />}
+      {advanced && <ModelSettings model={advanced} thinkingInChats={!!s.data?.settings.agent?.thinking_in_chats}
+        onClose={() => setAdvanced(null)} onSaved={() => { setAdvanced(null); refreshModels(); }} />}
       {addingHF && <AddFromHF onClose={() => setAddingHF(false)} onAdded={() => { setAddingHF(false); refreshModels(); }} />}
       {addingImage && models.sdxl && <AddImageModel choices={models.sdxl} onClose={() => setAddingImage(false)}
         onAdded={() => { setAddingImage(false); refreshModels(); }} />}
@@ -240,26 +241,109 @@ function ModelGroup({ title, items, busy, onDownload, onCancel, extra, note, act
   );
 }
 
-function ServerSettings({ model, onClose, onSaved }: { model: ModelEntry; onClose: () => void; onSaved: () => void }) {
+const SAMPLING_FIELDS: { key: keyof Sampling; label: string; step: number; min: number; max: number }[] = [
+  { key: "temperature", label: "Temperature", step: 0.05, min: 0, max: 2 },
+  { key: "top_p", label: "Top P", step: 0.05, min: 0, max: 1 },
+  { key: "top_k", label: "Top K", step: 1, min: 0, max: 500 },
+  { key: "min_p", label: "Min P", step: 0.01, min: 0, max: 1 },
+  { key: "presence_penalty", label: "Presence penalty", step: 0.1, min: -2, max: 2 },
+];
+type SamplingForm = Record<"instruct" | "thinking", Record<string, string>>;
+
+function samplingForm(m: ModelEntry): SamplingForm {
+  const one = (mode: "instruct" | "thinking") => Object.fromEntries(SAMPLING_FIELDS.map((f) => {
+    const v = m.sampling?.[mode]?.[f.key];
+    return [f.key, v == null ? "" : String(v)];
+  }));
+  return { instruct: one("instruct"), thinking: one("thinking") };
+}
+
+/** One model's settings: how it answers (thinking, sampling - sent with every request) and how llama-server runs it. */
+function ModelSettings({ model, thinkingInChats, onClose, onSaved }: { model: ModelEntry; thinkingInChats: boolean;
+  onClose: () => void; onSaved: () => void }) {
   const { toast } = useApp();
   const server = (model.server ?? {}) as Record<string, unknown>;
+  const canThink = (model.capabilities ?? []).includes("thinking");
+  const [thinkingMode, setThinkingMode] = useState<string>(model.thinking_mode ?? "follow");
+  const firstSampling = useMemo(() => samplingForm(model), [model]);
+  const [sampling, setSampling] = useState<SamplingForm>(firstSampling);
   const [ctx, setCtx] = useState(String(server.ctx ?? ""));
   const [parallel, setParallel] = useState(String(server.parallel ?? ""));
   const [cache, setCache] = useState(String(server.cache_type ?? "q8_0"));
-  const [extra, setExtra] = useState(((server.extra as string[] | undefined) ?? []).join(" "));
-  const save = async () => {
+  const firstExtra = ((server.extra as string[] | undefined) ?? []).join(" ");
+  const [extra, setExtra] = useState(firstExtra);
+  const serverChanged = ctx !== String(server.ctx ?? "") || parallel !== String(server.parallel ?? "")
+    || cache !== String(server.cache_type ?? "q8_0") || extra !== firstExtra;
+  const samplingChanged = JSON.stringify(sampling) !== JSON.stringify(firstSampling);
+  const setValue = (mode: "instruct" | "thinking", key: string, v: string) =>
+    setSampling((s) => ({ ...s, [mode]: { ...s[mode], [key]: v } }));
+
+  const put = async (body: Record<string, unknown>, done: string) => {
     try {
-      const r = await api<{ reloadNeeded: boolean }>(`/hub/api/models/${model.id}`, { method: "PUT", body: { server: {
-        ctx: Number(ctx), parallel: Number(parallel), cache_type: cache, extra: extra.trim() ? extra.trim().split(/\s+/) : [] } } });
-      toast(r.reloadNeeded ? "Saved. The model loads with these settings the next time it is loaded." : "Saved", "run");
+      const r = await api<{ reloadNeeded: boolean }>(`/hub/api/models/${model.id}`, { method: "PUT", body });
+      toast(r.reloadNeeded ? "Saved. The model loads with the new server settings the next time it is loaded." : done, "run");
       onSaved();
     } catch (e) {
       toast((e as Error).message, "fault");
     }
   };
+  const save = () => {
+    const body: Record<string, unknown> = {};
+    if (canThink && thinkingMode !== (model.thinking_mode ?? "follow")) body.thinking_mode = thinkingMode;
+    if (samplingChanged) {
+      const clean = (vals: Record<string, string>) => Object.fromEntries(Object.entries(vals).filter(([, v]) => v.trim() !== "")
+        .map(([k, v]) => [k, Number(v)]));
+      body.sampling = canThink ? { instruct: clean(sampling.instruct), thinking: clean(sampling.thinking) }
+        : { instruct: clean(sampling.instruct) };
+    }
+    if (serverChanged) body.server = { ctx: Number(ctx), parallel: Number(parallel), cache_type: cache,
+      extra: extra.trim() ? extra.trim().split(/\s+/) : [] };
+    if (!Object.keys(body).length) {
+      onClose();
+      return;
+    }
+    put(body, "Saved");
+  };
+  const source = model.sampling_own ? "set here"
+    : model.custom ? (model.sampling ? `the ${model.architecture ?? "model"} family's recommendation` : "none: llama-server decides")
+    : "the model card";
+  const modes: { mode: "instruct" | "thinking"; title: string }[] = canThink
+    ? [{ mode: "instruct", title: "Without thinking" }, { mode: "thinking", title: "With thinking" }]
+    : [{ mode: "instruct", title: "Sampling" }];
+
   return (
-    <Modal title={`${model.name}: server settings`} onClose={onClose} footer={<><button className="btn" onClick={onClose}>Cancel</button>
+    <Modal wide title={`${model.name}: settings`} onClose={onClose} footer={<>
+      {model.sampling_own && <button className="btn quiet" style={{ marginRight: "auto" }}
+        onClick={() => put({ reset_sampling: true }, "Back to the model's own sampling")}>Use the model's own sampling</button>}
+      <button className="btn" onClick={onClose}>Cancel</button>
       <button className="btn primary" onClick={save}>Save</button></>}>
+      <h3 style={{ margin: 0 }}>Answers</h3>
+      {canThink && (
+        <label className="field"><span>Thinking in chats</span>
+          <select className="select" value={thinkingMode} onChange={(e) => setThinkingMode(e.target.value)} style={{ maxWidth: "28rem" }}>
+            <option value="follow">Like the assistant setting (now: {thinkingInChats ? "think" : "answer straight away"})</option>
+            <option value="on">Always think first</option>
+            <option value="off">Answer straight away</option>
+          </select>
+          <small>For chats with no Think choice of their own. Reasoning models (they start with a think block) usually answer
+            better thinking.</small></label>
+      )}
+      {modes.map(({ mode, title }) => (
+        <fieldset key={mode} className="sampling-set">
+          <legend>{title}</legend>
+          <div className="sampling-grid">
+            {SAMPLING_FIELDS.map((f) => (
+              <label key={f.key} className="field"><span>{f.label}</span>
+                <input className="input" type="number" inputMode="decimal" step={f.step} min={f.min} max={f.max}
+                  value={sampling[mode][f.key]} placeholder="default"
+                  onChange={(e) => setValue(mode, f.key, e.target.value)} aria-label={`${title}: ${f.label}`} /></label>
+            ))}
+          </div>
+        </fieldset>
+      ))}
+      <p className="muted small" style={{ margin: 0 }}>Sampling now: {source}. Empty: llama-server's default. A flag such as
+        <code className="mono">--temp</code> under Extra llama-server flags wins over these.</p>
+      <h3 style={{ margin: "6px 0 0" }}>Server</h3>
       <p className="muted" style={{ margin: 0 }}>How llama-server runs this model. The context is shared by the slots
         (unified KV cache); more context or slots need more VRAM.</p>
       <div className="form-grid">
@@ -269,7 +353,9 @@ function ServerSettings({ model, onClose, onSaved }: { model: ModelEntry; onClos
           {["f16", "q8_0", "q4_0"].map((c) => <option key={c} value={c}>{c}</option>)}</select></label>
       </div>
       <label className="field"><span>Extra llama-server flags</span><input className="input mono" value={extra} onChange={(e) => setExtra(e.target.value)}
-        placeholder="--temp 0.6" /><small>For experiments. --host, --port and --api-key are set by the Hub.</small></label>
+        placeholder="--temp 0.6" /><small>For experiments. The Hub sets <code className="mono">--host</code> and{" "}
+        <code className="mono">--port</code>; <code className="mono">--api-key</code> is not allowed (the model server is
+        reachable only on the Hub's internal network).</small></label>
     </Modal>
   );
 }
@@ -288,12 +374,19 @@ function fitOf(size: number, vram: number): { lamp: LampState; text: string } {
   return { lamp: "fault", text: "Too big for the card" };
 }
 
+/** owner/name or a huggingface.co / hf.co link - anything else is searched for. */
+function looksLikeRepo(text: string): boolean {
+  const t = text.trim().replace(/^(https?:\/\/)?(www\.)?(huggingface\.co|hf\.co)\//i, "").split(/[?#]/)[0];
+  return /^[A-Za-z0-9][\w.-]*\/[A-Za-z0-9][\w.-]*(\/.*)?$/.test(t) && !/\s/.test(text.trim());
+}
+
 function AddFromHF({ onClose, onAdded }: { onClose: () => void; onAdded: () => void }) {
   const { toast } = useApp();
   const [repo, setRepo] = useState("");
   const [looking, setLooking] = useState(false);
   const [error, setError] = useState("");
   const [found, setFound] = useState<HFLookup | null>(null);
+  const [hits, setHits] = useState<HFSearchHit[] | null>(null);
   const [file, setFile] = useState("");
   const [mmproj, setMmproj] = useState("");
   const [name, setName] = useState("");
@@ -303,15 +396,39 @@ function AddFromHF({ onClose, onAdded }: { onClose: () => void; onAdded: () => v
   const [thinking, setThinking] = useState(false);
   const [adding, setAdding] = useState(false);
 
-  const lookUp = async () => {
-    if (!repo.trim()) return;
+  const search = async () => {
     setLooking(true);
     setError("");
     setFound(null);
     try {
-      const r = await api<HFLookup>("/hub/api/models/hf", { query: { repo: repo.trim() } });
+      const r = await api<{ results: HFSearchHit[] }>("/hub/api/models/hf/search", { query: { q: repo.trim() } });
+      setHits(r.results);
+      if (!r.results.length) setError(`No GGUF model on Hugging Face matches "${repo.trim()}". Try fewer words.`);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setLooking(false);
+    }
+  };
+
+  const submit = () => {
+    if (!repo.trim()) return;
+    if (looksLikeRepo(repo)) lookUp(repo);
+    else search();
+  };
+
+  const lookUp = async (which: string) => {
+    setLooking(true);
+    setError("");
+    setFound(null);
+    try {
+      const r = await api<HFLookup>("/hub/api/models/hf", { query: { repo: which.trim() } });
+      setHits(null);
+      // Q8_0 when it fits with room (nearly the answers of 16-bit at half the size and faster), else Q4_K_M.
+      const roomy = r.choices.filter((c) => fitOf(c.size, r.vram).lamp === "run");
       const fitting = r.choices.filter((c) => fitOf(c.size, r.vram).lamp !== "fault");
-      const pick = fitting.find((c) => /(^|-)Q4_K_M\b/i.test(c.label)) ?? fitting[fitting.length - 1] ?? r.choices[0];
+      const pick = roomy.find((c) => /^Q8_0$/i.test(c.label)) ?? fitting.find((c) => /(^|-)Q4_K_M\b/i.test(c.label))
+        ?? fitting[fitting.length - 1] ?? r.choices[0];
       setFound(r);
       setFile(pick?.key ?? "");
       setMmproj((r.mmproj.find((m) => /^F16$/i.test(m.label)) ?? r.mmproj[0])?.path ?? "");
@@ -355,15 +472,28 @@ function AddFromHF({ onClose, onAdded }: { onClose: () => void; onAdded: () => v
       <button className="btn" onClick={onClose}>Cancel</button>
       <button className="btn primary" disabled={!choice || !idOk || adding} onClick={add}>
         <Download size={14} /> {adding ? "Adding" : `Add and download${total ? ` (${bytes(total)})` : ""}`}</button></>}>
-      <form className="row" style={{ gap: 8 }} onSubmit={(e) => { e.preventDefault(); lookUp(); }}>
+      <form className="row" style={{ gap: 8 }} onSubmit={(e) => { e.preventDefault(); submit(); }}>
         <input className="input grow" autoFocus value={repo} onChange={(e) => setRepo(e.target.value)}
-          placeholder="unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF, or a link" aria-label="Hugging Face model" />
-        <button className="btn" type="submit" disabled={looking || !repo.trim()}>{looking ? "Looking" : "Look up"}</button>
+          placeholder="Search (Ornith 1.5 9B), or owner/name, or a link" aria-label="Hugging Face model" />
+        <button className="btn" type="submit" disabled={looking || !repo.trim()}>
+          {looking ? "Looking" : !repo.trim() || looksLikeRepo(repo) ? "Look up" : "Search"}</button>
       </form>
-      {!found && !error && <p className="muted small" style={{ margin: 0 }}>A GGUF repository (the Hub runs models with
-        llama.cpp). unsloth, bartowski and ggml-org publish most models that way. One language model is on the card at a
-        time; the Hub switches when a chat or an app asks for another.</p>}
+      {!found && !hits && !error && <p className="muted small" style={{ margin: 0 }}>Search for a model by name, or give a
+        GGUF repository (the Hub runs models with llama.cpp); unsloth, bartowski and ggml-org publish most models that
+        way. One language model is on the card at a time; the Hub switches when a chat or an app asks for another.</p>}
       {error && <div className="callout" style={{ color: "var(--fault)" }}>{error}</div>}
+      {hits && hits.length > 0 && !found && (
+        <div className="list" aria-label="Models found" style={{ maxHeight: 320, overflow: "auto" }}>
+          {hits.map((h) => (
+            <button key={h.repo} type="button" className="list-row hf-hit" disabled={looking}
+              onClick={() => { setRepo(h.repo); lookUp(h.repo); }}>
+              <span className="grow" style={{ minWidth: 0 }}><b className="ellipsis" style={{ display: "block" }}>{h.repo}</b>
+                <span className="meta num">{h.downloads.toLocaleString("en")} downloads · {h.likes} likes
+                  {h.updated ? ` · ${h.updated.slice(0, 10)}` : ""}{h.gated ? " · needs a token (gated)" : ""}</span></span>
+            </button>
+          ))}
+        </div>
+      )}
       {found && (<>
         <div className="muted small"><a href={found.url} target="_blank" rel="noreferrer">{found.repo}</a>
           {facts.length > 0 && <> · {facts.join(" · ")}</>}</div>
@@ -373,7 +503,8 @@ function AddFromHF({ onClose, onAdded }: { onClose: () => void; onAdded: () => v
             return (
               <label key={c.key} className="list-row choice-row">
                 <input type="radio" name="hf-file" checked={file === c.key} onChange={() => setFile(c.key)} />
-                <span className="choice-main"><b>{c.label}</b>{c.split && <span className="meta"> · in {c.files.length} parts</span>}</span>
+                <span className="choice-main"><b>{c.label}</b>{c.split && <span className="meta"> · in {c.files.length} parts</span>}
+                  {/^(BF16|F16|F32)$/i.test(c.label) && <span className="meta"> · twice the size of Q8_0 and slower, for nearly the same answers</span>}</span>
                 <span className="meta num">{bytes(c.size)}</span>
                 <span className="row choice-state" style={{ minWidth: 210 }}><Lamp state={fit.lamp} size="sm" /><span className="meta">{fit.text}</span></span>
               </label>
@@ -621,7 +752,7 @@ function AppsTab({ s }: { s: S }) {
   const { toast } = useApp();
   const [keys, setKeys] = useState<ApiKey[] | null>(null);
   const [adding, setAdding] = useState(false);
-  const [made, setMade] = useState<{ name: string; key: string } | null>(null);
+  const [made, setMade] = useState<NewKeyMade | null>(null);
   const [origins, setOrigins] = useState("");
   const [conn, setConn] = useState<Connection | null>(null);
   const load = useCallback(async () => {
@@ -637,13 +768,30 @@ function AppsTab({ s }: { s: S }) {
   }, [load]);
   const cors = s.data?.settings.api?.cors_origins as string[] | undefined;
   useEffect(() => setOrigins((cors ?? []).join("\n")), [cors]);
-  const patch = async (k: ApiKey, body: Record<string, unknown>) => {
+  const patch = async (k: ApiKey, body: Record<string, unknown>): Promise<boolean> => {
     try {
       await api(`/hub/api/keys/${k.id}`, { method: "PATCH", body });
       load();
+      return true;
     } catch (e) {
       toast((e as Error).message, "fault");
+      return false;
     }
+  };
+  // Away from home = also through the proxy, from anywhere. A limit to the home network contradicts that, so it goes.
+  const setWhere = async (k: ApiKey, away: boolean) => {
+    const body: Record<string, unknown> = { away };
+    let note = away ? `${k.name} works away from home too now, through ${publicHost || "the proxy"}.`
+      : `${k.name} works only at home now.`;
+    if (away && k.allowed_ips.trim()) {
+      if (conn?.homeNetwork && k.allowed_ips.trim() === conn.homeNetwork) {
+        body.allowed_ips = "";
+        note += " Its limit to the home network is removed.";
+      } else {
+        note += ` It is still limited to ${k.allowed_ips}.`;
+      }
+    }
+    if (await patch(k, body)) toast(note, "run");
   };
   const del = async (k: ApiKey) => {
     try {
@@ -658,10 +806,14 @@ function AppsTab({ s }: { s: S }) {
   const ollamaPort = conn?.ollamaPort ?? 11434;
   const example = made ? made.key : "slqhub_...";
   const phonePage = `http://${lanHost}:${uiPort}/chat`;
+  const publicUrl = (conn?.publicUrl || "").replace(/\/+$/, "");
+  const publicHost = hostOf(publicUrl);
+  const awayPage = publicUrl ? `${publicUrl}/chat` : "";
   return (
     <div>
       <p className="lead">Other apps use the models through the Hub, in the same queue as everything else. Each app gets
-        its own key; the model API answers only on the LAN and WireGuard.</p>
+        its own key. The model API answers only on the LAN and WireGuard, unless a key is set to work away from home
+        too (through {publicHost || "the proxy"}).</p>
       <div className="row" style={{ marginBottom: 8 }}><h3 style={{ margin: 0 }} className="grow">Keys</h3>
         <button className="btn small" onClick={() => { setAdding(true); setMade(null); }}><Plus size={14} /> New key</button></div>
       <div className="list" style={{ marginBottom: 24 }}>
@@ -671,6 +823,10 @@ function AppsTab({ s }: { s: S }) {
             <span className="grow" style={{ minWidth: 180 }}><b>{k.name}</b>
               <div className="meta"><span className="mono">{k.prefix}...</span>, {k.last_used ? `used ${ago(k.last_used)}` : "never used"}
                 {k.allowed_ips ? `, only from ${k.allowed_ips}` : ""}</div></span>
+            <select className="select" style={{ width: 170 }} value={k.away ? "away" : "home"}
+              onChange={(e) => setWhere(k, e.target.value === "away")} aria-label={`Where ${k.name} works`}>
+              <option value="home">At home</option><option value="away">At home and away</option>
+            </select>
             <select className="select" style={{ width: 150 }} value={k.priority} onChange={(e) => patch(k, { priority: e.target.value })}
               aria-label="Priority">
               <option value="interactive">Interactive</option><option value="normal">Normal</option><option value="background">Background</option>
@@ -686,7 +842,10 @@ function AppsTab({ s }: { s: S }) {
           and add it to the home screen; it asks for a key once, and the chats stay on the phone.
           <div className="code-line">{phonePage}</div>
           <div className="small muted" style={{ marginTop: 6 }}>Make a key per person: the key dialog gives a link with the key
-            in it, ready to send to the phone.</div></div>
+            in it, ready to send to the phone.</div>
+          {awayPage && <div className="small muted" style={{ marginTop: 6 }}>A key set to <b>At home and away</b> also works
+            at <span className="mono">{awayPage}</span>, from anywhere. That address is HTTPS, so a phone can install the
+            page as an app. A phone keeps its chats per address: use one of the two.</div>}</div>
         <div className="callout"><b>Ollama apps</b> (FamilyLog, Enchanted and others). Apps without a key field take the key in
           the address:
           <div className="code-line">http://{lanHost}:{ollamaPort}/k/{example}</div>
@@ -708,32 +867,45 @@ function AppsTab({ s }: { s: S }) {
         <button className="btn primary" onClick={() => s.save("api", { cors_origins: origins.split(/\s+/).map((x) => x.trim()).filter(Boolean) })}>Save origins</button>
       </div>
       <SectionForm s={s} section="api" fields={[
-        { key: "allow_external", label: "Allow the model API from outside the LAN", type: "bool",
-          help: "Through the proxy (hub.slq.dk) with a key. Off keeps the models on the LAN and WireGuard only." }]} />
+        { key: "allow_external", label: "Allow every key from outside the LAN", type: "bool",
+          help: `Through the proxy (${publicHost || "hub.slq.dk"}), for all keys. To let one person in from outside, set ` +
+            "that key to At home and away instead. Off keeps the other keys on the LAN and WireGuard." }]} />
 
       {adding && <NewKey onClose={() => setAdding(false)} made={made} onMade={(m) => { setMade(m); load(); }}
-        phonePage={phonePage} homeNetwork={conn?.homeNetwork} />}
+        phonePage={phonePage} awayPage={awayPage} publicHost={publicHost} homeNetwork={conn?.homeNetwork} />}
     </div>
   );
 }
 
-interface Connection { lanHost: string; uiPort: number; ollamaPort: number; homeNetwork?: string }
+interface Connection { lanHost: string; uiPort: number; ollamaPort: number; publicUrl?: string; homeNetwork?: string }
+interface NewKeyMade { name: string; key: string; away?: boolean }
 
-function NewKey({ onClose, made, onMade, phonePage, homeNetwork }: { onClose: () => void;
-  made: { name: string; key: string } | null; onMade: (m: { name: string; key: string }) => void; phonePage: string;
+function hostOf(url: string): string {
+  try {
+    return url ? new URL(url).host : "";
+  } catch {
+    return "";
+  }
+}
+
+function NewKey({ onClose, made, onMade, phonePage, awayPage, publicHost, homeNetwork }: { onClose: () => void;
+  made: NewKeyMade | null; onMade: (m: NewKeyMade) => void; phonePage: string; awayPage: string; publicHost: string;
   homeNetwork?: string }) {
   const { toast } = useApp();
   const [name, setName] = useState("");
   const [priority, setPriority] = useState("normal");
   const [ips, setIps] = useState("");
+  const [away, setAway] = useState(false);
   const create = async () => {
     try {
-      const k = await api<{ name: string; key: string }>("/hub/api/keys", { body: { name, priority, allowed_ips: ips } });
+      const k = await api<NewKeyMade>("/hub/api/keys", { body: { name, priority, allowed_ips: ips, away } });
       onMade(k);
     } catch (e) {
       toast((e as Error).message, "fault");
     }
   };
+  const copy = async (text: string) => toast((await copyText(text)) ? "Copied" : "Copying failed", "run");
+  const anywhere = !!made?.away && !!awayPage;
   return (
     <Modal title="New key" onClose={onClose} footer={made ? <button className="btn primary" onClick={onClose}>Done</button>
       : <><button className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={!name.trim()} onClick={create}>Make the key</button></>}>
@@ -742,13 +914,15 @@ function NewKey({ onClose, made, onMade, phonePage, homeNetwork }: { onClose: ()
           <p style={{ margin: 0 }}>The key for <b>{made.name}</b> is shown only now.</p>
           <div className="code-line">{made.key}</div>
           <div className="row wrap">
-            <button className="btn small" onClick={async () => toast((await copyText(made.key)) ? "Copied" : "Copying failed", "run")}><Copy size={14} /> Copy the key</button>
-            <button className="btn small" onClick={async () => toast((await copyText(`${phonePage}#key=${made.key}`)) ? "Copied" : "Copying failed", "run")}>
+            <button className="btn small" onClick={() => copy(made.key)}><Copy size={14} /> Copy the key</button>
+            <button className="btn small" onClick={() => copy(`${anywhere ? awayPage : phonePage}#key=${made.key}`)}>
               <Copy size={14} /> Copy the phone link</button>
+            {anywhere && <button className="btn small" onClick={() => copy(`${phonePage}#key=${made.key}`)}>
+              <Copy size={14} /> Copy the home-only link</button>}
           </div>
           <p className="small muted" style={{ margin: 0 }}>The phone link opens the chat page with this key in it. Send it to the
-            phone (Messages, mail) and open it on the home Wi-Fi. On an iPhone, add the page to the home screen and open it from
-            there; if it asks for the key, paste the link.</p>
+            phone (Messages, mail) and open it {anywhere ? `anywhere: it goes through ${publicHost}` : "on the home Wi-Fi"}. On
+            an iPhone, add the page to the home screen and open it from there; if it asks for the key, paste the link.</p>
         </>
       ) : (
         <>
@@ -756,9 +930,15 @@ function NewKey({ onClose, made, onMade, phonePage, homeNetwork }: { onClose: ()
           <label className="field"><span>Priority in the queue</span><select className="select" value={priority} onChange={(e) => setPriority(e.target.value)}>
             <option value="interactive">Interactive: like a web chat</option><option value="normal">Normal: most apps</option>
             <option value="background">Background: batch work</option></select></label>
+          <label className="field"><span>Where it works</span><select className="select" value={away ? "away" : "home"}
+            onChange={(e) => setAway(e.target.value === "away")}>
+            <option value="home">At home: the LAN and WireGuard</option>
+            <option value="away">At home and away: also through {publicHost || "the proxy"}</option></select>
+            <small>{away ? `From anywhere on the internet, with this key. For a person's phone; keep app keys at home.`
+              : "The usual choice for apps and for phones that stay at home."}</small></label>
           <label className="field"><span>Only from these addresses</span><input className="input" value={ips} onChange={(e) => setIps(e.target.value)}
-            placeholder="30.11.0.20, 10.8.0.0/24" /><small>Empty: any address on the LAN and WireGuard.</small></label>
-          {homeNetwork && ips.trim() !== homeNetwork && (
+            placeholder="30.11.0.20, 10.8.0.0/24" /><small>Empty: no limit beyond the choice above.</small></label>
+          {!away && homeNetwork && ips.trim() !== homeNetwork && (
             <button type="button" className="btn small" style={{ alignSelf: "flex-start" }} onClick={() => setIps(homeNetwork)}>
               Only the home network ({homeNetwork})</button>)}
         </>
@@ -789,6 +969,11 @@ function AgentTab({ s }: { s: S }) {
           help: "Longer output is saved to a file the model can read in parts." },
         { key: "thinking_in_chats", label: "Think before answering in plain chats", type: "bool" },
         { key: "thinking_in_projects", label: "Think before answering in projects", type: "bool" },
+        { key: "escalate_to", label: "When the model gets stuck, hand over to", type: "select",
+          options: [{ value: "", label: "Nobody: it answers with what it has" },
+            ...(models?.llm ?? []).filter((m) => m.installed).map((m) => ({ value: m.id, label: m.name }))],
+          help: "Stuck: it repeats itself, three tool calls in a row fail, or it asks for help. The turn goes on with this " +
+            "model (the card switches, which takes a moment) and the chat says so. Not when this model is the one working." },
       ]} />
       <SectionForm s={s} section="libraries" title="Libraries" fields={[
         { key: "page_images", label: "Page images for visual search", type: "select", options: [

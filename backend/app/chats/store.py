@@ -17,6 +17,7 @@ A message's content is a JSON list of blocks:
 """
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 
@@ -150,6 +151,39 @@ def runs_for_chat(chat_id: int) -> list[dict]:
         d = dict(r)
         d["steps"] = json.loads(d["steps"] or "[]")
         d["usage"] = json.loads(d["usage"] or "{}")
+        out.append(d)
+    return out
+
+
+def save_prompt(run_id: str, depth: int, step: int, model: str, reason: str, system: str, tools: list[str]) -> None:
+    """What a model works with, when it changes: the system prompt (stored once per text) and the tools' names."""
+    text = system[:40000]
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    now = db.utcnow()
+    with db.connect() as con:
+        con.execute("INSERT OR IGNORE INTO prompt_texts (hash, text, created_at) VALUES (?,?,?)", (digest, text, now))
+        con.execute("INSERT INTO run_prompts (run_id, depth, step, model, reason, system_hash, tools, created_at)"
+                    " VALUES (?,?,?,?,?,?,?,?)", (run_id, depth, step, model, reason, digest, json.dumps(tools), now))
+
+
+def prompts_for_chat(chat_id: int) -> list[dict]:
+    """The chat's recorded prompts, oldest first. A text already listed is not repeated: same_as names the
+    first entry with it."""
+    with db.connect() as con:
+        rows = con.execute("SELECT p.id, p.run_id, p.depth, p.step, p.model, p.reason, p.system_hash, t.text AS system,"
+                           " p.tools, p.created_at FROM run_prompts p JOIN runs r ON r.id = p.run_id"
+                           " JOIN prompt_texts t ON t.hash = p.system_hash WHERE r.chat_id=? ORDER BY p.id",
+                           (chat_id,)).fetchall()
+    out, first = [], {}
+    for r in rows:
+        d = dict(r)
+        d["tools"] = json.loads(d["tools"] or "[]")
+        digest = d.pop("system_hash")
+        if digest in first:
+            d["system"] = None
+            d["same_as"] = first[digest]
+        else:
+            first[digest] = d["id"]
         out.append(d)
     return out
 

@@ -24,12 +24,13 @@ decided and how the pieces fit; `docs/INSTALL.md` is the step-by-step guide.
 | OS | Ubuntu 24.04 LTS with the HWE kernel (7.0). AMD supports Radeon on 24.04.5 only with HWE. |
 | Running services | Docker Compose. `update.sh` with backup and automatic rollback, as in SLQ and FamilyLog. |
 | VM size | 40 GB RAM, 500 GB disk. |
-| Access | Web UI on a subdomain through Nginx Proxy Manager, with login. The model API answers only from LAN/WireGuard. |
+| Access | Web UI on a subdomain through Nginx Proxy Manager, with login. The model API answers only from LAN/WireGuard, except for keys set to work away from home (a person's phone), which also work through the proxy. |
 | Users | One admin. Other apps get API keys. |
 | Inference engine | llama.cpp (`llama-server`), started and stopped by the Hub. No Ollama: one queue, not two. |
 | Language models | Qwen3.8-27B (main, vision, tools, thinking) and Qwen3.6-35B-A3B (fast MoE). |
 | Main model settings | Q4_K_M-class quant, 64K context per conversation, KV cache q8_0. |
-| Cloud | Automatic escalation for hard tasks, but **only in web chats inside projects where it is switched on** (off by default). API calls from apps never leave the house. |
+| Stuck turns | A small model that gets stuck hands the turn over to a stronger model on the server (Settings → Assistant, default Qwen3.8 27B), in the same lease. |
+| Cloud | Automatic escalation for hard tasks, but **only in web chats inside projects where it is switched on** (off by default), and after the stronger local model. API calls from apps never leave the house. |
 | Images | Understand (vision), generate, edit, and classical processing (crop, scale, convert, OCR). |
 | Image engine | ComfyUI, headless behind the Hub. |
 | Other media in v1 | None (no speech, no video). |
@@ -180,12 +181,27 @@ KV heads × 256 head dim): weights 15.3 GiB + mmproj 0.9 + recurrent state
 → about 21 GiB. One conversation can use up to 64K tokens (the agent compacts
 before that), and both slots share the pool.
 
+Searching by name (Add from Hugging Face): the Hub asks
+`/api/models?search=<longest word>&filter=gguf&sort=downloads` and keeps the
+repositories whose id contains every word of the query; owner/name or a link
+looks the repository up directly. Q8_0 is preselected where it fits the card
+comfortably (small models), and 16-bit files say they are twice its size.
+
+**Per model** (Settings → Models → Settings, stored in
+`data/models.override.json` beside the server parameters): thinking in chats -
+follow the chat's and Settings' choice, always think first, or never - and
+sampling for answers with and without thinking (temperature, top_p, top_k,
+min_p, presence penalty; checked against limits), which replaces the card's
+values until reset. The order for thinking: the turn's toggle, the chat, the
+project, the model's own choice, then Settings.
+
 Sampling comes from the model cards. Qwen3.8 with thinking: temperature 1.0,
 top_p 0.95, top_k 20. Without thinking: 0.7 / 0.8 / 20, presence penalty 1.5.
 Models added from Hugging Face have no card values; those of the Qwen3 family
 (the GGUF architecture starts with `qwen3`: stored when added, or read from
 the file's header for models added before 0.9.1) get the same Qwen values.
-Others leave sampling to llama-server. A sampling flag among a model's extra
+Others leave sampling to llama-server. A model's own sampling (above) replaces
+both. A sampling flag among a model's extra
 llama-server flags (`--temp`, `--top-p`, `--top-k`, `--min-p`,
 `--presence-penalty`, ...) wins: the request then leaves that value out.
 The Qwen3.8 template accepts only `reasoning_effort` = `low`, `medium` or
@@ -222,10 +238,15 @@ image), `vision`, `thinking`, `default`, `loaded` - for the phone chat page
 (section 10); other clients ignore them.
 
 **LAN guard.** API routes answer only to clients in `HUB_LAN_CIDRS` (LAN,
-WireGuard, VPN; set in `/srv/slq-hub/.env`), unless Settings → Apps and keys
-allows the API through the proxy. Behind Nginx Proxy Manager the real client address
-comes from `X-Forwarded-For`, trusted only from the proxy's IP, so the
-subdomain serves the UI but not the API.
+WireGuard, VPN; set in `/srv/slq-hub/.env`). Behind Nginx Proxy Manager the
+real client address comes from `X-Forwarded-For`, trusted only from the
+proxy's IP, so the subdomain serves the UI but not the API. Two exceptions,
+both only through the proxy (a direct peer outside the LAN, like the sandbox,
+is always refused): a key set to **At home and away** (per key, for a
+person's phone: the chat page then works at `https://hub.slq.dk/chat`), and
+every key when Settings → Apps and keys allows that. A key's address list
+still applies. The 403 names the address the Hub saw (`client_ip`,
+`via_proxy`), which is how "it says I am not at home" gets diagnosed.
 
 **CORS.** Coagent may be a static page calling from the browser. Allowed
 origins are a list in Settings.
@@ -272,8 +293,9 @@ failed one may be retried once. After three refusals, or the same step (text
 and calls) three times, the next request goes without tools and with a note
 to answer from what it has; any tool calls in that answer are dropped. The
 event `loop` and a `loop` step record it, and the answer carries a `notice`
-block (shown in the chat, never sent to a model). Cloud escalation, where on,
-resets the guard.
+block (shown in the chat, never sent to a model). When someone can take
+over (below), the turn is handed over instead of forced to answer; a
+hand-over resets the guard.
 
 The UI receives every event as it happens over SSE
 (`GET /hub/api/runs/{id}/events`): `queued` (with the position), `started`,
@@ -290,7 +312,9 @@ stopped or crashed turn keeps what it did.
    images and artifacts guidance.
 2. The memory index (file names and first lines).
 3. The skills on offer (name + description only).
-4. Cloud help, where escalation is on.
+4. Who takes over when the model is stuck (a stronger local model, or the
+   cloud where escalation is on) - or, after a hand-over, that the turn came
+   from a smaller model whose steps should be checked rather than trusted.
 5. The project's instructions.
 6. The summary of the condensed part of the chat, if any.
 7. Then the history; tool schemas go in the request's `tools`.
@@ -314,7 +338,7 @@ cached prefix from step to step.
 | `todo_write` | A visible checklist for long tasks. It helps a 27B model keep track of them. |
 | `task` | A subagent with a fresh context and the tools except artifact, todo_write, image generation, task and escalate, inside the same lease. Its steps show nested under the call; only its report goes back. |
 | MCP tools | From configured servers: streamable HTTP, or stdio servers that run inside the sandbox through a pipe in the sandbox daemon. These ask first, with "Always allow" per tool. |
-| `escalate` | Present only where cloud escalation is on. |
+| `escalate` | Present when someone can take over: the stronger local model (Settings → Assistant), or the cloud where escalation is on. Its description names who. |
 
 **Approval.** Everything inside the sandbox runs without asking: files,
 bash, image tools, web. MCP tools ask the first time.
@@ -347,14 +371,41 @@ starts the next turn (not after an error). At most ten wait at a time.
 
 **Steps.** Every run stores its steps: queue wait, model loads, each model
 call (prompt tokens, cached tokens, generated tokens, tokens/s from
-llama-server's `timings`) and each tool call with its duration. The UI shows
-a summary line under each answer (model, time, tokens, tokens/s); the full
-list is in the chat's `runs` from the API.
+llama-server's `timings`) and each tool call with its duration. Each model
+call also records what was sent (`sent`: sampling, thinking, effort,
+max_tokens, number of tools and messages, the estimated prompt size) and why
+it stopped (`finish`). The system prompt and the tools' names are kept in
+`run_prompts` when they change (start, subagent, hand-over, compaction); a
+text is stored once in `prompt_texts` however many turns use it, and goes
+with the last run that used it. The UI shows a summary line under each answer
+(model, time, tokens, tokens/s); the full list is in the chat's `runs` from
+the API and in the troubleshooting export.
+
+**Hand-over** (`Engine._stuck`). A turn is stuck when the loop guard trips,
+when three tool calls in a row fail, when the same call is made three times
+in six, or when the model calls `escalate`. Who takes over, in this order:
+
+- **The stronger model on this server** (Settings → Assistant → "When the
+  model gets stuck, hand over to", default Qwen3.8 27B), when it is
+  downloaded and is not the one already working. The turn goes on in the same
+  lease: the card switches before the next step (`ticket.switch`), thinking
+  and effort are resolved again for the new model, the other model's
+  reasoning is dropped (and images, if the new model cannot see), the system
+  prompt says the turn came from a smaller model, and a note in the history
+  says why. Once per turn; subagents never hand over.
+- **The cloud**, in projects with cloud escalation, when the local model
+  cannot (or already took over).
+- **Nobody**: a loop ends in an answer without tools (loop guard, above).
+
+Every hand-over shows a notice ("Handed over from Qwen3.6 35B-A3B to Qwen3.8
+27B: the same step (web_search) 3 times."), emits `escalated` and records an
+`escalated` step with `from`, `local` and the reason. The answer's footer
+names both models.
 
 **Cloud escalation** (web chats in projects with "Cloud escalation" on):
 
-- **Triggers.** It starts when the model calls `escalate`, when three tool
-  calls in a row fail, or when the same call is made three times in six.
+- **Triggers.** The same as a hand-over (above), when no stronger local
+  model can take the turn.
 - **What happens.** The rest of the turn runs on the configured provider:
   Anthropic (Claude) or an OpenAI-compatible endpoint (DeepSeek, OpenRouter).
   Tools still run locally.

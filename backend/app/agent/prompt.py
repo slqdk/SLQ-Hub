@@ -10,7 +10,7 @@ BASE = """You are the assistant in SLQ Hub, a self-hosted AI workspace. You run 
 server. The user is {user}. Today is {date}.
 
 # How to work
-- Answer in the language the user writes in. Be direct and concise - no filler, no flattery.
+- Answer in the language of the user's latest message. Be direct and concise - no filler, no flattery.
 - Simple questions get a direct answer without tools. Use tools when they make the answer better: look things \
 up instead of guessing, read files before changing them, run code to check a result.
 - Never invent file contents, URLs, numbers, quotes or facts. If you are unsure, say so or find out.
@@ -52,8 +52,8 @@ wants it."""
 
 def system_prompt(*, user: str, model_name: str, folder_text: str, sandbox_path: str, memory_index: list,
                   skills: list[dict], project: dict | None, summary: str = "", images_available: bool = True,
-                  tz: str = "Europe/Copenhagen", escalation: bool = False, subagent: bool = False,
-                  cloud_model: str = "") -> str:
+                  tz: str = "Europe/Copenhagen", handover_to: str = "", subagent: bool = False,
+                  cloud_model: str = "", taken_over_from: str = "") -> str:
     now = datetime.now(ZoneInfo(tz))
     mem = ("Memory files:\n" + "\n".join(f"- {p}: {d}" for p, d in memory_index)) if memory_index else \
         "There are no memory files yet."
@@ -64,14 +64,18 @@ def system_prompt(*, user: str, model_name: str, folder_text: str, sandbox_path:
         lines = "\n".join(f"- {s['name']}: {s['description']}" for s in skills)
         text += ("\n\n# Skills\nThese skills are enabled. When a task matches one, load it with the skill tool "
                  "first and follow it:\n" + lines)
-    if escalation:
-        text += ("\n\n# Cloud help\nIf a task is clearly beyond you (you keep failing, or it needs knowledge or "
-                 "reasoning you lack), call escalate with a short reason; a stronger cloud model takes over this "
-                 "turn. Do not escalate simple things.")
+    if handover_to:
+        text += ("\n\n# Help\nIf a task is clearly beyond you (you keep failing, or it needs knowledge or "
+                 f"reasoning you lack), call escalate with a short reason; {handover_to} takes over this turn. "
+                 "Do not escalate simple things.")
     if cloud_model:
         text += (f"\n\n# Escalated\nThis turn was handed over to you, {cloud_model}, a cloud model, because the "
                  "local model could not finish it. Everything above was done by the local model. Continue the "
                  "task from where it stands and finish it.")
+    elif taken_over_from:
+        text += (f"\n\n# Handed over\nThis turn was handed over to you by {taken_over_from}, a smaller model on "
+                 "this server, because it could not finish it. What was done above in this turn was done by it: "
+                 "check it rather than trust it. Continue the task from where it stands and finish it.")
     if project:
         text += f"\n\n# Project: {project['name']}"
         if (project.get("instructions") or "").strip():

@@ -648,6 +648,12 @@ button.file-chip:disabled { cursor: default; }
 .tree-find input { flex: 1; min-width: 0; border: 0; outline: none; background: transparent; padding: 4px 0; font-size: 14px; color: var(--ink); }
 .btn.picked { color: var(--act); border-color: var(--act); background: var(--act-wash); }
 /* A radio list of files or versions: on a phone the size and the verdict wrap under the name. */
+.sampling-set { border: 1px solid var(--rule-2); border-radius: 8px; padding: 8px 12px 12px; margin: 0; }
+.sampling-set legend { padding: 0 4px; font-family: var(--font-plate); font-weight: 600; font-size: 14px; color: var(--ink-2); }
+.sampling-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px 12px; }
+button.hf-hit { width: 100%; border: 0; border-top: 1px solid var(--rule-2); background: transparent; text-align: left; cursor: pointer; }
+button.hf-hit:first-child { border-top: 0; }
+button.hf-hit:hover:not(:disabled) { background: var(--paper); }
 .choice-row { cursor: pointer; min-height: 44px; flex-wrap: wrap; }
 .choice-main { flex: 1 1 180px; min-width: 0; }
 .choice-state { gap: 6px; min-width: 150px; }

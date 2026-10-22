@@ -190,9 +190,13 @@ Under **Advanced** (long answers stream, and uploads can be large):
     proxy_send_timeout 3600s;
     proxy_buffering off;
 
-The model API (`/v1`, `/api`) is refused when it arrives through the proxy.
-That is deliberate: apps use the LAN address. (Settings → Apps and keys can
-allow it through the proxy, with a key, if you ever need that.)
+The model API (`/v1`, `/api`) is refused when it arrives through the proxy
+from outside. That is deliberate: apps use the LAN address. A key set to
+**At home and away** (Settings → Apps and keys) is the exception - for a
+person's phone, so the chat page works at `https://hub.slq.dk/chat` from
+anywhere; the key dialog's phone link then uses `HUB_PUBLIC_URL` from
+`/srv/slq-hub/.env` (`install.sh` asks for it). The Advanced block above
+matters for that page: long answers stream, and a picture can take a minute.
 
 SLQ Sync (`/api/sync`) works through the proxy with a device token, so PCs
 outside the LAN can sync.

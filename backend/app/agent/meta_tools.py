@@ -1,4 +1,4 @@
-"""escalate (hand the turn to a cloud model) and task (a subagent)."""
+"""escalate (hand the turn to a stronger model: on this server, or the cloud) and task (a subagent)."""
 from __future__ import annotations
 
 from .tools.base import Tool, ToolContext, ToolResult, obj, register
@@ -7,9 +7,19 @@ SUBAGENT_STEPS = 30
 
 
 async def escalate(ctx: ToolContext, args: dict) -> ToolResult:
-    reason = " ".join(str(args.get("reason") or "").split())[:300] or "the local model asked for help"
+    reason = " ".join(str(args.get("reason") or "").split())[:300] or "the model asked for help"
     ctx.state["escalate"] = reason
-    return ToolResult(f"Handing this turn over to the cloud model (reason: {reason}).")
+    who = ctx.engine.handover_label() if ctx.engine is not None else ""
+    return ToolResult(f"Handing this turn over to {who or 'a stronger model'} (reason: {reason}).")
+
+
+ESCALATE_TEXT = ("Hand this turn over to {who} when the task is clearly beyond you: you keep failing, or it needs "
+                 "knowledge or reasoning you lack. Not for simple things.")
+
+
+def _escalate_dynamic(ctx: ToolContext) -> tuple[str, dict]:
+    who = ctx.engine.handover_label() if ctx.engine is not None else ""
+    return ESCALATE_TEXT.format(who=who or "a stronger model"), ESCALATE_PARAMS
 
 
 async def task(ctx: ToolContext, args: dict) -> ToolResult:
@@ -29,7 +39,7 @@ async def task(ctx: ToolContext, args: dict) -> ToolResult:
     sub = Engine(ctx.hub, ctx.run, ctx.chat, ctx.project, ctx.workdir, ctx.model, parent.ticket, depth=1,
                  parent=ctx.call_id, thinking=parent.thinking, effort=parent.effort, escalation=False)
     sub.cloud = parent.cloud
-    system = agent.system_for(ctx.chat, ctx.project, ctx.workdir, ctx.model, escalation=False, subagent=True,
+    system = agent.system_for(ctx.chat, ctx.project, ctx.workdir, ctx.model, subagent=True,
                               cloud_model=parent.cloud.label if parent.cloud else "")
     ctx.emit("subagent", id=ctx.call_id, description=description, state="started")
     try:
@@ -45,10 +55,9 @@ async def task(ctx: ToolContext, args: dict) -> ToolResult:
                       display={"subagent": {"description": description, "tool_calls": steps}})
 
 
-register(Tool("escalate", "Hand this turn over to a stronger cloud model when the task is clearly beyond you: you "
-              "keep failing, or it needs knowledge or reasoning you lack. Not for simple things.",
-              obj({"reason": {"type": "string", "description": "One sentence: why"}}, ["reason"]),
-              escalate, in_subagent=False, group="meta"))
+ESCALATE_PARAMS = obj({"reason": {"type": "string", "description": "One sentence: why"}}, ["reason"])
+register(Tool("escalate", ESCALATE_TEXT.format(who="a stronger model"), ESCALATE_PARAMS, escalate, in_subagent=False,
+              group="meta", dynamic=_escalate_dynamic))
 register(Tool("task", "Give a focused job to a subagent that works with the same tools in a fresh context and "
               "returns only its final report. Use it for research or exploration that would fill this "
               "conversation with intermediate output (reading many files or pages). The subagent sees nothing "

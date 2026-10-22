@@ -138,6 +138,19 @@ def to_model_messages(rows: list[dict], current_run: str | None = None, keep_ima
     return out
 
 
+def without_images(messages: list[dict]) -> list[dict]:
+    """The messages for a model that cannot see: pictures become a short note."""
+    out = []
+    for m in messages:
+        c = m.get("content")
+        if isinstance(c, list) and any(p.get("type") == "image_url" for p in c):
+            texts = [p.get("text", "") if p.get("type") != "image_url" else "[a picture - this model cannot see it]"
+                     for p in c]
+            m = {**m, "content": "\n\n".join(t for t in texts if t)}
+        out.append(m)
+    return out
+
+
 def estimate_tokens(messages: list[dict]) -> int:
     chars, images = 0, 0
     for m in messages:

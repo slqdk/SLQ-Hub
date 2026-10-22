@@ -250,6 +250,22 @@ def strip_images(obj):
     return obj
 
 
+# Known noise in llama-server's log: vision models (Qwen-VL) warn about the token positions of every batch of
+# image tokens, which pushes everything else out of the tail.
+LOG_NOISE = re.compile(r"find_slot: non-consecutive token position")
+LOG_LINES = 800
+
+
+def quiet_log(text: str, keep: int = LOG_LINES) -> str:
+    """The model server's log tail without its known noise (counted instead of listed)."""
+    lines = text.splitlines()
+    kept = [line for line in lines if not LOG_NOISE.search(line)]
+    left_out = len(lines) - len(kept)
+    head = [f"({left_out} \"non-consecutive token position\" warnings left out: harmless, they come from the image "
+            "tokens of vision models.)"] if left_out else []
+    return "\n".join(head + kept[-keep:]) + ("\n" if kept else "")
+
+
 def merge_events(events: list[dict]) -> list[dict]:
     """A run's event log with the streamed pieces (text, thinking, tool
     arguments) joined, so it reads as steps rather than thousands of deltas."""
@@ -331,13 +347,13 @@ def _context(hub, agent, chat: dict, project: dict | None) -> dict:
         return {"error": str(exc)}
     wd = agent.workdir(chat)
     escalation = bool(project and project["settings"].get("cloud_escalation") and cloudmod.configured(hub.settings))
-    system = agent.system_for(chat, project, wd, entry, escalation=escalation)
+    engine = Engine(hub, Run(chat["id"]), chat, project, wd, entry, None, thinking=thinking, effort=effort,
+                    escalation=escalation)
+    system = agent.system_for(chat, project, wd, entry, handover_to=engine.handover_label())
     rows = store.messages(chat["id"], after_id=int(chat.get("summary_upto") or 0))
     keep_from = rows[-12]["id"] if len(rows) > 12 else 0
     messages = [{"role": "system", "content": system},
                 *C.to_model_messages(rows, None, keep_from, vision=vision(entry))]
-    engine = Engine(hub, Run(chat["id"]), chat, project, wd, entry, None, thinking=thinking, effort=effort,
-                    escalation=escalation)
     tools = engine.tools()
     schemas = engine.schemas(tools)
     ctx = hub.catalog.context_per_request(entry["id"])
@@ -348,6 +364,7 @@ def _context(hub, agent, chat: dict, project: dict | None) -> dict:
         "note": "What the model would be sent if a message were sent now, with today's settings and skills. "
                 "Older messages are condensed into the chat's summary (in the system prompt).",
         "model": entry["id"], "thinking": thinking, "effort": effort, "escalation": escalation,
+        "hand_over_to": engine.handover_label(),
         "context_per_request": ctx, "estimated_tokens": used,
         "compact_at": hub.settings.get("agent", "compact_at"),
         "messages": messages,
@@ -367,7 +384,7 @@ async def bundle(hub, agent, chat: dict) -> bytes:
     except Exception as exc:  # noqa: BLE001 - the rest of the bundle is still worth having
         context = {"error": f"{type(exc).__name__}: {exc}"}
     live = [r for r in agent.runs.runs.values() if r.chat_id == chat["id"]]
-    log_text = await hub.runner.logs("main", 800)
+    log_text = quiet_log(await hub.runner.logs("main", 3000))
     entry = hub.catalog.get_llm(context.get("model") or "") if isinstance(context, dict) else None
     model_card = dict(entry or {})
     if entry:
@@ -411,6 +428,7 @@ async def bundle(hub, agent, chat: dict) -> bytes:
                 "settings": _settings(hub),
                 "messages": rows,
                 "runs": runs,
+                "prompts": store.prompts_for_chat(chat["id"]),
                 "runs_in_memory": [{"id": r.id, "status": r.status, "events": len(r.events),
                                     "started": datetime.fromtimestamp(r.started, timezone.utc).isoformat(timespec="seconds"),
                                     "ended": datetime.fromtimestamp(r.ended, timezone.utc).isoformat(timespec="seconds")
@@ -441,8 +459,11 @@ Chat {id} "{title}", exported {at} from SLQ Hub {version}.
 transcript.md          the conversation, readable (tool results shortened)
 chat.json              everything stored about the chat: every message block (text,
                        thinking, tool calls and their full results), the runs (steps,
-                       timings, tokens, errors), artifacts with all versions, the model
-                       card, and the settings that shape a turn (no keys or tokens)
+                       timings, tokens, errors; each model step with what it sent -
+                       sampling, thinking, tools - and why it stopped), the system
+                       prompt and tools each turn's model got (prompts), artifacts
+                       with all versions, the model card, and the settings that shape
+                       a turn (no keys or tokens)
 context.json           what the model would be sent if a message were sent now: system
                        prompt, the history after condensing, the tools and the request
 events/<run>.json      the live event log of the {runs} run(s) still in the Hub's memory

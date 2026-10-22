@@ -32,8 +32,12 @@ export function PhoneChat() {
       const err = e instanceof HubError ? e : new HubError("other", (e as Error).message);
       // No key yet (and not the Hub's signed-in owner), or the key stopped working: ask for one.
       // Not at home, or the Hub is down: say so, and keep the key for later.
-      if (err.problem === "key") setConn({ state: "connect", error: key ? err.message : undefined });
-      else setConn({ state: "blocked", error: err });
+      if (err.problem === "key") {
+        setConn({ state: "connect", error: key ? err.message : undefined });
+      } else {
+        if (key) saveKey(key);              // from a link: kept, so Try again (and the next visit) has it
+        setConn({ state: "blocked", error: err });
+      }
     }
   }, []);
 
@@ -95,8 +99,8 @@ function Connect({ error, onKey }: { error?: string; onKey: (key: string) => voi
       </label>
       {(problem || error) && <p className="notice fault"><Lamp state="fault" /> {problem || error}</p>}
       <button className="btn primary" type="submit" disabled={!text.trim()}>Connect</button>
-      <p className="small faint" style={{ margin: 0 }}>The key stays on this device and works only on the home
-        network. Ask whoever runs the Hub for one (Settings, Apps and keys).</p>
+      <p className="small faint" style={{ margin: 0 }}>The key stays on this device. Ask whoever runs the Hub for one
+        (Settings, Apps and keys); it works on the home network, or anywhere if it is set to work away from home.</p>
     </form>
   );
 }

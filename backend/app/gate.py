@@ -3,9 +3,10 @@ straight through).
 
 * /k/<key>/...  - an API key in the path, for Ollama clients that cannot send
   headers: stripped here, remembered for the auth check.
-* model API (/v1/*, /api/* except /api/sync) - LAN only (unless allowed in
-  Settings), an API key (Bearer, x-api-key or path) or a signed-in browser,
-  CORS for the origins listed in Settings.
+* model API (/v1/*, /api/* except /api/sync) - LAN only, an API key (Bearer,
+  x-api-key or path) or a signed-in browser, CORS for the origins listed in
+  Settings. From outside, only through the trusted proxy: with a key set to
+  work away from home, or with any key when Settings allows it for all.
 * sync API (/api/sync/*) - a slqsync_ device token or a signed-in browser.
 * UI API (/hub/api/*) - a signed-in browser, except login/status/health;
   state-changing requests from another origin are refused.
@@ -119,16 +120,22 @@ class Gate:
                 await send({"type": "http.response.start", "status": 204, "headers": pre})
                 return await send({"type": "http.response.body", "body": b""})
             lan = netguard.is_lan(ip, hub.env.lan_networks, hub.env.sandbox_ip)
-            if not lan and not hub.settings.get("api", "allow_external"):
-                return await _json(send, 403, {"error": "the model API answers only on the LAN"}, cors)
             raw = path_key or _bearer(headers)
-            key = auth.verify_api_key(raw) if raw else None
+            key = auth.find_api_key(raw) if raw else None
+            # From outside the home network only through the proxy (hub.slq.dk): every key when Settings allows
+            # it, otherwise only keys set to work away from home.
+            away = via_proxy and (bool(hub.settings.get("api", "allow_external")) or bool(key and key.get("away")))
+            if not lan and not away:
+                return await _json(send, 403, {"error": f"the model API answers only on the LAN (this request came "
+                                                        f"from {ip})", "client_ip": ip, "via_proxy": via_proxy}, cors)
             if raw and key is None:                  # wrong credentials beat a browser session
                 return await _json(send, 401, {"error": {"message": "invalid API key",
                                                          "type": "authentication_error"}}, cors)
             if key is not None:
                 if not _ip_allowed(ip, key.get("allowed_ips", "")):
-                    return await _json(send, 403, {"error": f"this key may not be used from {ip}"}, cors)
+                    return await _json(send, 403, {"error": f"this key may not be used from {ip}", "client_ip": ip,
+                                                   "via_proxy": via_proxy}, cors)
+                auth.touch_api_key(key["id"])
                 state["caller"] = Caller(owner=key["name"], priority=key["priority"], via="key")
             else:
                 user = auth.session_user(_cookie(headers, auth.SESSION_COOKIE))
