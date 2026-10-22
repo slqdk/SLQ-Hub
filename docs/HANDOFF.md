@@ -138,10 +138,25 @@ reset problem is not known yet.
    0000:0a` line; `Failed to find module 'vfio_virqfd'` is a stale
    `/etc/modules` line, harmless on 6.8). After the VM's own reboot into
    7.0.0-38 it came back (`qmpstatus: running`, no D3 or EFAULT lines on the
-   host), but the GPU check stopped: "the amdgpu module is not loaded". Not
-   diagnosed yet: that check was `lsmod | grep -q '^amdgpu'` under pipefail,
-   which can fail on a match (SIGPIPE), fixed in 0.1.3; asked for
-   `/proc/modules`, `/proc/cmdline`, `dkms status` and dmesg from the VM.
+   host), but the GPU check stopped: "the amdgpu module is not loaded". That
+   was a false result: `/proc/modules` had `amdgpu 22007808 0 - Live ...
+   (OE)`; the check was `lsmod | grep -q '^amdgpu'` under pipefail (SIGPIPE),
+   fixed in 0.1.3. What the VM showed: `/proc/cmdline` =
+   `BOOT_IMAGE=/vmlinuz-7.0.0-38-generic
+   root=/dev/mapper/ubuntu--vg-ubuntu--lv ro amdgpu.runpm=0` (so `/` is on
+   LVM after all); `dkms status`: `amdgpu/7.1.9-2407772.24.04` installed for
+   6.8.0-147 and 7.0.0-38; dmesg: `amdgpu version: 7.1.9.31600000`, the card
+   at guest address `01:00.0` (IP discovery `0x1002:0x744C 0x1DA2:0xE471
+   0xC8`), `CP RS64 enable`, **`PCIE atomic ops is not supported`**, BAR 0
+   released and re-assigned but `BAR=256M` (no large BAR), 24560M VRAM, 20043M
+   GTT, DMUB firmware loading - the rest of the log (KFD) not seen yet. On
+   atomics: KFD on GFX11 with RS64 CP firmware accepts a card without PCIe
+   atomics when the MEC firmware is >= 509, so `/dev/kfd` may still appear;
+   the GPU check stops if KFD skips the card. Likely reason for the missing
+   atomics: QEMU (8.2+) only enables AtomicOps on the root port for a
+   single-function vfio device, and the card is passed with all functions
+   (GPU + audio, multifunction). Passing only `0000:0a:00.0` should give the
+   guest atomics - not tried.
 3. **llama.cpp on the card** (`server-rocm-b11783`): the flags parse (checked
    on a CPU build), but VRAM use (~21 GiB expected for Qwen3.8-27B with an 80K
    pool), ROCm itself and real tokens/s are unknown until the first load.
