@@ -39,9 +39,6 @@ export function ProjectView({ id, tab }: { id: number; tab?: string }) {
       <div className="topbar">
         <button className="icon-btn menu-btn" onClick={() => setSidebarOpen(true)} aria-label="Open the menu"><Menu size={18} /></button>
         <h1 className="ellipsis">{project.name}</h1>
-        <span className="grow" />
-        <button className="btn primary small" onClick={() => navigate({ name: "project-new-chat", id })}>
-          <MessageSquarePlus size={15} /> New chat</button>
       </div>
       <div className="scroll" style={current === "files" ? { overflow: "hidden", display: "flex", flexDirection: "column" } : undefined}>
         <div className="page" style={current === "files" ? { maxWidth: "none", width: "100%", paddingBottom: 0, flex: 1, display: "flex", flexDirection: "column", minHeight: 0 } : undefined}>
@@ -72,9 +69,14 @@ function ProjectChats({ project }: { project: Project }) {
     <div className="stack">
       {project.instructions.trim() && <div className="callout"><div className="label">Instructions</div>
         <div style={{ whiteSpace: "pre-wrap" }}>{project.instructions}</div></div>}
+      <div className="row">
+        <span className="grow muted small">{chats && chats.length > 0 ? `${chats.length} chat${chats.length === 1 ? "" : "s"}` : ""}</span>
+        <button className="btn primary small" onClick={() => navigate({ name: "project-new-chat", id: project.id })}>
+          <MessageSquarePlus size={15} /> New chat</button>
+      </div>
       <div className="list">
         {chats === null ? <Empty>Loading</Empty> : chats.length === 0 ? (
-          <Empty>No chats yet. A chat here works in the project's files; start one with New chat.</Empty>
+          <Empty>No chats yet. A chat here works in the project's files.</Empty>
         ) : chats.map((c) => (
           <a key={c.id} className="list-row" style={{ color: "inherit", textDecoration: "none" }} {...linkProps({ name: "chat", id: c.id })}>
             <span className="grow ellipsis"><b>{c.title}</b></span>

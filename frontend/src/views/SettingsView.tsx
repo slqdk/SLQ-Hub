@@ -1,13 +1,13 @@
 // Settings: models, the queue, apps and keys, the agent, skills, memory, MCP, cloud, system.
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Copy, Download, Menu, Plus, RefreshCw, Upload as UploadIcon, X } from "lucide-react";
-import { api, type ApiKey, type McpServerConfig, type McpStatus, type MemoryFile, type ModelEntry,
+import { api, type ApiKey, type HFLookup, type McpServerConfig, type McpStatus, type MemoryFile, type ModelEntry,
   type Settings, type Skill } from "../lib/api";
 import { ago, bytes, residencyName } from "../lib/format";
 import { navigate } from "../lib/router";
 import { useApp, type Theme } from "../state";
 import { QueueModal, plateState } from "../components/Queue";
-import { ConfirmButton, Empty, Lamp, Modal, Switch, SwitchRow, copyText, useInterval } from "../components/ui";
+import { ConfirmButton, Empty, Lamp, Modal, Switch, SwitchRow, copyText, useInterval, type LampState } from "../components/ui";
 import { forgetSettings } from "./ChatView";
 
 const TABS = [
@@ -143,6 +143,11 @@ function ModelsTab({ s }: { s: S }) {
   const cancel = (id: string) => act(`cancel-${id}`, () => api(`/hub/api/models/${id}/cancel-download`, { method: "POST" }));
   const load = (id: string) => act(`load-${id}`, () => api(`/hub/api/models/${id}/load`, { method: "POST" }));
   const unload = () => act("unload", () => api("/hub/api/models/unload", { method: "POST" }));
+  const remove = (m: ModelEntry) => act(`rm-${m.id}`, async () => {
+    await api(`/hub/api/models/${m.id}`, { method: "DELETE" });
+    toast(`Removed ${m.name} and its files`, "run");
+  });
+  const [addingHF, setAddingHF] = useState(false);
   if (!models) return <div className="faint">Loading</div>;
   const installedLlms = models.llm.filter((m) => m.installed);
 
@@ -162,25 +167,29 @@ function ModelsTab({ s }: { s: S }) {
         { key: "preload", label: "Load the chat model when the Hub starts", type: "bool" },
       ]} />
       <ModelGroup title="Language models" items={models.llm} busy={busy} onDownload={download} onCancel={cancel}
-        extra={(m) => m.installed && <>
-          {m.loaded ? <span className="tag"><Lamp state="run" size="sm" /> Loaded</span>
-            : <button className="btn small" disabled={!!busy} onClick={() => load(m.id)}>{busy === `load-${m.id}` ? "Loading" : "Load"}</button>}
-          <button className="btn quiet small" onClick={() => setAdvanced(m)}>Server settings</button>
+        action={<button className="btn small" onClick={() => setAddingHF(true)}><Plus size={14} /> Add from Hugging Face</button>}
+        extra={(m) => <>
+          {m.installed && (m.loaded ? <span className="tag"><Lamp state="run" size="sm" /> Loaded</span>
+            : <button className="btn small" disabled={!!busy} onClick={() => load(m.id)}>{busy === `load-${m.id}` ? "Loading" : "Load"}</button>)}
+          {m.installed && <button className="btn quiet small" onClick={() => setAdvanced(m)}>Server settings</button>}
+          {m.custom && <ConfirmButton className="btn quiet small" confirmText="Remove it and its files?"
+            disabled={!!busy || m.loaded} onConfirm={() => remove(m)}>Remove</ConfirmButton>}
         </>} />
       <ModelGroup title="Helpers for libraries" items={models.aux} busy={busy} onDownload={download} onCancel={cancel}
         note="Run on the CPU (the image embedder can use the GPU, see Assistant, Libraries)." />
       <ModelGroup title="Image models (ComfyUI)" items={models.comfy} busy={busy} onDownload={download} onCancel={cancel} />
       {advanced && <ServerSettings model={advanced} onClose={() => setAdvanced(null)} onSaved={() => { setAdvanced(null); refreshModels(); }} />}
+      {addingHF && <AddFromHF onClose={() => setAddingHF(false)} onAdded={() => { setAddingHF(false); refreshModels(); }} />}
     </div>
   );
 }
 
-function ModelGroup({ title, items, busy, onDownload, onCancel, extra, note }: { title: string; items: ModelEntry[];
+function ModelGroup({ title, items, busy, onDownload, onCancel, extra, note, action }: { title: string; items: ModelEntry[];
   busy: string | null; onDownload: (id: string) => void; onCancel: (id: string) => void;
-  extra?: (m: ModelEntry) => ReactNode; note?: string }) {
+  extra?: (m: ModelEntry) => ReactNode; note?: string; action?: ReactNode }) {
   return (
     <section style={{ marginBottom: 26 }}>
-      <h3>{title}</h3>
+      <div className="row" style={{ marginBottom: 8 }}><h3 className="grow" style={{ margin: 0 }}>{title}</h3>{action}</div>
       {note && <p className="muted small" style={{ marginTop: -4 }}>{note}</p>}
       <div className="list">
         {items.map((m) => {
@@ -194,7 +203,9 @@ function ModelGroup({ title, items, busy, onDownload, onCancel, extra, note }: {
             <div className="list-row" key={m.id} style={{ alignItems: "flex-start", flexWrap: "wrap" }}>
               <Lamp state={m.installed ? (m.loaded ? "run" : "off") : active.length ? "wait" : "off"} pulse={!!active.length} />
               <div className="grow" style={{ minWidth: 220 }}>
-                <b>{m.name}</b> {m.default ? null : <span className="tag">optional</span>}
+                <b>{m.name}</b> {m.custom && m.source
+                  ? <a className="tag" href={m.source.url} target="_blank" rel="noreferrer">Hugging Face</a>
+                  : m.default ? null : <span className="tag">optional</span>}
                 <div className="meta">{m.description}{size ? ` ${bytes(size)}.` : ""}</div>
                 {active.length > 0 && <div style={{ marginTop: 6 }}>
                   <div className="bar wait"><span style={{ width: `${total ? (done / total) * 100 : 2}%` }} /></div>
@@ -245,6 +256,134 @@ function ServerSettings({ model, onClose, onSaved }: { model: ModelEntry; onClos
       </div>
       <label className="field"><span>Extra llama-server flags</span><input className="input mono" value={extra} onChange={(e) => setExtra(e.target.value)}
         placeholder="--temp 0.6" /><small>For experiments. --host, --port and --api-key are set by the Hub.</small></label>
+    </Modal>
+  );
+}
+
+// ------------------------------------------------------------ add from Hugging Face
+
+const GiB = 1024 ** 3;
+const CONTEXTS = [8192, 16384, 32768, 65536, 131072, 262144];
+
+/** Whether the weights leave room on the card for the context and compute buffers. */
+function fitOf(size: number, vram: number): { lamp: LampState; text: string } {
+  if (!vram) return { lamp: "off", text: "" };
+  const left = vram - size;
+  if (left > 6 * GiB) return { lamp: "run", text: "Fits, with room for a long context" };
+  if (left > 2.5 * GiB) return { lamp: "wait", text: "Fits with a shorter context" };
+  return { lamp: "fault", text: "Too big for the card" };
+}
+
+function AddFromHF({ onClose, onAdded }: { onClose: () => void; onAdded: () => void }) {
+  const { toast } = useApp();
+  const [repo, setRepo] = useState("");
+  const [looking, setLooking] = useState(false);
+  const [error, setError] = useState("");
+  const [found, setFound] = useState<HFLookup | null>(null);
+  const [file, setFile] = useState("");
+  const [mmproj, setMmproj] = useState("");
+  const [name, setName] = useState("");
+  const [id, setId] = useState("");
+  const [ctx, setCtx] = useState(32768);
+  const [tools, setTools] = useState(true);
+  const [thinking, setThinking] = useState(false);
+  const [adding, setAdding] = useState(false);
+
+  const lookUp = async () => {
+    if (!repo.trim()) return;
+    setLooking(true);
+    setError("");
+    setFound(null);
+    try {
+      const r = await api<HFLookup>("/hub/api/models/hf", { query: { repo: repo.trim() } });
+      const fitting = r.choices.filter((c) => fitOf(c.size, r.vram).lamp !== "fault");
+      const pick = fitting.find((c) => /(^|-)Q4_K_M\b/i.test(c.label)) ?? fitting[fitting.length - 1] ?? r.choices[0];
+      setFound(r);
+      setFile(pick?.key ?? "");
+      setMmproj((r.mmproj.find((m) => /^F16$/i.test(m.label)) ?? r.mmproj[0])?.path ?? "");
+      setName(r.suggested.name);
+      setId(r.suggested.id);
+      const limit = r.meta.context_length ?? 262144;
+      setCtx(Math.min(32768, CONTEXTS.filter((c) => c <= limit).pop() ?? 8192));
+      setTools(r.meta.tools ?? true);
+      setThinking(r.meta.thinking ?? false);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setLooking(false);
+    }
+  };
+
+  const choice = found?.choices.find((c) => c.key === file);
+  const mm = found?.mmproj.find((m) => m.path === mmproj);
+  const total = (choice?.size ?? 0) + (mm?.size ?? 0);
+  const idOk = /^[a-z0-9][a-z0-9._-]{0,62}$/.test(id);
+  const add = async () => {
+    if (!found || !choice) return;
+    setAdding(true);
+    try {
+      await api("/hub/api/models/hf", { method: "POST", body: { repo: found.repo, file: choice.key, mmproj: mm?.path ?? null,
+        id, name, ctx, tools, thinking } });
+      toast(`Downloading ${name || id}. It appears under Language models when it is ready.`, "run");
+      onAdded();
+    } catch (e) {
+      toast((e as Error).message, "fault");
+    } finally {
+      setAdding(false);
+    }
+  };
+
+  const meta = found?.meta ?? {};
+  const facts = found ? [meta.architecture, meta.parameters ? `${(meta.parameters / 1e9).toFixed(1)}B parameters` : null,
+    meta.context_length ? `${Math.round(meta.context_length / 1024)}K context` : null].filter(Boolean) : [];
+  return (
+    <Modal wide title="Add a model from Hugging Face" onClose={onClose} footer={<>
+      <button className="btn" onClick={onClose}>Cancel</button>
+      <button className="btn primary" disabled={!choice || !idOk || adding} onClick={add}>
+        <Download size={14} /> {adding ? "Adding" : `Add and download${total ? ` (${bytes(total)})` : ""}`}</button></>}>
+      <form className="row" style={{ gap: 8 }} onSubmit={(e) => { e.preventDefault(); lookUp(); }}>
+        <input className="input grow" autoFocus value={repo} onChange={(e) => setRepo(e.target.value)}
+          placeholder="unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF, or a link" aria-label="Hugging Face model" />
+        <button className="btn" type="submit" disabled={looking || !repo.trim()}>{looking ? "Looking" : "Look up"}</button>
+      </form>
+      {!found && !error && <p className="muted small" style={{ margin: 0 }}>A GGUF repository (the Hub runs models with
+        llama.cpp). unsloth, bartowski and ggml-org publish most models that way. One language model is on the card at a
+        time; the Hub switches when a chat or an app asks for another.</p>}
+      {error && <div className="callout" style={{ color: "var(--fault)" }}>{error}</div>}
+      {found && (<>
+        <div className="muted small"><a href={found.url} target="_blank" rel="noreferrer">{found.repo}</a>
+          {facts.length > 0 && <> · {facts.join(" · ")}</>}</div>
+        <div className="list" role="radiogroup" aria-label="Size" style={{ maxHeight: 260, overflow: "auto" }}>
+          {found.choices.map((c) => {
+            const fit = fitOf(c.size, found.vram);
+            return (
+              <label key={c.key} className="list-row" style={{ cursor: "pointer", minHeight: 44 }}>
+                <input type="radio" name="hf-file" checked={file === c.key} onChange={() => setFile(c.key)} />
+                <span className="grow"><b>{c.label}</b>{c.split && <span className="meta"> · in {c.files.length} parts</span>}</span>
+                <span className="meta num">{bytes(c.size)}</span>
+                <span className="row" style={{ gap: 6, minWidth: 210 }}><Lamp state={fit.lamp} size="sm" /><span className="meta">{fit.text}</span></span>
+              </label>
+            );
+          })}
+        </div>
+        <div className="form-grid">
+          <label className="field"><span>Name</span><input className="input" value={name} onChange={(e) => setName(e.target.value)} /></label>
+          <label className="field"><span>Name for apps</span><input className="input mono" value={id} onChange={(e) => setId(e.target.value.toLowerCase())} />
+            <small style={idOk ? undefined : { color: "var(--fault)" }}>{idOk ? "Apps ask for the model by this name." : "a-z, 0-9, dots, dashes; starts with a letter or digit."}</small></label>
+          <label className="field"><span>Context (tokens)</span><select className="select" value={ctx} onChange={(e) => setCtx(Number(e.target.value))}>
+            {CONTEXTS.filter((c) => c <= (meta.context_length ?? 262144)).map((c) => <option key={c} value={c}>{c / 1024}K</option>)}</select>
+            <small>More context needs more VRAM. Changeable later under Server settings.</small></label>
+          {found.mmproj.length > 0 && <label className="field"><span>Pictures (vision)</span>
+            <select className="select" value={mmproj} onChange={(e) => setMmproj(e.target.value)}>
+              <option value="">No vision</option>
+              {found.mmproj.map((m) => <option key={m.path} value={m.path}>{m.label} ({bytes(m.size)})</option>)}</select></label>}
+        </div>
+        <SwitchRow checked={tools} onChange={setTools} title="Tool calls">
+          {meta.tools == null ? "Unknown for this model." : meta.tools ? "Its chat template supports tools." : "Its chat template mentions no tools; the assistant may not manage files, web or code with it."}</SwitchRow>
+        <SwitchRow checked={thinking} onChange={setThinking} title="Thinking">
+          {meta.thinking ? "Its chat template can switch thinking on and off." : "Shows the Think button for this model. Only for models that support it."}</SwitchRow>
+        <div className="muted small">Download {bytes(total)} · {bytes(found.freeDisk)} free on the disk</div>
+      </>)}
     </Modal>
   );
 }

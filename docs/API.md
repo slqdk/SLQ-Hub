@@ -32,6 +32,10 @@ VM's LAN address (for example `30.11.0.140`).
 | `qwen3.6-35b-a3b` | Qwen3.6 35B-A3B: fast MoE. Vision, tools, thinking. |
 | `embed-text` | Qwen3 Embedding 0.6B (embeddings only). |
 
+Models added under Settings → Models → Add from Hugging Face are listed by
+`/api/tags` and `/v1/models` too, under the "name for apps" given when adding
+them.
+
 Ollama-style names (`qwen3.8:27b`, `qwen3.8:latest`, ...) work too. Any other
 name goes to the fallback model (Settings → Models), so an app with an old
 model name in its settings still gets an answer. Asking for the model that is

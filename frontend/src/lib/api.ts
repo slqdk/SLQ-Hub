@@ -133,7 +133,16 @@ export interface ModelEntry { id: string; name: string; description?: string; de
   loaded?: boolean; downloads: DownloadState[]; capabilities?: string[]; kind?: string;
   files: { repo: string; path: string; dest: string; size?: number; role?: string }[];
   server?: Record<string, unknown>; thinking?: { efforts?: string[]; default_effort?: string; default?: boolean };
-  context_per_request?: number; parameter_size?: string; quantization?: string; aliases?: string[]; requires?: string[] }
+  context_per_request?: number; parameter_size?: string; quantization?: string; aliases?: string[]; requires?: string[];
+  custom?: boolean; source?: { repo: string; url: string; file?: string; added?: string } }
+
+/** GET /hub/api/models/hf: a Hugging Face repository's GGUF files, grouped. */
+export interface HFChoice { key: string; label: string; split: boolean; size: number; files: { path: string; size: number }[] }
+export interface HFLookup { repo: string; url: string; choices: HFChoice[];
+  mmproj: { path: string; size: number; label: string }[];
+  meta: { architecture?: string | null; context_length?: number | null; parameters?: number | null;
+    tools?: boolean | null; thinking?: boolean | null };
+  suggested: { id: string; name: string }; freeDisk: number; vram: number }
 export interface ModelsData { llm: ModelEntry[]; aux: ModelEntry[]; comfy: ModelEntry[]; current: string | null;
   defaults: { default: string; fallback_alias: string; preload: boolean } }
 

@@ -419,3 +419,43 @@ def make_searxng() -> FastAPI:
                             {"title": "Second", "url": "https://example.org/b", "content": "Another."}]}
 
     return app
+
+
+# ---------------------------------------------------------------- Hugging Face
+
+def make_hf(state: dict) -> FastAPI:
+    """The bits of huggingface.co the Hub uses: the tree and model-info APIs and
+    file downloads. state["repos"][repo] = {"tree": [...], "gguf": {...}} or
+    {"status": 401}; downloads serve b"g" * size."""
+    app = FastAPI()
+
+    def repo_of(owner: str, name: str) -> dict | None:
+        return (state.get("repos") or {}).get(f"{owner}/{name}")
+
+    @app.get("/api/models/{owner}/{name}/tree/main")
+    async def tree(owner: str, name: str, recursive: bool = False):
+        r = repo_of(owner, name)
+        if r is None:
+            return JSONResponse({"error": "Repository not found"}, status_code=404)
+        if r.get("status"):
+            return JSONResponse({"error": "Access denied"}, status_code=r["status"])
+        return r["tree"]
+
+    @app.get("/api/models/{owner}/{name}")
+    async def info(owner: str, name: str):
+        r = repo_of(owner, name)
+        if r is None or r.get("status"):
+            return JSONResponse({"error": "no"}, status_code=404)
+        return {"_id": "x", "id": f"{owner}/{name}", "gguf": r.get("gguf") or {}}
+
+    @app.get("/{owner}/{name}/resolve/main/{path:path}")
+    async def resolve(owner: str, name: str, path: str):
+        r = repo_of(owner, name) or {}
+        f = next((x for x in r.get("tree", []) if x.get("path") == path), None)
+        if f is None:
+            return PlainTextResponse("Entry not found", status_code=404)
+        state.setdefault("downloaded", []).append(f"{owner}/{name}/{path}")
+        size = 1024 if state.get("tiny_downloads") else int(f.get("size") or 0)
+        return Response(b"g" * size, media_type="application/octet-stream")
+
+    return app

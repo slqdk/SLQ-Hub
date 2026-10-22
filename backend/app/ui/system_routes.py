@@ -10,7 +10,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from .. import auth
+from .. import auth, hf
 from ..config import DEFAULTS
 from ..gpu.scheduler import SchedulerError
 from ..state import get_hub
@@ -137,6 +137,108 @@ async def models(request: Request):
     out["current"] = hub.scheduler.current
     out["defaults"] = hub.settings.get("models")
     return out
+
+
+@router.get("/hub/api/models/hf")
+async def hf_lookup(repo: str, request: Request):
+    """The GGUF files of a Hugging Face repository, grouped into choices."""
+    hub = get_hub(request)
+    try:
+        res = await hf.lookup(hf.parse_repo(repo), transport=hub.transports.web)
+    except hf.HFError as exc:
+        raise HTTPException(exc.status, str(exc))
+    sug = res["suggested"]
+    taken = {e["id"] for g in ("llm", "aux", "comfy") for e in hub.catalog.entries(g)}
+    base, n = sug["id"], 2
+    while sug["id"] in taken:
+        sug["id"] = f"{base}-{n}"
+        n += 1
+    hub.env.models_dir.mkdir(parents=True, exist_ok=True)
+    res["freeDisk"] = shutil.disk_usage(hub.env.models_dir).free
+    gpu = await hub.runner.gpu()
+    res["vram"] = gpu.get("vram_total") or 0
+    return res
+
+
+class HFAdd(BaseModel):
+    repo: str
+    file: str                      # the chosen quantisation: its first file
+    mmproj: str | None = None      # a vision projector from the same repository
+    id: str
+    name: str = ""
+    ctx: int = 32768
+    tools: bool = True
+    thinking: bool = False
+
+
+@router.post("/hub/api/models/hf")
+async def hf_add(body: HFAdd, request: Request):
+    """Add a model from Hugging Face to the catalog and start downloading it."""
+    hub = get_hub(request)
+    try:
+        repo = hf.parse_repo(body.repo)
+        res = await hf.lookup(repo, transport=hub.transports.web)      # sizes from the source, not the browser
+        choice = next((c for c in res["choices"] if c["key"] == body.file), None)
+        if choice is None:
+            raise hf.HFError(f"{body.file} is not a model file in {repo}.")
+        mm = None
+        if body.mmproj:
+            mm = next((m for m in res["mmproj"] if m["path"] == body.mmproj), None)
+            if mm is None:
+                raise hf.HFError(f"{body.mmproj} is not a vision projector in {repo}.")
+        limit = int(res["meta"].get("context_length") or 262144)
+        ctx = max(2048, min(int(body.ctx), limit))
+        entry = hf.make_entry(repo, choice, mm, body.id.strip(), body.name, ctx, body.tools, body.thinking,
+                              res["meta"])
+    except hf.HFError as exc:
+        raise HTTPException(exc.status, str(exc))
+    hub.env.models_dir.mkdir(parents=True, exist_ok=True)
+    need = sum(f["size"] for f in entry["files"] if not hub.catalog.path(f).is_file())
+    free = shutil.disk_usage(hub.env.models_dir).free
+    if need > free - 5 * 1024**3:                          # keep 5 GB for chats, images and updates
+        raise HTTPException(400, f"Not enough disk space: it needs {need / 1e9:.1f} GB, {free / 1e9:.1f} GB is free "
+                                 "and the Hub keeps 5 GB spare.")
+    try:
+        added = hub.catalog.add_custom(entry)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    queued = hub.extras["downloads"].enqueue(entry["id"])
+    return {"model": added, "queued": queued}
+
+
+@router.delete("/hub/api/models/{model_id}")
+async def remove_model(model_id: str, request: Request, files: bool = True):
+    """Remove a model that was added from Hugging Face (and its files)."""
+    hub = get_hub(request)
+    entry = hub.catalog.get_llm(model_id)
+    if not entry or not entry.get("custom"):
+        raise HTTPException(404, "Only models added from Hugging Face can be removed.")
+    if hub.loaded_model() == model_id:
+        raise HTTPException(409, "It is on the card now. Free the GPU first.")
+    if hub.settings.get("models", "default") == model_id:
+        raise HTTPException(409, "It is the model for chats. Choose another one first.")
+    hub.extras["downloads"].cancel(model_id)
+    hub.catalog.remove_custom(model_id)
+    if hub.settings.get("models", "fallback_alias") == model_id:
+        hub.settings.update("models", {"fallback_alias": ""})
+    if files:
+        root = (hub.env.models_dir / "llm" / "hf").resolve()
+        for f in entry.get("files", []):
+            p = hub.catalog.path(f)
+            for q in (p, p.with_name(p.name + ".part")):
+                try:
+                    if q.resolve().is_relative_to(root) and q.is_file():
+                        q.unlink()
+                except OSError:
+                    pass
+            d = p.parent                                   # empty folders up to llm/hf
+            while d.resolve() != root and d.resolve().is_relative_to(root):
+                try:
+                    d.rmdir()
+                except OSError:
+                    break
+                d = d.parent
+    return {"ok": True}
 
 
 @router.post("/hub/api/models/{model_id}/download")

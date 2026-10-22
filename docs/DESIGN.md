@@ -157,7 +157,14 @@ ComfyUI, renders, and switches back on the agent's next model call.
 ## 4. Models
 
 Defaults (`backend/app/catalog/models.json`; Settings → Models changes the
-server parameters per model, stored in `data/models.override.json`):
+server parameters per model, stored in `data/models.override.json`). More
+language models come from Hugging Face (Settings → Models → Add from Hugging
+Face, `backend/app/hf.py`): any GGUF repository - the Hub groups its files into
+quantisations (split files together, the vision projector apart), rates each
+against the card's VRAM, and stores the entry in `data/models.custom.json`
+(files under `models/llm/hf/<owner>--<name>/`, downloaded by the Hub's own
+queue; `HF_TOKEN` in `.env` for gated repositories). They start with two slots
+in a unified KV pool, q8_0 cache and the context chosen when adding them:
 
 | Id | File | Context | Notes |
 |---|---|---|---|

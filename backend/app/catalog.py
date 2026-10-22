@@ -3,12 +3,15 @@ start them, and what names apps may use for them.
 
 The bundled catalog is app/catalog/models.json. Per-model changes made in
 Settings -> Models (context, slots, extra llama-server flags) are stored in
-<data>/models.override.json and merged over it.
+<data>/models.override.json and merged over it. Language models added from
+Hugging Face (Settings -> Models -> Add from Hugging Face, app/hf.py) live in
+<data>/models.custom.json and are marked "custom".
 """
 from __future__ import annotations
 
 import copy
 import json
+import os
 import threading
 from pathlib import Path
 
@@ -18,20 +21,40 @@ EDITABLE_SERVER_KEYS = {"ctx", "parallel", "kv_unified", "cache_type", "gpu_laye
 
 
 class Catalog:
-    def __init__(self, models_dir: Path, override_path: Path, bundled: Path = BUNDLED):
+    def __init__(self, models_dir: Path, override_path: Path, bundled: Path = BUNDLED,
+                 custom_path: Path | None = None):
         self.models_dir = models_dir
         self.override_path = override_path
+        self.custom_path = custom_path or override_path.with_name("models.custom.json")
         self.bundled = bundled
         self._lock = threading.Lock()
         self._data = self._load()
 
     # ------------------------------------------------------------ loading
+    @staticmethod
+    def _read(path: Path) -> dict:
+        try:
+            d = json.loads(path.read_text(encoding="utf-8"))
+            return d if isinstance(d, dict) else {}
+        except (OSError, ValueError):
+            return {}
+
+    @staticmethod
+    def _write(path: Path, data: dict) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(path.name + ".tmp")
+        tmp.write_text(json.dumps(data, indent=1), encoding="utf-8")
+        os.replace(tmp, path)
+
     def _load(self) -> dict:
         data = json.loads(self.bundled.read_text(encoding="utf-8"))
-        try:
-            over = json.loads(self.override_path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            over = {}
+        over = self._read(self.override_path)
+        # Models added from Hugging Face (Settings -> Models), after the bundled ones.
+        known = {e["id"] for g in ("llm", "aux", "comfy") for e in data.get(g, [])}
+        for c in self._read(self.custom_path).get("llm") or []:
+            if isinstance(c, dict) and c.get("id") and c["id"] not in known and c.get("files") and c.get("server"):
+                data.setdefault("llm", []).append({**c, "custom": True})
+                known.add(c["id"])
         for entry in data.get("llm", []):
             o = (over.get("llm") or {}).get(entry["id"]) or {}
             if isinstance(o.get("server"), dict):
@@ -64,6 +87,35 @@ class Catalog:
             self.override_path.write_text(json.dumps(over, indent=1), encoding="utf-8")
         self.reload()
         return self.get_llm(model_id) or {}
+
+    def add_custom(self, entry: dict) -> dict:
+        """Add a language model from Hugging Face (an entry made by hf.make_entry)."""
+        with self._lock:
+            taken = {e["id"] for g in ("llm", "aux", "comfy") for e in self._data.get(g, [])}
+            if entry["id"] in taken:
+                raise ValueError(f"There is already a model called {entry['id']}.")
+            data = self._read(self.custom_path)
+            data.setdefault("llm", []).append({k: v for k, v in entry.items() if k != "custom"})
+            self._write(self.custom_path, data)
+        self.reload()
+        return self.get_llm(entry["id"]) or {}
+
+    def remove_custom(self, model_id: str) -> dict:
+        """Forget a model added from Hugging Face; returns its entry (files are the caller's)."""
+        with self._lock:
+            data = self._read(self.custom_path)
+            items = data.get("llm") or []
+            gone = next((e for e in items if isinstance(e, dict) and e.get("id") == model_id), None)
+            if gone is None:
+                raise KeyError(model_id)
+            data["llm"] = [e for e in items if e is not gone]
+            self._write(self.custom_path, data)
+            over = self._read(self.override_path)
+            if model_id in (over.get("llm") or {}):
+                del over["llm"][model_id]
+                self._write(self.override_path, over)
+        self.reload()
+        return gone
 
     # ------------------------------------------------------------ lookups
     def entries(self, group: str) -> list[dict]:

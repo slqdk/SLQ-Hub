@@ -23,7 +23,7 @@ from app.main import create_app
 from app.state import Transports
 
 from .conftest import _install_fake_models
-from .mocks import HostRouter, make_comfy, make_llama, make_mcp_http, make_sandbox, make_searxng, make_supervisor
+from .mocks import HostRouter, make_comfy, make_hf, make_llama, make_mcp_http, make_sandbox, make_searxng, make_supervisor
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -120,6 +120,22 @@ def responder(body: dict) -> dict:
     return {"content": ANSWER, "reasoning": "A quick look at what was asked."}
 
 
+# A fake Hugging Face repository for Settings -> Models -> Add from Hugging Face
+# (real-looking sizes; the "downloads" are 1 KB).
+def _hf_file(path: str, gb: float) -> dict:
+    return {"type": "file", "oid": "x", "size": int(gb * 1024**3), "path": path}
+
+
+HF_DEMO = {"tiny_downloads": True, "repos": {"unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF": {
+    "tree": [_hf_file(f"Qwen3-Coder-30B-A3B-Instruct-{q}.gguf", gb) for q, gb in
+             (("UD-IQ2_XXS", 8.0), ("Q3_K_M", 13.7), ("Q4_K_M", 17.3), ("Q5_K_M", 20.2), ("Q6_K", 23.4), ("Q8_0", 30.3))]
+            + [_hf_file("BF16/Qwen3-Coder-30B-A3B-Instruct-BF16-00001-of-00002.gguf", 46.5),
+               _hf_file("BF16/Qwen3-Coder-30B-A3B-Instruct-BF16-00002-of-00002.gguf", 10.4),
+               _hf_file("README.md", 0.00001)],
+    "gguf": {"architecture": "qwen3moe", "context_length": 262144, "total": 30532122624,
+             "chat_template": "{% if tools %}<tools>{% endif %}"}}}}
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=8080)
@@ -139,7 +155,8 @@ def main() -> None:
     fakes = {"sup": {}, "llama": {"responder": responder}, "comfy": {}, "sandbox": {}, "mcp": {}}
     router = HostRouter({"supervisor": make_supervisor(fakes["sup"]), "llm": make_llama(fakes["llama"]),
                          "comfy": make_comfy(fakes["comfy"]), "sandbox:7000": make_sandbox(fakes["sandbox"]),
-                         "searxng": make_searxng(), "mcp.test": make_mcp_http(fakes["mcp"])})
+                         "searxng": make_searxng(), "mcp.test": make_mcp_http(fakes["mcp"]),
+                         "huggingface.co": make_hf(HF_DEMO)})
     t = Transports(llm=router, runner=router, comfy=router, sandbox=router, web=router)
     app = create_app(env, t, startup=False)
     print(f"SLQ Hub (fake services) on http://127.0.0.1:{a.port}  data: {base}")

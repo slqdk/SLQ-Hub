@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.2.0 - 2026-10-22
+
+- **Add from Hugging Face** (Settings -> Models): paste a GGUF repository or
+  its link; the Hub lists its sizes (split files together, the vision
+  projector apart), says which fit the card, suggests names, reads from the
+  chat template whether tools and thinking work, and downloads the files with
+  its own queue. Added models can be loaded, tuned under Server settings, used
+  in chats and by apps, and removed with their files. Gated repositories need
+  `HF_TOKEN` in `.env`.
+- Projects: the New chat button sits with the chats.
+- The Think button works for models that switch thinking on and off without
+  effort levels.
+
 ## 0.1.6 - 2026-10-22
 
 - Settings -> Assistant -> Images: choose the model for pictures (Qwen-Image

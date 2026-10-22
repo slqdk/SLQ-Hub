@@ -1,0 +1,220 @@
+"""Hugging Face lookups for Settings -> Models -> Add from Hugging Face.
+
+`lookup()` lists a model repository's GGUF files and groups them into the
+choices a person makes: one quantisation (split files kept together), and,
+apart from it, the vision projectors (mmproj). `make_entry()` turns a choice
+into a catalog entry like the bundled ones; the Hub's own download queue then
+fetches the files. Only public repositories work without a token; HF_TOKEN in
+the environment (the VM's .env) is sent along for gated ones.
+"""
+from __future__ import annotations
+
+import datetime as dt
+import os
+import re
+
+import httpx
+
+HF = "https://huggingface.co"
+REPO_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,95}/[A-Za-z0-9][A-Za-z0-9._-]{0,95}$")
+SEGMENT_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._+-]{0,200}$")
+SPLIT_RE = re.compile(r"^(?P<stem>.+)-(?P<n>\d{5})-of-(?P<total>\d{5})\.gguf$", re.I)
+QUANT_RE = re.compile(r"(?i)(?:^|[-_.])((?:UD-)?(?:I?Q\d[A-Z0-9_]*|BF16|F16|F32|MXFP4(?:_MOE)?|TQ\d_\d))$")
+ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,62}$")
+
+
+class HFError(Exception):
+    def __init__(self, message: str, status: int = 400):
+        super().__init__(message)
+        self.status = status
+
+
+def parse_repo(text: str) -> str:
+    """owner/name from 'owner/name' or a huggingface.co / hf.co link."""
+    t = (text or "").strip()
+    t = re.sub(r"^(https?://)?(www\.)?(huggingface\.co|hf\.co)/", "", t, flags=re.I)
+    t = t.split("?")[0].split("#")[0].strip().strip("/")
+    parts = [p for p in t.split("/") if p]
+    if parts and parts[0].lower() in ("datasets", "spaces", "docs", "api"):
+        raise HFError("That is not a model repository. Give a model as owner/name.")
+    repo = "/".join(parts[:2])
+    if not REPO_RE.match(repo) or ".." in repo:
+        raise HFError("Give a Hugging Face model as owner/name (e.g. unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF) "
+                      "or paste its link.")
+    return repo
+
+
+def safe_path(path: str) -> bool:
+    """A repository path the Hub will write under its models folder."""
+    segs = (path or "").split("/")
+    return bool(segs) and len(path) < 400 and all(SEGMENT_RE.match(s) and s not in (".", "..") for s in segs)
+
+
+def quant_label(stem: str) -> str:
+    m = QUANT_RE.search(stem)
+    return m.group(1) if m else stem
+
+
+def _headers() -> dict:
+    h = {"User-Agent": "slq-hub/1", "Accept": "application/json"}
+    if os.environ.get("HF_TOKEN"):
+        h["Authorization"] = f"Bearer {os.environ['HF_TOKEN']}"
+    return h
+
+
+def _raise_for(r: httpx.Response, repo: str) -> None:
+    if r.status_code in (401, 403):
+        raise HFError(f"{repo} is gated or private. Accept its terms on huggingface.co, put an access token in "
+                      "/srv/slq-hub/.env as HF_TOKEN=..., and restart the Hub (update.sh compose up -d).", 403)
+    if r.status_code == 404:
+        raise HFError(f"Hugging Face has no model called {repo}.", 404)
+    if r.status_code >= 400:
+        raise HFError(f"Hugging Face answered {r.status_code} for {repo}.", 502)
+
+
+async def _tree(c: httpx.AsyncClient, repo: str) -> list[dict]:
+    url: str | None = f"{HF}/api/models/{repo}/tree/main?recursive=true"
+    items: list[dict] = []
+    for _ in range(20):                                  # paginated (Link: rel="next")
+        if not url:
+            break
+        r = await c.get(url, headers=_headers())
+        _raise_for(r, repo)
+        page = r.json()
+        if not isinstance(page, list):
+            raise HFError("Hugging Face sent something unexpected for the file list.", 502)
+        items += [x for x in page if isinstance(x, dict)]
+        url = (r.links.get("next") or {}).get("url")
+        if url and not url.startswith(f"{HF}/api/models/{repo}/tree/"):
+            url = None                                     # only ever follow Hugging Face's own next page
+    return items
+
+
+async def _meta(c: httpx.AsyncClient, repo: str) -> dict:
+    """Architecture, size and what the chat template supports; {} if unknown."""
+    try:
+        r = await c.get(f"{HF}/api/models/{repo}", params={"expand[]": "gguf"}, headers=_headers())
+        if r.status_code >= 400:
+            return {}
+        g = (r.json() or {}).get("gguf") or {}
+    except (httpx.HTTPError, ValueError):
+        return {}
+    if not isinstance(g, dict) or not g:
+        return {}
+    tpl = g.get("chat_template") or ""
+    if isinstance(tpl, list):                             # several named templates
+        tpl = " ".join(str(t.get("template", "")) for t in tpl if isinstance(t, dict))
+    tpl = str(tpl)
+    return {"architecture": g.get("architecture"), "context_length": g.get("context_length"),
+            "parameters": g.get("total"),
+            "tools": ("tools" in tpl) if tpl else None,
+            "thinking": ("enable_thinking" in tpl) if tpl else None}
+
+
+def _skip(path: str) -> bool:
+    base = path.rsplit("/", 1)[-1].lower()
+    return (not base.endswith(".gguf") or "imatrix" in base or base.startswith("mtp-")
+            or path.lower().startswith("mtp/") or not safe_path(path))
+
+
+def group(items: list[dict]) -> tuple[list[dict], list[dict]]:
+    """(model choices, vision projectors) from a repository tree."""
+    files = [(x["path"], int((x.get("lfs") or {}).get("size") or x.get("size") or 0))
+             for x in items if x.get("type") == "file" and isinstance(x.get("path"), str)]
+    choices: list[dict] = []
+    mmproj: list[dict] = []
+    splits: dict[tuple[str, str, int], dict[int, tuple[str, int]]] = {}
+    for path, size in files:
+        if _skip(path):
+            continue
+        d, _, base = path.rpartition("/")
+        if "mmproj" in base.lower():                       # mmproj-F16.gguf, Model-mmproj-f16.gguf, ...
+            label = re.sub(r"(?i)\.gguf$", "", base)
+            label = re.sub(r"(?i)^.*mmproj[-_.]?", "", label) or label
+            mmproj.append({"path": path, "size": size, "label": label})
+            continue
+        m = SPLIT_RE.match(base)
+        if m:
+            splits.setdefault((d, m["stem"], int(m["total"])), {})[int(m["n"])] = (path, size)
+            continue
+        choices.append({"key": path, "label": quant_label(base[:-5]), "split": False,
+                        "files": [{"path": path, "size": size}], "size": size})
+    for (d, stem, total), parts in splits.items():
+        if sorted(parts) != list(range(1, total + 1)):
+            continue                                       # an incomplete split: not loadable
+        fs = [{"path": parts[n][0], "size": parts[n][1]} for n in range(1, total + 1)]
+        choices.append({"key": fs[0]["path"], "label": quant_label(stem), "split": True, "files": fs,
+                        "size": sum(f["size"] for f in fs)})
+    labels = [c["label"] for c in choices]
+    for c in choices:                                      # the same quant in two places: say where
+        if labels.count(c["label"]) > 1:
+            c["label"] = f"{c['label']} ({c['key'].rsplit('/', 1)[0] if '/' in c['key'] else 'top level'})"
+    choices.sort(key=lambda c: c["size"])
+    mmproj.sort(key=lambda m: m["size"])
+    return choices, mmproj
+
+
+def suggest(repo: str) -> dict:
+    name = repo.split("/", 1)[1]
+    name = re.sub(r"(?i)[-_.]?gguf$", "", name) or name
+    mid = re.sub(r"[^a-z0-9.]+", "-", name.lower()).strip("-.")[:60] or "model"
+    return {"id": mid, "name": re.sub(r"[-_]+", " ", name).strip()}
+
+
+async def lookup(repo: str, transport: httpx.AsyncBaseTransport | None = None) -> dict:
+    async with httpx.AsyncClient(timeout=httpx.Timeout(30, connect=15), follow_redirects=True,
+                                 transport=transport) as c:
+        try:
+            items = await _tree(c, repo)
+            meta = await _meta(c, repo)
+        except httpx.HTTPError as exc:
+            raise HFError(f"Could not reach Hugging Face ({exc.__class__.__name__}).", 502)
+    choices, mmproj = group(items)
+    if not choices:
+        raise HFError(f"{repo} has no GGUF model files. The Hub runs GGUF models with llama.cpp; look for a "
+                      "repository ending in -GGUF (unsloth, bartowski and ggml-org publish many).")
+    return {"repo": repo, "url": f"{HF}/{repo}", "choices": choices, "mmproj": mmproj, "meta": meta,
+            "suggested": suggest(repo)}
+
+
+def make_entry(repo: str, choice: dict, mmproj: dict | None, model_id: str, name: str, ctx: int,
+               tools: bool, thinking: bool, meta: dict) -> dict:
+    """A catalog entry like the bundled ones: files under llm/hf/<owner>--<name>/."""
+    if not ID_RE.match(model_id):
+        raise HFError("The name for apps may use a-z, 0-9, dots, dashes and underscores (up to 63).")
+    base = f"llm/hf/{repo.replace('/', '--')}"
+    files = []
+    for i, f in enumerate(choice["files"]):
+        if not safe_path(f["path"]):
+            raise HFError(f"Unsafe file name in the repository: {f['path']}")
+        entry_file = {"repo": repo, "path": f["path"], "dest": f"{base}/{f['path']}", "size": f["size"]}
+        if i:
+            entry_file["role"] = "part"                    # llama.cpp finds the parts next to the first
+        files.append(entry_file)
+    if mmproj:
+        if not safe_path(mmproj["path"]):
+            raise HFError(f"Unsafe file name in the repository: {mmproj['path']}")
+        files.append({"repo": repo, "path": mmproj["path"], "dest": f"{base}/{mmproj['path']}",
+                      "size": mmproj["size"], "role": "mmproj"})
+    caps = ["chat"] + (["vision"] if mmproj else []) + (["tools"] if tools else []) + (["thinking"] if thinking else [])
+    params = meta.get("parameters")
+    entry = {
+        "id": model_id,
+        "name": (name or model_id).strip()[:80],
+        "description": f"Added from Hugging Face: {repo} ({choice['label']}).",
+        "default": False,
+        "source": {"repo": repo, "url": f"{HF}/{repo}", "file": choice["key"],
+                   "added": dt.date.today().isoformat()},
+        "files": files,
+        "server": {"ctx": int(ctx), "parallel": 2, "kv_unified": True, "cache_type": "q8_0", "gpu_layers": "all",
+                   "flash_attn": "on", "cache_ram_mib": 2048, "extra": []},
+        "context_per_request": int(ctx),
+        "capabilities": caps,
+        "aliases": [],
+        "quantization": choice["label"],
+    }
+    if isinstance(params, (int, float)) and params > 0:
+        entry["parameter_size"] = f"{params / 1e9:.1f}B"
+    if thinking:
+        entry["thinking"] = {"default": False, "efforts": [], "default_effort": None}
+    return entry

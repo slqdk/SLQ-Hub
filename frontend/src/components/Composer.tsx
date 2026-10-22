@@ -173,6 +173,12 @@ export function Composer({ running, onSend, onStop, settings, onSettings, models
                   onClick={() => { onSettings({ thinking: false }); close(); }}>
                   {!settings.thinking ? <Check size={15} /> : <span style={{ width: 15 }} />}
                   <span>No thinking<small>Fastest; fine for most questions</small></span></button>
+                {efforts.length === 0 && (                  /* a model that thinks on/off, with no effort levels */
+                  <button className="menu-item" role="menuitemradio" aria-checked={!!settings.thinking}
+                    onClick={() => { onSettings({ thinking: true }); close(); }}>
+                    {settings.thinking ? <Check size={15} /> : <span style={{ width: 15 }} />}
+                    <span>Think<small>Reasons before it answers</small></span></button>
+                )}
                 {efforts.map((e) => (
                   <button key={e} className="menu-item" role="menuitemradio" aria-checked={settings.thinking && settings.effort === e}
                     onClick={() => { onSettings({ thinking: true, effort: e }); close(); }}>

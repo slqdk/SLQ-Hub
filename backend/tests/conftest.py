@@ -9,7 +9,7 @@ from app.config import Env, _networks
 from app.main import create_app
 from app.state import Transports
 
-from .mocks import HostRouter, make_comfy, make_llama, make_mcp_http, make_sandbox, make_searxng, make_supervisor
+from .mocks import HostRouter, make_comfy, make_hf, make_llama, make_mcp_http, make_sandbox, make_searxng, make_supervisor
 
 CATALOG = Path(__file__).resolve().parents[1] / "app" / "catalog" / "models.json"
 
@@ -33,6 +33,7 @@ class Fakes:
         self.sandbox = {}
         self.cloud = {}
         self.mcp = {}
+        self.hf = {}
 
 
 @pytest.fixture
@@ -64,6 +65,7 @@ def app(hub_env, fakes):
         "searxng": make_searxng(),
         "cloud.test": make_llama(fakes.cloud),
         "mcp.test": make_mcp_http(fakes.mcp),
+        "huggingface.co": make_hf(fakes.hf),
     })
     t = Transports(llm=router, runner=router, comfy=router, sandbox=router, web=router)
     application = create_app(hub_env, t, startup=False)
