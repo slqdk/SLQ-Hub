@@ -219,7 +219,7 @@ function LibraryDetail({ lib, onChanged }: { lib: Library; onChanged: () => void
                 {d.status === "indexing" && <div className="bar wait" style={{ marginTop: 6 }}><span style={{ width: `${Math.round(d.progress * 100)}%` }} /></div>}
               </div>
               <button className="icon-btn small" onClick={() => reindex(d)} aria-label="Index again" title="Index again"><RefreshCw size={14} /></button>
-              <ConfirmButton className="icon-btn small" confirmText="Delete?" onConfirm={() => del(d)}><Trash2 size={14} /></ConfirmButton>
+              <ConfirmButton className="icon-btn small" confirmText="Delete?" label={`Delete ${d.filename}`} onConfirm={() => del(d)}><Trash2 size={14} /></ConfirmButton>
             </div>
           ))}
         </div>

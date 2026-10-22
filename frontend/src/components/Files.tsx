@@ -336,7 +336,7 @@ function FileView({ folder, entry, projectId, picked, onPick, onChanged, onGone,
         {projectId && <button className="icon-btn small" onClick={() => setHistory(true)} aria-label="History" title="History"><History size={15} /></button>}
         <button className="icon-btn small" onClick={onRename} aria-label="Rename or move" title="Rename or move"><Pencil size={15} /></button>
         <a className="icon-btn small" href={`${raw}&download=true`} aria-label="Download" title="Download"><Download size={15} /></a>
-        <ConfirmButton className="icon-btn small" confirmText="Delete?" onConfirm={remove}><Trash2 size={15} /></ConfirmButton>
+        <ConfirmButton className="icon-btn small" confirmText="Delete?" label="Delete" onConfirm={remove}><Trash2 size={15} /></ConfirmButton>
         </span>
       </div>
       {isImage ? (

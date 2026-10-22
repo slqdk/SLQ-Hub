@@ -128,8 +128,11 @@ export function Toasts() {
 }
 
 /** Two clicks to do something that cannot be undone. */
+/** A button that asks once more: the first click shows confirmText (an icon
+ *  button widens for it, see .armed), the second does it. */
 export function ConfirmButton({ onConfirm, children, confirmText = "Click again to confirm", className = "btn danger small",
-  disabled }: { onConfirm: () => void; children: ReactNode; confirmText?: string; className?: string; disabled?: boolean }) {
+  disabled, label }: { onConfirm: () => void; children: ReactNode; confirmText?: string; className?: string;
+  disabled?: boolean; label?: string }) {
   const [armed, setArmed] = useState(false);
   useEffect(() => {
     if (!armed) return;
@@ -137,7 +140,8 @@ export function ConfirmButton({ onConfirm, children, confirmText = "Click again 
     return () => window.clearTimeout(t);
   }, [armed]);
   return (
-    <button type="button" className={className} disabled={disabled}
+    <button type="button" className={`${className}${armed ? " armed" : ""}`} disabled={disabled}
+      aria-label={armed ? undefined : label} title={armed ? undefined : label}
       onClick={() => (armed ? (setArmed(false), onConfirm()) : setArmed(true))}>
       {armed ? confirmText : children}
     </button>

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.1 - 2026-10-22
+
+- Fixed: an icon button's "Delete?" question (files, library documents) was
+  cut off; the button now widens for it.
+
 ## 0.5.0 - 2026-10-22
 
 - **Put project files in a message**, to have them changed or to ask about
