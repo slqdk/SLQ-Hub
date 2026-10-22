@@ -1,6 +1,6 @@
 // SLQ Hub service worker: makes the app installable and starts it quickly.
 // The app shell is cached; API calls always go to the network.
-const SHELL = "slq-hub-shell-v1";
+const SHELL = "slq-hub-shell-v2";
 const ASSETS = "slq-hub-assets-v1";
 
 self.addEventListener("install", (event) => {
@@ -49,16 +49,18 @@ self.addEventListener("fetch", (event) => {
 
   if (req.mode === "navigate") {
     // The page itself: the network when it answers, the cached shell when not.
+    // The phone chat page (/chat) is a page of its own, with its own shell.
+    const shell = p === "/chat" || p.startsWith("/chat/") ? "/chat" : "/";
     event.respondWith(
       fetch(req)
         .then((res) => {
           if (res.ok) {
             const copy = res.clone();
-            caches.open(SHELL).then((c) => c.put("/", copy));
+            caches.open(SHELL).then((c) => c.put(shell, copy));
           }
           return res;
         })
-        .catch(() => caches.match("/")),
+        .catch(() => caches.match(shell)),
     );
   }
 });

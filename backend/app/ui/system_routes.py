@@ -479,10 +479,22 @@ async def system(request: Request):
 
 @router.get("/hub/api/connection")
 async def connection(request: Request):
-    """How other apps reach the Hub (for the Apps page)."""
+    """How other apps reach the Hub (for the Apps page). homeNetwork is the
+    LAN range the Hub itself sits in, for keys that should work only at home
+    (the other LAN ranges may be WireGuard or a VPN)."""
     env = get_hub(request).env
     return {"lanHost": env.lan_host, "uiPort": env.ui_port, "ollamaPort": env.ollama_port,
-            "publicUrl": env.public_url}
+            "publicUrl": env.public_url, "homeNetwork": _home_network(env)}
+
+
+def _home_network(env) -> str:
+    import ipaddress
+    try:
+        addr = ipaddress.ip_address((env.lan_host or "").strip())
+    except ValueError:
+        return ""
+    nets = [n for n in env.lan_networks if n.version == addr.version and addr in n and not n.is_loopback]
+    return str(min(nets, key=lambda n: n.num_addresses)) if nets else ""
 
 
 @router.get("/hub/api/system/logs/{name}")

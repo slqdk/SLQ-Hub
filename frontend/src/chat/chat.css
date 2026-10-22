@@ -1,0 +1,100 @@
+/* SLQ Chat (/chat): the phone page. It is built from the Hub's parts
+   (styles.css: topbar, messages, composer, sidebar, lamps); these rules lay
+   them out as one column with a drawer, and add the gate and the viewer. */
+
+.pc-app { height: 100dvh; display: flex; flex-direction: column; background: var(--paper); }
+.pc-top {
+  padding-top: calc(8px + env(safe-area-inset-top, 0px));
+  padding-left: calc(10px + env(safe-area-inset-left, 0px));
+  padding-right: calc(10px + env(safe-area-inset-right, 0px));
+  background: var(--paper);
+}
+.pc-top h1 { font-size: 17px; }
+.pc-column { max-width: 46rem; }
+.pc-welcome { padding-top: 12vh; }
+.pc-welcome p + p { margin-top: 10px; }
+
+.pc-note { display: flex; align-items: center; gap: 6px; margin: 0 4px 8px; font-size: 13px; color: var(--ink-3); }
+.pc-note .btn { margin-left: auto; }
+
+/* A native select under a chip: the phone's own wheel or list, the Hub's look. */
+.pc-select { position: relative; overflow: hidden; cursor: pointer; }
+.pc-select select { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; font-size: 16px; }
+.composer-bar > .pc-model { flex: 0 1 auto; min-width: 0; max-width: 48%; }
+
+/* the drawer with the chats */
+.pc-drawer {
+  position: fixed; z-index: 45; top: 0; left: 0;
+  height: 100dvh; width: min(86vw, 330px);
+  padding-top: env(safe-area-inset-top, 0px);
+  transform: translateX(-102%);
+  visibility: hidden;
+  transition: transform 0.2s ease, visibility 0s linear 0.2s;
+  box-shadow: var(--pop);
+}
+.pc-drawer.open { transform: none; visibility: visible; transition: transform 0.2s ease; }
+.pc-scrim { position: fixed; inset: 0; z-index: 44; background: rgba(20, 24, 26, 0.35); }
+.pc-drawer .brand img { width: 26px; height: 26px; }
+.pc-actions { display: flex; padding: 0 12px 10px; }
+.pc-actions .btn { flex: 1; justify-content: flex-start; }
+.pc-chat-row { display: flex; align-items: center; gap: 2px; }
+.pc-chat-row .side-item { flex: 1; min-width: 0; }
+.pc-empty { margin: 8px 10px; color: var(--ink-3); font-size: 14px; }
+.pc-drawer .side-foot { padding-left: calc(10px + env(safe-area-inset-left, 0px)); }
+
+/* answers */
+.pc-status { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.pc-status .notice { margin: 0; }
+.msg-assistant > .notice { margin: 0; }
+.pc-picture {
+  display: block; padding: 0; overflow: hidden;
+  width: min(100%, 30rem);
+  border: 1px solid var(--rule); border-radius: 10px;
+  background: var(--sheet);
+  cursor: zoom-in;
+}
+.pc-picture img { display: block; width: 100%; height: auto; }
+.pc-canvas {
+  width: min(100%, 22rem);
+  display: grid; place-items: center;
+  border: 1px dashed var(--rule); border-radius: 10px;
+  background: repeating-linear-gradient(45deg, var(--rule-2) 0 10px, transparent 10px 20px);
+}
+.pc-canvas .notice { padding: 6px 10px; border-radius: 6px; background: var(--sheet); }
+.pc-thumb { padding: 0; cursor: zoom-in; }
+
+/* a picture, full screen */
+.pc-viewer {
+  position: fixed; inset: 0; z-index: 80;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
+  padding: calc(12px + env(safe-area-inset-top, 0px)) 12px calc(12px + env(safe-area-inset-bottom, 0px));
+  background: rgba(12, 14, 15, 0.94);
+}
+.pc-viewer img { max-width: 100%; max-height: calc(100% - 96px); object-fit: contain; border-radius: 6px; }
+.pc-viewer-bar { display: flex; gap: 8px; }
+.pc-viewer-tip { margin: 0; color: #aab3b0; font-size: 13px; }
+
+/* the gate: connecting, asking for a key, or saying why it cannot */
+.pc-gate {
+  min-height: 100dvh;
+  display: grid; place-items: center;
+  padding: calc(20px + env(safe-area-inset-top, 0px)) 16px calc(20px + env(safe-area-inset-bottom, 0px));
+  background: var(--cabinet);
+}
+.pc-card {
+  width: min(400px, 100%);
+  display: flex; flex-direction: column; gap: 14px;
+  padding: 26px 22px;
+  border: 1px solid var(--rule); border-radius: 12px;
+  background: var(--sheet);
+  box-shadow: var(--pop);
+}
+.pc-card h1 { margin: 0 0 4px; display: flex; align-items: center; gap: 10px; font-family: var(--font-plate); font-weight: 600; font-size: 24px; }
+.pc-card h1 img { width: 34px; height: 34px; }
+.pc-card .notice { margin: 0; }
+.pc-card .input { font-size: 16px; }          /* iOS zooms into fields with smaller text */
+.pc-lead { margin: 0; }
+
+@media (max-width: 360px) {
+  .pc-label { display: none; }          /* Picture and Think show their icon only */
+}

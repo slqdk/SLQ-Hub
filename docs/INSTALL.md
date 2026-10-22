@@ -215,7 +215,30 @@ outside the LAN can sync.
 
 TwinCAT Coagent and anything else: see [API.md](API.md).
 
-## 6. Retire VM 104 later
+## 6. Phones and tablets
+
+The Hub has a chat page made for phones, `http://30.11.0.140:8080/chat`. It
+uses the model API with its own key, so it works only on the home network
+and cannot see your chats, projects or settings. Its chats are kept on the
+phone.
+
+1. In the Hub: **Settings → Apps and keys → New key**. Name it after the
+   person, choose **Interactive**, press **Only the home network** and make
+   the key.
+2. Press **Copy the phone link** and send the link to the phone (Messages,
+   mail).
+3. On the phone, on the home Wi-Fi, open the link: the chat opens.
+4. Add it to the home screen: on an iPhone Safari → Share → **Add to Home
+   Screen**, on Android Chrome → ⋮ → **Add to Home screen**. If the page asks
+   for the key when opened from the home screen, paste the link there.
+
+Switch the key off or delete it under Apps and keys to stop it.
+
+Phone apps work too, each with its own key: for example Enchanted (iPhone,
+an Ollama app) with the server `http://30.11.0.140:11434` and the key as
+**Bearer Token**.
+
+## 7. Retire VM 104 later
 
 VM 104 stays as a fallback: to go back, shut the Hub VM down and start 104.
 When the Hub has run well for a while, delete VM 104 on the host:

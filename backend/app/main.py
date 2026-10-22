@@ -90,7 +90,9 @@ def _install_features(hub: Hub) -> None:
 
 
 def _static(app: FastAPI, static_dir: Path | None) -> None:
-    @app.get("/", include_in_schema=False)
+    # HEAD too: some Ollama apps (Enchanted) probe the server with HEAD / and
+    # call it unreachable unless that answers 200, as Ollama's own server does.
+    @app.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)
     async def root(request: Request):
         accept = request.headers.get("accept", "")
         if "text/html" not in accept:
@@ -111,4 +113,7 @@ def _static(app: FastAPI, static_dir: Path | None) -> None:
         f = (static_dir / path).resolve()
         if path and f.is_file() and static_dir.resolve() in f.parents:
             return FileResponse(f)
+        # The phone chat page (/chat) is a small app of its own on the model API.
+        if (path == "chat" or path.startswith("chat/")) and (static_dir / "chat.html").is_file():
+            return FileResponse(static_dir / "chat.html")
         return FileResponse(static_dir / "index.html")

@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.8.0 - 2026-10-22
+
+- **Chat page for phones** (`http://<hub>:8080/chat`): a simple chat for the
+  rest of the household on the home network. It uses the model API with its
+  own key, so it works only on the LAN and cannot see your chats, projects or
+  settings. It streams answers, can think first, takes photos from the phone
+  (with a model that can see them) and makes pictures (**Picture**, with the
+  picture model from Settings, square, portrait or landscape). Its chats are
+  kept on the phone, not on the Hub. Add it to the home screen to use it like
+  an app.
+- **Settings -> Apps and keys**: the new-key dialog gives a phone link with the
+  key in it, and a button that limits the key to the home network.
+- Ollama apps that check the server with `HEAD /` (Enchanted on the iPhone)
+  no longer say "Server unreachable".
+- `/v1/models` also tells what each model is (name, chat, embedding or image,
+  vision, thinking, default, loaded). Other clients ignore the extra fields.
+
 ## 0.7.0 - 2026-10-22
 
 - **Write to the assistant while it works**: a message sent during a turn

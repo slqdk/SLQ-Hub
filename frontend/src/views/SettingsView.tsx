@@ -623,7 +623,7 @@ function AppsTab({ s }: { s: S }) {
   const [adding, setAdding] = useState(false);
   const [made, setMade] = useState<{ name: string; key: string } | null>(null);
   const [origins, setOrigins] = useState("");
-  const [conn, setConn] = useState<{ lanHost: string; uiPort: number; ollamaPort: number } | null>(null);
+  const [conn, setConn] = useState<Connection | null>(null);
   const load = useCallback(async () => {
     try {
       setKeys(await api<ApiKey[]>("/hub/api/keys"));
@@ -633,7 +633,7 @@ function AppsTab({ s }: { s: S }) {
   }, [toast]);
   useEffect(() => {
     load();
-    api<{ lanHost: string; uiPort: number; ollamaPort: number }>("/hub/api/connection").then(setConn, () => undefined);
+    api<Connection>("/hub/api/connection").then(setConn, () => undefined);
   }, [load]);
   const cors = s.data?.settings.api?.cors_origins as string[] | undefined;
   useEffect(() => setOrigins((cors ?? []).join("\n")), [cors]);
@@ -657,6 +657,7 @@ function AppsTab({ s }: { s: S }) {
   const uiPort = conn?.uiPort ?? 8080;
   const ollamaPort = conn?.ollamaPort ?? 11434;
   const example = made ? made.key : "slqhub_...";
+  const phonePage = `http://${lanHost}:${uiPort}/chat`;
   return (
     <div>
       <p className="lead">Other apps use the models through the Hub, in the same queue as everything else. Each app gets
@@ -681,8 +682,16 @@ function AppsTab({ s }: { s: S }) {
 
       <h3>Connecting an app</h3>
       <div className="stack" style={{ maxWidth: "52rem" }}>
-        <div className="callout"><b>Ollama apps</b> (FamilyLog and others). Ollama clients send no key, so it goes in the address:
+        <div className="callout"><b>Phones and tablets</b>: the Hub's chat page, made for a phone. Open it on the home Wi-Fi
+          and add it to the home screen; it asks for a key once, and the chats stay on the phone.
+          <div className="code-line">{phonePage}</div>
+          <div className="small muted" style={{ marginTop: 6 }}>Make a key per person: the key dialog gives a link with the key
+            in it, ready to send to the phone.</div></div>
+        <div className="callout"><b>Ollama apps</b> (FamilyLog, Enchanted and others). Apps without a key field take the key in
+          the address:
           <div className="code-line">http://{lanHost}:{ollamaPort}/k/{example}</div>
+          <div className="small muted" style={{ marginTop: 6 }}>Apps with a key field (Enchanted calls it Bearer Token) use
+            http://{lanHost}:{ollamaPort} and the key there.</div>
           <div className="small muted" style={{ marginTop: 6 }}>Use the Hub's model names (qwen3.8-27b, qwen3.6-35b-a3b) or any
             name: unknown names go to the fallback model. Settings like "free ComfyUI first" in the app are not needed: the Hub's queue does that.</div></div>
         <div className="callout"><b>OpenAI-compatible apps</b>
@@ -702,13 +711,17 @@ function AppsTab({ s }: { s: S }) {
         { key: "allow_external", label: "Allow the model API from outside the LAN", type: "bool",
           help: "Through the proxy (hub.slq.dk) with a key. Off keeps the models on the LAN and WireGuard only." }]} />
 
-      {adding && <NewKey onClose={() => setAdding(false)} made={made} onMade={(m) => { setMade(m); load(); }} />}
+      {adding && <NewKey onClose={() => setAdding(false)} made={made} onMade={(m) => { setMade(m); load(); }}
+        phonePage={phonePage} homeNetwork={conn?.homeNetwork} />}
     </div>
   );
 }
 
-function NewKey({ onClose, made, onMade }: { onClose: () => void; made: { name: string; key: string } | null;
-  onMade: (m: { name: string; key: string }) => void }) {
+interface Connection { lanHost: string; uiPort: number; ollamaPort: number; homeNetwork?: string }
+
+function NewKey({ onClose, made, onMade, phonePage, homeNetwork }: { onClose: () => void;
+  made: { name: string; key: string } | null; onMade: (m: { name: string; key: string }) => void; phonePage: string;
+  homeNetwork?: string }) {
   const { toast } = useApp();
   const [name, setName] = useState("");
   const [priority, setPriority] = useState("normal");
@@ -728,7 +741,14 @@ function NewKey({ onClose, made, onMade }: { onClose: () => void; made: { name: 
         <>
           <p style={{ margin: 0 }}>The key for <b>{made.name}</b> is shown only now.</p>
           <div className="code-line">{made.key}</div>
-          <button className="btn small" onClick={async () => toast((await copyText(made.key)) ? "Copied" : "Copying failed", "run")}><Copy size={14} /> Copy the key</button>
+          <div className="row wrap">
+            <button className="btn small" onClick={async () => toast((await copyText(made.key)) ? "Copied" : "Copying failed", "run")}><Copy size={14} /> Copy the key</button>
+            <button className="btn small" onClick={async () => toast((await copyText(`${phonePage}#key=${made.key}`)) ? "Copied" : "Copying failed", "run")}>
+              <Copy size={14} /> Copy the phone link</button>
+          </div>
+          <p className="small muted" style={{ margin: 0 }}>The phone link opens the chat page with this key in it. Send it to the
+            phone (Messages, mail) and open it on the home Wi-Fi. On an iPhone, add the page to the home screen and open it from
+            there; if it asks for the key, paste the link.</p>
         </>
       ) : (
         <>
@@ -737,7 +757,10 @@ function NewKey({ onClose, made, onMade }: { onClose: () => void; made: { name: 
             <option value="interactive">Interactive: like a web chat</option><option value="normal">Normal: most apps</option>
             <option value="background">Background: batch work</option></select></label>
           <label className="field"><span>Only from these addresses</span><input className="input" value={ips} onChange={(e) => setIps(e.target.value)}
-            placeholder="30.11.0.20, 10.8.0.0/24" /><small>Empty: any address on the LAN.</small></label>
+            placeholder="30.11.0.20, 10.8.0.0/24" /><small>Empty: any address on the LAN and WireGuard.</small></label>
+          {homeNetwork && ips.trim() !== homeNetwork && (
+            <button type="button" className="btn small" style={{ alignSelf: "flex-start" }} onClick={() => setIps(homeNetwork)}>
+              Only the home network ({homeNetwork})</button>)}
         </>
       )}
     </Modal>

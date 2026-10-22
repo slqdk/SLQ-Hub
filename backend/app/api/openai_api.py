@@ -27,13 +27,26 @@ def _err(status: int, message: str, kind: str = "invalid_request_error", code: s
 
 @router.get("/v1/models")
 async def models(request: Request):
+    """The standard list, plus a few fields other clients ignore and the
+    phone chat page (/chat) uses: name, kind (chat, embedding, image),
+    vision and thinking, default (what the Hub picks itself) and loaded."""
     hub = hub_of(request)
     now = int(time.time())
-    data = [{"id": e["id"], "object": "model", "created": now, "owned_by": "slq-hub"}
+    chat_default = hub.settings.get("models", "default")
+    image_default = hub.settings.get("images", "model")
+    loaded = hub.loaded_model()
+
+    def item(e: dict, kind: str, **more) -> dict:
+        return {"id": e["id"], "object": "model", "created": now, "owned_by": "slq-hub",
+                "name": e.get("name") or e["id"], "kind": kind, **more}
+
+    data = [item(e, "chat", vision="vision" in (e.get("capabilities") or []),
+                 thinking="thinking" in (e.get("capabilities") or []),
+                 default=e["id"] == chat_default, loaded=e["id"] == loaded)
             for e in hub.catalog.llm_models() if hub.catalog.installed(e)]
-    data += [{"id": a["id"], "object": "model", "created": now, "owned_by": "slq-hub"}
+    data += [item(a, "embedding")
              for a in hub.catalog.entries("aux") if a.get("kind") == "embedding" and hub.catalog.installed(a)]
-    data += [{"id": c["id"], "object": "model", "created": now, "owned_by": "slq-hub"}
+    data += [item(c, "image", abilities=list(c.get("abilities") or []), default=c["id"] == image_default)
              for c in hub.catalog.entries("comfy") if hub.catalog.installed(c)]
     return {"object": "list", "data": data}
 

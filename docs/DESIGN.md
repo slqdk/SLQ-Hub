@@ -211,6 +211,10 @@ It is accepted three ways:
   send no auth header, so FamilyLog only needs its "Ollama address" changed to
   `http://<hub>:11434/k/<key>`, with no code change.
 
+`/v1/models` items carry extra fields - `name`, `kind` (chat, embedding,
+image), `vision`, `thinking`, `default`, `loaded` - for the phone chat page
+(section 10); other clients ignore them.
+
 **LAN guard.** API routes answer only to clients in `HUB_LAN_CIDRS` (LAN,
 WireGuard, VPN; set in `/srv/slq-hub/.env`), unless Settings → Apps and keys
 allows the API through the proxy. Behind Nginx Proxy Manager the real client address
@@ -232,6 +236,8 @@ origins are a list in Settings.
 - `prompt_eval_count`, `eval_count` and the durations on the final line.
 - `/api/show` returning `model_info["<arch>.context_length"]`.
 - `keep_alive` is accepted and ignored, because the scheduler decides.
+- `GET /` and `HEAD /` answer 200 "Ollama is running". Enchanted (iPhone)
+  sends `HEAD /` before every message and refuses to send when it fails.
 
 FamilyLog's own setting "free ComfyUI first" should be switched off:
 the Hub does that.
@@ -517,6 +523,20 @@ On mobile it shows one column, and the panels become overlays. It is an
 installable PWA (manifest, icons, a service worker that caches only the app
 shell).
 
+**The phone chat page (`/chat`)** is a second, small page for the rest of the
+household: one column, a drawer of chats, and a composer with Picture (the
+Settings picture model; square, portrait, landscape), Think, a photo button
+when the model can see, and the model. It is deliberately not the Hub's UI
+with a second account. The Hub stays single-user, and the page is one more
+app on the model API with its own key: it answers only on the LAN, follows
+the key's address limit and priority (its requests show in the queue under
+the key's name), and cannot reach chats, projects, files, memory or settings.
+Its conversations live in the phone's IndexedDB, never on the Hub. The key
+comes in the link (`/chat#key=…`: read, kept in the browser, removed from the
+address; a fragment is never sent to a server) or is pasted. It has no agent:
+no web search, tools or files - plain chat, photos and pictures. A signed-in
+browser needs no key (the gate accepts the session on the model API).
+
 ---
 
 ## 11. Security
@@ -534,6 +554,10 @@ shell).
   - public DNS servers (Docker's embedded DNS would otherwise forward to the
     LAN resolver).
 - **Web fetch.** `web_fetch` refuses private and loopback addresses.
+- **Phone chat page.** A client of the model API like any app (LAN guard,
+  key, address limit). It renders answers with the UI's sanitising Markdown
+  renderer and runs on the Hub's origin, so a signed-in browser opening it
+  acts as the Hub's owner.
 - **Ports.** ComfyUI and llama-server are never published on the LAN.
 
 ---

@@ -187,6 +187,62 @@ async def test_openai_embeddings(client, api_key):
     assert r.json()["data"][0]["object"] == "embedding"
 
 
+async def test_model_list_says_what_each_model_is(client, api_key):
+    """The extra fields the phone page (/chat) reads; other clients ignore them."""
+    r = await client.get("/v1/models", headers={"Authorization": f"Bearer {api_key}"})
+    data = r.json()["data"]
+    by_id = {m["id"]: m for m in data}
+    big = by_id["qwen3.8-27b"]
+    assert big["kind"] == "chat" and big["name"] == "Qwen3.8 27B" and big["vision"] and big["thinking"]
+    assert big["default"] is True and by_id["qwen3.6-35b-a3b"]["default"] is False
+    assert by_id["embed-text"]["kind"] == "embedding"
+    pic = by_id["qwen-image-2.1"]
+    assert pic["kind"] == "image" and "generate" in pic["abilities"] and pic["default"] is True
+    assert by_id["qwen-image-2.1-turbo"]["default"] is False
+    assert all(m["object"] == "model" and m["owned_by"] == "slq-hub" for m in data)
+
+
+# ---------------------------------------------------------------- phones
+
+async def test_ollama_apps_may_probe_with_head(client, api_key):
+    """Enchanted asks HEAD / before every message and says "Server
+    unreachable" unless it is answered with 200, as Ollama does."""
+    assert (await client.head("/")).status_code == 200
+    assert (await client.head(f"/k/{api_key}/")).status_code == 200
+    r = await client.get("/", headers={"Authorization": f"Bearer {api_key}"})
+    assert r.status_code == 200 and r.text.startswith("Ollama is running")
+
+
+async def test_the_phone_page_is_served_at_chat(tmp_path):
+    from fastapi import FastAPI
+
+    from app.main import _static
+    dist = tmp_path / "dist"
+    (dist / "assets").mkdir(parents=True)
+    (dist / "index.html").write_text("<title>SLQ Hub</title>")
+    (dist / "chat.html").write_text("<title>SLQ Chat</title>")
+    (dist / "chat.webmanifest").write_text("{}")
+    web = FastAPI()
+    _static(web, dist)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=web), base_url="http://hub") as c:
+        assert "SLQ Chat" in (await c.get("/chat")).text
+        assert "SLQ Chat" in (await c.get("/chat/")).text
+        assert (await c.get("/chat.webmanifest")).text == "{}"
+        assert "SLQ Hub" in (await c.get("/chats/12")).text           # the web UI's own routes are untouched
+        assert "SLQ Hub" in (await c.get("/", headers={"accept": "text/html"})).text
+
+
+def test_home_network_is_the_lan_range_the_hub_sits_in(hub_env):
+    from dataclasses import replace
+
+    from app.config import _networks
+    from app.ui.system_routes import _home_network
+    nets = tuple(_networks(["30.11.0.0/20", "10.0.0.0/8", "30.0.0.0/8", "127.0.0.0/8"]))
+    assert _home_network(replace(hub_env, lan_host="30.11.0.222", lan_networks=nets)) == "30.11.0.0/20"
+    assert _home_network(replace(hub_env, lan_host="", lan_networks=nets)) == ""
+    assert _home_network(replace(hub_env, lan_host="192.168.1.5", lan_networks=nets)) == ""
+
+
 # ---------------------------------------------------------------- Anthropic
 
 async def test_anthropic_non_stream_tool_use(client, api_key, fakes):

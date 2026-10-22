@@ -10,6 +10,9 @@ other app on the network calls models through the Hub's queue.
   cloud model where you allow it.
 - **Model API** for other apps (FamilyLog, TwinCAT Coagent, …) in three
   formats — Ollama, OpenAI and Anthropic — all through one priority queue.
+- **Chat page for phones** (`/chat`) for the rest of the household: chat,
+  photos and pictures on the home network, with its own key; the chats stay
+  on the phone.
 - **SLQ Sync** for project files, protocol-compatible with SLQSync.exe.
 - **Models**: Qwen3.8-27B and Qwen3.6-35B-A3B on llama.cpp (ROCm), Qwen-Image
   2.1 on ComfyUI, Qwen3 embeddings for document libraries.

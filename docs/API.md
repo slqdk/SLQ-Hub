@@ -44,11 +44,14 @@ until the card can switch.
 
 ## 3. Ollama format (FamilyLog and other Ollama apps)
 
-Ollama clients send no key, so the key goes in the address:
+Most Ollama clients send no key, so the key goes in the address:
 
     http://HUB:11434/k/slqhub_.../
 
-Set that as the app's "Ollama address" or base URL. Supported:
+Set that as the app's "Ollama address" or base URL. Apps with a key field
+(Enchanted on the iPhone calls it "Bearer Token") can use `http://HUB:11434`
+and the key there instead. `GET /` and `HEAD /` answer "Ollama is running",
+as Ollama does. Supported:
 
 | Endpoint | Notes |
 |---|---|
@@ -79,7 +82,7 @@ Test from a shell on the LAN:
 
 | Endpoint | Notes |
 |---|---|
-| `GET /v1/models` | |
+| `GET /v1/models` | Besides the standard fields: `name`, `kind` (`chat`, `embedding`, `image`), and for chat models `vision`, `thinking`, `default` (the Hub's own choice) and `loaded`; for picture models `abilities` and `default`. |
 | `POST /v1/chat/completions` | Streaming, tools, images (`image_url` with a data URL or an http URL the Hub can fetch), `response_format`, `reasoning_effort` (`low`, `medium`, `high`), `chat_template_kwargs: {"enable_thinking": false}` to answer without thinking. Responses include llama-server's `timings`. |
 | `POST /v1/embeddings` | `model: "embed-text"`. |
 | `POST /v1/images/generations` | Qwen-Image 2.1 through ComfyUI: `prompt`, `size` (`1024x1024`, ...), `n`, `quality` (`low` = the 8-step turbo model), `response_format` (`b64_json` or `url`). |
@@ -94,6 +97,15 @@ r = client.chat.completions.create(model="qwen3.8-27b",
                                    messages=[{"role": "user", "content": "Hello"}])
 print(r.choices[0].message.content)
 ```
+
+### Phones and tablets
+
+The Hub's own chat page for phones, `http://HUB:8080/chat`, is a client of
+this API: it sends the key as `Authorization: Bearer`, streams
+`/v1/chat/completions` and makes pictures with `/v1/images/generations`
+(`response_format: b64_json`). Its conversations stay on the phone. Give each
+person their own key; the new-key dialog has a phone link with the key in it
+(`/chat#key=slqhub_...` - the part after `#` never reaches a server).
 
 ## 5. Anthropic format
 

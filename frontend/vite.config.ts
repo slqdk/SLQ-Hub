@@ -49,5 +49,12 @@ export default defineConfig({
   build: {
     target: "es2022",
     chunkSizeWarningLimit: 1500,
+    // Two pages: the Hub itself, and the phone chat page (/chat) on the model API.
+    rollupOptions: {
+      input: {
+        main: fileURLToPath(new URL("./index.html", import.meta.url)),
+        chat: fileURLToPath(new URL("./chat.html", import.meta.url)),
+      },
+    },
   },
 });

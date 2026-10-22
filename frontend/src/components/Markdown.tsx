@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { renderMarkdown } from "../lib/markdown";
-import { copyText } from "./ui";
+import { copyText } from "../lib/clipboard";
 
 /** Rendered markdown. While `live`, re-rendering is throttled to one frame. */
 export function Markdown({ text, live, className }: { text: string; live?: boolean; className?: string }) {
