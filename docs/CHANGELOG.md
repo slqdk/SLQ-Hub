@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.2 - 2026-10-22
+
+- Phones: the row under the text field stays on one line. The send button
+  no longer slides off the screen. The picture and thinking buttons show
+  their icon only (blue while thinking is on), and the model name shortens.
+- Phones: the menu (sidebar) and the side panel take the visible height, so
+  the GPU plate under Libraries and Settings is no longer cut off by
+  Chrome's address bar.
+- Menus near the edge of the screen move back into view.
+
 ## 0.5.1 - 2026-10-22
 
 - Fixed: an icon button's "Delete?" question (files, library documents) was

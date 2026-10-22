@@ -310,7 +310,7 @@ a { color: var(--act); text-decoration-thickness: 1px; text-underline-offset: 2p
 .side-item .lamp { margin-left: auto; }
 .side-sub { padding-left: 14px; }
 .side-more { color: var(--ink-3); font-size: 13.5px; }
-.side-foot { padding: 10px; border-top: 1px solid var(--rule); display: flex; flex-direction: column; gap: 8px; }
+.side-foot { padding: 10px 10px calc(10px + env(safe-area-inset-bottom, 0px)); border-top: 1px solid var(--rule); display: flex; flex-direction: column; gap: 8px; }
 .side-links { display: flex; gap: 2px; }
 .side-links .side-item { justify-content: center; flex: 1; font-size: 14px; }
 
@@ -481,7 +481,7 @@ button.file-chip:disabled { cursor: default; }
 }
 
 /* ------------------------------------------------------------ composer */
-.composer-wrap { padding: 0 0 14px; background: linear-gradient(180deg, transparent, var(--paper) 30%); }
+.composer-wrap { padding: 0 0 calc(14px + env(safe-area-inset-bottom, 0px)); background: linear-gradient(180deg, transparent, var(--paper) 30%); }
 .composer {
   border: 1px solid var(--rule);
   border-radius: 12px;
@@ -503,8 +503,16 @@ button.file-chip:disabled { cursor: default; }
   font-size: 16px;
   line-height: 1.5;
 }
-.composer-bar { display: flex; align-items: center; gap: 4px; }
-.composer-bar .spacer { flex: 1; }
+/* One row, always: the chips keep their size (the model name shortens), the send button stays in view. */
+.composer-bar { display: flex; flex-wrap: nowrap; align-items: center; gap: 4px; }
+.composer-bar > * { flex: none; }
+.composer-bar > .spacer { flex: 1 1 0; min-width: 0; }
+.composer-bar .picker { white-space: nowrap; }
+.composer-bar > .menu-anchor.shrink { flex: 0 1 auto; min-width: 0; }   /* the model chip gives way first */
+.composer-bar > .menu-anchor.shrink > .picker { min-width: 0; max-width: 100%; }
+.composer-bar .picker svg { flex: none; }
+.chip-model { min-width: 0; max-width: 150px; }
+.chip-picture { max-width: 140px; }
 .pending { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 6px 8px; }
 .pending-item { position: relative; display: flex; align-items: center; gap: 6px; padding: 4px 26px 4px 6px; border: 1px solid var(--rule); border-radius: 6px; background: var(--paper); font-size: 13px; max-width: 220px; }
 .pending-item img { width: 32px; height: 32px; object-fit: cover; border-radius: 4px; }
@@ -522,7 +530,7 @@ button.file-chip:disabled { cursor: default; }
   font-family: var(--font-plate); font-weight: 600; font-size: 14px;
 }
 .picker:hover { background: var(--rule-2); color: var(--ink); }
-.picker[aria-pressed="true"] { color: var(--act); }
+.picker[aria-pressed="true"], .picker.on { color: var(--act); }
 .send { width: 36px; height: 36px; border-radius: 8px; border: 0; display: grid; place-items: center; background: var(--act); color: var(--act-ink); }
 .send:disabled { background: var(--cabinet-3); color: var(--sheet); cursor: default; }
 .send.stop { background: var(--graphite); color: var(--plate-ink); }
@@ -533,8 +541,8 @@ button.file-chip:disabled { cursor: default; }
 .menu {
   position: absolute;
   z-index: 60;
-  min-width: 220px;
-  max-width: 340px;
+  min-width: min(220px, calc(100vw - 16px));
+  max-width: min(340px, calc(100vw - 16px));
   max-height: 60vh;
   overflow: auto;
   padding: 5px;
@@ -668,11 +676,13 @@ button.file-chip:disabled { cursor: default; }
 /* ------------------------------------------------------------ narrow screens */
 @media (max-width: 1100px) {
   .app.with-panel { grid-template-columns: var(--sidebar-w) minmax(0, 1fr); }
-  .app.with-panel .panel { position: fixed; z-index: 50; top: 0; right: 0; bottom: 0; width: min(760px, 100vw); box-shadow: var(--pop); }
+  .app.with-panel .panel { position: fixed; z-index: 50; top: 0; right: 0; height: 100dvh; width: min(760px, 100vw); box-shadow: var(--pop); }
 }
 @media (max-width: 860px) {
   .app, .app.with-panel { grid-template-columns: minmax(0, 1fr); }
-  .sidebar { position: fixed; z-index: 45; top: 0; bottom: 0; left: 0; width: min(86vw, 320px); transform: translateX(-102%); transition: transform 0.2s ease; box-shadow: var(--pop); }
+  /* height: 100dvh, not bottom: 0 - on Android Chrome a fixed box with bottom: 0 reached below the
+     screen while the address bar showed, hiding the GPU plate. */
+  .sidebar { position: fixed; z-index: 45; top: 0; left: 0; height: 100dvh; width: min(86vw, 320px); transform: translateX(-102%); transition: transform 0.2s ease; box-shadow: var(--pop); }
   .sidebar.open { transform: none; }
   .topbar .menu-btn { display: inline-grid; }
   .scrim { position: fixed; inset: 0; z-index: 44; background: rgba(20, 24, 26, 0.35); }
@@ -684,5 +694,9 @@ button.file-chip:disabled { cursor: default; }
   .page { padding: 18px 14px 50px; }
   .welcome { padding-top: 8vh; }
   .hint { display: none; }
+}
+@media (max-width: 520px) {
+  /* The picture and thinking chips show their icon only (the menu and the tooltip name the choice). */
+  .composer-bar .hide-narrow { display: none; }
 }
 @media (min-width: 861px) { .scrim { display: none; } }

@@ -180,8 +180,8 @@ export function Composer({ running, onSend, onStop, settings, onSettings, models
             </>
           )}
         </MenuButton>
-        <MenuButton up label={<><Cpu size={15} /> <span className="ellipsis" style={{ maxWidth: 150 }}>{model?.name ?? "No model"}</span></>}
-          title="Model">
+        <MenuButton up anchorClassName="shrink" label={<><Cpu size={15} /> <span className="ellipsis chip-model">{model?.name ?? "No model"}</span></>}
+          title={`Model: ${model?.name ?? "none"}`}>
           {(close) => (
             <>
               <div className="menu-head">Model for this chat</div>
@@ -196,8 +196,8 @@ export function Composer({ running, onSend, onStop, settings, onSettings, models
           )}
         </MenuButton>
         {pictureModels.length > 1 && (
-          <MenuButton up label={<><ImageIcon size={15} /> <span className="ellipsis" style={{ maxWidth: 140 }}>{picture?.name ?? "Pictures"}</span></>}
-            title="Model for pictures">
+          <MenuButton up label={<><ImageIcon size={15} /> <span className="ellipsis chip-picture hide-narrow">{picture?.name ?? "Pictures"}</span></>}
+            title={`Model for pictures: ${picture?.name ?? "none"}`}>
             {(close) => (
               <>
                 <div className="menu-head">Pictures in this chat</div>
@@ -217,7 +217,8 @@ export function Composer({ running, onSend, onStop, settings, onSettings, models
           </MenuButton>
         )}
         {canThink && (
-          <MenuButton up label={<><Brain size={15} /> {thinkLabel}</>} title="Thinking">
+          <MenuButton up className={`picker${settings.thinking ? " on" : ""}`}
+            label={<><Brain size={15} /> <span className="hide-narrow">{thinkLabel}</span></>} title={`Thinking: ${thinkLabel}`}>
             {(close) => (
               <>
                 <button className="menu-item" role="menuitemradio" aria-checked={!settings.thinking}

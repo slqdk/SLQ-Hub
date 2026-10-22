@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.5.1, 2026-10-22)
+## State (0.5.2, 2026-10-22)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -133,8 +133,10 @@ the host if the VM ever stops by itself.
    the Qwen3-VL-Embedding chat format in `app/rag/library.py` and the
    re-ranker's score scale (log-odds or probability: both handled) wait for
    the first library upload.
-6. **Nginx Proxy Manager**: SSE streaming (`proxy_buffering off`), uploads
-   (`client_max_body_size`), the session cookie behind HTTPS.
+6. **Nginx Proxy Manager**: hub.slq.dk works from Søren's phone (2026-10-22:
+   signed in, the start page with his models). Not confirmed through it yet:
+   SSE streaming of a long answer (`proxy_buffering off`), uploads
+   (`client_max_body_size`).
 7. **PWA** install on a phone through hub.slq.dk.
 8. **FamilyLog** against the Hub's Ollama API with its real settings, and
    TwinCAT Coagent (format still unknown; all three formats and CORS exist).

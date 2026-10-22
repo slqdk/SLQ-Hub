@@ -1,5 +1,5 @@
 // Small building blocks: lamps, menus, modals, switches, toasts.
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { X } from "lucide-react";
 import { useApp } from "../state";
 
@@ -45,11 +45,29 @@ export function Modal({ title, onClose, children, footer, wide }: { title: strin
 }
 
 /** A button with a drop-down menu; the menu closes on any click outside or on an item. */
-export function MenuButton({ label, children, up, right, className, title, disabled }: { label: ReactNode;
+export function MenuButton({ label, children, up, right, className, title, disabled, anchorClassName }: { label: ReactNode;
   children: (close: () => void) => ReactNode; up?: boolean; right?: boolean; className?: string; title?: string;
-  disabled?: boolean }) {
+  disabled?: boolean; anchorClassName?: string }) {
   const [open, setOpen] = useState(false);
+  const [shift, setShift] = useState(0);
   const ref = useRef<HTMLDivElement>(null);
+  const menu = useRef<HTMLDivElement>(null);
+  // A menu that would run past the edge of the screen (a chip near the right on a phone) moves back in.
+  useLayoutEffect(() => {
+    if (!open || !menu.current) {
+      setShift(0);
+      return;
+    }
+    const r = menu.current.getBoundingClientRect();
+    const margin = 8;
+    // The visible width: on a phone an overflowing menu widens the layout viewport (innerWidth) itself.
+    const width = Math.min(window.innerWidth, document.documentElement.clientWidth || Infinity,
+      window.visualViewport?.width ?? Infinity);
+    let dx = 0;
+    if (r.right > width - margin) dx = width - margin - r.right;
+    if (r.left + dx < margin) dx = margin - r.left;
+    setShift(dx);
+  }, [open]);
   useEffect(() => {
     if (!open) return;
     const on = (e: MouseEvent) => ref.current && !ref.current.contains(e.target as Node) && setOpen(false);
@@ -62,12 +80,13 @@ export function MenuButton({ label, children, up, right, className, title, disab
     };
   }, [open]);
   return (
-    <div className="menu-anchor" ref={ref}>
+    <div className={`menu-anchor${anchorClassName ? ` ${anchorClassName}` : ""}`} ref={ref}>
       <button type="button" className={className ?? "picker"} onClick={() => setOpen((o) => !o)} aria-haspopup="menu"
         aria-expanded={open} title={title} disabled={disabled}>
         {label}
       </button>
-      {open && <div className={`menu ${up ? "up" : "down"} ${right ? "right" : ""}`} role="menu">
+      {open && <div ref={menu} className={`menu ${up ? "up" : "down"} ${right ? "right" : ""}`} role="menu"
+        style={shift ? { transform: `translateX(${shift}px)` } : undefined}>
         {children(() => setOpen(false))}
       </div>}
     </div>
