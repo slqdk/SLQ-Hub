@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.6 - 2026-10-22
+
+- Settings -> Assistant -> Images: choose the model for pictures (Qwen-Image
+  2.1 or FLUX.2 klein, when downloaded).
+- The tab rows (projects, settings) no longer show a small vertical scrollbar
+  on Windows.
+- The welcome text mentions that you can ask for a picture.
+
 ## 0.1.5 - 2026-10-22
 
 - Self-test: the chat line says whether the model was already loaded (the Hub

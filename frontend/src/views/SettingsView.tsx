@@ -407,6 +407,11 @@ function NewKey({ onClose, made, onMade }: { onClose: () => void; made: { name: 
 // ------------------------------------------------------------ assistant
 
 function AgentTab({ s }: { s: S }) {
+  const { models } = useApp();
+  const current = String(s.data?.settings.images?.model ?? "qwen-image-2.1");
+  const imageModels = (models?.comfy ?? []).filter((m) => m.installed && !m.id.endsWith("-turbo"));
+  const imageOptions = imageModels.length ? imageModels.map((m) => ({ value: m.id, label: m.name }))
+    : [{ value: current, label: "No image model downloaded" }];
   return (
     <div>
       <SectionForm s={s} section="agent" title="The assistant" fields={[
@@ -438,6 +443,8 @@ function AgentTab({ s }: { s: S }) {
         { key: "max_timeout_s", label: "Longest a command may run (seconds)", type: "number", min: 10, max: 7200 },
       ]} />
       <SectionForm s={s} section="images" title="Images" fields={[
+        { key: "model", label: "Model for pictures", type: "select", options: imageOptions,
+          help: "Ask for a picture in any chat. The assistant can still use the other model if you name it." },
         { key: "steps", label: "Steps for a normal image", type: "number", min: 4, max: 80 },
         { key: "turbo_steps", label: "Steps for a fast image", type: "number", min: 2, max: 20 },
         { key: "default_size", label: "Default size (pixels, the long side)", type: "number", min: 512, max: 2048, step: 64 },

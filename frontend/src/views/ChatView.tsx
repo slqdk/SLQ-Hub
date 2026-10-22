@@ -299,7 +299,7 @@ export function ChatView({ chatId, projectId, openPanel }: { chatId?: number; pr
               <h2>{project ? project.name : "What are we working on?"}</h2>
               <p>{project
                 ? "This chat works in the project's files. Everything the assistant changes is kept in the project's history."
-                : "Ask, attach files or pictures, or have it build something. It runs on your own card."}</p>
+                : "Ask, attach files or pictures, ask for a picture, or have it build something. It runs on your own card."}</p>
             </div>
           )}
           <div className="messages">
