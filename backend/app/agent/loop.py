@@ -97,6 +97,18 @@ class Engine:
             out += mcp.tools()
         return out
 
+    async def _inbox(self, messages: list[dict], persist: Persist) -> None:
+        """Messages the user sent while this turn worked: stored where the model
+        reads them (after the step it was on), shown, and added to the context."""
+        if self.depth:
+            return
+        for item in self.run.take_inbox():
+            blocks = [{**b, "while_working": True} if b.get("type") == "text" else b for b in item["blocks"]]
+            m = await persist("user", blocks) if persist else None
+            row = m or {"id": 0, "role": "user", "content": blocks, "run_id": self.run.id}
+            self.emit("user_message", id=item["id"], message=row)
+            messages.extend(C.to_model_messages([row], vision=vision(self.model) or self.cloud is not None))
+
     def schemas(self, tools: list[Tool]) -> list[dict]:
         ctx = self.tool_context("")
         return [t.schema(ctx) for t in tools]
@@ -109,6 +121,7 @@ class Engine:
         schemas = self.schemas(tools)
         final = ""
         for step in range(1, max_steps + 1):
+            await self._inbox(messages, persist)
             messages = await self._fit(messages, compact)
             try:
                 res = await self._model_step(messages, schemas, step)
@@ -134,6 +147,8 @@ class Engine:
                 await persist("assistant", blocks)
             final = res.get("content") or final
             if not calls:
+                if self.run.inbox and not self.depth and step < max_steps:
+                    continue                      # the user wrote meanwhile: answer that too, in this turn
                 if res.get("finish_reason") == "length" and step < max_steps:
                     messages.append({"role": "user", "content": "(Your answer was cut off at the length limit. "
                                                                 "Continue exactly where you stopped.)"})
@@ -521,9 +536,10 @@ class Agent:
                             escalation=escalation)
             engine.steps.append({"type": "queue", "seconds": waited})
 
-            async def persist(role: str, blocks: list[dict]) -> None:
+            async def persist(role: str, blocks: list[dict]) -> dict:
                 m = chats.add_message(chat["id"], role, blocks, run.id)
                 run.emit("message_saved", id=m["id"], role=role)
+                return m
 
             messages = self.build_messages(chat, project, wd, entry, run, escalation)
             max_steps = int(self.hub.settings.get("agent", "max_steps") or 60)
@@ -559,6 +575,17 @@ class Agent:
                 run.emit("cancelled")
             else:
                 run.emit("done", usage=engine.usage if engine else {})
+            # Written after the last step it could be read in (or with Stop): it becomes the next turn.
+            leftover = run.take_inbox()
+            if leftover and chats.get_chat(run.chat_id):
+                for item in leftover:
+                    chats.add_message(run.chat_id, "user", [{k: v for k, v in b.items() if k != "while_working"}
+                                                            for b in item["blocks"]])
+                if status != "error":
+                    try:
+                        self.start(run.chat_id, options)
+                    except RuntimeError:
+                        pass
 
 
 def attachment_block(wd: projects.Workdir, up: dict) -> dict:

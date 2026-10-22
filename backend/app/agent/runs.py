@@ -21,8 +21,15 @@ class Run:
         self.ended: float | None = None
         self.task: asyncio.Task | None = None
         self.approvals: dict[str, asyncio.Future] = {}
+        # What the user sent while the turn works ({"id", "blocks"}): the loop hands it to the model after the
+        # step it is on; whatever is left when the turn ends starts the next turn.
+        self.inbox: list[dict] = []
         self._cond = asyncio.Condition()
         self._seq = 0
+
+    def take_inbox(self) -> list[dict]:
+        items, self.inbox = self.inbox, []
+        return items
 
     def emit(self, kind: str, **data) -> dict:
         self._seq += 1

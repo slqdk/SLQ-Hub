@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.0 - 2026-10-22
+
+- **Write to the assistant while it works**: a message sent during a turn
+  waits (shown as waiting in the chat) and the model reads it after the step
+  it is on, so you can correct or add something without stopping it. If it
+  had already finished, or you press Stop, the message starts the next turn.
+  While it works, the square stops it and the arrow sends.
+
 ## 0.6.0 - 2026-10-22
 
 - **Z-Image Turbo** (Alibaba, 6B, Apache 2.0): fast photorealistic pictures in

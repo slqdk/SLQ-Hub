@@ -3,7 +3,8 @@
     cd backend && python -m tests.devserver [--port 8080] [--data /tmp/hub-dev]
 
 Signs in as soren / "correct horse battery". The fake model answers by
-keyword: "files" (writes and runs a script), "page" (makes an artifact),
+keyword: "files" (writes and runs a script), "game" (slow steps, to try
+sending a message while it works), "page" (makes an artifact),
 "think" (reasons first), "search" (web search), "picture" (an image), or
 anything else (a short markdown answer). The built UI (frontend/dist) is
 served when it exists; otherwise use `npm run dev` in frontend/.
@@ -94,6 +95,16 @@ def responder(body: dict) -> dict:
         if tools_done == 0:
             return {"tool_calls": [{"name": "image_generate", "arguments": {"prompt": "a red fox in the snow", "fast": True}}]}
         return {"content": "Here is the fox."}
+    if low.startswith("(the user wrote this while you were working"):
+        note = text.split("\n", 1)[-1].strip()
+        return {"content": f'Noted: "{note[:80]}". I take that into account from here.', "delay": 1}
+    if "game" in low:                                   # slow steps: try sending something while it works
+        if tools_done == 0:
+            return {"content": "I will write the game first.", "delay": 3, "tool_calls": [
+                {"name": "write_file", "arguments": {"path": "game.js", "content": "console.log('jump')\n"}}]}
+        if tools_done == 1:
+            return {"delay": 3, "tool_calls": [{"name": "bash", "arguments": {"command": "node game.js"}}]}
+        return {"content": "The game runs.", "delay": 2}
     if "slow" in low:
         return {"content": "That took a while, but here it is.", "delay": 5}
     if "add numbers" in low:

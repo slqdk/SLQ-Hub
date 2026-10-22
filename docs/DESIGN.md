@@ -303,6 +303,17 @@ outputs are shortened first; if that is not enough, everything before the
 latest user message is summarised by the model into the chat's summary, which
 goes into the system prompt from then on. The UI shows a notice.
 
+**Messages while it works.** A message sent while a turn runs does not wait
+for the end: it goes into the run's inbox (event `user_queued`), and the
+loop hands it to the model at the next step boundary - after the tool
+results of the step it is on, or instead of ending when the model had just
+given its last answer. It is stored there, in the order the model read it
+(with the run's id and `while_working` on its text, which the model sees as
+"The user wrote this while you were working"), so tool calls and results
+stay in pairs. A message left in the inbox when the turn ends - it came after
+the last step, or the user pressed Stop - is stored as a normal message and
+starts the next turn (not after an error). At most ten wait at a time.
+
 **Steps.** Every run stores its steps: queue wait, model loads, each model
 call (prompt tokens, cached tokens, generated tokens, tokens/s from
 llama-server's `timings`) and each tool call with its duration. The UI shows

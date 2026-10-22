@@ -78,7 +78,9 @@ export function Composer({ running, onSend, onStop, settings, onSettings, models
 
   const ready = pending.filter((p) => p.state === "done" && p.upload).map((p) => p.upload!);
   const uploading = pending.some((p) => p.state === "uploading");
-  const canSend = !running && !sending && !uploading && (text.trim().length > 0 || ready.length > 0 || refs.length > 0);
+  const hasContent = text.trim().length > 0 || ready.length > 0 || refs.length > 0;
+  // While a turn works, a message waits for it: the model reads it after the step it is on.
+  const canSend = !sending && !uploading && hasContent;
 
   const send = async () => {
     if (!canSend) return;
@@ -243,10 +245,10 @@ export function Composer({ running, onSend, onStop, settings, onSettings, models
           </MenuButton>
         )}
         <span className="spacer" />
-        {running ? (
-          <button className="send stop" onClick={onStop} aria-label="Stop"><Square size={14} fill="currentColor" /></button>
-        ) : (
-          <button className="send" onClick={send} disabled={!canSend} aria-label="Send"><ArrowUp size={18} /></button>
+        {running && <button className="send stop" onClick={onStop} aria-label="Stop" title="Stop"><Square size={14} fill="currentColor" /></button>}
+        {(!running || hasContent) && (
+          <button className="send" onClick={send} disabled={!canSend} aria-label={running ? "Send while it works" : "Send"}
+            title={running ? "It reads this after the step it is on" : undefined}><ArrowUp size={18} /></button>
         )}
       </div>
     </div>

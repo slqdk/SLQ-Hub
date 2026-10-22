@@ -1,6 +1,6 @@
 // One view model for an assistant turn, built either from stored messages
 // (history) or from a run's live events - so both render the same way.
-import type { ArtifactRef, Display, ImageRef, Message, RunEvent, RunRecord, Todo } from "./api";
+import type { ArtifactRef, Block, Display, ImageRef, Message, RunEvent, RunRecord, Todo } from "./api";
 
 export type ToolState = "streaming" | "running" | "approval" | "done" | "error";
 
@@ -24,7 +24,8 @@ export type Item =
   | { kind: "tools"; tools: ToolView[] }
   | { kind: "artifact"; ref: ArtifactRef }
   | { kind: "todos"; items: Todo[] }
-  | { kind: "notice"; text: string; tone: "info" | "fault" | "wait" };
+  | { kind: "notice"; text: string; tone: "info" | "fault" | "wait" }
+  | { kind: "user"; message: Message; id: string };      // written while the turn worked, now read by the model
 
 export interface UserTurn { type: "user"; message: Message }
 export interface AssistantTurn { type: "assistant"; key: string; runId: string | null; items: Item[]; run?: RunRecord;
@@ -129,11 +130,28 @@ export interface LiveRun {
   steps: number;
   tokens: number;
   tps: number | null;
+  pending: { id: string; content: Block[] }[];         // sent while it works, read after the step it is on
 }
 
 export function newLive(runId: string): LiveRun {
   return { runId, seq: 0, status: "queued", position: null, model: null, started: Date.now(), items: [], steps: 0,
-    tokens: 0, tps: null };
+    tokens: 0, tps: null, pending: [] };
+}
+
+/** A live run's items split where the user wrote something: assistant parts and user messages in order. */
+export function liveSegments(items: Item[]): ({ kind: "assistant"; items: Item[] } | { kind: "user"; message: Message;
+  id: string })[] {
+  const out: ({ kind: "assistant"; items: Item[] } | { kind: "user"; message: Message; id: string })[] = [];
+  for (const it of items) {
+    if (it.kind === "user") {
+      out.push({ kind: "user", message: it.message, id: it.id });
+      continue;
+    }
+    const last = out[out.length - 1];
+    if (last && last.kind === "assistant") last.items.push(it);
+    else out.push({ kind: "assistant", items: [it] });
+  }
+  return out;
 }
 
 function applyStream(items: Item[], ev: RunEvent): void {
@@ -229,6 +247,13 @@ export function reduceLive(live: LiveRun, ev: RunEvent): LiveRun {
       break;
     case "title":
       next.title = d.title;
+      break;
+    case "user_queued":
+      if (!next.pending.some((p) => p.id === d.id)) next.pending = [...next.pending, { id: d.id, content: d.content ?? [] }];
+      break;
+    case "user_message":
+      next.pending = next.pending.filter((p) => p.id !== d.id);
+      next.items.push({ kind: "user", message: d.message, id: d.id });
       break;
     case "done":
       next.status = "done";

@@ -32,6 +32,8 @@ export function Items({ items, actions }: { items: Item[]; actions: TurnActions 
           }
           case "artifact":
             return <ArtifactCard key={i} refx={it.ref} onOpen={() => actions.openArtifact(it.ref)} />;
+          case "user":
+            return null;
           case "todos":
             return (
               <ul className="todos" key={i} aria-label="Task list">

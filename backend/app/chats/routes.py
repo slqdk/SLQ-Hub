@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import mimetypes
+import secrets
 import shutil
 
 from fastapi import APIRouter, File, Header, HTTPException, Request, UploadFile
@@ -116,10 +117,13 @@ def _reset_summary_if(chat: dict, message_id: int) -> None:
 
 @router.post("/chats/{chat_id}/messages")
 async def post_message(chat_id: int, body: MessageIn, request: Request):
+    """A new message starts a turn. While a turn works, the message waits in
+    the turn's inbox and the model reads it after the step it is on."""
     chat = _chat_or_404(chat_id)
     agent = _agent(request)
-    if agent.runs.active_for_chat(chat_id):
-        raise HTTPException(409, "this chat is already working on an answer")
+    active = agent.runs.active_for_chat(chat_id)
+    if active and len(active.inbox) >= 10:
+        raise HTTPException(409, "Ten messages are already waiting for this turn")
     if not body.text.strip() and not body.attachments and not body.refs:
         raise HTTPException(400, "the message is empty")
     from ..agent.context import CHARS_PER_TOKEN
@@ -148,6 +152,12 @@ async def post_message(chat_id: int, body: MessageIn, request: Request):
             raise HTTPException(404, f"No such file in the working folder: {exc}")
         except ValueError as exc:
             raise HTTPException(400, str(exc))
+    active = agent.runs.active_for_chat(chat_id)
+    if active is not None:
+        item = {"id": "note_" + secrets.token_hex(4), "blocks": blocks}
+        active.inbox.append(item)
+        active.emit("user_queued", id=item["id"], content=blocks)
+        return {"message": None, "run_id": active.id, "queued": item["id"]}
     msg = store.add_message(chat_id, "user", blocks)     # attachments are copied to .hub/ (not synced)
     return {"message": msg, "run_id": _start(request, chat_id, body.options)}
 

@@ -65,7 +65,7 @@ export interface User { id: number; username: string }
 export interface AuthStatus { signedIn: boolean; user: User | null; version: string; setupNeeded: boolean }
 
 export type Block =
-  | { type: "text"; text: string }
+  | { type: "text"; text: string; while_working?: boolean }   // while_working: sent while a turn worked
   | { type: "thinking"; text: string }
   | { type: "image"; sha: string; mime?: string; name?: string; path?: string; size?: number; ref?: boolean }
   | { type: "file"; sha: string; mime?: string; name?: string; path?: string; size?: number }

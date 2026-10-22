@@ -160,13 +160,89 @@ async def test_stopping_while_the_model_writes_keeps_the_text(signed_in, app, fa
     assert [m["role"] for m in chats.messages(c["id"])] == ["user"]      # nothing written yet: nothing saved
 
 
-async def test_one_turn_per_chat_and_errors_are_reported(signed_in, app, fakes):
-    fakes.llama["replies"] = [{"content": "slow", "delay": 0.5}]
+async def test_a_message_sent_while_it_works_reaches_the_model(signed_in, app, fakes):
+    agent = app.state.hub.extras["agent"]
+    fakes.sandbox["delay"] = 0.6
+    fakes.llama["replies"] = [{"content": "Let me run it.", "tool_calls": [{"name": "bash", "arguments": {"command": "make"}}]},
+                              {"content": "Moved the popup."}, {"content": "Popup"}]
     c = await new_chat(signed_in)
-    run_id = await say(signed_in, c["id"], "first")
-    r = await signed_in.post(f"/hub/api/chats/{c['id']}/messages", json={"text": "second"})
-    assert r.status_code == 409
+    run_id = await say(signed_in, c["id"], "fix the game")
+    run = agent.runs.get(run_id)
+    await until(lambda: any(e["type"] == "tool_call" for e in run.events))
+    r = await signed_in.post(f"/hub/api/chats/{c['id']}/messages", json={"text": "I can't see Mario for the popup"})
+    assert r.status_code == 200, r.text
+    assert r.json()["queued"].startswith("note_") and r.json()["run_id"] == run_id and r.json()["message"] is None
     await finish(app, run_id)
+    assert run.status == "done"
+    # After the tool's result, before its next step, the model reads the note.
+    second = [b for b in fakes.llama["requests"] if b.get("tools")][1]["messages"]
+    assert [m["role"] for m in second[1:]] == ["user", "assistant", "tool", "user"]
+    assert second[-1]["content"].startswith("(The user wrote this while you were working")
+    assert second[-1]["content"].endswith("I can't see Mario for the popup")
+    rows = chats.messages(c["id"])
+    assert [m["role"] for m in rows] == ["user", "assistant", "tool", "user", "assistant"]
+    assert rows[3]["run_id"] == run_id and rows[3]["content"][0]["while_working"] is True
+    kinds = [e["type"] for e in run.events]
+    assert kinds.index("user_queued") < kinds.index("user_message")
+
+    # Written while it writes its last answer: it answers that too, in the same turn.
+    fakes.sandbox["delay"] = 0
+    fakes.llama["requests"] = []
+    fakes.llama["replies"] = [{"content": "Done.", "delay": 0.5}, {"content": "Blue it is."}]
+    run_id = await say(signed_in, c["id"], "colour?")
+    run = agent.runs.get(run_id)
+    await until(lambda: any(e["type"] == "step" for e in run.events))
+    assert (await signed_in.post(f"/hub/api/chats/{c['id']}/messages", json={"text": "make it blue"})).status_code == 200
+    await finish(app, run_id)
+    assert [m["role"] for m in chats.messages(c["id"])][-4:] == ["user", "assistant", "user", "assistant"]
+    assert chats.messages(c["id"])[-1]["content"][0]["text"] == "Blue it is."
+
+
+async def test_a_late_message_or_stop_starts_the_next_turn(signed_in, app, fakes, monkeypatch):
+    agent = app.state.hub.extras["agent"]
+    c = await new_chat(signed_in)
+    # Arrives after the last step it could be read in: it becomes the next turn, as a normal message.
+    sent = []
+    orig = agent._title
+
+    async def late(chat, engine):
+        if not sent:
+            sent.append(1)
+            engine.run.inbox.append({"id": "note_late", "blocks": [{"type": "text", "text": "one more thing"}]})
+        await orig(chat, engine)
+
+    monkeypatch.setattr(agent, "_title", late)
+    fakes.llama["replies"] = [{"content": "first"}, {"content": "Title"}, {"content": "About that thing."}]
+    run1 = await finish(app, await say(signed_in, c["id"], "hello"))
+    assert run1.status == "done"
+    await until(lambda: len(chats.messages(c["id"])) == 4)
+    rows = chats.messages(c["id"])
+    assert [m["role"] for m in rows] == ["user", "assistant", "user", "assistant"]
+    assert rows[2]["content"] == [{"type": "text", "text": "one more thing"}] and rows[2]["run_id"] is None
+    assert rows[3]["content"][0]["text"] == "About that thing." and rows[3]["run_id"] != run1.id
+    await finish(app, rows[3]["run_id"])
+
+    # Stop with a note waiting: the run stops, and the note starts the next turn.
+    fakes.sandbox["delay"] = 5
+    fakes.llama["requests"] = []                    # the fake model answers by request number
+    fakes.llama["replies"] = [{"content": "Running.", "tool_calls": [{"name": "bash", "arguments": {"command": "sleep 9"}}]},
+                              {"content": "Looking at your note."}]
+    run_id = await say(signed_in, c["id"], "build it")
+    run = agent.runs.get(run_id)
+    await until(lambda: any(e["type"] == "tool_call" for e in run.events))
+    assert (await signed_in.post(f"/hub/api/chats/{c['id']}/messages", json={"text": "wait, use the other map"})).status_code == 200
+    await signed_in.post(f"/hub/api/runs/{run_id}/stop")
+    await finish(app, run_id)
+    assert run.status == "cancelled"
+    await until(lambda: chats.messages(c["id"])[-1]["role"] == "assistant"
+                and chats.messages(c["id"])[-1]["run_id"] != run_id)
+    rows = chats.messages(c["id"])
+    assert [b.get("text") for b in rows[-2]["content"]] == ["wait, use the other map"]
+    assert rows[-1]["content"][0]["text"] == "Looking at your note."
+
+
+async def test_errors_are_reported(signed_in, app, fakes):
+    c = await new_chat(signed_in)
     fakes.llama["replies"] = [{"error": "model exploded"}]
     run = await finish(app, await say(signed_in, c["id"], "again"))
     assert run.status == "error" and "model exploded" in run.events[-1]["data"]["message"]

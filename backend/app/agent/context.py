@@ -96,7 +96,10 @@ def to_model_messages(rows: list[dict], current_run: str | None = None, keep_ima
             for b in blocks:
                 t = b.get("type")
                 if t == "text" and b.get("text"):
-                    parts.append({"type": "text", "text": b["text"]})
+                    text = b["text"]
+                    if b.get("while_working"):
+                        text = "(The user wrote this while you were working - take it into account:)\n" + text
+                    parts.append({"type": "text", "text": text})
                 elif t == "image":
                     part = _image(b) if recent else None
                     if part:

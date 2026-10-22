@@ -1,11 +1,11 @@
 // A chat: history, the live turn, and the composer.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { Copy, FileText, FolderOpen, Menu, MoreHorizontal, Pencil, RotateCcw, Trash2 } from "lucide-react";
-import { api, mediaUrl, type ArtifactRef, type ChatData, type ChatSettings, type Library, type Message,
+import { api, mediaUrl, type ArtifactRef, type Block, type ChatData, type ChatSettings, type Library, type Message,
   type RunEvent, type RunRecord, type Settings, type Skill, type Upload } from "../lib/api";
 import { seconds, tokens } from "../lib/format";
 import { linkProps, navigate } from "../lib/router";
-import { buildTurns, newLive, reduceLive, type AssistantTurn, type LiveRun } from "../lib/turns";
+import { buildTurns, liveSegments, newLive, reduceLive, type AssistantTurn, type LiveRun } from "../lib/turns";
 import { useApp } from "../state";
 import { Composer, type ComposerSettings } from "../components/Composer";
 import { Items } from "../components/Turn";
@@ -97,13 +97,15 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
       es.close();
       if (esRef.current === es) esRef.current = null;
       const err = liveRef.current?.status === "error" ? liveRef.current.error : null;
-      await load();
+      const d = await load();
       if (liveRef.current?.runId === runId) {
         liveRef.current = null;
         setLive(null);
       }
       refreshLists();
       if (err) toast(err, "fault");
+      // A message that came after the turn's last step (or with Stop) has started the next turn.
+      if (d?.run && d.run.id !== runId) attachRef.current?.(d.run.id);
     };
     es.addEventListener("end", () => finish());
     es.onerror = () => {
@@ -111,6 +113,8 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
       if (ended || es.readyState === EventSource.CLOSED) finish();
     };
   }, [detach, load, refreshLists, toast]);
+  const attachRef = useRef(attach);
+  attachRef.current = attach;
 
   useEffect(() => {
     setData(null);
@@ -177,16 +181,21 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
           settings: draft } });
         id = created.id;
       }
-      const r = await api<{ message: Message; run_id: string }>(`/hub/api/chats/${id}/messages`, {
+      const r = await api<{ message: Message | null; run_id: string; queued?: string }>(`/hub/api/chats/${id}/messages`, {
         body: { text, attachments: uploads.map((u) => u.sha), refs } });
       onRefs([]);
+      if (r.queued || !r.message) {                    // the turn at work reads it after the step it is on
+        stick.current = true;
+        return true;
+      }
       if (!chatId) {
         refreshLists();
         keepPanel();
         navigate({ name: "chat", id }, true);
         return true;
       }
-      setData((d) => (d ? { ...d, messages: [...d.messages, r.message] } : d));
+      const message = r.message;
+      setData((d) => (d ? { ...d, messages: [...d.messages, message] } : d));
       attach(r.run_id);
       return true;
     } catch (e) {
@@ -250,6 +259,12 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
 
   const openArtifact = (ref: ArtifactRef) => chatId && openPanel({ kind: "artifact", chatId, id: ref.id, version: ref.version });
   const turns = useMemo(() => (data ? buildTurns(data.messages, data.runs, live?.runId) : []), [data, live?.runId]);
+  // A note written while a turn worked splits it in parts: the run's summary goes under the last part.
+  const lastPart = useMemo(() => {
+    const m = new Map<string, number>();
+    turns.forEach((t, i) => { if (t.type === "assistant" && t.runId) m.set(t.runId, i); });
+    return m;
+  }, [turns]);
   const lastAssistant = [...turns].reverse().find((t) => t.type === "assistant") as AssistantTurn | undefined;
   const running = !!live && live.status !== "done" && live.status !== "error" && live.status !== "cancelled";
 
@@ -315,7 +330,7 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
             </div>
           )}
           <div className="messages">
-            {turns.map((t) => t.type === "user" ? (
+            {turns.map((t, i) => t.type === "user" ? (
               <UserMessage key={`u${t.message.id}`} message={t.message} editing={editing === t.message.id}
                 canEdit={!running} onEdit={() => setEditing(t.message.id)} onCancel={() => setEditing(null)}
                 onSave={(text) => saveEdit(t.message.id, text)} onOpenFile={folder ? showFiles : undefined} />
@@ -323,15 +338,28 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
               <div className="msg-assistant" key={t.key}>
                 <Items items={t.items} actions={{ openArtifact }} />
                 <TurnFoot turn={t} names={modelNames} canRetry={!running && t === lastAssistant}
-                  onRetry={() => retry()} />
+                  stats={!t.runId || lastPart.get(t.runId) === i} onRetry={() => retry()} />
               </div>
             ))}
-            {live && (
-              <div className="msg-assistant">
-                <Items items={live.items} actions={{ openArtifact, runId: live.runId, live: true }} />
-                <LiveState live={live} queueCurrent={queue?.current ?? null} names={modelNames} />
-              </div>
-            )}
+            {live && (() => {
+              const segs = liveSegments(live.items);
+              const tail = segs.length && segs[segs.length - 1].kind === "assistant" ? segs.length - 1 : -1;
+              const state = <LiveState live={live} queueCurrent={queue?.current ?? null} names={modelNames} />;
+              return <>
+                {segs.map((seg, i) => seg.kind === "user" ? (
+                  <UserMessage key={`lu${seg.id}`} message={seg.message} editing={false} canEdit={false}
+                    onEdit={() => undefined} onCancel={() => undefined} onSave={() => undefined}
+                    onOpenFile={folder ? showFiles : undefined} />
+                ) : (
+                  <div className="msg-assistant" key={`la${i}`}>
+                    <Items items={seg.items} actions={{ openArtifact, runId: live.runId, live: true }} />
+                    {i === tail && state}
+                  </div>
+                ))}
+                {tail < 0 && <div className="msg-assistant">{state}</div>}
+                {live.pending.map((n) => <PendingNote key={n.id} content={n.content} />)}
+              </>;
+            })()}
           </div>
         </div>
       </div>
@@ -340,11 +368,12 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
         <div className="column">
           <Composer running={running} onSend={send} onStop={stop} settings={effective} onSettings={changeSettings}
             models={llms} pictureModels={pictureModels} pictureDefault={pictureDefault} libraries={libraries} skills={skills} autoFocus
-            placeholder={project ? `Ask about ${project.name}, or give it a task` : undefined}
+            placeholder={running ? "Add something while it works" : project ? `Ask about ${project.name}, or give it a task` : undefined}
             refs={folder ? refs : []} onRemoveRef={(p) => onRefs((r) => r.filter((x) => x !== p))} onOpenRef={(p) => showFiles(p)}
             onBrowseFiles={folder ? () => showFiles() : undefined} browseLabel={project ? "Project files" : "This chat's files"} />
-          <div className="hint">Enter sends, Shift+Enter makes a new line. Paste or drop files to attach them
-            {folder ? <>, or put {project ? "project" : "the chat's"} files in the message from <b>Files</b>.</> : "."}</div>
+          <div className="hint">{running ? "What you send now is read after the step it is working on. The square stops it."
+            : <>Enter sends, Shift+Enter makes a new line. Paste or drop files to attach them
+            {folder ? <>, or put {project ? "project" : "the chat's"} files in the message from <b>Files</b>.</> : "."}</>}</div>
         </div>
       </div>
     </div>
@@ -356,9 +385,11 @@ function UserMessage({ message, editing, canEdit, onEdit, onCancel, onSave, onOp
   onOpenFile?: (path: string) => void }) {
   const text = message.content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join("\n\n");
   const files = message.content.filter((b) => b.type === "image" || b.type === "file" || b.type === "file_ref");
+  const whileWorking = message.content.some((b) => b.type === "text" && b.while_working);
   const [value, setValue] = useState(text);
   return (
     <div className="msg-user">
+      {whileWorking && <div className="msg-note">Sent while it worked</div>}
       {files.length > 0 && (
         <div className="attachments">
           {files.map((b, i) => b.type === "image" ? (
@@ -394,6 +425,25 @@ function UserMessage({ message, editing, canEdit, onEdit, onCancel, onSave, onOp
   );
 }
 
+/** A message sent while the turn works, before the model has read it. */
+function PendingNote({ content }: { content: Block[] }) {
+  const text = content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join("\n\n");
+  const files = content.filter((b) => b.type === "image" || b.type === "file" || b.type === "file_ref");
+  return (
+    <div className="msg-user pending-note">
+      <div className="msg-note"><Lamp state="wait" size="sm" /> Waiting: it reads this after the step it is on</div>
+      {files.length > 0 && (
+        <div className="attachments">
+          {files.map((b, i) => b.type === "image" ? (
+            <span key={i} className="thumb"><img src={mediaUrl(b.sha)} alt={b.name ?? "attached image"} /></span>
+          ) : <span key={i} className="file-chip">{b.type === "file_ref" ? b.path : b.name}</span>)}
+        </div>
+      )}
+      {text && <div className="bubble">{text}</div>}
+    </div>
+  );
+}
+
 function runStats(run: RunRecord | undefined, names: Record<string, string>): string {
   if (!run) return "";
   const parts: string[] = [];
@@ -410,16 +460,16 @@ function runStats(run: RunRecord | undefined, names: Record<string, string>): st
   return parts.join(", ");
 }
 
-function TurnFoot({ turn, names, canRetry, onRetry }: { turn: AssistantTurn; names: Record<string, string>;
-  canRetry: boolean; onRetry: () => void }) {
+function TurnFoot({ turn, names, canRetry, onRetry, stats = true }: { turn: AssistantTurn; names: Record<string, string>;
+  canRetry: boolean; onRetry: () => void; stats?: boolean }) {
   const { toast } = useApp();
   return (
     <div className="msg-foot">
       {turn.text && <button className="icon-btn small" aria-label="Copy the answer"
         onClick={async () => toast((await copyText(turn.text)) ? "Copied" : "Copying failed", "run")}><Copy size={14} /></button>}
       {canRetry && <button className="icon-btn small" aria-label="Answer again" onClick={onRetry}><RotateCcw size={14} /></button>}
-      <span className="stats">{runStats(turn.run, names)}</span>
-      {turn.run?.status === "error" && turn.run.error && <span className="notice fault" style={{ fontSize: 13 }}>{turn.run.error}</span>}
+      <span className="stats">{stats ? runStats(turn.run, names) : ""}</span>
+      {stats && turn.run?.status === "error" && turn.run.error && <span className="notice fault" style={{ fontSize: 13 }}>{turn.run.error}</span>}
     </div>
   );
 }
