@@ -19,9 +19,12 @@ Proxmox host is the real test. Expect to fix things there; the self-test
 The first install does not use `create-vm.sh`: Søren made VM 222 by hand in
 the Proxmox UI (at first SeaBIOS, i440fx, CPU `x86-64-v2-AES`, 34 GiB, no
 GPU) and installs Ubuntu 24.04.2 from the ISO. He was given the changes to
-make before installing (`docs/INSTALL.md`, "Or: make the VM by hand"); his
-`qm config 222` afterwards has not been seen yet. `install.sh` now checks the
-VM before installing anything (stage `vm`).
+make before installing (`docs/INSTALL.md`, "Or: make the VM by hand"). His
+`qm config 222` afterwards matches: `machine: q35`, `bios: ovmf` with
+`efidisk0 ...,efitype=4m,pre-enrolled-keys=0`, `cpu: host`, 12 cores,
+`memory: 40960`, `balloon: 0`, `hostpci0: 0000:0a:00,pcie=1` (no `x-vga`),
+default display, `agent: enabled=1`, `onboot: 1`, 530G on `VMDisc01`.
+`install.sh` now checks the VM before installing anything (stage `vm`).
 
 First real-hardware observation: starting VM 222 right after VM 104 released
 the card (GPU at host address `0000:0a:00.0`) failed with
