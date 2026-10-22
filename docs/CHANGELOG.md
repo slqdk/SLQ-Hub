@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.4 - 2026-10-22
+
+- `install.sh`: the GPU check rounds the VRAM it reports (a 24 GB card showed
+  as 23 GB).
+
 ## 0.1.3 - 2026-10-22
 
 - `install.sh`: the GPU check reads `/proc/modules` instead of `lsmod | grep

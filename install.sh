@@ -337,7 +337,7 @@ stage_gpu() {
     ok "render node: ${nodes[*]}"
     local vram=""
     for f in /sys/class/drm/card*/device/mem_info_vram_total; do
-        [[ -r "$f" ]] && vram="$(( $(cat "$f") / 1024 / 1024 / 1024 )) GB"
+        [[ -r "$f" ]] && vram="$(( ($(cat "$f") + 512 * 1024 * 1024) / 1024 / 1024 / 1024 )) GB"   # rounded: 24560 MiB -> 24
     done
     [[ -n "$vram" ]] && ok "VRAM: $vram"
     local gid

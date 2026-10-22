@@ -156,7 +156,12 @@ reset problem is not known yet.
    atomics: QEMU (8.2+) only enables AtomicOps on the root port for a
    single-function vfio device, and the card is passed with all functions
    (GPU + audio, multifunction). Passing only `0000:0a:00.0` should give the
-   guest atomics - not tried.
+   guest atomics - not tried. With 0.1.3 the GPU check passed: kernel
+   7.0.0-38, amdgpu loaded, runpm=0, `/dev/kfd` present (so KFD accepted the
+   card without atomics), `/dev/dri/renderD128`, render GID 993. `sudo vgs`:
+   `ubuntu-vg` 526.95g with 0 free - the root LV already has the whole disk.
+   The `build` stage started (SearXNG pulled first); `models`, `start` and
+   `selftest` follow.
 3. **llama.cpp on the card** (`server-rocm-b11783`): the flags parse (checked
    on a CPU build), but VRAM use (~21 GiB expected for Qwen3.8-27B with an 80K
    pool), ROCm itself and real tokens/s are unknown until the first load.
