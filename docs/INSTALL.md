@@ -278,3 +278,4 @@ versions) are in `/srv/slq-hub/.env`. After editing it, run:
 | A model download fails | Run the installer again: downloads resume. |
 | The self-test fails at "load model" | `sudo bash /opt/slq-hub/update.sh compose logs llm` shows llama-server's own words. |
 | The UI works on the LAN but not through the proxy | Check the proxy host's port (8080) and that Websockets support is on. |
+| A chat behaves strangely (loops, odd answers, stops) | The chat's ⋯ menu → **Export for troubleshooting**, and send me the ZIP. On the phone page: menu → **Export this chat**. |

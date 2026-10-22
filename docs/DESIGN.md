@@ -588,6 +588,16 @@ browser needs no key (the gate accepts the session on the model API).
 **Logs.** `update.sh compose logs -f <service>`. The Hub keeps an error log
 and per-model llama-server logs, viewable in Settings → System.
 
+**A chat that behaves strangely.** Its ⋯ menu exports a troubleshooting ZIP
+(`app/chats/export.py`): every stored message block and run (steps, timings,
+tokens, errors), the live event log of runs still in memory (streamed pieces
+joined), what the model would be sent next (system prompt, history after
+condensing, tools, the request body), the settings that shape a turn (never a
+key or token: cloud gives only whether a key is set, MCP only names and
+status), the queue's jobs during the runs (its monotonic times turned into
+clock times), the tail of llama-server's log and the chat's files (up to
+60 MB). The phone page exports its chats as JSON from the device.
+
 ---
 
 ## 13. Risks and things not yet verified on the hardware

@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.9.0 - 2026-10-22
+
+- **Export a chat** (the chat's ⋯ menu):
+  - **Export as Markdown**: the conversation to read or keep, with the thinking
+    folded away and tool calls and results shortened.
+  - **Export for troubleshooting**: a ZIP with everything the Hub knows about
+    the chat, to find out why it behaved as it did. It holds every message
+    block (with full tool results) and the runs (steps, timings, tokens,
+    errors). It also has the live event log of runs from the last hour and
+    what the model would be sent next (system prompt, history after
+    condensing, tools). Then the queue around the runs, the model server's
+    recent log, and the chat's pictures and attachments. No keys or tokens.
+- The phone chat page: **Export this chat** in its menu saves the open chat as
+  a file (photos and pictures included).
+
 ## 0.8.0 - 2026-10-22
 
 - **Chat page for phones** (`http://<hub>:8080/chat`): a simple chat for the

@@ -7,7 +7,7 @@ import secrets
 import shutil
 
 from fastapi import APIRouter, File, Header, HTTPException, Request, UploadFile
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
 from ..projects import store as projects
@@ -79,6 +79,22 @@ class ChatPatch(BaseModel):
 async def patch_chat(chat_id: int, body: ChatPatch):
     _chat_or_404(chat_id)
     return store.update_chat(chat_id, title=body.title, settings=body.settings)
+
+
+@router.get("/chats/{chat_id}/export")
+async def export_chat(chat_id: int, request: Request, format: str = "zip"):
+    """The chat as Markdown (format=md) or as a troubleshooting bundle (format=zip)."""
+    from . import export
+    chat = _chat_or_404(chat_id)
+    hub = get_hub(request)
+    if format == "md":
+        return Response(export.markdown(chat, hub.env.version), media_type="text/markdown; charset=utf-8",
+                        headers={"Content-Disposition": f'attachment; filename="{export.filename(chat, "md")}"'})
+    if format != "zip":
+        raise HTTPException(400, "format is md or zip")
+    data = await export.bundle(hub, _agent(request), chat)
+    return Response(data, media_type="application/zip",
+                    headers={"Content-Disposition": f'attachment; filename="{export.filename(chat, "zip")}"'})
 
 
 @router.delete("/chats/{chat_id}")

@@ -1,6 +1,6 @@
 // A chat: history, the live turn, and the composer.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
-import { Copy, FileText, FolderOpen, Menu, MoreHorizontal, Pencil, RotateCcw, Trash2 } from "lucide-react";
+import { Copy, Download, FileText, FolderOpen, Menu, MoreHorizontal, Pencil, RotateCcw, Trash2 } from "lucide-react";
 import { api, mediaUrl, type ArtifactRef, type Block, type ChatData, type ChatSettings, type Library, type Message,
   type RunEvent, type RunRecord, type Settings, type Skill, type Upload } from "../lib/api";
 import { seconds, tokens } from "../lib/format";
@@ -10,6 +10,7 @@ import { useApp } from "../state";
 import { Composer, type ComposerSettings } from "../components/Composer";
 import { Items } from "../components/Turn";
 import { copyText, Lamp, MenuButton } from "../components/ui";
+import { download } from "../lib/download";
 import type { PanelState } from "../App";
 import type { Folder } from "../components/Files";
 
@@ -307,6 +308,11 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
                   <button key={a.id} className="menu-item" onClick={() => { close(); openPanel({ kind: "artifact", chatId, id: a.id }); }}>
                     <span className="tag">artifact</span> {a.title}</button>
                 ))}
+                <div className="menu-sep" />
+                <button className="menu-item" onClick={() => { close(); download(`/hub/api/chats/${chatId}/export?format=md`); }}>
+                  <FileText size={15} /> Export as Markdown</button>
+                <button className="menu-item" onClick={() => { close(); download(`/hub/api/chats/${chatId}/export?format=zip`); }}>
+                  <Download size={15} /><span>Export for troubleshooting<small>Everything about the chat, as a ZIP</small></span></button>
                 <div className="menu-sep" />
                 <button className="menu-item" style={{ color: "var(--fault)" }} onClick={() => { close(); remove(); }}>
                   <Trash2 size={15} /> Delete chat</button>

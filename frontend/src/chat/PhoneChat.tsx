@@ -6,6 +6,7 @@ import { ArrowUp, Brain, ChevronDown, ChevronRight, Copy, Download, Image as Ima
   RotateCcw, Square, SquarePen, Trash2, X } from "lucide-react";
 import { Markdown } from "../components/Markdown";
 import { copyText } from "../lib/clipboard";
+import { saveText } from "../lib/download";
 import { HubError, keyFrom, listModels, makePicture, saveKey, SIZES, storedKey, streamChat, takeKeyFromLink,
   type ApiMessage, type HubModel, type Part, type SizeName } from "./hub";
 import { photoFromFile, pictureName } from "./photos";
@@ -225,6 +226,25 @@ function ChatApp({ apiKey, models: firstModels, onUseKey, onForget }: { apiKey: 
       setToast({ text: "This chat could not be read.", fault: true });
     }
     setChat({ meta, messages });
+  };
+
+  // The open chat as a file, everything included (photos and pictures too), for showing someone what happened.
+  const exportChat = () => {
+    if (!chat.meta) return;
+    const data = {
+      exported: { app: "SLQ Chat", at: new Date().toISOString(), format: 1, page: location.origin + location.pathname,
+        browser: navigator.userAgent },
+      settings: { model: model?.id ?? null, think, pictureSize: size, keptOnDevice: kept,
+        key: apiKey ? `${apiKey.slice(0, 14)}...` : "signed in to the Hub" },
+      models: models.map(({ id, name, kind, vision, thinking, default: isDefault, loaded }) =>
+        ({ id, name, kind, vision, thinking, default: isDefault, loaded })),
+      systemPrompt: systemPrompt(),
+      answering: busy?.chatId === chat.meta.id,
+      chat: chat.meta,
+      messages: chat.messages,
+    };
+    saveText(JSON.stringify(data, null, 1), `slq-chat-${fileSlug(chat.meta.title)}-${new Date().toISOString().slice(0, 10)}.json`);
+    setDrawer(false);
   };
 
   const removeChat = async (meta: ChatMeta) => {
@@ -454,6 +474,12 @@ function ChatApp({ apiKey, models: firstModels, onUseKey, onForget }: { apiKey: 
         <div className="pc-actions">
           <button className="btn" onClick={newChat}><SquarePen size={15} /> New chat</button>
         </div>
+        {chat.meta && (
+          <div className="pc-actions">
+            <button className="btn quiet" onClick={exportChat} title="Save this chat as a file, to show someone what happened">
+              <Download size={15} /> Export this chat</button>
+          </div>
+        )}
         <div className="sidebar-scroll">
           {chats.length === 0 ? <p className="pc-empty">No chats yet.</p> : groups(chats).map(([label, items]) => (
             <div className="side-group" key={label}>
@@ -523,6 +549,11 @@ function ConfirmTap({ onConfirm, label, armedLabel }: { onConfirm: () => void; l
   }, [armed]);
   return <button className={`btn small ${armed ? "danger" : ""}`} onClick={() => (armed ? onConfirm() : setArmed(true))}>
     {armed ? armedLabel : label}</button>;
+}
+
+function fileSlug(title: string): string {
+  const t = title.toLowerCase().replace(/æ/g, "ae").replace(/ø/g, "oe").replace(/å/g, "aa");
+  return t.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40).replace(/-+$/, "") || "chat";
 }
 
 function groups(chats: ChatMeta[]): [string, ChatMeta[]][] {

@@ -4,14 +4,17 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.8.0, 2026-10-22)
+## State (0.9.0, 2026-10-22)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
 with all its tools, projects with SLQ Sync, images through ComfyUI, libraries
 (multimodal RAG), MCP, cloud escalation, the web UI (responsive, PWA) and the
 command line self-test. Since 0.8.0 there is also a chat page for phones
-(`/chat`) on the model API, for the rest of the household.
+(`/chat`) on the model API, for the rest of the household. A chat that behaves
+strangely can be exported from its ⋯ menu ("Export for troubleshooting": a ZIP
+with messages, runs, live events, the next turn's context, the queue and the
+model server's log) - ask for that first.
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
 host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU
@@ -105,6 +108,7 @@ the host if the VM ever stops by itself.
 | Files in a message | Clicked through in Chromium at 1920, 1280 and 390 px against the dev server: + -> Project files opens the panel, the search finds a file, its + and the file bar's Add to chat put files in the message (chips in the composer, a count in the panel), sending creates the chat with the panel still open, the message shows the files and a click opens one; the project page's Files tab has no + buttons. |
 | Image models from links | 5 tests (`tests/test_images_models.py`) against a fake Hugging Face (real safetensors headers, Range requests) and a fake Civitai (model and version API, a login-only download, the redirect to its storage): link parsing, the checkpoint check (SDXL, v-prediction, no text encoders, no VAE, refiner, SD 1.5, FLUX, LoRA), presets and their limits, lookup and add from both sites, the 401 that names `CIVITAI_TOKEN`, the token kept from the storage host, settings changes, removal (not while it is the Settings model), a chat with its own SDXL model (the graph, clip skip, tags, the SDXL size) and the tool description it gets. The dialog clicked through in Chromium at 1440 and 390 px. |
 | Phone chat page | 34 checks in Chromium (Playwright) with iPhone 13 and iPhone SE (dark) emulation against the dev server: Settings (the page's address, Only the home network, Copy the phone link); connecting (a wrong paste, an unknown key, the link - the key is kept and leaves the address); a streamed answer (Bearer key, thinking off by default, the system prompt, the default model, the title); Think on; the history sent; a photo (shrunk to JPEG, sent as `image_url`); a picture (portrait size, kept as data); the viewer's Save link; Stop and Try again; two chats kept over a reload, with their photo and picture; delete; copy; away from home (a 403 from the LAN guard); a key switched off (said in the chat, then the key screen after a reload); the composer at 320 px. The requests Enchanted (`HEAD /`, Bearer, `/api/tags`, `/api/chat`) and Reins (key in the path, `GET` of the base address) make, replayed with curl; read from their sources (Enchanted 2026-07 and its OllamaKit fork, Reins 2026-10). |
+| Chat export | 6 tests (`tests/test_export.py`): Markdown (thinking, tool calls and results, one section per turn, the turn line), the ZIP (every part; full tool arguments; the model card and safe settings - a cloud API key set in Settings appears nowhere in it; the picture as a file and linked in the transcript; context.json with the system prompt, history, tools and request, the picture left out; the event log with streamed pieces joined; the queue job of the run), 404/400/401, joining events, file names. Both menu items and the phone page's Export this chat clicked through in Chromium (downloads named after the chat, unzipped, the phone file has no whole key). |
 | Tab rows | In Chromium: the old CSS gave `.tabs` 1px of vertical overflow (scrollHeight 42, clientHeight 41 - a scrollbar with Windows' classic scrollbars, reported by Søren); the inset-shadow rule gives none. |
 | Compose | `docker compose config` (v2.40.3) with a `.env` written the way `install.sh` writes it: renders, and the admin password hash arrives intact. |
 | llama.cpp | b11783 built from source (CPU): every command line the Hub builds parses; the real supervisor started the real llama-server through the Hub's scheduler, runner and client with a tiny random model - load, streaming (the real chunk format), a killed server noticed and reloaded, unload. Embeddings (strings and `content` arrays) and `/v1/rerank` answer in the shapes the Hub expects. |
@@ -190,6 +194,7 @@ the host if the VM ever stops by itself.
 | `backend/app/api/` | Ollama, OpenAI, Anthropic formats. |
 | `backend/app/catalog.py`, `hf.py`, `downloads.py` | The model catalog (bundled + `data/models.custom.json` + overrides), Hugging Face lookups for Add from Hugging Face, the in-app download queue. |
 | `backend/app/agent/loop.py` | The agent loop (`Engine`) and turns (`Agent`). |
+| `backend/app/chats/export.py` | A chat as Markdown, or as the troubleshooting ZIP (`GET /hub/api/chats/{id}/export?format=md|zip`). |
 | `backend/app/agent/tools/` | The tools; `meta_tools.py` has `task` and `escalate`; `mcp.py` the MCP client. |
 | `backend/app/projects/` | Projects, folders, the sync store and the `/api/sync` protocol. |
 | `backend/app/images/` | ComfyUI workflows, the image pipeline (by family), `sources.py` (SDXL checkpoints from Civitai and Hugging Face links). |
