@@ -89,7 +89,17 @@ unused card in D3), `vfio vfio_iommu_type1 vfio_pci` in `/etc/modules`,
 `systemctl disable vreset.service`, `update-initramfs -u -k all`. Check after
 the reboot: both functions on vfio-pci before anything else, `Y` in
 `/sys/module/vfio_pci/parameters/disable_idle_d3`, no `snd_hda_intel
-0000:0a` or `device_specific` lines in the journal. Not done or verified yet.
+0000:0a` or `device_specific` lines in the journal.
+
+Applied at 10:27 (the host reboot still to come): `vfio.conf` now reads
+`options vfio-pci ids=1002:744c,1002:ab30,1002:73bf,1002:ab28
+disable_idle_d3=1` plus the three softdeps; `vreset.service` (its whole job:
+`ExecStart=/usr/bin/bash -c 'echo device_specific >
+/sys/bus/pci/devices/0000:0a:00.0/reset_method'`, `After=multi-user.target`)
+disabled; initramfs rebuilt for every installed kernel (6.8.12-37/-15/-11/-2
+and two old 5.15 kernels; GRUB host, so "No /etc/kernel/proxmox-boot-uuids
+found" is expected); `hostpci0: 0000:0a:00,pcie=1` back on VM 222. The
+after-reboot checks are not done yet.
 Whether a plain reboot of VM 222 (which `install.sh` does once) hits the
 reset problem is not known yet.
 
