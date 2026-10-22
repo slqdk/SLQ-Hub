@@ -572,3 +572,45 @@ def attachment_block(wd: projects.Workdir, up: dict) -> dict:
         projects.safe_write(wd.root, p, data)
     kind = "image" if (up.get("mime") or "").startswith("image/") else "file"
     return {"type": kind, "sha": up["sha"], "mime": up.get("mime"), "name": name, "size": up.get("size"), "path": rel}
+
+
+REF_MAX = 20                     # files of the working folder in one message
+REF_SHARE = 0.3                  # of the model's context, for the text of those files
+REF_IMAGE_EXT = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"}
+REF_IMAGE_MAX = 20_000_000
+
+
+def ref_blocks(wd: projects.Workdir, paths: list[str], budget: int) -> list[dict]:
+    """Blocks for files of the working folder that the user put in a message.
+    Text files are copied into the message as they are now, while they fit in
+    `budget` characters, so the model has them without a tool call; pictures
+    are shown to it; anything else is named, for read_file. Raises ValueError
+    for a path outside the folder and FileNotFoundError for one that is not a
+    file."""
+    from ..projects import blobs
+    out: list[dict] = []
+    seen: set[str] = set()
+    for raw in paths[:REF_MAX]:
+        p = wd.resolve(raw)
+        if not p.is_file():
+            raise FileNotFoundError(raw)
+        rel = wd.rel(p)
+        if rel in seen:
+            continue
+        seen.add(rel)
+        size = p.stat().st_size
+        meta = {"path": rel, "name": p.name, "size": size, "mime": projects.mime_of(p.name)}
+        if p.suffix.lower() in REF_IMAGE_EXT and size <= REF_IMAGE_MAX:
+            up = chats.save_upload(p.read_bytes(), p.name, meta["mime"])
+            out.append({"type": "image", "sha": up["sha"], **meta, "ref": True})
+            continue
+        block = {"type": "file_ref", **meta}
+        if size <= budget * 4:                     # UTF-8: at most 4 bytes a character
+            data = p.read_bytes()
+            if projects.is_text(data):
+                text = data.decode("utf-8", "replace")
+                if len(text) <= budget:
+                    block.update(sha=blobs.store(data), lines=len(text.splitlines()), inline=True)
+                    budget -= len(text)
+        out.append(block)
+    return out

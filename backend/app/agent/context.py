@@ -3,12 +3,14 @@ them inside the context window (compaction)."""
 from __future__ import annotations
 
 import json
+import re
 
 from ..chats import store as chats
 from ..llm.messages import image_part
 from ..projects import blobs
 
 IMAGE_TOKENS = 1000
+CHARS_PER_TOKEN = 3.2
 
 
 def _image(block: dict) -> dict | None:
@@ -19,6 +21,31 @@ def _image(block: dict) -> dict | None:
         return image_part(blobs.read(sha))
     except ValueError:
         return None
+
+
+def _size(n: int) -> str:
+    for unit in ("bytes", "KB", "MB", "GB"):
+        if n < 1000 or unit == "GB":
+            return f"{n} {unit}" if unit == "bytes" else f"{n:.1f} {unit}"
+        n /= 1000
+    return ""
+
+
+def _file_ref(block: dict, fresh: bool) -> str:
+    """A file of the working folder that the user put in a message: its text
+    as it was then (while the message is recent), else where to read it."""
+    path = block.get("path") or block.get("name") or "?"
+    sha = block.get("sha")
+    if fresh and block.get("inline") and sha and blobs.exists(sha):
+        text = blobs.read(sha).decode("utf-8", "replace")
+        fence = "`" * max(3, 1 + max((len(m) for m in re.findall(r"`+", text)), default=0))
+        return (f"[File from the working folder: {path} ({block.get('lines', 0)} lines), as it was when this "
+                f"message was sent]\n{fence}\n{text.rstrip(chr(10))}\n{fence}")
+    if block.get("inline"):
+        return (f"[File from the working folder: {path} ({_size(int(block.get('size') or 0))}) - it was shown "
+                "with this message; read it again with read_file if you need it]")
+    return (f"[File from the working folder: {path} ({_size(int(block.get('size') or 0))}) - "
+            "read it with read_file]")
 
 
 def to_model_messages(rows: list[dict], current_run: str | None = None, keep_images_from: int = 0,
@@ -43,7 +70,8 @@ def to_model_messages(rows: list[dict], current_run: str | None = None, keep_ima
 
     for r in rows:
         role, blocks = r["role"], r["content"]
-        recent = vision and r["id"] >= keep_images_from
+        fresh = r["id"] >= keep_images_from
+        recent = vision and fresh
         if role == "tool":
             for b in blocks:
                 if b.get("type") != "tool_result":
@@ -63,6 +91,7 @@ def to_model_messages(rows: list[dict], current_run: str | None = None, keep_ima
             continue
         flush()
         if role == "user":
+            docs: list[dict] = []             # files from the working folder go before what the user wrote
             parts: list[dict] = []
             for b in blocks:
                 t = b.get("type")
@@ -72,12 +101,16 @@ def to_model_messages(rows: list[dict], current_run: str | None = None, keep_ima
                     part = _image(b) if recent else None
                     if part:
                         parts.append(part)
-                    note = f"[Attached image: {b.get('path') or b.get('name')}]"
+                    what = "Image from the working folder" if b.get("ref") else "Attached image"
+                    note = f"[{what}: {b.get('path') or b.get('name')}]"
                     parts.append({"type": "text", "text": note if part else note + " (not shown - use view_image "
                                                                                     "to look at it)"})
                 elif t == "file":
                     parts.append({"type": "text", "text": f"[Attached file: {b.get('path') or b.get('name')} "
                                                           f"({b.get('size', 0)} bytes) - read it with read_file]"})
+                elif t == "file_ref":
+                    docs.append({"type": "text", "text": _file_ref(b, fresh)})
+            parts = docs + parts
             if not parts:
                 continue
             if all(p["type"] == "text" for p in parts):
@@ -117,7 +150,7 @@ def estimate_tokens(messages: list[dict]) -> int:
         for tc in m.get("tool_calls") or []:
             chars += len(tc["function"].get("arguments") or "") + 20
         chars += len(m.get("reasoning_content") or "")
-    return int(chars / 3.2) + images * IMAGE_TOKENS
+    return int(chars / CHARS_PER_TOKEN) + images * IMAGE_TOKENS
 
 
 SUMMARY_PROMPT = """Condense the conversation above into a summary that lets you continue the work without it. \

@@ -332,6 +332,20 @@ settings (default model, cloud escalation). Its files live in
 `data/workspace/chats/<id>/` (deleted with the chat). Attachments and long tool
 outputs go to `.hub/` inside the folder, which sync ignores.
 
+**Files in a message.** In a chat, files of its folder can be put in the next
+message (the + in the Files panel, or + -> Project files in the composer).
+The message stores a `file_ref` block per file. A text file's content goes
+into the blob store as it is at that moment and reaches the model before
+what the user wrote, in a fence, marked "as it was when this message was
+sent" - so a model that has since changed the file knows to read it again.
+Files are taken in order while their text fits in 30% of the answering
+model's context per request (`REF_SHARE`); the rest, binaries, PDFs and Word
+files are named with a pointer to `read_file`. Pictures (PNG, JPEG, WebP,
+GIF, BMP) become image blocks, like attachments. Like pictures, a file's text
+gives way to a pointer once the message is older than the last twelve
+stored messages; compaction treats it the same way. Paths are checked
+against the folder (`Workdir.resolve`); at most 20 files per message.
+
 `backend/app/projects/syncstore.py` is SLQ Companion's `syncstore.py`:
 
 - **History.** Each project has a linear revision history. Contents live in a
@@ -439,10 +453,12 @@ running, amber waiting, blue your action is needed (a tool asks), red fault.
   thinking, tool calls as a terminal strip (one row per call, expandable to
   input and output), approvals inline, artifact cards, task lists, a summary
   line per answer, retry and edit-and-resend.
-- **Composer.** Attach, paste or drop files, the model, thinking (off, a
-  little, normal, hard), libraries and extra skills for the chat.
+- **Composer.** Attach, paste or drop files, files of the project (or the
+  chat's folder) to put in the message, the model, the picture model,
+  thinking (off, a little, normal, hard), libraries and extra skills.
 - **Side panel.** Artifacts (sandboxed iframe, versions, source, save to the
-  folder) or the folder's files.
+  folder) or the folder's files, with a search and a + on each file that
+  puts it in the next message.
 - **Project page.** Chats, files (tree, CodeMirror editor, upload, history and
   restore per file), settings, revisions, sync devices.
 - **Libraries.** Documents with indexing progress and a search to try.

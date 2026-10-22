@@ -1,7 +1,9 @@
-// Where messages are written: text, attachments (pick, paste, drop), the
-// model, how hard it thinks, and the libraries and skills for this chat.
+// Where messages are written: text, attachments (pick, paste, drop), files
+// of the chat's folder, the model, how hard it thinks, and the libraries and
+// skills for this chat.
 import { useEffect, useRef, useState } from "react";
-import { ArrowUp, BookOpen, Brain, Check, Cpu, Image as ImageIcon, Paperclip, Plus, Sparkles, Square, X } from "lucide-react";
+import { ArrowUp, BookOpen, Brain, Check, Cpu, FileText, FolderOpen, Image as ImageIcon, Paperclip, Plus, Sparkles, Square,
+  X } from "lucide-react";
 import { upload, type ModelEntry, type Skill, type Upload } from "../lib/api";
 import { bytes } from "../lib/format";
 import { Lamp, MenuButton } from "./ui";
@@ -20,8 +22,11 @@ interface Pending { key: number; name: string; size: number; preview: string | n
 
 const EFFORT_LABEL: Record<string, string> = { low: "Think a little", medium: "Think", xhigh: "Think hard", high: "Think hard" };
 
+/** The end of a path, enough to tell files apart: "POUs/MAIN.TcPOU". */
+const shortPath = (p: string) => p.split("/").slice(-2).join("/");
+
 export function Composer({ running, onSend, onStop, settings, onSettings, models, pictureModels = [], pictureDefault,
-  libraries, skills, placeholder, autoFocus }: {
+  libraries, skills, placeholder, autoFocus, refs = [], onRemoveRef, onOpenRef, onBrowseFiles, browseLabel }: {
   running: boolean;
   onSend: (text: string, uploads: Upload[]) => Promise<boolean>;
   onStop: () => void;
@@ -34,6 +39,11 @@ export function Composer({ running, onSend, onStop, settings, onSettings, models
   skills: Skill[];
   placeholder?: string;
   autoFocus?: boolean;
+  refs?: string[];                  // files of the chat's folder that go with the message
+  onRemoveRef?: (path: string) => void;
+  onOpenRef?: (path: string) => void;
+  onBrowseFiles?: () => void;       // shows the folder's files beside the chat, to pick from
+  browseLabel?: string;
 }) {
   const [text, setText] = useState("");
   const [pending, setPending] = useState<Pending[]>([]);
@@ -68,7 +78,7 @@ export function Composer({ running, onSend, onStop, settings, onSettings, models
 
   const ready = pending.filter((p) => p.state === "done" && p.upload).map((p) => p.upload!);
   const uploading = pending.some((p) => p.state === "uploading");
-  const canSend = !running && !sending && !uploading && (text.trim().length > 0 || ready.length > 0);
+  const canSend = !running && !sending && !uploading && (text.trim().length > 0 || ready.length > 0 || refs.length > 0);
 
   const send = async () => {
     if (!canSend) return;
@@ -96,8 +106,16 @@ export function Composer({ running, onSend, onStop, settings, onSettings, models
       onDragOver={(e) => { if (e.dataTransfer.types.includes("Files")) { e.preventDefault(); setDrag(true); } }}
       onDragLeave={() => setDrag(false)}
       onDrop={(e) => { e.preventDefault(); setDrag(false); if (e.dataTransfer.files.length) add(e.dataTransfer.files); }}>
-      {pending.length > 0 && (
+      {(pending.length > 0 || refs.length > 0) && (
         <div className="pending">
+          {refs.map((path) => (
+            <div className="pending-item ref" key={`ref:${path}`} title={path}>
+              <FileText size={14} />
+              <button className="open ellipsis" onClick={() => onOpenRef?.(path)} aria-label={`Show ${path}`}>{shortPath(path)}</button>
+              <button className="icon-btn small x" aria-label={`Take ${path} out of the message`}
+                onClick={() => onRemoveRef?.(path)}><X size={13} /></button>
+            </div>
+          ))}
           {pending.map((p) => (
             <div className="pending-item" key={p.key} title={p.error ?? p.name}>
               {p.preview ? <img src={p.preview} alt="" /> : <Paperclip size={14} />}
@@ -127,6 +145,12 @@ export function Composer({ running, onSend, onStop, settings, onSettings, models
             <>
               <button className="menu-item" onClick={() => { close(); fileInput.current?.click(); }}>
                 <Paperclip size={15} /> Attach files</button>
+              {onBrowseFiles && (
+                <button className="menu-item" onClick={() => { close(); onBrowseFiles(); }}>
+                  <FolderOpen size={15} />
+                  <span>{browseLabel ?? "Project files"}<small>Put files in the message, to change them or ask about them</small></span>
+                </button>
+              )}
               <div className="menu-sep" />
               <div className="menu-head">Libraries to search</div>
               {libraries.length === 0 && <div className="menu-item faint" style={{ cursor: "default" }}>No libraries yet</div>}

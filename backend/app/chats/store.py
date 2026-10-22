@@ -3,8 +3,12 @@
 A message's content is a JSON list of blocks:
 
     {"type": "text", "text": ...}
-    {"type": "image", "sha": ..., "mime": ..., "name": ...}        (user upload)
+    {"type": "image", "sha": ..., "mime": ..., "name": ...}        (user upload; "ref": true and
+                                                                    "path" for a picture from the folder)
     {"type": "file", "sha": ..., "mime": ..., "name": ..., "size": ...}
+    {"type": "file_ref", "path": ..., "name": ..., "size": ..., "mime": ...,
+     "sha": ..., "lines": ..., "inline": true}                      (a file of the working folder; with
+                                                                    "inline", its text then, in blobs)
     {"type": "thinking", "text": ...}                               (assistant)
     {"type": "tool_call", "id": ..., "name": ..., "arguments": "<json>"}
     {"type": "tool_result", "tool_call_id": ..., "name": ..., "text": ...,

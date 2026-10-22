@@ -98,6 +98,7 @@ async def delete_chat(chat_id: int, request: Request):
 class MessageIn(BaseModel):
     text: str = ""
     attachments: list[str] = []          # upload sha256s
+    refs: list[str] = []                 # files of the chat's working folder (the project's files)
     options: dict = {}                   # model, thinking, effort for this turn
 
 
@@ -119,9 +120,10 @@ async def post_message(chat_id: int, body: MessageIn, request: Request):
     agent = _agent(request)
     if agent.runs.active_for_chat(chat_id):
         raise HTTPException(409, "this chat is already working on an answer")
-    if not body.text.strip() and not body.attachments:
+    if not body.text.strip() and not body.attachments and not body.refs:
         raise HTTPException(400, "the message is empty")
-    from ..agent.loop import attachment_block
+    from ..agent.context import CHARS_PER_TOKEN
+    from ..agent.loop import REF_SHARE, attachment_block, ref_blocks
     wd = agent.workdir(chat)
     blocks: list[dict] = []
     if body.text.strip():
@@ -132,6 +134,20 @@ async def post_message(chat_id: int, body: MessageIn, request: Request):
             raise HTTPException(404, f"no upload {sha[:12]}")
         blocks.append(attachment_block(wd, {"sha": sha, "name": up["filename"], "mime": up["mime"],
                                             "size": up["size"]}))
+    if body.refs:
+        # How much file text the message may carry depends on the model that answers it.
+        project = projects.get_project(chat["project_id"]) if chat.get("project_id") else None
+        try:
+            entry, _, _ = agent.resolve(chat, project, body.options)
+            ctx = get_hub(request).catalog.context_per_request(entry["id"])
+        except RuntimeError:
+            ctx = 32768
+        try:
+            blocks.extend(ref_blocks(wd, body.refs, int(ctx * REF_SHARE * CHARS_PER_TOKEN)))
+        except FileNotFoundError as exc:
+            raise HTTPException(404, f"No such file in the working folder: {exc}")
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
     msg = store.add_message(chat_id, "user", blocks)     # attachments are copied to .hub/ (not synced)
     return {"message": msg, "run_id": _start(request, chat_id, body.options)}
 

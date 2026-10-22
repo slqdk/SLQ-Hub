@@ -71,12 +71,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const listSeq = useRef(0);
   const refreshLists = useCallback(async () => {
+    const n = ++listSeq.current;
     try {
       const [p, c] = await Promise.all([
         api<Project[]>("/hub/api/projects"),
         api<ChatListItem[]>("/hub/api/chats", { query: { all: true, limit: 300 } }),
       ]);
+      if (n !== listSeq.current) return;      // a newer refresh started: an older answer must not win
       setProjects(p);
       setChats(c);
     } catch {

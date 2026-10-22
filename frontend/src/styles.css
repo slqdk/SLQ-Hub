@@ -40,7 +40,7 @@
 
   --sidebar-w: 276px;
   --panel-w: min(46vw, 760px);
-  --column: 46rem;
+  --column: 58rem;
   color-scheme: light;
 }
 
@@ -358,6 +358,10 @@ a { color: var(--act); text-decoration-thickness: 1px; text-underline-offset: 2p
 .thumb { display: block; border-radius: 8px; overflow: hidden; border: 1px solid var(--rule); background: var(--sheet); }
 .thumb img { display: block; max-width: 220px; max-height: 180px; object-fit: cover; }
 .file-chip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border: 1px solid var(--rule); border-radius: 6px; background: var(--sheet); font-size: 13.5px; }
+button.file-chip { max-width: 100%; text-align: left; }
+button.file-chip:hover:not(:disabled) { border-color: var(--act); color: var(--act); }
+button.file-chip:disabled { cursor: default; }
+.file-chip svg { flex: none; color: var(--ink-3); }
 
 .msg-assistant { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .msg-foot { display: flex; align-items: center; gap: 4px; color: var(--ink-3); font-size: 13px; min-height: 26px; }
@@ -504,6 +508,10 @@ a { color: var(--act); text-decoration-thickness: 1px; text-underline-offset: 2p
 .pending-item img { width: 32px; height: 32px; object-fit: cover; border-radius: 4px; }
 .pending-item .x { position: absolute; right: 2px; top: 50%; transform: translateY(-50%); }
 .pending-item .lamp { flex: none; }
+.pending-item.ref { border-color: color-mix(in srgb, var(--act) 40%, var(--rule)); }
+.pending-item.ref > svg { flex: none; color: var(--act); }
+.pending-item .open { min-width: 0; padding: 0; border: 0; background: transparent; text-align: left; }
+.pending-item .open:hover { text-decoration: underline; }
 .picker {
   display: inline-flex; align-items: center; gap: 6px;
   height: 30px; padding: 0 8px;
@@ -548,6 +556,7 @@ a { color: var(--act); text-decoration-thickness: 1px; text-underline-offset: 2p
 .menu-item:hover, .menu-item:focus-visible { background: var(--paper); outline: none; }
 .menu-item[aria-checked="true"] { color: var(--act); }
 .menu-item small { display: block; color: var(--ink-3); font-size: 12.5px; }
+.menu-item > svg { flex: none; }
 .menu-sep { height: 1px; margin: 4px 2px; background: var(--rule-2); }
 .menu-head { padding: 6px 9px 3px; font-family: var(--font-plate); font-weight: 600; font-size: 13px; color: var(--ink-3); }
 
@@ -615,9 +624,25 @@ a { color: var(--act); text-decoration-thickness: 1px; text-underline-offset: 2p
 .tree-item:hover { background: var(--paper); }
 .tree-item[aria-current="true"] { background: var(--act-wash); color: var(--act); }
 .tree-item svg { flex: none; color: var(--ink-3); }
+.tree-item .ellipsis { min-width: 0; }
+.tree-row { position: relative; }
+.tree.picking .tree-item { padding-right: 30px; }
+/* The + that puts a file in the next message: shown on hover, always on touch screens and when picked. */
+.tree-pick { position: absolute; right: 2px; top: 50%; transform: translateY(-50%); width: 24px; height: 24px; opacity: 0; }
+.tree-row:hover .tree-pick, .tree-pick:focus-visible, .tree-pick[aria-pressed="true"] { opacity: 1; }
+@media (hover: none) { .tree-pick { opacity: 1; } }
+.tree-find { display: flex; align-items: center; gap: 6px; margin: 0 4px 6px; padding: 0 8px; border: 1px solid var(--rule); border-radius: 6px; background: var(--sheet); color: var(--ink-3); }
+.tree-find:focus-within { border-color: var(--act); box-shadow: 0 0 0 3px var(--act-wash); }
+.tree-find input { flex: 1; min-width: 0; border: 0; outline: none; background: transparent; padding: 4px 0; font-size: 14px; color: var(--ink); }
+.btn.picked { color: var(--act); border-color: var(--act); background: var(--act-wash); }
 .file-view { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
-.file-bar { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-bottom: 1px solid var(--rule-2); min-height: 44px; }
-.file-bar .path { font-family: var(--font-mono); font-size: 12.5px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+/* One row when there is room; else the buttons wrap below the name, which keeps showing. */
+.file-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; padding: 6px 10px; border-bottom: 1px solid var(--rule-2); min-height: 44px; }
+.file-bar .path { display: flex; flex: 1 1 14em; min-width: 0; font-family: var(--font-mono); font-size: 12.5px; color: var(--ink-2); white-space: nowrap; }
+.file-bar .path .dir { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--ink-3); }
+.file-bar .path .name { flex: none; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.file-bar .meta { white-space: nowrap; }
+.file-actions { display: flex; align-items: center; gap: 6px; margin-left: auto; }
 .editor { flex: 1; min-height: 0; overflow: auto; }
 .editor .cm-editor { height: 100%; font-size: 13px; }
 .editor .cm-scroller { font-family: var(--font-mono); }

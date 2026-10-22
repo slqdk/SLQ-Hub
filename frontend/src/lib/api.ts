@@ -67,8 +67,11 @@ export interface AuthStatus { signedIn: boolean; user: User | null; version: str
 export type Block =
   | { type: "text"; text: string }
   | { type: "thinking"; text: string }
-  | { type: "image"; sha: string; mime?: string; name?: string; path?: string; size?: number }
+  | { type: "image"; sha: string; mime?: string; name?: string; path?: string; size?: number; ref?: boolean }
   | { type: "file"; sha: string; mime?: string; name?: string; path?: string; size?: number }
+  /** A file of the chat's working folder put in the message (its text then, when "inline"). */
+  | { type: "file_ref"; path: string; name?: string; size?: number; mime?: string; sha?: string; lines?: number;
+      inline?: boolean }
   | { type: "tool_call"; id: string; name: string; arguments: string }
   | { type: "tool_result"; tool_call_id: string; name: string; text: string; images?: ImageRef[]; is_error?: boolean;
       display?: Display | null };

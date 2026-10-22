@@ -220,6 +220,48 @@ async def test_an_attached_image_reaches_the_model_and_the_folder(signed_in, app
     assert (folder / ".hub" / "attachments" / "photo.png").read_bytes() == _png((20, 10))
 
 
+async def test_project_files_can_be_put_in_a_message(signed_in, app, fakes):
+    from app.agent import context as C
+    from app.projects import store as projects
+    p = (await signed_in.post("/hub/api/projects", json={"name": "Refs"})).json()
+    base = f"/hub/api/folders/project/{p['id']}"
+    r = await signed_in.put(f"{base}/file", json={"path": "src/main.py", "text": "print('hi')\n# ```not the end```\n"})
+    assert r.status_code == 200, r.text
+    folder = app.state.hub.env.workspace_dir / "projects" / str(p["id"])
+    (folder / "pics").mkdir()
+    (folder / "pics" / "logo.png").write_bytes(_png((8, 8)))
+    (folder / "big.log").write_text("x" * 300_000)            # more than the model's share for files
+    (folder / "blob.bin").write_bytes(b"\x00\x01" * 100)
+    c = await new_chat(signed_in, project_id=p["id"])
+    fakes.llama["replies"] = [{"content": "Done."}, {"content": "Refs"}]
+    run = await finish(app, await say(signed_in, c["id"], "Change the greeting",
+                                      refs=["src/main.py", "pics/logo.png", "big.log", "blob.bin", "./src/main.py"]))
+    assert run.status == "done"
+    parts = fakes.llama["requests"][0]["messages"][-1]["content"]
+    # The files' text comes first, as it was when the message was sent; then what the user wrote.
+    assert parts[0]["text"].startswith("[File from the working folder: src/main.py (2 lines), as it was")
+    assert "\n````\nprint('hi')\n# ```not the end```\n````" in parts[0]["text"]
+    assert "big.log (300.0 KB) - read it with read_file" in parts[1]["text"]
+    assert "blob.bin (200 bytes) - read it with read_file" in parts[2]["text"]
+    assert parts[3] == {"type": "text", "text": "Change the greeting"}
+    assert parts[4]["type"] == "image_url"
+    assert parts[5]["text"] == "[Image from the working folder: pics/logo.png]"
+    row = chats.messages(c["id"])[0]
+    assert [b["type"] for b in row["content"]] == ["text", "file_ref", "image", "file_ref", "file_ref"]
+    assert row["content"][1]["inline"] and not row["content"][3].get("inline")
+    # Once the message is old, the text gives way to a pointer, like pictures do.
+    old = C.to_model_messages([row], keep_images_from=10**12)[0]["content"]
+    assert "src/main.py (32 bytes) - it was shown with this message" in old
+    # A message can be just files; paths must be files inside the folder.
+    fakes.llama["replies"] = [{"content": "Seen."}]
+    assert (await finish(app, await say(signed_in, c["id"], "", refs=["big.log"]))).status == "done"
+    for path, status in (("../../etc/passwd", 400), ("nope.txt", 404), ("src", 404)):
+        r = await signed_in.post(f"/hub/api/chats/{c['id']}/messages", json={"text": "x", "refs": [path]})
+        assert r.status_code == status, (path, r.text)
+    # A character cut in two at byte 8000 does not make a text file binary.
+    assert projects.is_text(("a" * 7999 + "ø").encode())
+
+
 async def test_image_generation_switches_the_card_and_back(signed_in, app, fakes):
     fakes.llama["replies"] = [
         {"tool_calls": [{"name": "image_generate", "arguments": {"prompt": "a red fox in snow", "fast": True}}]},

@@ -9,6 +9,7 @@ revision, so it can be restored and the Windows client picks it up.
 """
 from __future__ import annotations
 
+import codecs
 import json
 import mimetypes
 import os
@@ -235,7 +236,8 @@ def is_text(data: bytes) -> bool:
     if b"\x00" in data[:8000]:
         return False
     try:
-        data[:8000].decode("utf-8")
+        # Incremental, so a character cut in two at byte 8000 is not taken for binary.
+        codecs.getincrementaldecoder("utf-8")().decode(data[:8000], final=False)
         return True
     except UnicodeDecodeError:
         return False

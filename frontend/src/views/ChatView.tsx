@@ -1,6 +1,6 @@
 // A chat: history, the live turn, and the composer.
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Copy, FolderOpen, Menu, MoreHorizontal, Pencil, RotateCcw, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { Copy, FileText, FolderOpen, Menu, MoreHorizontal, Pencil, RotateCcw, Trash2 } from "lucide-react";
 import { api, mediaUrl, type ArtifactRef, type ChatData, type ChatSettings, type Library, type Message,
   type RunEvent, type RunRecord, type Settings, type Skill, type Upload } from "../lib/api";
 import { seconds, tokens } from "../lib/format";
@@ -11,6 +11,7 @@ import { Composer, type ComposerSettings } from "../components/Composer";
 import { Items } from "../components/Turn";
 import { copyText, Lamp, MenuButton } from "../components/ui";
 import type { PanelState } from "../App";
+import type { Folder } from "../components/Files";
 
 let settingsCache: Settings | null = null;
 async function loadSettings(): Promise<Settings> {
@@ -21,8 +22,12 @@ export function forgetSettings() {
   settingsCache = null;
 }
 
-export function ChatView({ chatId, projectId, openPanel }: { chatId?: number; projectId?: number;
-  openPanel: (p: PanelState) => void }) {
+export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel }: { chatId?: number; projectId?: number;
+  openPanel: (p: PanelState) => void;
+  refs: string[];                                   // files of the folder picked for the next message
+  onRefs: Dispatch<SetStateAction<string[]>>;
+  keepPanel: () => void;                            // a new chat was saved: keep the panel on its page
+}) {
   const { models, queue, refreshLists, toast, setSidebarOpen, modelNames, projects } = useApp();
   const [data, setData] = useState<ChatData | null>(null);
   const [missing, setMissing] = useState(false);
@@ -173,9 +178,11 @@ export function ChatView({ chatId, projectId, openPanel }: { chatId?: number; pr
         id = created.id;
       }
       const r = await api<{ message: Message; run_id: string }>(`/hub/api/chats/${id}/messages`, {
-        body: { text, attachments: uploads.map((u) => u.sha) } });
+        body: { text, attachments: uploads.map((u) => u.sha), refs } });
+      onRefs([]);
       if (!chatId) {
         refreshLists();
+        keepPanel();
         navigate({ name: "chat", id }, true);
         return true;
       }
@@ -257,7 +264,9 @@ export function ChatView({ chatId, projectId, openPanel }: { chatId?: number; pr
   }
 
   const title = data?.chat.title ?? (project ? `New chat in ${project.name}` : "New chat");
-  const folder = chatId ? { kind: "chat" as const, id: chatId } : null;
+  // The folder the assistant works in: the project's, or this chat's own (once the chat exists).
+  const folder: Folder | null = project ? { kind: "project", id: project.id } : chatId ? { kind: "chat", id: chatId } : null;
+  const showFiles = (select?: string) => folder && openPanel({ kind: "files", folder, select, at: Date.now() });
 
   return (
     <div className="main">
@@ -272,7 +281,7 @@ export function ChatView({ chatId, projectId, openPanel }: { chatId?: number; pr
         )}
         {project && <a className="tag" {...linkProps({ name: "project", id: project.id })}>{project.name}</a>}
         <span className="grow" />
-        {folder && <button className="btn quiet small" onClick={() => openPanel({ kind: "files", folder: project ? { kind: "project", id: project.id } : folder })}>
+        {folder && <button className="btn quiet small" onClick={() => showFiles()}>
           <FolderOpen size={15} /> Files</button>}
         {chatId && (
           <MenuButton right className="icon-btn" label={<MoreHorizontal size={18} />} title="More">
@@ -309,7 +318,7 @@ export function ChatView({ chatId, projectId, openPanel }: { chatId?: number; pr
             {turns.map((t) => t.type === "user" ? (
               <UserMessage key={`u${t.message.id}`} message={t.message} editing={editing === t.message.id}
                 canEdit={!running} onEdit={() => setEditing(t.message.id)} onCancel={() => setEditing(null)}
-                onSave={(text) => saveEdit(t.message.id, text)} />
+                onSave={(text) => saveEdit(t.message.id, text)} onOpenFile={folder ? showFiles : undefined} />
             ) : (
               <div className="msg-assistant" key={t.key}>
                 <Items items={t.items} actions={{ openArtifact }} />
@@ -331,28 +340,36 @@ export function ChatView({ chatId, projectId, openPanel }: { chatId?: number; pr
         <div className="column">
           <Composer running={running} onSend={send} onStop={stop} settings={effective} onSettings={changeSettings}
             models={llms} pictureModels={pictureModels} pictureDefault={pictureDefault} libraries={libraries} skills={skills} autoFocus
-            placeholder={project ? `Ask about ${project.name}, or give it a task` : undefined} />
-          <div className="hint">Enter sends, Shift+Enter makes a new line. Paste or drop files to attach them.</div>
+            placeholder={project ? `Ask about ${project.name}, or give it a task` : undefined}
+            refs={folder ? refs : []} onRemoveRef={(p) => onRefs((r) => r.filter((x) => x !== p))} onOpenRef={(p) => showFiles(p)}
+            onBrowseFiles={folder ? () => showFiles() : undefined} browseLabel={project ? "Project files" : "This chat's files"} />
+          <div className="hint">Enter sends, Shift+Enter makes a new line. Paste or drop files to attach them
+            {folder ? <>, or put {project ? "project" : "the chat's"} files in the message from <b>Files</b>.</> : "."}</div>
         </div>
       </div>
     </div>
   );
 }
 
-function UserMessage({ message, editing, canEdit, onEdit, onCancel, onSave }: { message: Message; editing: boolean;
-  canEdit: boolean; onEdit: () => void; onCancel: () => void; onSave: (text: string) => void }) {
+function UserMessage({ message, editing, canEdit, onEdit, onCancel, onSave, onOpenFile }: { message: Message;
+  editing: boolean; canEdit: boolean; onEdit: () => void; onCancel: () => void; onSave: (text: string) => void;
+  onOpenFile?: (path: string) => void }) {
   const text = message.content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join("\n\n");
-  const files = message.content.filter((b) => b.type === "image" || b.type === "file");
+  const files = message.content.filter((b) => b.type === "image" || b.type === "file" || b.type === "file_ref");
   const [value, setValue] = useState(text);
   return (
     <div className="msg-user">
       {files.length > 0 && (
         <div className="attachments">
           {files.map((b, i) => b.type === "image" ? (
-            <a key={i} className="thumb" href={mediaUrl(b.sha)} target="_blank" rel="noreferrer">
+            <a key={i} className="thumb" href={mediaUrl(b.sha)} target="_blank" rel="noreferrer" title={b.ref ? b.path : b.name}>
               <img src={mediaUrl(b.sha)} alt={b.name ?? "attached image"} loading="lazy" /></a>
           ) : b.type === "file" ? (
             <a key={i} className="file-chip" href={`${mediaUrl(b.sha)}?download=1`}>{b.name}</a>
+          ) : b.type === "file_ref" ? (
+            <button key={i} className="file-chip" disabled={!onOpenFile} onClick={() => onOpenFile?.(b.path)}
+              title={`Show ${b.path}`}>
+              <FileText size={14} /><span className="ellipsis">{b.path}</span></button>
           ) : null)}
         </div>
       )}

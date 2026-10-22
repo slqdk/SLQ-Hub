@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.5.0 - 2026-10-22
+
+- **Put project files in a message**, to have them changed or to ask about
+  them: in Files beside the chat, the + on a file (or Add to chat on an open
+  file), or + -> Project files under the text field. The assistant gets the
+  file's text as it is when you send (as much as fits in about a third of
+  the model's context; bigger files, PDFs and Word files it reads with its
+  tools) and sees pictures. The files show on the message; a click opens one.
+- Files has a search box above the tree.
+- The chat column is wider (58rem instead of 46rem).
+- The Files button is there in a new project chat before the first message,
+  and the panel stays open when that first message creates the chat.
+- Fixed: a UTF-8 text file with a non-ASCII character across byte 8000 was
+  taken for a binary file (`read_file` refused it).
+- Fixed: the sidebar could keep showing a finished new chat as "New chat",
+  still running (an older list refresh arriving last).
+
 ## 0.4.0 - 2026-10-22
 
 - Choose the picture model per chat (a picture button under the text field,
