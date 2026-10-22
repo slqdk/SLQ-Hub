@@ -24,8 +24,42 @@ class ImageError(RuntimeError):
     pass
 
 
-GENERATORS = ("qwen-image-2.1", "flux2-klein-4b", "ernie-image", "ernie-image-turbo")
-EDITORS = ("qwen-image-2.1", "flux2-klein-4b")
+def family(entry: dict | None) -> str:
+    """Which workflow a picture model runs with (catalog "family")."""
+    return str((entry or {}).get("family") or "")
+
+
+def abilities(entry: dict | None) -> list[str]:
+    """generate, edit, cutout (catalog "abilities")."""
+    return list((entry or {}).get("abilities") or [])
+
+
+# How to write the prompt for each family; image_generate's description carries it.
+HINTS = {
+    "qwen-image": "Detailed English prompt (other languages work): subject, style, composition, lighting, exact text "
+                  "in quotes. Good at text in images; fast=true uses its 8-step turbo.",
+    "flux2-klein": "Fast (4 steps). Detailed natural-language prompt.",
+    "ernie-image": "Photorealistic. Its own prompt enhancer expands the prompt, so a short clear description is enough.",
+    "z-image": "Fast (8 steps), photorealistic. Detailed natural-language prompt in English or Chinese, exact text in "
+               "quotes. No negative prompt.",
+    "chroma": "Any subject and style, no content filter. A detailed natural-language description; negative says what "
+              "to avoid (by default blur, sketchiness and flat colours). Slower (about 26 steps).",
+}
+SDXL_HINTS = {
+    "pony": "SDXL, Pony: comma-separated Danbooru-style tags (e.g. 1girl, solo, smile, outdoors). The quality tags "
+            "are added for you; rating_safe, rating_questionable or rating_explicit and source_anime, "
+            "source_cartoon, source_furry or source_pony steer it.",
+    "illustrious": "SDXL, Illustrious/NoobAI: comma-separated Danbooru-style tags (e.g. 1girl, solo, long hair, smile, "
+                   "outdoors). The quality tags are added for you.",
+    "sdxl": "SDXL: a short English description or comma-separated keywords; the first ~75 tokens count most.",
+}
+
+
+def prompt_hint(entry: dict) -> str:
+    if family(entry) == "sdxl":
+        preset = str((entry.get("sdxl") or {}).get("preset") or "sdxl")
+        return SDXL_HINTS.get(preset, SDXL_HINTS["sdxl"]) + " negative is added to the model's own negative prompt."
+    return HINTS.get(family(entry), "")
 
 
 def _png_ok(data: bytes) -> tuple[int, int]:
@@ -37,12 +71,28 @@ class ImagePipeline:
     def __init__(self, hub: Hub):
         self.hub = hub
 
+    def entry(self, model: str | None) -> dict | None:
+        return self.hub.catalog.get("comfy", model) if model else None
+
+    def installed(self, ability: str) -> list[dict]:
+        """Downloaded models that can do something (generate, edit, cutout), in
+        catalog order. A turbo that needs its base model is left out: fast=true
+        reaches it."""
+        return [e for e in self.hub.catalog.entries("comfy")
+                if ability in abilities(e) and not e.get("requires") and self.hub.catalog.installed(e)]
+
     def available(self, model: str | None = None) -> bool:
         """Whether a model is downloaded; without one, whether any can make pictures."""
         if model is None:
-            return any(self.available(m) for m in GENERATORS)
-        e = self.hub.catalog.get("comfy", model)
+            return bool(self.installed("generate"))
+        e = self.entry(model)
         return bool(e) and self.hub.catalog.installed(e)
+
+    def chosen(self, model: str | None) -> str:
+        """The model asked for, or Settings -> Assistant -> Images when none was
+        (or when a chat still names a model that has been removed)."""
+        default = str(self.hub.settings.get("images", "model") or "qwen-image-2.1")
+        return model if model and self.entry(model) else default
 
     def _ernie(self, model: str, fast: bool) -> str:
         """ERNIE-Image or its Turbo: what was asked for, else whichever is downloaded."""
@@ -104,17 +154,19 @@ class ImagePipeline:
                        steps: int | None = None, ticket: Ticket | None = None, owner: str = "web",
                        priority: str = "interactive", on_progress=None) -> list[dict]:
         s = self.hub.settings.get("images")
-        model = model or s.get("model", "qwen-image-2.1")
-        if model.startswith("ernie-image"):
+        model = self.chosen(model)
+        if family(self.entry(model)) == "ernie-image":
             model = self._ernie(model, fast)
         elif fast and model == "qwen-image-2.1" and self.available("qwen-image-2.1-turbo"):
             model = "qwen-image-2.1-turbo"
         if not self.available(model):
             raise ImageError(f"the image model {model} is not downloaded (Settings -> Models)")
+        entry = self.entry(model) or {}
+        fam = family(entry)
         results = []
         for i in range(max(1, min(int(count), 4))):
             sd = (int(seed) + i) if seed is not None else random.randint(1, 2**31 - 1)
-            if model.startswith("ernie-image"):
+            if fam == "ernie-image":
                 turbo = model.endswith("turbo")
                 graph = W.ernie_t2i(prompt, width, height, sd, turbo=turbo,
                                     steps=steps or int(s.get("turbo_steps" if turbo else "steps", 8 if turbo else 25)),
@@ -125,8 +177,15 @@ class ImagePipeline:
                 for item in self._save(out, "generated"):
                     results.append({**item, "seed": sd, "model": model, **({"prompt_used": used} if used else {})})
                 continue
-            if model.startswith("flux2-klein"):
+            if fam == "flux2-klein":
                 graph = W.klein_t2i(prompt, width, height, sd, steps=steps or 4)
+            elif fam == "z-image":
+                graph = W.zimage_t2i(prompt, width, height, sd, steps=steps or int(s.get("turbo_steps", 8)))
+            elif fam == "chroma":
+                graph = W.chroma_t2i(prompt, width, height, sd, steps=steps or int(s.get("steps", 25)),
+                                     negative=negative.strip() or None)
+            elif fam == "sdxl":
+                graph = self._sdxl(entry, prompt, width, height, sd, steps, negative)
             else:
                 turbo = model.endswith("turbo")
                 graph = W.qwen_t2i(prompt, width, height, sd, steps=steps or int(s.get("steps", 25)),
@@ -136,13 +195,24 @@ class ImagePipeline:
                 results.append({**item, "seed": sd, "model": model})
         return results
 
+    @staticmethod
+    def _sdxl(entry: dict, prompt: str, width: int, height: int, seed: int, steps: int | None, negative: str) -> dict:
+        """An SDXL checkpoint with its own settings (Settings -> Models)."""
+        p = entry.get("sdxl") or {}
+        ckpt = entry["files"][0]["dest"].split("comfy/checkpoints/", 1)[-1]
+        neg = ", ".join(x for x in (str(p.get("negative") or "").strip(), negative.strip()) if x)
+        return W.sdxl_t2i(ckpt, prompt, width, height, seed, steps=int(steps or p.get("steps") or 25),
+                          cfg=float(p.get("cfg") or 7.0), sampler=str(p.get("sampler") or "dpmpp_2m"),
+                          scheduler=str(p.get("scheduler") or "karras"), clip_skip=int(p.get("clip_skip") or 1),
+                          prompt_prefix=str(p.get("prefix") or ""), negative=neg)
+
     async def edit(self, prompt: str, images: list[bytes], seed: int | None = None, fast: bool = False,
                    model: str | None = None, steps: int | None = None, ticket: Ticket | None = None,
                    owner: str = "web", priority: str = "interactive", on_progress=None, count: int = 1) -> list[dict]:
         s = self.hub.settings.get("images")
-        model = model or s.get("model", "qwen-image-2.1")
-        if model.startswith("ernie-image"):           # ERNIE-Image only generates: edit with another model
-            model = next((m for m in EDITORS if self.available(m)), "qwen-image-2.1")
+        model = self.chosen(model)
+        if "edit" not in abilities(self.entry(model)):   # ERNIE, Z-Image, Chroma, SDXL only generate
+            model = next((e["id"] for e in self.installed("edit")), "qwen-image-2.1")
         if fast and model == "qwen-image-2.1" and self.available("qwen-image-2.1-turbo"):
             model = "qwen-image-2.1-turbo"
         if not self.available(model):
@@ -151,7 +221,7 @@ class ImagePipeline:
         for i in range(max(1, min(int(count), 4))):
             names = await self._upload_inputs(images)
             sd = (int(seed) + i) if seed is not None else random.randint(1, 2**31 - 1)
-            if model.startswith("flux2-klein"):
+            if family(self.entry(model)) == "flux2-klein":
                 graph = W.klein_edit(prompt, names, sd, steps=steps or 4)
             else:
                 graph = W.qwen_edit(prompt, names, sd, steps=steps or int(s.get("steps", 25)),

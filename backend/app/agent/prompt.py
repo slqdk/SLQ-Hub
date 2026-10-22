@@ -45,8 +45,9 @@ projects, decisions) - briefly, without duplicates, never passwords or secrets.
 {memory_index}"""
 
 IMAGE_GEN = """
-- image_generate, image_edit and image_remove_background run on the GPU (Qwen-Image 2.1) and take 15-90 s each. \
-Use them when the user wants an image made or changed. Write detailed English prompts."""
+- image_generate, image_edit and image_remove_background run on the GPU and take 15-90 s each. \
+Use them when the user wants an image made or changed, and write the prompt the way image_generate says the model \
+wants it."""
 
 
 def system_prompt(*, user: str, model_name: str, folder_text: str, sandbox_path: str, memory_index: list,

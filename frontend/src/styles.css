@@ -645,6 +645,13 @@ button.file-chip:disabled { cursor: default; }
 .tree-find:focus-within { border-color: var(--act); box-shadow: 0 0 0 3px var(--act-wash); }
 .tree-find input { flex: 1; min-width: 0; border: 0; outline: none; background: transparent; padding: 4px 0; font-size: 14px; color: var(--ink); }
 .btn.picked { color: var(--act); border-color: var(--act); background: var(--act-wash); }
+/* A radio list of files or versions: on a phone the size and the verdict wrap under the name. */
+.choice-row { cursor: pointer; min-height: 44px; flex-wrap: wrap; }
+.choice-main { flex: 1 1 180px; min-width: 0; }
+.choice-state { gap: 6px; min-width: 150px; }
+@media (max-width: 520px) { .choice-state { min-width: 0 !important; } .choice-row > .num { margin-left: 28px; } }
+.sdxl-more summary { cursor: pointer; font-family: var(--font-plate); font-weight: 600; font-size: 14px; color: var(--ink-2); }
+.sdxl-more summary:hover { color: var(--ink); }
 .file-view { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 /* One row when there is room; else the buttons wrap below the name, which keeps showing. */
 .file-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; padding: 6px 10px; border-bottom: 1px solid var(--rule-2); min-height: 44px; }

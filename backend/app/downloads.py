@@ -1,15 +1,37 @@
 """Model downloads from the browser (Settings -> Models): one file at a
-time, resumable (<file>.part + Range), progress kept in memory."""
+time, resumable (<file>.part + Range), progress kept in memory. Files come
+from Hugging Face (repo + path) or, for picture models added from Civitai,
+from a download URL that Civitai redirects to its storage."""
 from __future__ import annotations
 
 import asyncio
 import os
 import time
 from pathlib import Path
+from urllib.parse import urlparse
 
 import httpx
 
 from .catalog import Catalog
+
+CIVITAI_LOGIN = ("Civitai wants a signed-in user for this file: create an API key at civitai.com (Account settings -> "
+                 "API keys), put CIVITAI_TOKEN=... in /srv/slq-hub/.env, restart the Hub (update.sh compose up -d) "
+                 "and download again.")
+
+
+def _source(f: dict) -> tuple[str, dict, str]:
+    """(url, headers, site) for one catalog file. Tokens go only to their own
+    site; httpx drops Authorization when a redirect leaves the host."""
+    headers = {"User-Agent": "slq-hub/1"}
+    if f.get("url"):
+        host = (urlparse(f["url"]).hostname or "").lower()
+        civitai = host == "civitai.com" or host.endswith(".civitai.com")
+        if civitai and os.environ.get("CIVITAI_TOKEN"):
+            headers["Authorization"] = f"Bearer {os.environ['CIVITAI_TOKEN']}"
+        return f["url"], headers, "Civitai" if civitai else host
+    if os.environ.get("HF_TOKEN"):
+        headers["Authorization"] = f"Bearer {os.environ['HF_TOKEN']}"
+    return f"https://huggingface.co/{f['repo']}/resolve/main/{f['path']}?download=true", headers, "Hugging Face"
 
 
 class Downloads:
@@ -84,10 +106,7 @@ class Downloads:
         dest: Path = self.catalog.path(f)
         dest.parent.mkdir(parents=True, exist_ok=True)
         part = dest.with_name(dest.name + ".part")
-        url = f"https://huggingface.co/{f['repo']}/resolve/main/{f['path']}?download=true"
-        headers = {"User-Agent": "slq-hub/1"}
-        if os.environ.get("HF_TOKEN"):
-            headers["Authorization"] = f"Bearer {os.environ['HF_TOKEN']}"
+        url, headers, site = _source(f)
         st["status"] = "downloading"
         for attempt in range(1, 9):
             have = part.stat().st_size if part.exists() else 0
@@ -100,8 +119,10 @@ class Downloads:
                     async with c.stream("GET", url, headers=h) as r:
                         if r.status_code == 416:            # already complete
                             break
+                        if r.status_code in (401, 403) and site == "Civitai":
+                            raise RuntimeError(CIVITAI_LOGIN)
                         if r.status_code >= 400:
-                            raise RuntimeError(f"Hugging Face answered {r.status_code}")
+                            raise RuntimeError(f"{site} answered {r.status_code}")
                         if have and r.status_code != 206:
                             have = 0
                         total = have + int(r.headers.get("content-length") or 0)

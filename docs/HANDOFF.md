@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.5.2, 2026-10-22)
+## State (0.6.0, 2026-10-22)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -102,10 +102,11 @@ the host if the VM ever stops by itself.
 | Self-test | Against `tests.devserver`: the chat line says "incl. loading" on a cold card and "already loaded" after a preload. |
 | Add from Hugging Face | 5 tests (`tests/test_models_hf.py`) against a fake huggingface.co built from the real tree of `unsloth/Qwen3.8-27B-GGUF` (fetched 2026-10-22: directories, a split BF16, an MTP draft, imatrix, two mmproj, LFS sizes) and the model-info `gguf` block: repo names and links, quant labels, grouping, the API (lookup, add with the context capped to the model's, download through the queue, the llama-server command line for a single file and a split, survives a restart, listed by `/api/tags`, removal of files and folders, refusals: gated, unknown, no GGUF, bad names, taken names, disk space). The dialog clicked through in Chromium against the dev server's fake repository. |
 | Files in a message | Clicked through in Chromium at 1920, 1280 and 390 px against the dev server: + -> Project files opens the panel, the search finds a file, its + and the file bar's Add to chat put files in the message (chips in the composer, a count in the panel), sending creates the chat with the panel still open, the message shows the files and a click opens one; the project page's Files tab has no + buttons. |
+| Image models from links | 5 tests (`tests/test_images_models.py`) against a fake Hugging Face (real safetensors headers, Range requests) and a fake Civitai (model and version API, a login-only download, the redirect to its storage): link parsing, the checkpoint check (SDXL, v-prediction, no text encoders, no VAE, refiner, SD 1.5, FLUX, LoRA), presets and their limits, lookup and add from both sites, the 401 that names `CIVITAI_TOKEN`, the token kept from the storage host, settings changes, removal (not while it is the Settings model), a chat with its own SDXL model (the graph, clip skip, tags, the SDXL size) and the tool description it gets. The dialog clicked through in Chromium at 1440 and 390 px. |
 | Tab rows | In Chromium: the old CSS gave `.tabs` 1px of vertical overflow (scrollHeight 42, clientHeight 41 - a scrollbar with Windows' classic scrollbars, reported by Søren); the inset-shadow rule gives none. |
 | Compose | `docker compose config` (v2.40.3) with a `.env` written the way `install.sh` writes it: renders, and the admin password hash arrives intact. |
 | llama.cpp | b11783 built from source (CPU): every command line the Hub builds parses; the real supervisor started the real llama-server through the Hub's scheduler, runner and client with a tiny random model - load, streaming (the real chunk format), a killed server noticed and reloaded, unload. Embeddings (strings and `content` arrays) and `/v1/rerank` answer in the shapes the Hub expects. |
-| ComfyUI | v0.42.3 on CPU with placeholder model files: all eleven workflow graphs (Qwen-Image 2.1 generate, turbo, edit with 1 and 3 images, background removal, FLUX.2 klein generate and edit, ERNIE-Image and Turbo each with and without the prompt enhancer) pass ComfyUI's own validation, including `TextGenerate`'s dynamic `sampling_mode.*` inputs. The ERNIE graphs follow the official templates (`Comfy-Org/workflow_templates`: `image_ernie_image.json`, `image_ernie_image_turbo.json`, fetched 2026-10-22). Tests: the graph shapes, and an agent turn with only Turbo downloaded (the enhancer's text comes back through `PreviewAny` into the tool result), the enhancer switched off, an edit with ERNIE chosen going to Qwen-Image. |
+| ComfyUI | v0.42.3 on CPU with placeholder model files: all workflow graphs (Qwen-Image 2.1 generate, turbo, edit with 1 and 3 images, background removal, FLUX.2 klein generate and edit, ERNIE-Image and Turbo each with and without the prompt enhancer, Z-Image Turbo, Chroma1-HD with the default and a given negative, SDXL with clip skip 2 and tags and plain, and SDXL with every sampler and scheduler the settings offer: 41 in all) pass ComfyUI's own validation. Z-Image, Chroma and SDXL follow `image_z_image_turbo.json`, `image_chroma_text_to_image.json` and `image_sdxl_simple.json` (fetched 2026-10-22), including `TextGenerate`'s dynamic `sampling_mode.*` inputs. The ERNIE graphs follow the official templates (`Comfy-Org/workflow_templates`: `image_ernie_image.json`, `image_ernie_image_turbo.json`, fetched 2026-10-22). Tests: the graph shapes, and an agent turn with only Turbo downloaded (the enhancer's text comes back through `PreviewAny` into the tool result), the enhancer switched off, an edit with ERNIE chosen going to Qwen-Image. |
 | MCP over stdio | A real stdio MCP server through the real sandbox daemon (`execd.py`): initialize, a server-to-client ping, tools, an 18 KB result. |
 
 ## Not verified - check these on the real system
@@ -128,7 +129,12 @@ the host if the VM ever stops by itself.
    is installed), VRAM release with `/free` before the LLM loads again.
    ERNIE-Image is untried too: whether the prompt enhancer answers in English
    for English requests, how long enhancer plus the 16 GB model take on
-   gfx1100, and RAM with three large files in ComfyUI's cache.
+   gfx1100, and RAM with three large files in ComfyUI's cache. New in 0.6.0
+   and untried on the card: Z-Image Turbo (bf16), Chroma1-HD with the
+   template's fp8 files (RDNA3 has no fp8 maths; ComfyUI should dequantize to
+   bf16 - if it fails, the same repository has the bf16 `Chroma1-HD.safetensors`,
+   17.8 GB, and `comfyanonymous/flux_text_encoders` has `t5xxl_fp16`), and any
+   SDXL checkpoint.
 5. **Embeddings and re-ranking**: text embeddings answer (1024 dimensions);
    the Qwen3-VL-Embedding chat format in `app/rag/library.py` and the
    re-ranker's score scale (log-odds or probability: both handled) wait for
@@ -153,6 +159,12 @@ the host if the VM ever stops by itself.
     it was given in the message with `edit_file` straight away (the text is
     exact, without `read_file`'s line numbers), and whether 30% of the
     context for file text is the right share in long project chats.
+13. **Civitai against the real site**: the API shapes come from Civitai's
+    own source (github.com/civitai/civitai: `src/pages/api/v1/models/[id].ts`,
+    `src/pages/api/download/models/[modelVersionId].ts`, read 2026-10-22);
+    the real API could not be reached from where this was built. Not tried:
+    a real lookup, which models need `CIVITAI_TOKEN`, a resumed download on
+    its storage, models hidden by region.
 
 ## Where things are
 
@@ -165,7 +177,7 @@ the host if the VM ever stops by itself.
 | `backend/app/agent/loop.py` | The agent loop (`Engine`) and turns (`Agent`). |
 | `backend/app/agent/tools/` | The tools; `meta_tools.py` has `task` and `escalate`; `mcp.py` the MCP client. |
 | `backend/app/projects/` | Projects, folders, the sync store and the `/api/sync` protocol. |
-| `backend/app/images/` | ComfyUI workflows and the image pipeline. |
+| `backend/app/images/` | ComfyUI workflows, the image pipeline (by family), `sources.py` (SDXL checkpoints from Civitai and Hugging Face links). |
 | `backend/app/rag/` | Libraries: extraction, indexing, search, the `library_search` tool. |
 | `backend/app/cli.py` | `selftest`, `set-password`, `create-key`, `keys`. |
 | `frontend/src/` | The UI: `views/` (chat, project, libraries, settings), `components/`, `lib/turns.ts` (the turn view model for history and live runs). |

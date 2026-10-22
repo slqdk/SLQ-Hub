@@ -4,11 +4,12 @@ them by host name."""
 from __future__ import annotations
 
 import json
+import re
 import time
 
 import httpx
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, PlainTextResponse, Response, StreamingResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, RedirectResponse, Response, StreamingResponse
 
 
 class HostRouter(httpx.AsyncBaseTransport):
@@ -242,7 +243,8 @@ def make_comfy(state: dict) -> FastAPI:
                  "KSamplerSelect", "RandomNoise", "CFGGuider", "SamplerCustomAdvanced", "ManualSigmas",
                  "CLIPTextEncode", "EmptyFlux2LatentImage", "Flux2Scheduler", "ConditioningZeroOut",
                  "ImageScaleToTotalPixels", "VAEEncode", "ReferenceLatent", "GetImageSize", "TextGenerate",
-                 "PreviewAny"]
+                 "PreviewAny", "ModelSamplingAuraFlow", "EmptySD3LatentImage", "T5TokenizerOptions", "BasicScheduler",
+                 "CheckpointLoaderSimple", "CLIPSetLastLayer"]
         return {n: {"input": {}, "output": []} for n in names}
 
     @app.post("/free")
@@ -428,10 +430,29 @@ def make_searxng() -> FastAPI:
 
 # ---------------------------------------------------------------- Hugging Face
 
+def _ranged(data: bytes, request: Request) -> Response:
+    """The whole body, or the part a Range header asks for (206)."""
+    m = re.match(r"bytes=(\d+)-(\d*)$", request.headers.get("range") or "")
+    if not m:
+        return Response(data, media_type="application/octet-stream")
+    start = int(m[1])
+    end = min(int(m[2]) if m[2] else len(data) - 1, len(data) - 1)
+    if start >= len(data):
+        return Response(status_code=416)
+    return Response(data[start:end + 1], status_code=206, media_type="application/octet-stream",
+                    headers={"Content-Range": f"bytes {start}-{end}/{len(data)}"})
+
+
+def safetensors_bytes(header: dict, pad: int = 1024) -> bytes:
+    raw = json.dumps(header).encode()
+    return len(raw).to_bytes(8, "little") + raw + b"\0" * pad
+
+
 def make_hf(state: dict) -> FastAPI:
     """The bits of huggingface.co the Hub uses: the tree and model-info APIs and
     file downloads. state["repos"][repo] = {"tree": [...], "gguf": {...}} or
-    {"status": 401}; downloads serve b"g" * size."""
+    {"status": 401}; downloads serve b"g" * size, or a .safetensors file when
+    the tree entry has a "header"; Range requests get their part."""
     app = FastAPI()
 
     def repo_of(owner: str, name: str) -> dict | None:
@@ -454,13 +475,67 @@ def make_hf(state: dict) -> FastAPI:
         return {"_id": "x", "id": f"{owner}/{name}", "gguf": r.get("gguf") or {}}
 
     @app.get("/{owner}/{name}/resolve/main/{path:path}")
-    async def resolve(owner: str, name: str, path: str):
+    async def resolve(owner: str, name: str, path: str, request: Request):
         r = repo_of(owner, name) or {}
         f = next((x for x in r.get("tree", []) if x.get("path") == path), None)
         if f is None:
             return PlainTextResponse("Entry not found", status_code=404)
-        state.setdefault("downloaded", []).append(f"{owner}/{name}/{path}")
+        rng = request.headers.get("range") or ""
+        if not rng or rng.endswith("-"):                    # a download, not a header read
+            state.setdefault("downloaded", []).append(f"{owner}/{name}/{path}")
+        if f.get("header") is not None:
+            return _ranged(safetensors_bytes(f["header"]), request)
         size = 1024 if state.get("tiny_downloads") else int(f.get("size") or 0)
-        return Response(b"g" * size, media_type="application/octet-stream")
+        return _ranged(b"g" * size, request)
+
+    return app
+
+
+def make_civitai(state: dict) -> FastAPI:
+    """civitai.com: the model and model-version APIs, and downloads that
+    redirect to its storage (delivery.civitai.test). state["models"][id] is a
+    model as the API returns it; with state["token"], downloads need
+    "Authorization: Bearer <token>"."""
+    app = FastAPI()
+
+    def models() -> dict:
+        return state.get("models") or {}
+
+    @app.get("/api/v1/models/{mid}")
+    async def model(mid: int):
+        m = models().get(mid)
+        if m is None:
+            return JSONResponse({"error": f"No model with id {mid}"}, status_code=404)
+        return m
+
+    @app.get("/api/v1/model-versions/{vid}")
+    async def version(vid: int):
+        for m in models().values():
+            for v in m.get("modelVersions", []):
+                if v["id"] == vid:
+                    return {**v, "modelId": m["id"], "model": {"name": m["name"], "type": m["type"],
+                                                                "nsfw": m.get("nsfw")}}
+        return JSONResponse({"error": f"No version with id {vid}"}, status_code=404)
+
+    @app.get("/api/download/models/{vid}")
+    async def download(vid: int, request: Request):
+        state.setdefault("download_auth", []).append(request.headers.get("authorization"))
+        if state.get("token") and request.headers.get("authorization") != f"Bearer {state['token']}":
+            return JSONResponse({"error": "Unauthorized", "message": "The creator of this asset requires you to be "
+                                 "logged in to download it"}, status_code=401)
+        return RedirectResponse(f"https://delivery.civitai.test/file/{vid}.safetensors", status_code=307)
+
+    return app
+
+
+def make_civitai_delivery(state: dict) -> FastAPI:
+    """Civitai's file storage behind the signed redirect."""
+    app = FastAPI()
+
+    @app.get("/file/{name}")
+    async def file(name: str, request: Request):
+        state.setdefault("delivery_auth", []).append(request.headers.get("authorization"))
+        state.setdefault("delivered", []).append(name)
+        return _ranged(b"c" * 2048, request)
 
     return app

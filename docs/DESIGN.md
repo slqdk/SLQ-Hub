@@ -393,6 +393,39 @@ restore, and the sync devices.
     text encoder, the 3B prompt enhancer (6.9 GB) and the FLUX.2 VAE it shares
     with klein. Base: 25 steps, cfg 4, empty negative; Turbo: 8 steps, cfg 1,
     zeroed negative; euler/simple - as in the official templates.
+  - **Z-Image Turbo** (Alibaba, 6B, Apache 2.0) and **Chroma1-HD** (8.9B,
+    FLUX.1 schnell based, Apache 2.0, no safety alignment) are optional
+    catalog models, after the official templates (`image_z_image_turbo.json`,
+    `image_chroma_text_to_image.json`). Z-Image: bf16 model (12.3 GB), Qwen3-4B
+    as text encoder (the same file as FLUX.2 klein's, shared), the FLUX.1 VAE
+    `ae.safetensors`; AuraFlow sampling with shift 3, 8 steps of res_multistep
+    at cfg 1, a zeroed negative. Chroma: the fp8mixed model (9.2 GB) and fp8
+    T5-XXL from the template, the same `ae.safetensors`; shift 1, CFGGuider
+    3.5, euler over a beta schedule, the template's negative prompt unless the
+    assistant gives one.
+  - **SDXL checkpoints from a link** (Settings -> Models -> Add image model,
+    `backend/app/images/sources.py`): a Civitai model or version page, or a
+    Hugging Face repository or file. Civitai's API names each version's base
+    model (SDXL 1.0, Pony, Illustrious, NoobAI ... count as SDXL); on Hugging
+    Face the chosen file's header is read with two Range requests and must
+    hold SDXL's UNet (the 2816-wide class embedding), both text encoders and
+    the VAE. SD 1.x, refiners, FLUX, LoRAs and diffusers folders are refused
+    with the reason. The entry (family `sdxl`, in `models.custom.json`) keeps
+    its own settings, from a preset per kind: Pony (score tags, clip skip 2,
+    Euler a, 25 steps, cfg 7, from its model card), Illustrious/NoobAI
+    (quality tags and negative from NoobAI's card, Euler a, 28 steps, cfg 5),
+    SDXL (ComfyUI's SDXL template: dpmpp_2m karras, 25 steps, cfg 7). One
+    graph serves them all: CheckpointLoaderSimple, CLIPSetLastLayer for clip
+    skip 2, the quality tags before the prompt, the model's negative plus the
+    assistant's, the nearest SDXL training size. V-prediction checkpoints
+    (NoobAI V-pred) work: ComfyUI reads the `v_pred` key. The file goes to
+    `models/comfy/checkpoints/hub/<id>.safetensors`; Civitai downloads follow
+    its redirect to storage with `CIVITAI_TOKEN` (sent to Civitai only).
+  - **Families and abilities.** Each picture model in the catalog has a
+    `family` (which graph) and `abilities` (generate, edit, cutout). Models
+    that only generate hand edits to one that edits. `image_generate`'s
+    description and model list are built per turn from the downloaded
+    models, with the chat's own model named and a prompt hint per family.
   - **Which model makes a picture**: the one the assistant names in the call
     (when you ask for it by name), else the chat's choice (the picture button
     under the text field), else the project's (project Settings), else

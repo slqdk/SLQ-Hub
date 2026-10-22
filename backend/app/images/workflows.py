@@ -9,10 +9,16 @@ The turbo checkpoint samples 8 fixed sigmas with SamplerCustomAdvanced.
 
 ERNIE-Image (and Turbo) is generation only; its 3B prompt enhancer runs in
 the same graph (TextGenerate) and its text is read back through PreviewAny.
+
+Z-Image Turbo and Chroma1-HD follow image_z_image_turbo.json and
+image_chroma_text_to_image.json. SDXL checkpoints (added from a link) use one
+graph for the whole family (CheckpointLoaderSimple), with each model's own
+sampler settings, quality tags and negative prompt.
 """
 from __future__ import annotations
 
 import json
+import math
 
 QWEN = {
     "unet": "qwen_image_2.1_int8_convrot.safetensors",
@@ -233,6 +239,114 @@ def ernie_t2i(prompt: str, width: int, height: int, seed: int, steps: int | None
                           "cfg": float(cfg if cfg is not None else (1.0 if turbo else 4.0)),
                           "sampler_name": "euler", "scheduler": "simple", "denoise": 1.0}}
     g["8"] = {"class_type": "VAEDecode", "inputs": {"samples": ["10", 0], "vae": ["4", 0]}}
+    g["9"] = _save(["8", 0], prefix, png_alpha=False)
+    return g
+
+
+# ---------------------------------------------------------------- Z-Image Turbo
+
+ZIMAGE = {"unet": "z_image_turbo_bf16.safetensors", "clip": "qwen_3_4b.safetensors", "vae": "ae.safetensors"}
+
+
+def zimage_t2i(prompt: str, width: int, height: int, seed: int, steps: int = 8, prefix: str = "hub") -> dict:
+    """Z-Image Turbo after the official template: AuraFlow sampling with shift 3,
+    Qwen3-4B as the text encoder (CLIPLoader type lumina2), a zeroed negative,
+    8 steps of res_multistep at cfg 1."""
+    w, h = snap(width, 16), snap(height, 16)
+    return {
+        "1": {"class_type": "UNETLoader", "inputs": {"unet_name": ZIMAGE["unet"], "weight_dtype": "default"}},
+        "2": {"class_type": "ModelSamplingAuraFlow", "inputs": {"model": ["1", 0], "shift": 3.0}},
+        "3": {"class_type": "CLIPLoader", "inputs": {"clip_name": ZIMAGE["clip"], "type": "lumina2", "device": "default"}},
+        "4": {"class_type": "VAELoader", "inputs": {"vae_name": ZIMAGE["vae"]}},
+        "5": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["3", 0], "text": prompt}},
+        "6": {"class_type": "ConditioningZeroOut", "inputs": {"conditioning": ["5", 0]}},
+        "7": {"class_type": "EmptySD3LatentImage", "inputs": {"width": w, "height": h, "batch_size": 1}},
+        "10": {"class_type": "KSampler",
+               "inputs": {"model": ["2", 0], "positive": ["5", 0], "negative": ["6", 0], "latent_image": ["7", 0],
+                          "seed": int(seed), "steps": int(steps), "cfg": 1.0, "sampler_name": "res_multistep",
+                          "scheduler": "simple", "denoise": 1.0}},
+        "8": {"class_type": "VAEDecode", "inputs": {"samples": ["10", 0], "vae": ["4", 0]}},
+        "9": _save(["8", 0], prefix, png_alpha=False),
+    }
+
+
+# ---------------------------------------------------------------- Chroma1-HD
+
+CHROMA = {"unet": "Chroma1-HD-fp8mixed.safetensors", "clip": "t5xxl_fp8_e4m3fn_scaled.safetensors",
+          "vae": "ae.safetensors"}
+# The official template's negative prompt: it steers away from blur and sketchiness.
+CHROMA_NEGATIVE = ("This low quality greyscale unfinished sketch is inaccurate and flawed. The image is very blurred "
+                   "and lacks detail with excessive chromatic aberrations and artifacts. The image is overly saturated "
+                   "with excessive bloom. It has a toony aesthetic with bold outlines and flat colors.")
+
+
+def chroma_t2i(prompt: str, width: int, height: int, seed: int, steps: int = 26, cfg: float = 3.5,
+               negative: str | None = None, prefix: str = "hub") -> dict:
+    """Chroma1-HD after the official template: T5-XXL (CLIPLoader type chroma,
+    no tokenizer padding), AuraFlow sampling with shift 1, CFGGuider at 3.5,
+    euler over a beta schedule; a negative prompt (the template's by default)."""
+    w, h = snap(width, 16), snap(height, 16)
+    return {
+        "1": {"class_type": "UNETLoader", "inputs": {"unet_name": CHROMA["unet"], "weight_dtype": "default"}},
+        "2": {"class_type": "ModelSamplingAuraFlow", "inputs": {"model": ["1", 0], "shift": 1.0}},
+        "3": {"class_type": "CLIPLoader", "inputs": {"clip_name": CHROMA["clip"], "type": "chroma", "device": "default"}},
+        "11": {"class_type": "T5TokenizerOptions", "inputs": {"clip": ["3", 0], "min_padding": 0, "min_length": 0}},
+        "4": {"class_type": "VAELoader", "inputs": {"vae_name": CHROMA["vae"]}},
+        "5": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["11", 0], "text": prompt}},
+        "6": {"class_type": "CLIPTextEncode",
+              "inputs": {"clip": ["11", 0], "text": CHROMA_NEGATIVE if negative is None else negative}},
+        "7": {"class_type": "EmptySD3LatentImage", "inputs": {"width": w, "height": h, "batch_size": 1}},
+        "20": {"class_type": "RandomNoise", "inputs": {"noise_seed": int(seed)}},
+        "21": {"class_type": "KSamplerSelect", "inputs": {"sampler_name": "euler"}},
+        "22": {"class_type": "CFGGuider", "inputs": {"model": ["2", 0], "positive": ["5", 0], "negative": ["6", 0],
+                                                     "cfg": float(cfg)}},
+        "23": {"class_type": "BasicScheduler", "inputs": {"model": ["2", 0], "scheduler": "beta", "steps": int(steps),
+                                                          "denoise": 1.0}},
+        "24": {"class_type": "SamplerCustomAdvanced",
+               "inputs": {"noise": ["20", 0], "guider": ["22", 0], "sampler": ["21", 0], "sigmas": ["23", 0],
+                          "latent_image": ["7", 0]}},
+        "8": {"class_type": "VAEDecode", "inputs": {"samples": ["24", 0], "vae": ["4", 0]}},
+        "9": _save(["8", 0], prefix, png_alpha=False),
+    }
+
+
+# ---------------------------------------------------------------- SDXL checkpoints
+
+# SDXL was trained on these sizes (about one megapixel); other sizes repeat the subject.
+SDXL_BUCKETS = ((1024, 1024), (1152, 896), (896, 1152), (1216, 832), (832, 1216), (1344, 768), (768, 1344),
+                (1536, 640), (640, 1536))
+SDXL_SAMPLERS = ("euler", "euler_ancestral", "heun", "dpm_2", "dpm_2_ancestral", "lms", "dpmpp_2s_ancestral",
+                 "dpmpp_sde", "dpmpp_2m", "dpmpp_2m_sde", "dpmpp_3m_sde", "ddim", "uni_pc", "lcm", "res_multistep")
+SDXL_SCHEDULERS = ("normal", "karras", "exponential", "sgm_uniform", "simple", "ddim_uniform", "beta")
+
+
+def sdxl_size(width: int, height: int) -> tuple[int, int]:
+    """The SDXL size nearest in shape to the one asked for."""
+    want = math.log(max(1, int(width)) / max(1, int(height)))
+    return min(SDXL_BUCKETS, key=lambda b: abs(math.log(b[0] / b[1]) - want))
+
+
+def sdxl_t2i(ckpt: str, prompt: str, width: int, height: int, seed: int, steps: int = 25, cfg: float = 7.0,
+             sampler: str = "dpmpp_2m", scheduler: str = "karras", clip_skip: int = 1, prompt_prefix: str = "",
+             negative: str = "", prefix: str = "hub") -> dict:
+    """An SDXL checkpoint (one file: UNet, both text encoders, VAE), as in the
+    official SDXL template, with the model's own settings: clip skip 2 for
+    Pony-style models, quality tags put in front of the prompt."""
+    w, h = sdxl_size(width, height)
+    g: dict = {"1": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": ckpt}}}
+    clip: list = ["1", 1]
+    if int(clip_skip) > 1:
+        g["2"] = {"class_type": "CLIPSetLastLayer", "inputs": {"clip": clip, "stop_at_clip_layer": -int(clip_skip)}}
+        clip = ["2", 0]
+    head = prompt_prefix.strip().rstrip(",").strip()
+    g["5"] = {"class_type": "CLIPTextEncode", "inputs": {"clip": clip, "text": f"{head}, {prompt}" if head else prompt}}
+    g["6"] = {"class_type": "CLIPTextEncode", "inputs": {"clip": clip, "text": negative}}
+    g["7"] = {"class_type": "EmptyLatentImage", "inputs": {"width": w, "height": h, "batch_size": 1}}
+    g["10"] = {"class_type": "KSampler",
+               "inputs": {"model": ["1", 0], "positive": ["5", 0], "negative": ["6", 0], "latent_image": ["7", 0],
+                          "seed": int(seed), "steps": int(steps), "cfg": float(cfg), "sampler_name": sampler,
+                          "scheduler": scheduler, "denoise": 1.0}}
+    g["8"] = {"class_type": "VAEDecode", "inputs": {"samples": ["10", 0], "vae": ["1", 2]}}
     g["9"] = _save(["8", 0], prefix, png_alpha=False)
     return g
 

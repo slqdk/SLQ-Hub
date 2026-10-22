@@ -54,10 +54,18 @@ class Tool:
     available: Callable[[ToolContext], bool] = lambda ctx: True
     in_subagent: bool = True
     group: str = "core"
+    # Description and parameters that depend on the turn (which models are downloaded, the chat's choice).
+    dynamic: Callable[[ToolContext], tuple[str, dict]] | None = None
 
-    def schema(self) -> dict:
-        return {"type": "function", "function": {"name": self.name, "description": self.description,
-                                                 "parameters": self.parameters}}
+    def schema(self, ctx: ToolContext | None = None) -> dict:
+        description, parameters = self.description, self.parameters
+        if self.dynamic is not None and ctx is not None:
+            try:
+                description, parameters = self.dynamic(ctx)
+            except Exception:  # noqa: BLE001 - the static schema is a fine fallback
+                pass
+        return {"type": "function", "function": {"name": self.name, "description": description,
+                                                 "parameters": parameters}}
 
 
 REGISTRY: dict[str, Tool] = {}

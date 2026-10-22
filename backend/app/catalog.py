@@ -4,8 +4,9 @@ start them, and what names apps may use for them.
 The bundled catalog is app/catalog/models.json. Per-model changes made in
 Settings -> Models (context, slots, extra llama-server flags) are stored in
 <data>/models.override.json and merged over it. Language models added from
-Hugging Face (Settings -> Models -> Add from Hugging Face, app/hf.py) live in
-<data>/models.custom.json and are marked "custom".
+Hugging Face (Settings -> Models -> Add from Hugging Face, app/hf.py) and SDXL
+picture models added from a link (Add image model, app/images/sources.py)
+live in <data>/models.custom.json and are marked "custom".
 """
 from __future__ import annotations
 
@@ -51,9 +52,15 @@ class Catalog:
         over = self._read(self.override_path)
         # Models added from Hugging Face (Settings -> Models), after the bundled ones.
         known = {e["id"] for g in ("llm", "aux", "comfy") for e in data.get(g, [])}
-        for c in self._read(self.custom_path).get("llm") or []:
+        custom = self._read(self.custom_path)
+        for c in custom.get("llm") or []:
             if isinstance(c, dict) and c.get("id") and c["id"] not in known and c.get("files") and c.get("server"):
                 data.setdefault("llm", []).append({**c, "custom": True})
+                known.add(c["id"])
+        for c in custom.get("comfy") or []:
+            if isinstance(c, dict) and c.get("id") and c["id"] not in known and c.get("files") \
+                    and c.get("family") == "sdxl":
+                data.setdefault("comfy", []).append({**c, "custom": True})
                 known.add(c["id"])
         for entry in data.get("llm", []):
             o = (over.get("llm") or {}).get(entry["id"]) or {}
@@ -88,27 +95,44 @@ class Catalog:
         self.reload()
         return self.get_llm(model_id) or {}
 
-    def add_custom(self, entry: dict) -> dict:
-        """Add a language model from Hugging Face (an entry made by hf.make_entry)."""
+    def add_custom(self, entry: dict, group: str = "llm") -> dict:
+        """Add a language model from Hugging Face (hf.make_entry) or, with
+        group "comfy", an SDXL picture model from a link (sources.make_entry)."""
         with self._lock:
             taken = {e["id"] for g in ("llm", "aux", "comfy") for e in self._data.get(g, [])}
             if entry["id"] in taken:
                 raise ValueError(f"There is already a model called {entry['id']}.")
             data = self._read(self.custom_path)
-            data.setdefault("llm", []).append({k: v for k, v in entry.items() if k != "custom"})
+            data.setdefault(group, []).append({k: v for k, v in entry.items() if k != "custom"})
             self._write(self.custom_path, data)
         self.reload()
-        return self.get_llm(entry["id"]) or {}
+        return self.get(group, entry["id"]) or {}
 
-    def remove_custom(self, model_id: str) -> dict:
-        """Forget a model added from Hugging Face; returns its entry (files are the caller's)."""
+    def update_custom(self, model_id: str, changes: dict) -> dict:
+        """Change an added picture model's name or SDXL settings."""
         with self._lock:
             data = self._read(self.custom_path)
-            items = data.get("llm") or []
-            gone = next((e for e in items if isinstance(e, dict) and e.get("id") == model_id), None)
+            entry = next((e for e in data.get("comfy") or [] if isinstance(e, dict) and e.get("id") == model_id), None)
+            if entry is None:
+                raise KeyError(model_id)
+            entry.update({k: v for k, v in changes.items() if k in ("name", "sdxl")})
+            self._write(self.custom_path, data)
+        self.reload()
+        return self.get("comfy", model_id) or {}
+
+    def remove_custom(self, model_id: str) -> dict:
+        """Forget an added model; returns its entry (files are the caller's)."""
+        with self._lock:
+            data = self._read(self.custom_path)
+            gone = None
+            for group in ("llm", "comfy"):
+                items = data.get(group) or []
+                gone = next((e for e in items if isinstance(e, dict) and e.get("id") == model_id), None)
+                if gone is not None:
+                    data[group] = [e for e in items if e is not gone]
+                    break
             if gone is None:
                 raise KeyError(model_id)
-            data["llm"] = [e for e in items if e is not gone]
             self._write(self.custom_path, data)
             over = self._read(self.override_path)
             if model_id in (over.get("llm") or {}):

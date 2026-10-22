@@ -23,7 +23,8 @@ from app.main import create_app
 from app.state import Transports
 
 from .conftest import _install_fake_models
-from .mocks import HostRouter, make_comfy, make_hf, make_llama, make_mcp_http, make_sandbox, make_searxng, make_supervisor
+from .mocks import (HostRouter, make_civitai, make_civitai_delivery, make_comfy, make_hf, make_llama, make_mcp_http,
+                    make_sandbox, make_searxng, make_supervisor)
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -136,6 +137,34 @@ HF_DEMO = {"tiny_downloads": True, "repos": {"unsloth/Qwen3-Coder-30B-A3B-Instru
              "chat_template": "{% if tools %}<tools>{% endif %}"}}}}
 
 
+# Picture models from a link: a Hugging Face repository with an SDXL and an SD 1.5 checkpoint, and a Civitai
+# model with a Pony version and a Flux one (try https://civitai.com/models/257749 in Add image model).
+_T = {"dtype": "F16", "shape": [4], "data_offsets": [0, 8]}
+SDXL_HEADER = {"model.diffusion_model.input_blocks.0.0.weight": {**_T, "shape": [320, 4, 3, 3]},
+               "model.diffusion_model.label_emb.0.0.weight": {**_T, "shape": [1280, 2816]},
+               "conditioner.embedders.0.transformer.text_model.final_layer_norm.weight": _T,
+               "conditioner.embedders.1.model.ln_final.weight": _T, "first_stage_model.decoder.conv_in.weight": _T}
+SD15_HEADER = {"cond_stage_model.transformer.text_model.final_layer_norm.weight": _T,
+               "model.diffusion_model.input_blocks.0.0.weight": {**_T, "shape": [320, 4, 3, 3]},
+               "first_stage_model.decoder.conv_in.weight": _T}
+HF_DEMO["repos"]["someone/sdxl-mirror"] = {"tree": [
+    {**_hf_file("juggernautXL_v10.safetensors", 6.6), "header": SDXL_HEADER},
+    {**_hf_file("sd15/realisticVision.safetensors", 2.0), "header": SD15_HEADER}, _hf_file("README.md", 0.00001)]}
+
+
+def _civitai_version(vid: int, name: str, base: str) -> dict:
+    return {"id": vid, "name": name, "baseModel": base, "files": [
+        {"id": vid * 10, "name": f"{name}.safetensors", "sizeKB": 6_775_430.0, "type": "Model", "primary": True,
+         "metadata": {"format": "SafeTensor", "size": "pruned", "fp": "fp16"}, "hashes": {"SHA256": "AB12"},
+         "downloadUrl": f"https://civitai.com/api/download/models/{vid}?fileId={vid * 10}"}]}
+
+
+CIVITAI_DEMO = {"models": {257749: {"id": 257749, "name": "Pony Diffusion V6 XL", "type": "Checkpoint", "nsfw": True,
+                                    "creator": {"username": "PurpleSmartAI"},
+                                    "modelVersions": [_civitai_version(290640, "V6 (start with this one)", "Pony"),
+                                                      _civitai_version(290641, "Flux port", "Flux.1 D")]}}}
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=8080)
@@ -144,7 +173,7 @@ def main() -> None:
     base = Path(a.data or tempfile.mkdtemp(prefix="hub-dev-"))
     data, models = base / "data", base / "models"
     _install_fake_models(models, {"qwen3.8-27b", "qwen3.6-35b-a3b", "embed-text", "rerank", "embed-vl",
-                                  "qwen-image-2.1", "qwen-image-2.1-turbo", "ernie-image-turbo"})
+                                  "qwen-image-2.1", "qwen-image-2.1-turbo", "ernie-image-turbo", "z-image-turbo"})
     dist = ROOT / "frontend" / "dist"
     env = Env(data_dir=data, models_dir=models, llm_url="http://supervisor", llm_host="llm", comfy_url="http://comfy",
               searxng_url="http://searxng", sandbox_url="http://sandbox:7000", sandbox_ip="172.31.250.20",
@@ -156,7 +185,8 @@ def main() -> None:
     router = HostRouter({"supervisor": make_supervisor(fakes["sup"]), "llm": make_llama(fakes["llama"]),
                          "comfy": make_comfy(fakes["comfy"]), "sandbox:7000": make_sandbox(fakes["sandbox"]),
                          "searxng": make_searxng(), "mcp.test": make_mcp_http(fakes["mcp"]),
-                         "huggingface.co": make_hf(HF_DEMO)})
+                         "huggingface.co": make_hf(HF_DEMO), "civitai.com": make_civitai(CIVITAI_DEMO),
+                         "delivery.civitai.test": make_civitai_delivery(CIVITAI_DEMO)})
     t = Transports(llm=router, runner=router, comfy=router, sandbox=router, web=router)
     app = create_app(env, t, startup=False)
     print(f"SLQ Hub (fake services) on http://127.0.0.1:{a.port}  data: {base}")

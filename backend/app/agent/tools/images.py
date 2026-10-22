@@ -238,7 +238,7 @@ def _images_ready(ctx: ToolContext) -> bool:
 
 def _edit_ready(ctx: ToolContext) -> bool:
     pipe = ctx.hub.extras.get("images")
-    return bool(pipe and (pipe.available("qwen-image-2.1") or pipe.available("flux2-klein-4b")))
+    return bool(pipe and pipe.installed("edit"))
 
 
 def _cutout_ready(ctx: ToolContext) -> bool:
@@ -261,25 +261,55 @@ register(Tool("image_transform", "Process an image without AI: crop, resize, rot
 register(Tool("image_ocr", "Read the text in an image with Tesseract OCR (default languages dan+eng). For "
               "photos and screenshots your own vision is often better; use OCR for long printed text.",
               obj({"path": {"type": "string"}, "languages": {"type": "string"}}, ["path"]), image_ocr, group="images"))
-register(Tool("image_generate", "Generate images from a text prompt with the model chosen in Settings (default "
-              "Qwen-Image 2.1, good at text in images, any language). Write a detailed English prompt: subject, "
-              "style, composition, lighting, any exact text in quotes. fast=true uses an 8-step turbo model for "
-              "drafts. model: qwen-image-2.1; flux2-klein-4b (fast); ernie-image (photorealistic; its own prompt "
-              "enhancer expands the prompt, so a short clear description is enough). Takes 15-90 s per image.",
-              obj({"prompt": {"type": "string"}, "width": {"type": "integer"}, "height": {"type": "integer"},
-                   "count": {"type": "integer", "description": "1-4"}, "seed": {"type": "integer"},
-                   "fast": {"type": "boolean"}, "negative": {"type": "string"},
-                   "model": {"type": "string", "enum": ["qwen-image-2.1", "flux2-klein-4b", "ernie-image"]},
-                   "save_as": {"type": "string", "description": "Path in the working folder"}}, ["prompt"]),
-              image_generate, available=_images_ready, in_subagent=False, group="images"))
-register(Tool("image_edit", "Edit images with an instruction (Qwen-Image 2.1): change, add or remove things, "
-              "restyle, combine up to 10 reference images ('put the person from image 1 into the scene of image "
-              "2'). The output keeps the first image's proportions.",
-              obj({"prompt": {"type": "string"}, "images": {"type": "array", "items": {"type": "string"}},
-                   "seed": {"type": "integer"}, "fast": {"type": "boolean"}, "count": {"type": "integer"},
-                   "model": {"type": "string", "enum": ["qwen-image-2.1", "flux2-klein-4b"]},
-                   "save_as": {"type": "string"}}, ["prompt", "images"]),
-              image_edit, available=_edit_ready, in_subagent=False, group="images"))
+def _generate_params(models: list[str]) -> dict:
+    model: dict = {"type": "string", "enum": models} if models else {"type": "string"}
+    return obj({"prompt": {"type": "string"}, "width": {"type": "integer"}, "height": {"type": "integer"},
+                "count": {"type": "integer", "description": "1-4"}, "seed": {"type": "integer"},
+                "fast": {"type": "boolean"}, "negative": {"type": "string"}, "model": model,
+                "save_as": {"type": "string", "description": "Path in the working folder"}}, ["prompt"])
+
+
+def _generate_dynamic(ctx: ToolContext) -> tuple[str, dict]:
+    """The downloaded picture models, the chat's own first, each with how to
+    write its prompt (tags for SDXL anime models, sentences for the rest)."""
+    from ...images.pipeline import prompt_hint
+    pipe = _pipeline(ctx)
+    gens = pipe.installed("generate")
+    mine = pipe.chosen(_picture_model(ctx, {}))
+    chosen = next((e for e in gens if e["id"] == mine), gens[0] if gens else None)
+    if chosen is None:
+        return GENERATE_TEXT, _generate_params([])
+    lines = [f"- {e['id']}: {e['name']}{' (this chat uses it)' if e is chosen else ''}. {prompt_hint(e)}" for e in gens]
+    return (f"Generate images from a text prompt. Without model, this chat uses {chosen['name']}; pick another "
+            "only when the user asks for it. Write the prompt the way the model wants it:\n" + "\n".join(lines) +
+            "\nTakes 15-90 s per image (longer when the model has to load first).",
+            _generate_params([e["id"] for e in gens]))
+
+
+def _edit_params(models: list[str]) -> dict:
+    model: dict = {"type": "string", "enum": models} if models else {"type": "string"}
+    return obj({"prompt": {"type": "string"}, "images": {"type": "array", "items": {"type": "string"}},
+                "seed": {"type": "integer"}, "fast": {"type": "boolean"}, "count": {"type": "integer"},
+                "model": model, "save_as": {"type": "string"}}, ["prompt", "images"])
+
+
+def _edit_dynamic(ctx: ToolContext) -> tuple[str, dict]:
+    eds = _pipeline(ctx).installed("edit")
+    names = " or ".join(e["name"] for e in eds) or "Qwen-Image 2.1"
+    return EDIT_TEXT.replace("(Qwen-Image 2.1)", f"({names})"), _edit_params([e["id"] for e in eds])
+
+
+GENERATE_TEXT = ("Generate images from a text prompt with the model chosen for this chat (Settings -> Assistant -> "
+                 "Images by default). Write a detailed English prompt: subject, style, composition, lighting, any "
+                 "exact text in quotes. Takes 15-90 s per image.")
+EDIT_TEXT = ("Edit images with an instruction (Qwen-Image 2.1): change, add or remove things, restyle, combine up to "
+             "10 reference images ('put the person from image 1 into the scene of image 2'). The output keeps the "
+             "first image's proportions.")
+
+register(Tool("image_generate", GENERATE_TEXT, _generate_params(["qwen-image-2.1"]), image_generate,
+              available=_images_ready, in_subagent=False, group="images", dynamic=_generate_dynamic))
+register(Tool("image_edit", EDIT_TEXT, _edit_params(["qwen-image-2.1", "flux2-klein-4b"]), image_edit,
+              available=_edit_ready, in_subagent=False, group="images", dynamic=_edit_dynamic))
 register(Tool("image_remove_background", "Cut out the subject of an image: a PNG with a transparent background.",
               obj({"path": {"type": "string"}, "save_as": {"type": "string"}}, ["path"]),
               image_remove_background, available=_cutout_ready, in_subagent=False, group="images"))

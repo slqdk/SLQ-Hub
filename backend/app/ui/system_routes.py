@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import shutil
 
 import httpx
@@ -13,6 +14,8 @@ from pydantic import BaseModel
 from .. import auth, hf
 from ..config import DEFAULTS
 from ..gpu.scheduler import SchedulerError
+from ..images import sources
+from ..images import workflows as W
 from ..state import get_hub
 
 router = APIRouter()
@@ -136,6 +139,8 @@ async def models(request: Request):
                                "loaded": group == "llm" and hub.loaded_model() == e["id"]})
     out["current"] = hub.scheduler.current
     out["defaults"] = hub.settings.get("models")
+    out["sdxl"] = {"presets": sources.PRESETS, "samplers": list(W.SDXL_SAMPLERS),
+                   "schedulers": list(W.SDXL_SCHEDULERS)}
     return out
 
 
@@ -147,12 +152,7 @@ async def hf_lookup(repo: str, request: Request):
         res = await hf.lookup(hf.parse_repo(repo), transport=hub.transports.web)
     except hf.HFError as exc:
         raise HTTPException(exc.status, str(exc))
-    sug = res["suggested"]
-    taken = {e["id"] for g in ("llm", "aux", "comfy") for e in hub.catalog.entries(g)}
-    base, n = sug["id"], 2
-    while sug["id"] in taken:
-        sug["id"] = f"{base}-{n}"
-        n += 1
+    res["suggested"]["id"] = _unique_id(hub, res["suggested"]["id"])
     hub.env.models_dir.mkdir(parents=True, exist_ok=True)
     res["freeDisk"] = shutil.disk_usage(hub.env.models_dir).free
     gpu = await hub.runner.gpu()
@@ -192,12 +192,7 @@ async def hf_add(body: HFAdd, request: Request):
                               res["meta"])
     except hf.HFError as exc:
         raise HTTPException(exc.status, str(exc))
-    hub.env.models_dir.mkdir(parents=True, exist_ok=True)
-    need = sum(f["size"] for f in entry["files"] if not hub.catalog.path(f).is_file())
-    free = shutil.disk_usage(hub.env.models_dir).free
-    if need > free - 5 * 1024**3:                          # keep 5 GB for chats, images and updates
-        raise HTTPException(400, f"Not enough disk space: it needs {need / 1e9:.1f} GB, {free / 1e9:.1f} GB is free "
-                                 "and the Hub keeps 5 GB spare.")
+    _disk_check(hub, entry)
     try:
         added = hub.catalog.add_custom(entry)
     except ValueError as exc:
@@ -206,23 +201,115 @@ async def hf_add(body: HFAdd, request: Request):
     return {"model": added, "queued": queued}
 
 
+def _unique_id(hub, want: str) -> str:
+    taken = {e["id"] for g in ("llm", "aux", "comfy") for e in hub.catalog.entries(g)}
+    mid, n = want, 2
+    while mid in taken:
+        mid = f"{want}-{n}"
+        n += 1
+    return mid
+
+
+def _disk_check(hub, entry: dict) -> None:
+    hub.env.models_dir.mkdir(parents=True, exist_ok=True)
+    need = sum(int(f.get("size") or 0) for f in entry["files"] if not hub.catalog.path(f).is_file())
+    free = shutil.disk_usage(hub.env.models_dir).free
+    if need > free - 5 * 1024**3:                          # keep 5 GB for chats, images and updates
+        raise HTTPException(400, f"Not enough disk space: it needs {need / 1e9:.1f} GB, {free / 1e9:.1f} GB is free "
+                                 "and the Hub keeps 5 GB spare.")
+
+
+@router.get("/hub/api/models/images/lookup")
+async def image_lookup(link: str, request: Request, pick: str | None = None):
+    """What an SDXL link points at (Hugging Face files or Civitai versions),
+    which of them the Hub can run, and settings to start from."""
+    hub = get_hub(request)
+    try:
+        res = await sources.lookup(link, pick, transport=hub.transports.web)
+    except sources.SourceError as exc:
+        raise HTTPException(exc.status, str(exc))
+    res["suggested"]["id"] = _unique_id(hub, res["suggested"]["id"])
+    hub.env.models_dir.mkdir(parents=True, exist_ok=True)
+    res["freeDisk"] = shutil.disk_usage(hub.env.models_dir).free
+    res["presets"] = sources.PRESETS
+    res["samplers"] = list(W.SDXL_SAMPLERS)
+    res["schedulers"] = list(W.SDXL_SCHEDULERS)
+    res["tokens"] = {"hf": bool(os.environ.get("HF_TOKEN")), "civitai": bool(os.environ.get("CIVITAI_TOKEN"))}
+    return res
+
+
+class ImageAdd(BaseModel):
+    link: str
+    pick: str                      # the Hugging Face file or the Civitai version
+    id: str
+    name: str = ""
+    settings: dict = {}
+
+
+@router.post("/hub/api/models/images")
+async def image_add(body: ImageAdd, request: Request):
+    """Add an SDXL checkpoint from a link to the catalog and start downloading it."""
+    hub = get_hub(request)
+    try:
+        res = await sources.lookup(body.link, body.pick, transport=hub.transports.web)   # checked at the source
+        entry = sources.make_entry(res, body.id.strip(), body.name, sources.clean_settings(body.settings))
+    except sources.SourceError as exc:
+        raise HTTPException(exc.status, str(exc))
+    _disk_check(hub, entry)
+    try:
+        added = hub.catalog.add_custom(entry, "comfy")
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    queued = hub.extras["downloads"].enqueue(entry["id"])
+    return {"model": added, "queued": queued}
+
+
+class ImagePatch(BaseModel):
+    name: str | None = None
+    settings: dict | None = None
+
+
+@router.put("/hub/api/models/images/{model_id}")
+async def image_update(model_id: str, body: ImagePatch, request: Request):
+    """An added picture model's name and settings (steps, CFG, sampler, tags...)."""
+    hub = get_hub(request)
+    entry = hub.catalog.get("comfy", model_id)
+    if not entry or not entry.get("custom"):
+        raise HTTPException(404, "Only picture models added from a link have these settings.")
+    changes: dict = {}
+    if body.name is not None:
+        changes["name"] = body.name.strip()[:80] or entry["name"]
+    if body.settings is not None:
+        try:
+            changes["sdxl"] = sources.clean_settings(body.settings)
+        except sources.SourceError as exc:
+            raise HTTPException(exc.status, str(exc))
+    return {"model": hub.catalog.update_custom(model_id, changes)}
+
+
 @router.delete("/hub/api/models/{model_id}")
 async def remove_model(model_id: str, request: Request, files: bool = True):
-    """Remove a model that was added from Hugging Face (and its files)."""
+    """Remove a model that was added from Hugging Face or a link (and its files)."""
     hub = get_hub(request)
-    entry = hub.catalog.get_llm(model_id)
+    entry, group = hub.catalog.get_llm(model_id), "llm"
+    if entry is None:
+        entry, group = hub.catalog.get("comfy", model_id), "comfy"
     if not entry or not entry.get("custom"):
-        raise HTTPException(404, "Only models added from Hugging Face can be removed.")
-    if hub.loaded_model() == model_id:
-        raise HTTPException(409, "It is on the card now. Free the GPU first.")
-    if hub.settings.get("models", "default") == model_id:
-        raise HTTPException(409, "It is the model for chats. Choose another one first.")
+        raise HTTPException(404, "Only models you added yourself can be removed.")
+    if group == "llm":
+        if hub.loaded_model() == model_id:
+            raise HTTPException(409, "It is on the card now. Free the GPU first.")
+        if hub.settings.get("models", "default") == model_id:
+            raise HTTPException(409, "It is the model for chats. Choose another one first.")
+    elif hub.settings.get("images", "model") == model_id:
+        raise HTTPException(409, "It is the model for pictures (Settings -> Assistant -> Images). Choose another "
+                                 "one first.")
     hub.extras["downloads"].cancel(model_id)
     hub.catalog.remove_custom(model_id)
     if hub.settings.get("models", "fallback_alias") == model_id:
         hub.settings.update("models", {"fallback_alias": ""})
     if files:
-        root = (hub.env.models_dir / "llm" / "hf").resolve()
+        root = (hub.env.models_dir / ("llm/hf" if group == "llm" else "comfy/checkpoints/hub")).resolve()
         for f in entry.get("files", []):
             p = hub.catalog.path(f)
             for q in (p, p.with_name(p.name + ".part")):
@@ -231,7 +318,7 @@ async def remove_model(model_id: str, request: Request, files: bool = True):
                         q.unlink()
                 except OSError:
                     pass
-            d = p.parent                                   # empty folders up to llm/hf
+            d = p.parent                                   # empty folders up to llm/hf (or checkpoints/hub)
             while d.resolve() != root and d.resolve().is_relative_to(root):
                 try:
                     d.rmdir()

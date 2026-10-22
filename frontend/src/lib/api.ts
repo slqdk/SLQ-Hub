@@ -132,12 +132,27 @@ export interface QueueSnapshot { current: string | null; switching: string | nul
 
 export interface DownloadState { model: string; dest: string; status: string; done: number; total: number; rate: number;
   error: string | null }
+/** An SDXL picture model's own settings (added from a link). */
+export interface SdxlSettings { preset: string; steps: number; cfg: number; sampler: string; scheduler: string;
+  clip_skip: number; prefix: string; negative: string }
+export interface SdxlChoices { presets: Record<string, SdxlSettings & { label: string }>; samplers: string[];
+  schedulers: string[] }
+
 export interface ModelEntry { id: string; name: string; description?: string; default?: boolean; installed: boolean;
   loaded?: boolean; downloads: DownloadState[]; capabilities?: string[]; kind?: string;
-  files: { repo: string; path: string; dest: string; size?: number; role?: string }[];
+  files: { repo?: string; path?: string; url?: string; dest: string; size?: number; role?: string }[];
   server?: Record<string, unknown>; thinking?: { efforts?: string[]; default_effort?: string; default?: boolean };
   context_per_request?: number; parameter_size?: string; quantization?: string; aliases?: string[]; requires?: string[];
-  custom?: boolean; source?: { repo: string; url: string; file?: string; added?: string } }
+  custom?: boolean; family?: string; abilities?: string[]; sdxl?: SdxlSettings;
+  source?: { repo?: string; url: string; file?: string; added?: string; site?: "huggingface" | "civitai"; nsfw?: boolean;
+    base?: string; version_id?: number } }
+
+/** GET /hub/api/models/images/lookup: what an SDXL link points at. */
+export interface ImageOption { key: string; label: string; size: number; supported: boolean | null; reason: string;
+  base: string; preset: string; vpred?: boolean; file?: { name: string; url: string; sha256: string } }
+export interface ImageLookup { site: "hf" | "civitai"; url: string; title: string; nsfw: boolean | null;
+  creator: string | null; options: ImageOption[]; pick: string | null;
+  suggested: { id: string; name: string; preset: string }; freeDisk: number; tokens: { hf: boolean; civitai: boolean } }
 
 /** GET /hub/api/models/hf: a Hugging Face repository's GGUF files, grouped. */
 export interface HFChoice { key: string; label: string; split: boolean; size: number; files: { path: string; size: number }[] }
@@ -147,7 +162,7 @@ export interface HFLookup { repo: string; url: string; choices: HFChoice[];
     tools?: boolean | null; thinking?: boolean | null };
   suggested: { id: string; name: string }; freeDisk: number; vram: number }
 export interface ModelsData { llm: ModelEntry[]; aux: ModelEntry[]; comfy: ModelEntry[]; current: string | null;
-  defaults: { default: string; fallback_alias: string; preload: boolean } }
+  defaults: { default: string; fallback_alias: string; preload: boolean }; sdxl?: SdxlChoices }
 
 export interface ApiKey { id: number; name: string; prefix: string; priority: string; allowed_ips: string;
   created_at: string; last_used: string | null; enabled: number }

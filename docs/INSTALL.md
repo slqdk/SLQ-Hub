@@ -235,6 +235,7 @@ All commands run in the VM from `/opt/slq-hub`:
 | Backups / roll back | `sudo bash /opt/slq-hub/update.sh backups` / `... rollback` |
 | Run the self-test again | `sudo bash /opt/slq-hub/update.sh compose exec hub python -m app.cli selftest` |
 | More language models | Settings → Models → Add from Hugging Face (GGUF repositories; gated ones need `HF_TOKEN` in `.env`) |
+| More picture models | Settings → Models → Add image model (an SDXL checkpoint on Civitai or Hugging Face; Civitai files for signed-in users need `CIVITAI_TOKEN` in `.env`) |
 
 Settings that belong to the machine (ports, proxy IP, LAN networks, image
 versions) are in `/srv/slq-hub/.env`. After editing it, run:

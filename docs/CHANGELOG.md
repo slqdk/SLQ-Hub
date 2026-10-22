@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.6.0 - 2026-10-22
+
+- **Z-Image Turbo** (Alibaba, 6B, Apache 2.0): fast photorealistic pictures in
+  8 steps, text in English and Chinese. It shares its text encoder with FLUX.2
+  klein. Download it in Settings -> Models.
+- **Chroma1-HD** (8.9B, built on FLUX.1 schnell, Apache 2.0): released
+  without a safety filter, so any subject and style. Uses a negative prompt.
+- **Add image model** (Settings -> Models): paste a Civitai or Hugging Face
+  link to an SDXL checkpoint: SDXL itself, Pony, Illustrious, NoobAI and the
+  many models built on them. The Hub checks the file before it downloads
+  anything (Civitai's base model; on Hugging Face the file's own header). It
+  picks settings for the kind of model (quality tags, sampler, clip skip,
+  negative prompt), which you can change later under the model's Settings.
+  Remove takes the file too. Civitai files that need a signed-in user need
+  `CIVITAI_TOKEN` in `.env`.
+- The assistant is told which picture model the chat uses and how to write
+  its prompt (tags for Pony and Illustrious, sentences for the others). It
+  only offers models that are downloaded.
+- A chat that chose a picture model that was later removed uses the one from
+  Settings.
+
 ## 0.5.2 - 2026-10-22
 
 - Phones: the row under the text field stays on one line. The send button

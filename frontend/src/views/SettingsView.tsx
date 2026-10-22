@@ -1,8 +1,8 @@
 // Settings: models, the queue, apps and keys, the agent, skills, memory, MCP, cloud, system.
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Copy, Download, Menu, Plus, RefreshCw, Upload as UploadIcon, X } from "lucide-react";
-import { api, type ApiKey, type HFLookup, type McpServerConfig, type McpStatus, type MemoryFile, type ModelEntry,
-  type Settings, type Skill } from "../lib/api";
+import { api, type ApiKey, type HFLookup, type ImageLookup, type McpServerConfig, type McpStatus, type MemoryFile,
+  type ModelEntry, type SdxlChoices, type SdxlSettings, type Settings, type Skill } from "../lib/api";
 import { ago, bytes, residencyName } from "../lib/format";
 import { navigate } from "../lib/router";
 import { useApp, type Theme } from "../state";
@@ -148,6 +148,8 @@ function ModelsTab({ s }: { s: S }) {
     toast(`Removed ${m.name} and its files`, "run");
   });
   const [addingHF, setAddingHF] = useState(false);
+  const [addingImage, setAddingImage] = useState(false);
+  const [imageSettings, setImageSettings] = useState<ModelEntry | null>(null);
   if (!models) return <div className="faint">Loading</div>;
   const installedLlms = models.llm.filter((m) => m.installed);
 
@@ -177,9 +179,19 @@ function ModelsTab({ s }: { s: S }) {
         </>} />
       <ModelGroup title="Helpers for libraries" items={models.aux} busy={busy} onDownload={download} onCancel={cancel}
         note="Run on the CPU (the image embedder can use the GPU, see Assistant, Libraries)." />
-      <ModelGroup title="Image models (ComfyUI)" items={models.comfy} busy={busy} onDownload={download} onCancel={cancel} />
+      <ModelGroup title="Image models (ComfyUI)" items={models.comfy} busy={busy} onDownload={download} onCancel={cancel}
+        action={models.sdxl && <button className="btn small" onClick={() => setAddingImage(true)}><Plus size={14} /> Add image model</button>}
+        extra={(m) => m.custom ? <>
+          {m.sdxl && <button className="btn quiet small" onClick={() => setImageSettings(m)}>Settings</button>}
+          <ConfirmButton className="btn quiet small" confirmText="Remove it and its file?" disabled={!!busy}
+            onConfirm={() => remove(m)}>Remove</ConfirmButton>
+        </> : null} />
       {advanced && <ServerSettings model={advanced} onClose={() => setAdvanced(null)} onSaved={() => { setAdvanced(null); refreshModels(); }} />}
       {addingHF && <AddFromHF onClose={() => setAddingHF(false)} onAdded={() => { setAddingHF(false); refreshModels(); }} />}
+      {addingImage && models.sdxl && <AddImageModel choices={models.sdxl} onClose={() => setAddingImage(false)}
+        onAdded={() => { setAddingImage(false); refreshModels(); }} />}
+      {imageSettings && models.sdxl && <ImageModelSettings model={imageSettings} choices={models.sdxl}
+        onClose={() => setImageSettings(null)} onSaved={() => { setImageSettings(null); refreshModels(); }} />}
     </div>
   );
 }
@@ -204,7 +216,9 @@ function ModelGroup({ title, items, busy, onDownload, onCancel, extra, note, act
               <Lamp state={m.installed ? (m.loaded ? "run" : "off") : active.length ? "wait" : "off"} pulse={!!active.length} />
               <div className="grow" style={{ minWidth: 220 }}>
                 <b>{m.name}</b> {m.custom && m.source
-                  ? <a className="tag" href={m.source.url} target="_blank" rel="noreferrer">Hugging Face</a>
+                  ? <><a className="tag" href={m.source.url} target="_blank" rel="noreferrer">
+                      {m.source.site === "civitai" ? "Civitai" : "Hugging Face"}</a>
+                    {m.source.nsfw && <span className="tag" title="Civitai marks this model NSFW">NSFW</span>}</>
                   : m.default ? null : <span className="tag">optional</span>}
                 <div className="meta">{m.description}{size ? ` ${bytes(size)}.` : ""}</div>
                 {active.length > 0 && <div style={{ marginTop: 6 }}>
@@ -357,11 +371,11 @@ function AddFromHF({ onClose, onAdded }: { onClose: () => void; onAdded: () => v
           {found.choices.map((c) => {
             const fit = fitOf(c.size, found.vram);
             return (
-              <label key={c.key} className="list-row" style={{ cursor: "pointer", minHeight: 44 }}>
+              <label key={c.key} className="list-row choice-row">
                 <input type="radio" name="hf-file" checked={file === c.key} onChange={() => setFile(c.key)} />
-                <span className="grow"><b>{c.label}</b>{c.split && <span className="meta"> · in {c.files.length} parts</span>}</span>
+                <span className="choice-main"><b>{c.label}</b>{c.split && <span className="meta"> · in {c.files.length} parts</span>}</span>
                 <span className="meta num">{bytes(c.size)}</span>
-                <span className="row" style={{ gap: 6, minWidth: 210 }}><Lamp state={fit.lamp} size="sm" /><span className="meta">{fit.text}</span></span>
+                <span className="row choice-state" style={{ minWidth: 210 }}><Lamp state={fit.lamp} size="sm" /><span className="meta">{fit.text}</span></span>
               </label>
             );
           })}
@@ -384,6 +398,193 @@ function AddFromHF({ onClose, onAdded }: { onClose: () => void; onAdded: () => v
           {meta.thinking ? "Its chat template can switch thinking on and off." : "Shows the Think button for this model. Only for models that support it."}</SwitchRow>
         <div className="muted small">Download {bytes(total)} · {bytes(found.freeDisk)} free on the disk</div>
       </>)}
+    </Modal>
+  );
+}
+
+// ------------------------------------------------------------ picture models from a link
+
+function presetSettings(choices: SdxlChoices, key: string): SdxlSettings {
+  const { label: _label, ...rest } = choices.presets[key] ?? choices.presets.sdxl;
+  return { ...rest, preset: choices.presets[key] ? key : "sdxl" };
+}
+
+/** Kind (preset), sampler settings, quality tags and negative prompt of an SDXL model. */
+function SdxlFields({ value, onChange, choices }: { value: SdxlSettings; onChange: (v: SdxlSettings) => void;
+  choices: SdxlChoices }) {
+  const set = (patch: Partial<SdxlSettings>) => onChange({ ...value, ...patch });
+  return (<>
+    <label className="field"><span>Kind</span>
+      <select className="select" value={value.preset} onChange={(e) => onChange(presetSettings(choices, e.target.value))}>
+        {Object.entries(choices.presets).map(([k, p]) => <option key={k} value={k}>{p.label}</option>)}</select>
+      <small>Sets the quality tags, sampler and clip skip that kind of model is made for.</small></label>
+    <details className="sdxl-more">
+      <summary>Sampler, tags and negative prompt</summary>
+      <div className="stack" style={{ marginTop: 10 }}>
+        <div className="form-grid">
+          <label className="field"><span>Steps</span><input className="input" type="number" min={1} max={100}
+            value={value.steps} onChange={(e) => set({ steps: Number(e.target.value) })} /></label>
+          <label className="field"><span>CFG</span><input className="input" type="number" min={0} max={30} step={0.5}
+            value={value.cfg} onChange={(e) => set({ cfg: Number(e.target.value) })} /></label>
+          <label className="field"><span>Sampler</span><select className="select" value={value.sampler}
+            onChange={(e) => set({ sampler: e.target.value })}>{choices.samplers.map((x) => <option key={x} value={x}>{x}</option>)}</select></label>
+          <label className="field"><span>Scheduler</span><select className="select" value={value.scheduler}
+            onChange={(e) => set({ scheduler: e.target.value })}>{choices.schedulers.map((x) => <option key={x} value={x}>{x}</option>)}</select></label>
+          <label className="field"><span>Clip skip</span><select className="select" value={value.clip_skip}
+            onChange={(e) => set({ clip_skip: Number(e.target.value) })}>
+            <option value={1}>1 (most models)</option><option value={2}>2 (Pony and its finetunes)</option></select></label>
+        </div>
+        <label className="field"><span>Quality tags, put before every prompt</span>
+          <textarea className="textarea" rows={2} style={{ minHeight: 56 }} value={value.prefix} onChange={(e) => set({ prefix: e.target.value })} /></label>
+        <label className="field"><span>Negative prompt</span>
+          <textarea className="textarea" rows={2} style={{ minHeight: 56 }} value={value.negative} onChange={(e) => set({ negative: e.target.value })} />
+          <small>What the assistant asks to avoid is added to this.</small></label>
+      </div>
+    </details>
+  </>);
+}
+
+function AddImageModel({ choices, onClose, onAdded }: { choices: SdxlChoices; onClose: () => void; onAdded: () => void }) {
+  const { toast } = useApp();
+  const [link, setLink] = useState("");
+  const [looking, setLooking] = useState(false);
+  const [error, setError] = useState("");
+  const [found, setFound] = useState<ImageLookup | null>(null);
+  const [name, setName] = useState("");
+  const [id, setId] = useState("");
+  const [named, setNamed] = useState(false);              // name or id typed by hand: keep them
+  const [settings, setSettings] = useState<SdxlSettings | null>(null);
+  const [tuned, setTuned] = useState(false);              // settings changed by hand: keep them
+  const [adding, setAdding] = useState(false);
+  const [checking, setChecking] = useState<string | null>(null);   // the file being checked, shown as chosen
+
+  const lookUp = async (pick?: string) => {
+    if (!link.trim()) return;
+    setLooking(true);
+    setChecking(pick ?? null);
+    setError("");
+    if (!pick) {
+      setFound(null);
+      setNamed(false);
+      setTuned(false);
+    }
+    try {
+      const r = await api<ImageLookup>("/hub/api/models/images/lookup", { query: { link: link.trim(), pick } });
+      // Each lookup checks only the picked file: keep what earlier ones found out about the others.
+      setFound((prev) => {
+        if (!pick || !prev) return r;
+        const known = new Map(prev.options.map((o) => [o.key, o]));
+        return { ...r, options: r.options.map((o) => {
+          const k = known.get(o.key);
+          return o.supported === null && k && k.supported !== null ? { ...o, supported: k.supported, reason: k.reason, vpred: k.vpred } : o;
+        }) };
+      });
+      if (!pick || !named) {
+        setName(r.suggested.name);
+        setId(r.suggested.id);
+      }
+      if (!pick || !tuned) setSettings(presetSettings(choices, r.suggested.preset));
+    } catch (e) {
+      if (pick) toast((e as Error).message, "fault");
+      else setError((e as Error).message);
+    } finally {
+      setLooking(false);
+      setChecking(null);
+    }
+  };
+
+  const chosen = found?.options.find((o) => o.key === found.pick);
+  const idOk = /^[a-z0-9][a-z0-9._-]{0,62}$/.test(id);
+  const add = async () => {
+    if (!found || !chosen || !settings) return;
+    setAdding(true);
+    try {
+      await api("/hub/api/models/images", { method: "POST", body: { link: link.trim(), pick: chosen.key, id, name, settings } });
+      toast(`Downloading ${name || id}. It appears under Image models when it is ready.`, "run");
+      onAdded();
+    } catch (e) {
+      toast((e as Error).message, "fault");
+    } finally {
+      setAdding(false);
+    }
+  };
+
+  return (
+    <Modal wide title="Add an image model" onClose={onClose} footer={<>
+      <button className="btn" onClick={onClose}>Cancel</button>
+      <button className="btn primary" disabled={!chosen || chosen.supported !== true || !idOk || !settings || adding || looking}
+        onClick={add}><Download size={14} /> {adding ? "Adding" : `Add and download${chosen?.size ? ` (${bytes(chosen.size)})` : ""}`}</button></>}>
+      <form className="row" style={{ gap: 8 }} onSubmit={(e) => { e.preventDefault(); lookUp(); }}>
+        <input className="input grow" autoFocus value={link} onChange={(e) => setLink(e.target.value)}
+          placeholder="https://civitai.com/models/..., or a Hugging Face link" aria-label="Link to the model" />
+        <button className="btn" type="submit" disabled={looking || !link.trim()}>{looking && !found ? "Looking" : "Look up"}</button>
+      </form>
+      {!found && !error && <p className="muted small" style={{ margin: 0 }}>An SDXL checkpoint: SDXL itself, Pony,
+        Illustrious, NoobAI and the many models built on them. Paste its page on Civitai, or a Hugging Face repository
+        or file with one .safetensors checkpoint (about 7 GB). The Hub checks that it can run it before anything is
+        downloaded.</p>}
+      {error && <div className="callout" style={{ color: "var(--fault)" }}>{error}</div>}
+      {found && settings && (<>
+        <div className="muted small"><a href={found.url} target="_blank" rel="noreferrer">{found.title}</a>
+          {found.creator && <> · by {found.creator}</>}
+          {found.nsfw && <> <span className="tag" title="Civitai marks this model NSFW">NSFW</span></>}</div>
+        <div className="list" role="radiogroup" aria-label="Version" style={{ maxHeight: 240, overflow: "auto" }}>
+          {found.options.map((o) => (
+            <label key={o.key} className="list-row choice-row">
+              <input type="radio" name="image-option" checked={(checking ?? found.pick) === o.key} disabled={looking}
+                onChange={() => lookUp(o.key)} />
+              <span className="choice-main"><b className="ellipsis" style={{ display: "block" }}>{o.label}</b>
+                {o.base && <span className="meta">{o.base}</span>}
+                {o.supported === false && <div className="meta" style={{ color: "var(--fault)" }}>{o.reason}</div>}</span>
+              <span className="meta num">{o.size ? bytes(o.size) : ""}</span>
+              <span className="row choice-state">
+                <Lamp state={o.supported ? "run" : o.supported === false ? "fault" : "off"} size="sm" />
+                <span className="meta">{checking === o.key ? "Checking" : o.supported ? "The Hub can run it"
+                  : o.supported === false ? "Not usable" : "Pick it to check"}</span></span>
+            </label>
+          ))}
+        </div>
+        {chosen?.vpred && <p className="muted small" style={{ margin: 0 }}>A v-prediction model: ComfyUI reads that from the file.</p>}
+        <div className="form-grid">
+          <label className="field"><span>Name</span><input className="input" value={name}
+            onChange={(e) => { setName(e.target.value); setNamed(true); }} /></label>
+          <label className="field"><span>Name for apps</span><input className="input mono" value={id}
+            onChange={(e) => { setId(e.target.value.toLowerCase()); setNamed(true); }} />
+            <small style={idOk ? undefined : { color: "var(--fault)" }}>{idOk ? "Chats and apps pick the model by this name."
+              : "a-z, 0-9, dots, dashes; starts with a letter or digit."}</small></label>
+        </div>
+        <SdxlFields value={settings} choices={choices} onChange={(v) => { setSettings(v); setTuned(true); }} />
+        {found.site === "civitai" && !found.tokens.civitai && <p className="muted small" style={{ margin: 0 }}>Many
+          Civitai models download only for signed-in users. If this one does, the download says so: create an API key
+          at civitai.com (Account settings, API keys), put <code>CIVITAI_TOKEN=...</code> in /srv/slq-hub/.env and
+          restart the Hub (<code>update.sh compose up -d</code>).</p>}
+        <div className="muted small">Download {chosen?.size ? bytes(chosen.size) : "-"} · {bytes(found.freeDisk)} free on the disk</div>
+      </>)}
+    </Modal>
+  );
+}
+
+function ImageModelSettings({ model, choices, onClose, onSaved }: { model: ModelEntry; choices: SdxlChoices;
+  onClose: () => void; onSaved: () => void }) {
+  const { toast } = useApp();
+  const [name, setName] = useState(model.name);
+  const [settings, setSettings] = useState<SdxlSettings>(model.sdxl ?? presetSettings(choices, "sdxl"));
+  const save = async () => {
+    try {
+      await api(`/hub/api/models/images/${model.id}`, { method: "PUT", body: { name, settings } });
+      toast("Saved", "run");
+      onSaved();
+    } catch (e) {
+      toast((e as Error).message, "fault");
+    }
+  };
+  return (
+    <Modal title={`${model.name}: settings`} onClose={onClose} footer={<><button className="btn" onClick={onClose}>Cancel</button>
+      <button className="btn primary" onClick={save}>Save</button></>}>
+      <p className="muted" style={{ margin: 0 }}>How the Hub makes pictures with this model. The next picture uses the
+        new settings.</p>
+      <label className="field"><span>Name</span><input className="input" value={name} onChange={(e) => setName(e.target.value)} /></label>
+      <SdxlFields value={settings} choices={choices} onChange={setSettings} />
     </Modal>
   );
 }
@@ -585,8 +786,10 @@ function AgentTab({ s }: { s: S }) {
       <SectionForm s={s} section="images" title="Images" fields={[
         { key: "model", label: "Model for pictures", type: "select", options: imageOptions,
           help: "Ask for a picture in any chat. The assistant can still use the other model if you name it." },
-        { key: "steps", label: "Steps for a normal image", type: "number", min: 4, max: 80 },
-        { key: "turbo_steps", label: "Steps for a fast image", type: "number", min: 2, max: 20 },
+        { key: "steps", label: "Steps for a normal image", type: "number", min: 4, max: 80,
+          help: "Qwen-Image, ERNIE-Image and Chroma1-HD. Models added from a link have their own (Settings, Models)." },
+        { key: "turbo_steps", label: "Steps for a fast image", type: "number", min: 2, max: 20,
+          help: "The turbo models: Qwen-Image Turbo, ERNIE-Image Turbo, Z-Image Turbo." },
         { key: "default_size", label: "Default size (pixels, the long side)", type: "number", min: 512, max: 2048, step: 64 },
         { key: "enhance_prompts", label: "ERNIE-Image: let its prompt enhancer expand the prompt", type: "bool",
           help: "A 3B model in the image workflow turns the prompt into a detailed description first. The chat shows what it wrote." },

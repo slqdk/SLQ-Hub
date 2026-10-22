@@ -97,12 +97,16 @@ class Engine:
             out += mcp.tools()
         return out
 
+    def schemas(self, tools: list[Tool]) -> list[dict]:
+        ctx = self.tool_context("")
+        return [t.schema(ctx) for t in tools]
+
     # ------------------------------------------------------------ the loop
     async def loop(self, messages: list[dict], persist: Persist = None, max_steps: int = 60,
                    compact: Callable[[list[dict]], Awaitable[list[dict]]] | None = None) -> str:
         tools = self.tools()
         by_name = {t.name: t for t in tools}
-        schemas = [t.schema() for t in tools]
+        schemas = self.schemas(tools)
         final = ""
         for step in range(1, max_steps + 1):
             messages = await self._fit(messages, compact)
@@ -159,7 +163,7 @@ class Engine:
                 await self._escalate(messages, reason)
                 tools = self.tools()
                 by_name = {t.name: t for t in tools}
-                schemas = [t.schema() for t in tools]
+                schemas = self.schemas(tools)
         note = f"(Stopped after {max_steps} steps - ask me to continue if there is more to do.)"
         self.emit("text", text="\n\n" + note)
         if persist:

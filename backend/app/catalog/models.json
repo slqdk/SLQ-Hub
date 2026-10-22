@@ -108,6 +108,8 @@
       "name": "Qwen-Image 2.1",
       "description": "Generation and editing in one checkpoint (int8). 25 steps.",
       "default": true,
+      "family": "qwen-image",
+      "abilities": ["generate", "edit", "cutout"],
       "files": [
         {"repo": "Comfy-Org/Qwen-Image-2.1", "path": "diffusion_models/qwen_image_2.1_int8_convrot.safetensors", "dest": "comfy/diffusion_models/qwen_image_2.1_int8_convrot.safetensors", "size": 7260000000},
         {"repo": "Comfy-Org/Qwen-Image-2.1", "path": "text_encoders/qwen3vl_8b_int8_convrot.safetensors", "dest": "comfy/text_encoders/qwen3vl_8b_int8_convrot.safetensors", "size": 9350000000},
@@ -120,6 +122,8 @@
       "description": "8-step checkpoint for fast drafts. Shares the text encoder and VAE.",
       "default": true,
       "requires": ["qwen-image-2.1"],
+      "family": "qwen-image",
+      "abilities": ["generate", "edit"],
       "files": [
         {"repo": "Comfy-Org/Qwen-Image-2.1", "path": "diffusion_models/qwen_image_2.1_turbo_int8_convrot.safetensors", "dest": "comfy/diffusion_models/qwen_image_2.1_turbo_int8_convrot.safetensors", "size": 7260000000}
       ]
@@ -129,9 +133,11 @@
       "name": "FLUX.2 [klein] 4B",
       "description": "Optional fast model (4 steps, Apache 2.0): generation and multi-reference editing.",
       "default": false,
+      "family": "flux2-klein",
+      "abilities": ["generate", "edit"],
       "files": [
         {"repo": "Comfy-Org/flux2-klein", "path": "split_files/diffusion_models/flux-2-klein-4b.safetensors", "dest": "comfy/diffusion_models/flux-2-klein-4b.safetensors", "size": 7750000000},
-        {"repo": "Comfy-Org/flux2-klein", "path": "split_files/text_encoders/qwen_3_4b.safetensors", "dest": "comfy/text_encoders/qwen_3_4b.safetensors", "size": 8040000000},
+        {"repo": "Comfy-Org/flux2-klein", "path": "split_files/text_encoders/qwen_3_4b.safetensors", "dest": "comfy/text_encoders/qwen_3_4b.safetensors", "size": 8044982048},
         {"repo": "Comfy-Org/flux2-dev", "path": "split_files/vae/flux2-vae.safetensors", "dest": "comfy/vae/flux2-vae.safetensors", "size": 340000000}
       ]
     },
@@ -140,6 +146,8 @@
       "name": "ERNIE-Image",
       "description": "Baidu's 8B photorealistic model (Apache 2.0) with its own 3B prompt enhancer, which expands short requests. Generation only, about 25 steps.",
       "default": false,
+      "family": "ernie-image",
+      "abilities": ["generate"],
       "files": [
         {"repo": "Comfy-Org/ERNIE-Image", "path": "diffusion_models/ernie-image.safetensors", "dest": "comfy/diffusion_models/ernie-image.safetensors", "size": 16067025480},
         {"repo": "Comfy-Org/ERNIE-Image", "path": "text_encoders/ministral-3-3b.safetensors", "dest": "comfy/text_encoders/ministral-3-3b.safetensors", "size": 7717637511},
@@ -152,11 +160,39 @@
       "name": "ERNIE-Image Turbo",
       "description": "ERNIE-Image in 8 steps, much faster. Shares the text encoder, prompt enhancer and VAE with ERNIE-Image.",
       "default": false,
+      "family": "ernie-image",
+      "abilities": ["generate"],
       "files": [
         {"repo": "Comfy-Org/ERNIE-Image", "path": "diffusion_models/ernie-image-turbo.safetensors", "dest": "comfy/diffusion_models/ernie-image-turbo.safetensors", "size": 16067025480},
         {"repo": "Comfy-Org/ERNIE-Image", "path": "text_encoders/ministral-3-3b.safetensors", "dest": "comfy/text_encoders/ministral-3-3b.safetensors", "size": 7717637511},
         {"repo": "Comfy-Org/ERNIE-Image", "path": "text_encoders/ernie-image-prompt-enhancer.safetensors", "dest": "comfy/text_encoders/ernie-image-prompt-enhancer.safetensors", "size": 6877439999},
         {"repo": "Comfy-Org/ERNIE-Image", "path": "vae/flux2-vae.safetensors", "dest": "comfy/vae/flux2-vae.safetensors", "size": 336213556}
+      ]
+    },
+    {
+      "id": "z-image-turbo",
+      "name": "Z-Image Turbo",
+      "description": "Alibaba's fast 6B photorealistic model (Apache 2.0): 8 steps, English and Chinese text in images. Shares its text encoder with FLUX.2 klein and its VAE with Chroma1-HD.",
+      "default": false,
+      "family": "z-image",
+      "abilities": ["generate"],
+      "files": [
+        {"repo": "Comfy-Org/z_image_turbo", "path": "split_files/diffusion_models/z_image_turbo_bf16.safetensors", "dest": "comfy/diffusion_models/z_image_turbo_bf16.safetensors", "size": 12309866400},
+        {"repo": "Comfy-Org/z_image_turbo", "path": "split_files/text_encoders/qwen_3_4b.safetensors", "dest": "comfy/text_encoders/qwen_3_4b.safetensors", "size": 8044982048},
+        {"repo": "Comfy-Org/z_image_turbo", "path": "split_files/vae/ae.safetensors", "dest": "comfy/vae/ae.safetensors", "size": 335304388}
+      ]
+    },
+    {
+      "id": "chroma1-hd",
+      "name": "Chroma1-HD",
+      "description": "8.9B model built on FLUX.1 schnell (Apache 2.0), released without a safety filter: any subject and style, with a negative prompt. About 26 steps.",
+      "default": false,
+      "family": "chroma",
+      "abilities": ["generate"],
+      "files": [
+        {"repo": "Comfy-Org/Chroma1-HD_repackaged", "path": "split_files/diffusion_models/Chroma1-HD-fp8mixed.safetensors", "dest": "comfy/diffusion_models/Chroma1-HD-fp8mixed.safetensors", "size": 9193379316},
+        {"repo": "comfyanonymous/flux_text_encoders", "path": "t5xxl_fp8_e4m3fn_scaled.safetensors", "dest": "comfy/text_encoders/t5xxl_fp8_e4m3fn_scaled.safetensors", "size": 5157348688},
+        {"repo": "Comfy-Org/z_image_turbo", "path": "split_files/vae/ae.safetensors", "dest": "comfy/vae/ae.safetensors", "size": 335304388}
       ]
     }
   ]
