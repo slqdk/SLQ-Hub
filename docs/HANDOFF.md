@@ -128,6 +128,12 @@ reset problem is not known yet.
    it reads (PCI vendor/class, host bridge id, the `SecureBoot` EFI variable).
 2. **install.sh** end to end on Ubuntu 24.04: HWE kernel 7.0, amdgpu-dkms 31.60
    building against it, `/dev/kfd`, PCIe atomics, Docker CE, the firewall unit.
+   Progress on VM 222 (2026-10-22, from 6.8.0-147-generic): stages `vm`,
+   `config` and `system` ran to the end - so the VM check passed and
+   amdgpu-dkms built for `7.0.0-38-generic` (the script stops otherwise);
+   Docker 29.9.2 (compose plugin 5.6.1, buildx 0.38.1, containerd 2.4.2) and
+   `slq-hub-firewall.service` installed. Next: the reboot with the card (the
+   first VM reboot with it) and the GPU check.
 3. **llama.cpp on the card** (`server-rocm-b11783`): the flags parse (checked
    on a CPU build), but VRAM use (~21 GiB expected for Qwen3.8-27B with an 80K
    pool), ROCm itself and real tokens/s are unknown until the first load.
