@@ -155,6 +155,7 @@ DEFAULTS: dict = {
         "model": "qwen-image-2.1",
         "steps": 25,
         "turbo_steps": 8,
+        "enhance_prompts": True,           # ERNIE-Image: let its own prompt enhancer expand the prompt
         "cfg": 1.0,
         "default_size": 1024,
     },

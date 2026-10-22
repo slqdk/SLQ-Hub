@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.2.0, 2026-10-22)
+## State (0.3.0, 2026-10-22)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -104,7 +104,7 @@ the host if the VM ever stops by itself.
 | Tab rows | In Chromium: the old CSS gave `.tabs` 1px of vertical overflow (scrollHeight 42, clientHeight 41 - a scrollbar with Windows' classic scrollbars, reported by Søren); the inset-shadow rule gives none. |
 | Compose | `docker compose config` (v2.40.3) with a `.env` written the way `install.sh` writes it: renders, and the admin password hash arrives intact. |
 | llama.cpp | b11783 built from source (CPU): every command line the Hub builds parses; the real supervisor started the real llama-server through the Hub's scheduler, runner and client with a tiny random model - load, streaming (the real chunk format), a killed server noticed and reloaded, unload. Embeddings (strings and `content` arrays) and `/v1/rerank` answer in the shapes the Hub expects. |
-| ComfyUI | v0.42.3 on CPU with placeholder model files: all seven workflow graphs (Qwen-Image 2.1 generate, turbo, edit with 1 and 3 images, background removal, FLUX.2 klein generate and edit) pass ComfyUI's own validation. |
+| ComfyUI | v0.42.3 on CPU with placeholder model files: all eleven workflow graphs (Qwen-Image 2.1 generate, turbo, edit with 1 and 3 images, background removal, FLUX.2 klein generate and edit, ERNIE-Image and Turbo each with and without the prompt enhancer) pass ComfyUI's own validation, including `TextGenerate`'s dynamic `sampling_mode.*` inputs. The ERNIE graphs follow the official templates (`Comfy-Org/workflow_templates`: `image_ernie_image.json`, `image_ernie_image_turbo.json`, fetched 2026-10-22). Tests: the graph shapes, and an agent turn with only Turbo downloaded (the enhancer's text comes back through `PreviewAny` into the tool result), the enhancer switched off, an edit with ERNIE chosen going to Qwen-Image. |
 | MCP over stdio | A real stdio MCP server through the real sandbox daemon (`execd.py`): initialize, a server-to-client ping, tools, an 18 KB result. |
 
 ## Not verified - check these on the real system
@@ -125,6 +125,9 @@ the host if the VM ever stops by itself.
    /opt/slq-hub/update.sh compose exec hub python -m app.cli selftest
    --images`): the Qwen-Image 2.1 int8 kernels on gfx1100, FLUX.2 klein (it
    is installed), VRAM release with `/free` before the LLM loads again.
+   ERNIE-Image is untried too: whether the prompt enhancer answers in English
+   for English requests, how long enhancer plus the 16 GB model take on
+   gfx1100, and RAM with three large files in ComfyUI's cache.
 5. **Embeddings and re-ranking**: text embeddings answer (1024 dimensions);
    the Qwen3-VL-Embedding chat format in `app/rag/library.py` and the
    re-ranker's score scale (log-odds or probability: both handled) wait for

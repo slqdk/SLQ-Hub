@@ -134,6 +134,30 @@
         {"repo": "Comfy-Org/flux2-klein", "path": "split_files/text_encoders/qwen_3_4b.safetensors", "dest": "comfy/text_encoders/qwen_3_4b.safetensors", "size": 8040000000},
         {"repo": "Comfy-Org/flux2-dev", "path": "split_files/vae/flux2-vae.safetensors", "dest": "comfy/vae/flux2-vae.safetensors", "size": 340000000}
       ]
+    },
+    {
+      "id": "ernie-image",
+      "name": "ERNIE-Image",
+      "description": "Baidu's 8B photorealistic model (Apache 2.0) with its own 3B prompt enhancer, which expands short requests. Generation only, about 25 steps.",
+      "default": false,
+      "files": [
+        {"repo": "Comfy-Org/ERNIE-Image", "path": "diffusion_models/ernie-image.safetensors", "dest": "comfy/diffusion_models/ernie-image.safetensors", "size": 16067025480},
+        {"repo": "Comfy-Org/ERNIE-Image", "path": "text_encoders/ministral-3-3b.safetensors", "dest": "comfy/text_encoders/ministral-3-3b.safetensors", "size": 7717637511},
+        {"repo": "Comfy-Org/ERNIE-Image", "path": "text_encoders/ernie-image-prompt-enhancer.safetensors", "dest": "comfy/text_encoders/ernie-image-prompt-enhancer.safetensors", "size": 6877439999},
+        {"repo": "Comfy-Org/ERNIE-Image", "path": "vae/flux2-vae.safetensors", "dest": "comfy/vae/flux2-vae.safetensors", "size": 336213556}
+      ]
+    },
+    {
+      "id": "ernie-image-turbo",
+      "name": "ERNIE-Image Turbo",
+      "description": "ERNIE-Image in 8 steps, much faster. Shares the text encoder, prompt enhancer and VAE with ERNIE-Image.",
+      "default": false,
+      "files": [
+        {"repo": "Comfy-Org/ERNIE-Image", "path": "diffusion_models/ernie-image-turbo.safetensors", "dest": "comfy/diffusion_models/ernie-image-turbo.safetensors", "size": 16067025480},
+        {"repo": "Comfy-Org/ERNIE-Image", "path": "text_encoders/ministral-3-3b.safetensors", "dest": "comfy/text_encoders/ministral-3-3b.safetensors", "size": 7717637511},
+        {"repo": "Comfy-Org/ERNIE-Image", "path": "text_encoders/ernie-image-prompt-enhancer.safetensors", "dest": "comfy/text_encoders/ernie-image-prompt-enhancer.safetensors", "size": 6877439999},
+        {"repo": "Comfy-Org/ERNIE-Image", "path": "vae/flux2-vae.safetensors", "dest": "comfy/vae/flux2-vae.safetensors", "size": 336213556}
+      ]
     }
   ]
 }

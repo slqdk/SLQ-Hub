@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.0 - 2026-10-22
+
+- **ERNIE-Image and ERNIE-Image Turbo** (Baidu, 8B, Apache 2.0) as optional
+  picture models: download them in Settings -> Models, choose them under
+  Settings -> Assistant -> Images. Photorealistic; generation only (edits go
+  to Qwen-Image or FLUX.2 klein).
+- **ERNIE's prompt enhancer**: a 3B model in the same image job turns the
+  prompt into a detailed description before the picture is made. The chat
+  shows what it wrote. On by default, a switch under Images.
+- The image tools only offer what the downloaded models can do (editing
+  needs Qwen-Image or FLUX.2 klein, cutting out needs Qwen-Image).
+
 ## 0.2.0 - 2026-10-22
 
 - **Add from Hugging Face** (Settings -> Models): paste a GGUF repository or

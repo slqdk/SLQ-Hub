@@ -168,8 +168,11 @@ async def image_generate(ctx: ToolContext, args: dict) -> ToolResult:
     paths = _save_outputs(ctx, items, args.get("save_as"), prompt)
     desc = ", ".join(f"{it['width']}x{it['height']} seed {it['seed']}" for it in items)
     where = f" Saved as {', '.join(paths)}." if paths else ""
+    used = items[0].get("prompt_used")
+    enhanced = f"\nERNIE-Image's prompt enhancer turned the prompt into: {used[:2000]}" if used else ""
     return ToolResult(f"Generated {len(items)} image(s) with {items[0]['model']} ({desc}). They are shown to the "
-                      f"user and below.{where}", images=[{"sha": it["sha"], "mime": "image/png"} for it in items],
+                      f"user and below.{where}{enhanced}",
+                      images=[{"sha": it["sha"], "mime": "image/png"} for it in items],
                       display={"generated": [{"sha": it["sha"], "seed": it["seed"], "path": p}
                                              for it, p in zip(items, paths + [None] * len(items))]})
 
@@ -218,7 +221,17 @@ async def image_remove_background(ctx: ToolContext, args: dict) -> ToolResult:
 
 def _images_ready(ctx: ToolContext) -> bool:
     pipe = ctx.hub.extras.get("images")
-    return bool(pipe and pipe.available())
+    return bool(pipe and pipe.available())                  # any model that makes pictures
+
+
+def _edit_ready(ctx: ToolContext) -> bool:
+    pipe = ctx.hub.extras.get("images")
+    return bool(pipe and (pipe.available("qwen-image-2.1") or pipe.available("flux2-klein-4b")))
+
+
+def _cutout_ready(ctx: ToolContext) -> bool:
+    pipe = ctx.hub.extras.get("images")
+    return bool(pipe and pipe.available("qwen-image-2.1"))
 
 
 register(Tool("view_image", "Look at an image from the working folder (or an attached image by its id).",
@@ -236,13 +249,15 @@ register(Tool("image_transform", "Process an image without AI: crop, resize, rot
 register(Tool("image_ocr", "Read the text in an image with Tesseract OCR (default languages dan+eng). For "
               "photos and screenshots your own vision is often better; use OCR for long printed text.",
               obj({"path": {"type": "string"}, "languages": {"type": "string"}}, ["path"]), image_ocr, group="images"))
-register(Tool("image_generate", "Generate images from a text prompt with Qwen-Image 2.1 (good at text in "
-              "images, any language). Write a detailed English prompt: subject, style, composition, lighting, "
-              "any exact text in quotes. fast=true uses the 8-step turbo model for drafts. Takes 15-90 s per image.",
+register(Tool("image_generate", "Generate images from a text prompt with the model chosen in Settings (default "
+              "Qwen-Image 2.1, good at text in images, any language). Write a detailed English prompt: subject, "
+              "style, composition, lighting, any exact text in quotes. fast=true uses an 8-step turbo model for "
+              "drafts. model: qwen-image-2.1; flux2-klein-4b (fast); ernie-image (photorealistic; its own prompt "
+              "enhancer expands the prompt, so a short clear description is enough). Takes 15-90 s per image.",
               obj({"prompt": {"type": "string"}, "width": {"type": "integer"}, "height": {"type": "integer"},
                    "count": {"type": "integer", "description": "1-4"}, "seed": {"type": "integer"},
                    "fast": {"type": "boolean"}, "negative": {"type": "string"},
-                   "model": {"type": "string", "enum": ["qwen-image-2.1", "flux2-klein-4b"]},
+                   "model": {"type": "string", "enum": ["qwen-image-2.1", "flux2-klein-4b", "ernie-image"]},
                    "save_as": {"type": "string", "description": "Path in the working folder"}}, ["prompt"]),
               image_generate, available=_images_ready, in_subagent=False, group="images"))
 register(Tool("image_edit", "Edit images with an instruction (Qwen-Image 2.1): change, add or remove things, "
@@ -252,7 +267,7 @@ register(Tool("image_edit", "Edit images with an instruction (Qwen-Image 2.1): c
                    "seed": {"type": "integer"}, "fast": {"type": "boolean"}, "count": {"type": "integer"},
                    "model": {"type": "string", "enum": ["qwen-image-2.1", "flux2-klein-4b"]},
                    "save_as": {"type": "string"}}, ["prompt", "images"]),
-              image_edit, available=_images_ready, in_subagent=False, group="images"))
+              image_edit, available=_edit_ready, in_subagent=False, group="images"))
 register(Tool("image_remove_background", "Cut out the subject of an image: a PNG with a transparent background.",
               obj({"path": {"type": "string"}, "save_as": {"type": "string"}}, ["path"]),
-              image_remove_background, available=_images_ready, in_subagent=False, group="images"))
+              image_remove_background, available=_cutout_ready, in_subagent=False, group="images"))

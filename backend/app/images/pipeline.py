@@ -24,6 +24,10 @@ class ImageError(RuntimeError):
     pass
 
 
+GENERATORS = ("qwen-image-2.1", "flux2-klein-4b", "ernie-image", "ernie-image-turbo")
+EDITORS = ("qwen-image-2.1", "flux2-klein-4b")
+
+
 def _png_ok(data: bytes) -> tuple[int, int]:
     with Image.open(io.BytesIO(data)) as img:
         return img.size
@@ -33,9 +37,19 @@ class ImagePipeline:
     def __init__(self, hub: Hub):
         self.hub = hub
 
-    def available(self, model: str = "qwen-image-2.1") -> bool:
+    def available(self, model: str | None = None) -> bool:
+        """Whether a model is downloaded; without one, whether any can make pictures."""
+        if model is None:
+            return any(self.available(m) for m in GENERATORS)
         e = self.hub.catalog.get("comfy", model)
         return bool(e) and self.hub.catalog.installed(e)
+
+    def _ernie(self, model: str, fast: bool) -> str:
+        """ERNIE-Image or its Turbo: what was asked for, else whichever is downloaded."""
+        base, turbo = "ernie-image", "ernie-image-turbo"
+        want = turbo if (model == turbo or fast) else base
+        other = base if want == turbo else turbo
+        return want if self.available(want) else (other if self.available(other) else model)
 
     async def _validate(self, graph: dict) -> None:
         try:
@@ -48,7 +62,7 @@ class ImagePipeline:
                              "(COMFYUI_REF in .env) or the workflow")
 
     async def _run(self, graph: dict, ticket: Ticket | None, owner: str, priority: str, label: str,
-                   on_progress=None) -> list[tuple[str, bytes]]:
+                   on_progress=None, texts: dict | None = None) -> list[tuple[str, bytes]]:
         own = None
         try:
             if ticket is not None:
@@ -57,7 +71,10 @@ class ImagePipeline:
                 own = await self.hub.scheduler.acquire(owner, "image", "comfy", priority, label=label,
                                                        max_wait=float(self.hub.settings.get("queue", "max_wait_s")))
             await self._validate(graph)
-            return await self.hub.comfy.run(graph, on_progress=on_progress)
+            images, out_texts = await self.hub.comfy.run_outputs(graph, on_progress=on_progress)
+            if texts is not None:
+                texts.update(out_texts)
+            return images
         except (ComfyError, SchedulerError) as exc:
             raise ImageError(str(exc))
         finally:
@@ -88,13 +105,26 @@ class ImagePipeline:
                        priority: str = "interactive", on_progress=None) -> list[dict]:
         s = self.hub.settings.get("images")
         model = model or s.get("model", "qwen-image-2.1")
-        if fast and model == "qwen-image-2.1" and self.available("qwen-image-2.1-turbo"):
+        if model.startswith("ernie-image"):
+            model = self._ernie(model, fast)
+        elif fast and model == "qwen-image-2.1" and self.available("qwen-image-2.1-turbo"):
             model = "qwen-image-2.1-turbo"
         if not self.available(model):
             raise ImageError(f"the image model {model} is not downloaded (Settings -> Models)")
         results = []
         for i in range(max(1, min(int(count), 4))):
             sd = (int(seed) + i) if seed is not None else random.randint(1, 2**31 - 1)
+            if model.startswith("ernie-image"):
+                turbo = model.endswith("turbo")
+                graph = W.ernie_t2i(prompt, width, height, sd, turbo=turbo,
+                                    steps=steps or int(s.get("turbo_steps" if turbo else "steps", 8 if turbo else 25)),
+                                    enhance=bool(s.get("enhance_prompts", True)))
+                texts: dict = {}
+                out = await self._run(graph, ticket, owner, priority, f"image: {prompt[:60]}", on_progress, texts)
+                used = (texts.get(W.ERNIE_PROMPT_NODE) or [""])[0].strip()
+                for item in self._save(out, "generated"):
+                    results.append({**item, "seed": sd, "model": model, **({"prompt_used": used} if used else {})})
+                continue
             if model.startswith("flux2-klein"):
                 graph = W.klein_t2i(prompt, width, height, sd, steps=steps or 4)
             else:
@@ -111,6 +141,8 @@ class ImagePipeline:
                    owner: str = "web", priority: str = "interactive", on_progress=None, count: int = 1) -> list[dict]:
         s = self.hub.settings.get("images")
         model = model or s.get("model", "qwen-image-2.1")
+        if model.startswith("ernie-image"):           # ERNIE-Image only generates: edit with another model
+            model = next((m for m in EDITORS if self.available(m)), "qwen-image-2.1")
         if fast and model == "qwen-image-2.1" and self.available("qwen-image-2.1-turbo"):
             model = "qwen-image-2.1-turbo"
         if not self.available(model):

@@ -241,7 +241,8 @@ def make_comfy(state: dict) -> FastAPI:
                  "EmptyLatentImage", "KSampler", "VAEDecode", "SaveImage", "SaveImageAdvanced", "LoadImage",
                  "KSamplerSelect", "RandomNoise", "CFGGuider", "SamplerCustomAdvanced", "ManualSigmas",
                  "CLIPTextEncode", "EmptyFlux2LatentImage", "Flux2Scheduler", "ConditioningZeroOut",
-                 "ImageScaleToTotalPixels", "VAEEncode", "ReferenceLatent", "GetImageSize"]
+                 "ImageScaleToTotalPixels", "VAEEncode", "ReferenceLatent", "GetImageSize", "TextGenerate",
+                 "PreviewAny"]
         return {n: {"input": {}, "output": []} for n in names}
 
     @app.post("/free")
@@ -268,8 +269,12 @@ def make_comfy(state: dict) -> FastAPI:
 
     @app.get("/history/{pid}")
     async def history(pid: str):
-        return {pid: {"status": {"status_str": "success", "completed": True, "messages": []},
-                      "outputs": {"9": {"images": [{"filename": f"{pid}.png", "subfolder": "", "type": "output"}]}}}}
+        outputs = {"9": {"images": [{"filename": f"{pid}.png", "subfolder": "", "type": "output"}]}}
+        graph = state["prompts"][int(pid[1:]) - 1] if pid[1:].isdigit() and int(pid[1:]) <= len(state["prompts"]) else {}
+        for node_id, node in graph.items():                   # PreviewAny shows the text it was given
+            if node.get("class_type") == "PreviewAny":
+                outputs[node_id] = {"text": [state.get("preview_text", "An enhanced, detailed prompt.")]}
+        return {pid: {"status": {"status_str": "success", "completed": True, "messages": []}, "outputs": outputs}}
 
     @app.get("/view")
     async def view():

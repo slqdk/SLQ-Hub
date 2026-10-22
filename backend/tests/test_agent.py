@@ -238,6 +238,37 @@ async def test_image_generation_switches_the_card_and_back(signed_in, app, fakes
     assert app.state.hub.scheduler.current == "llm:qwen3.8-27b"
 
 
+
+async def test_ernie_image_with_its_prompt_enhancer(signed_in, app, fakes):
+    hub = app.state.hub
+    for f in hub.catalog.get("comfy", "ernie-image-turbo")["files"]:        # only Turbo is downloaded
+        p = hub.env.models_dir / f["dest"]
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(b"fake")
+    fakes.comfy["preview_text"] = "A red fox stands in deep fresh snow at dusk, soft blue light, photorealistic."
+    fakes.llama["replies"] = [
+        {"tool_calls": [{"name": "image_generate", "arguments": {"prompt": "a fox in snow", "model": "ernie-image"}}]},
+        {"content": "Here it is."}, {"content": "Fox"}]
+    c = await new_chat(signed_in)
+    run = await finish(app, await say(signed_in, c["id"], "Draw a fox"))
+    assert run.status == "done", run.events[-1]
+    graph = fakes.comfy["prompts"][-1]
+    assert {n["class_type"] for n in graph.values()} >= {"TextGenerate", "PreviewAny", "KSampler"}
+    assert any(n["inputs"].get("unet_name") == "ernie-image-turbo.safetensors" for n in graph.values())
+    result = next(e for e in run.events if e["type"] == "tool_result")
+    assert result["data"]["ok"] and "prompt enhancer turned the prompt into: A red fox stands" in result["data"]["text"]
+    tool_msg = next(m for m in fakes.llama["requests"][1]["messages"] if m["role"] == "tool")
+    assert "A red fox stands in deep fresh snow" in json.dumps(tool_msg)
+
+    # Off in Settings: no enhancer in the graph. ERNIE cannot edit: an edit goes to Qwen-Image.
+    hub.settings.update("images", {"enhance_prompts": False, "model": "ernie-image"})
+    items = await hub.extras["images"].generate("a fox", 512, 512)
+    graph = fakes.comfy["prompts"][-1]
+    assert "TextGenerate" not in {n["class_type"] for n in graph.values()} and "prompt_used" not in items[0]
+    items = await hub.extras["images"].edit("make it blue", [_png((8, 8))])
+    assert items[0]["model"] == "qwen-image-2.1"
+
+
 # ---------------------------------------------------------------- MCP
 
 async def test_mcp_over_http_asks_first_and_can_be_always_allowed(signed_in, app, fakes):

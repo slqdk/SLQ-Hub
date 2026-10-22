@@ -548,7 +548,8 @@ function NewKey({ onClose, made, onMade }: { onClose: () => void; made: { name: 
 function AgentTab({ s }: { s: S }) {
   const { models } = useApp();
   const current = String(s.data?.settings.images?.model ?? "qwen-image-2.1");
-  const imageModels = (models?.comfy ?? []).filter((m) => m.installed && !m.id.endsWith("-turbo"));
+  // A turbo checkpoint that needs its base model (Qwen) is used for fast drafts, not chosen here.
+  const imageModels = (models?.comfy ?? []).filter((m) => m.installed && !(m.requires ?? []).length);
   const imageOptions = imageModels.length ? imageModels.map((m) => ({ value: m.id, label: m.name }))
     : [{ value: current, label: "No image model downloaded" }];
   return (
@@ -587,6 +588,8 @@ function AgentTab({ s }: { s: S }) {
         { key: "steps", label: "Steps for a normal image", type: "number", min: 4, max: 80 },
         { key: "turbo_steps", label: "Steps for a fast image", type: "number", min: 2, max: 20 },
         { key: "default_size", label: "Default size (pixels, the long side)", type: "number", min: 512, max: 2048, step: 64 },
+        { key: "enhance_prompts", label: "ERNIE-Image: let its prompt enhancer expand the prompt", type: "bool",
+          help: "A 3B model in the image workflow turns the prompt into a detailed description first. The chat shows what it wrote." },
       ]} />
     </div>
   );

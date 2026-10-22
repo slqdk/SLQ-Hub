@@ -372,6 +372,21 @@ restore, and the sync devices.
     "Remove the background, and output a PNG image". It saves PNG with alpha.
   - **FLUX.2 [klein] 4B** (Apache 2.0, 4 steps) is in the catalog as an
     optional fast model.
+  - **ERNIE-Image and ERNIE-Image Turbo** (Baidu, 8B, Apache 2.0) are
+    optional too: photorealistic, generation only (an edit with ERNIE chosen
+    goes to Qwen-Image or FLUX.2 klein). Files from `Comfy-Org/ERNIE-Image`:
+    the 16.1 GB diffusion model (base or Turbo), `ministral-3-3b` (7.7 GB) as
+    text encoder, the 3B prompt enhancer (6.9 GB) and the FLUX.2 VAE it shares
+    with klein. Base: 25 steps, cfg 4, empty negative; Turbo: 8 steps, cfg 1,
+    zeroed negative; euler/simple - as in the official templates.
+  - **ERNIE's prompt enhancer** is the "prompt writer" step: in the same
+    ComfyUI graph, `TextGenerate` on the enhancer expands the prompt (its own
+    Chinese instruction plus `{"prompt", "width", "height"}` as JSON, exactly
+    as the templates send it) before `ministral-3-3b` encodes it. A
+    `PreviewAny` node puts the text in the job's history, and the image tool
+    shows it in the chat. On by default; Settings → Assistant → Images turns
+    it off. It needs no extra model switch on the card - it is part of the
+    image job.
 - **Workflows** are built in code from the confirmed API-format graphs
   (`backend/app/images/workflows.py`), so the number of reference images can
   vary. Before each job they are checked against ComfyUI's `/object_info`, so

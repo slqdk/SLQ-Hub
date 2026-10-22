@@ -101,6 +101,11 @@ class Comfy:
 
     async def run(self, graph: dict, on_progress: ProgressFn | None = None, timeout: float = 1800) -> list[tuple[str, bytes]]:
         """Queue a workflow, wait for it, and return its output images."""
+        return (await self.run_outputs(graph, on_progress, timeout))[0]
+
+    async def run_outputs(self, graph: dict, on_progress: ProgressFn | None = None,
+                          timeout: float = 1800) -> tuple[list[tuple[str, bytes]], dict[str, list[str]]]:
+        """Like run(), plus the text outputs by node id (PreviewAny shows text)."""
         client_id = uuid.uuid4().hex
         prompt_id: str | None = None
         try:
@@ -114,7 +119,10 @@ class Comfy:
             if status.get("status_str") == "error":
                 raise ComfyError("ComfyUI reported an error: " + _status_message(status))
             images: list[tuple[str, bytes]] = []
-            for out in (hist.get("outputs") or {}).values():
+            texts: dict[str, list[str]] = {}
+            for node_id, out in (hist.get("outputs") or {}).items():
+                if isinstance(out.get("text"), list):
+                    texts[str(node_id)] = [str(t) for t in out["text"]]
                 for img in out.get("images") or []:
                     if img.get("type") not in (None, "output"):
                         continue
@@ -122,7 +130,7 @@ class Comfy:
                     images.append((img["filename"], data))
             if not images:
                 raise ComfyError("the workflow finished without an output image")
-            return images
+            return images, texts
         except asyncio.CancelledError:
             if prompt_id:
                 await asyncio.shield(self.interrupt(prompt_id))
