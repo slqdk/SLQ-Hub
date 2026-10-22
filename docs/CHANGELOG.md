@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.3 - 2026-10-22
+
+- `install.sh`: the GPU check reads `/proc/modules` instead of `lsmod | grep
+  -q`. Under `set -o pipefail` that pipe can fail when the match is found
+  early (SIGPIPE), so it could report amdgpu as not loaded when it was. The
+  same fix for the dkms and PCIe-atomics checks, and in `create-vm.sh`. The
+  "not loaded" message now says what to check.
+
 ## 0.1.2 - 2026-10-22
 
 - `install.sh` keeps the passed-through card awake: it puts

@@ -179,7 +179,7 @@ ok "VM $VMID created"
 
 # ---------------------------------------------------------------- 4. GPU
 section "4. Moving the GPU from VM $GPU_FROM"
-if qm status "$GPU_FROM" 2>/dev/null | grep -q running; then
+if [[ "$(qm status "$GPU_FROM" 2>/dev/null)" == *running* ]]; then
     run qm shutdown "$GPU_FROM" --timeout 180 --forceStop 1
     ok "VM $GPU_FROM is shut down"
 else

@@ -259,11 +259,13 @@ stage_system() {
     printf 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600\n' > /etc/apt/preferences.d/repo-radeon-pin-600
     apt-get update -q
     apt-get -y -q install amdgpu-dkms
-    if ! dkms status 2>/dev/null | grep -q "amdgpu.*$hwe.*installed"; then
+    # (No "cmd | grep -q" in this script: under pipefail, grep -q exiting at the
+    # first match can kill cmd with SIGPIPE and turn a match into a failure.)
+    if ! grep -q "amdgpu.*$hwe.*installed" <<<"$(dkms status 2>/dev/null)"; then
         info "building the amdgpu module for $hwe ..."
         dkms autoinstall -k "$hwe" || true
     fi
-    dkms status 2>/dev/null | grep -q "amdgpu.*$hwe.*installed" \
+    grep -q "amdgpu.*$hwe.*installed" <<<"$(dkms status 2>/dev/null)" \
         || die "amdgpu-dkms did not build for kernel $hwe. See: dkms status; and /var/lib/dkms/amdgpu/*/build/make.log"
     ok "amdgpu-dkms $AMDGPU_VERSION built for $hwe"
 
@@ -311,7 +313,8 @@ stage_gpu() {
     else
         ok "kernel $kver"
     fi
-    lsmod | grep -q '^amdgpu' || die "the amdgpu module is not loaded. Check: dmesg | grep -i amdgpu"
+    grep -q '^amdgpu ' /proc/modules || die "the amdgpu module is not loaded. Check: sudo dmesg | grep -i amdgpu;
+         dkms status; cat /proc/cmdline (nomodeset keeps it from loading); sudo modprobe -v amdgpu"
     ok "amdgpu module loaded"
     local runpm
     runpm="$(cat /sys/module/amdgpu/parameters/runpm 2>/dev/null || true)"
@@ -321,7 +324,7 @@ stage_gpu() {
         warn "amdgpu runpm is '${runpm:-?}', not 0: an idle card may go into D3 and stop the VM.
          Check that /proc/cmdline has amdgpu.runpm=0 (/etc/default/grub.d/90-slq-hub.cfg, then sudo update-grub)."
     fi
-    if dmesg 2>/dev/null | grep -qi 'PCI rejects atomics'; then
+    if grep -qi 'PCI rejects atomics' <<<"$(dmesg 2>/dev/null)"; then
         die "the kernel skipped the GPU for ROCm: 'PCI rejects atomics'. gfx11 needs PCIe atomics
          in a VM (or newer MEC firmware). Check the VM's hostpci line has pcie=1 and the
          machine type is q35; dmesg | grep -i atomics shows the details."

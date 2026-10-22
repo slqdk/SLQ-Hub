@@ -132,8 +132,16 @@ reset problem is not known yet.
    `config` and `system` ran to the end - so the VM check passed and
    amdgpu-dkms built for `7.0.0-38-generic` (the script stops otherwise);
    Docker 29.9.2 (compose plugin 5.6.1, buildx 0.38.1, containerd 2.4.2) and
-   `slq-hub-firewall.service` installed. Next: the reboot with the card (the
-   first VM reboot with it) and the GPU check.
+   `slq-hub-firewall.service` installed. The host had been rebooted at 10:31
+   with the new vfio settings: vfio-pci now binds the card at boot (`vfio_pci:
+   add [1002:744c...]`, `deactivate vga console` at boot, no `snd_hda_intel
+   0000:0a` line; `Failed to find module 'vfio_virqfd'` is a stale
+   `/etc/modules` line, harmless on 6.8). After the VM's own reboot into
+   7.0.0-38 it came back (`qmpstatus: running`, no D3 or EFAULT lines on the
+   host), but the GPU check stopped: "the amdgpu module is not loaded". Not
+   diagnosed yet: that check was `lsmod | grep -q '^amdgpu'` under pipefail,
+   which can fail on a match (SIGPIPE), fixed in 0.1.3; asked for
+   `/proc/modules`, `/proc/cmdline`, `dkms status` and dmesg from the VM.
 3. **llama.cpp on the card** (`server-rocm-b11783`): the flags parse (checked
    on a CPU build), but VRAM use (~21 GiB expected for Qwen3.8-27B with an 80K
    pool), ROCm itself and real tokens/s are unknown until the first load.
