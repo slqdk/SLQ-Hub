@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.1.2, 2026-10-22)
+## State (0.1.5, 2026-10-22)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -12,176 +12,134 @@ with all its tools, projects with SLQ Sync, images through ComfyUI, libraries
 (multimodal RAG), MCP, cloud escalation, the web UI (responsive, PWA) and the
 command line self-test.
 
-**Nothing has run on the real hardware yet.** The first install on the
-Proxmox host is the real test. Expect to fix things there; the self-test
-(`python -m app.cli selftest`) is the place to start.
+**It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
+host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU
+(24.0 GB VRAM), all default models on disk, sandbox (Python 3.12.3, Node
+18.19.1, tesseract 5.3.4) with its isolation (no Hub, no LAN) and internet,
+web search (38 results), ComfyUI (`cuda:0 AMD Radeon RX 7900 XTX : native`,
+torch 2.14.1+rocm7.14), Qwen3.8-27B answering at 33 tokens/s (a short reply),
+text embeddings (1024 dimensions). Web UI on the LAN:
+`http://30.11.0.222:8080`, admin user `adminsorenlyder`. Not done yet: Nginx
+Proxy Manager / hub.slq.dk, an image render, FamilyLog, and days of uptime
+(see "The D3 problem").
 
-The first install does not use `create-vm.sh`: Søren made VM 222 by hand in
-the Proxmox UI (at first SeaBIOS, i440fx, CPU `x86-64-v2-AES`, 34 GiB, no
-GPU) and installs Ubuntu 24.04.2 from the ISO. He was given the changes to
-make before installing (`docs/INSTALL.md`, "Or: make the VM by hand"). His
-`qm config 222` afterwards matches: `machine: q35`, `bios: ovmf` with
-`efidisk0 ...,efitype=4m,pre-enrolled-keys=0`, `cpu: host`, 12 cores,
-`memory: 40960`, `balloon: 0`, `hostpci0: 0000:0a:00,pcie=1` (no `x-vga`),
-default display, `agent: enabled=1`, `onboot: 1`, 530G on `VMDisc01`.
-`install.sh` now checks the VM before installing anything (stage `vm`).
+## The machine, as installed
 
-First real-hardware observation: starting VM 222 right after VM 104 released
-the card (GPU at host address `0000:0a:00.0`) failed with
-`error writing '1' to '.../0000:0a:00.0/reset': Inappropriate ioctl for device`
-and then `kvm: ../hw/pci/pci.c:1654: pci_irq_handler: Assertion '0 <= irq_num
-&& irq_num < PCI_NUM_PINS' failed` - the card no longer answered config reads
-(the RDNA3 reset problem the design expected). Advised: reboot the Proxmox
-host. After the host reboot (07:49) VM 222 started with the card (07:51) and
-showed the Ubuntu installer's language screen. The host journal then shows
-(host kernel 6.8.12-37-pve, PVE 8.4.19, AMD CPU):
+- **Host** TX82PVE: Proxmox VE 8.4.19 (its support ended 2026-08-31, the UI
+  says), kernel 6.8.12-37-pve, AMD CPU, GRUB, `quiet iommu=pt`.
+- **Host passthrough config** (changed 2026-10-22): `/etc/modprobe.d/vfio.conf`
+  = `options vfio-pci ids=1002:744c,1002:ab30,1002:73bf,1002:ab28
+  disable_idle_d3=1` and `softdep radeon|amdgpu|snd_hda_intel pre: vfio-pci`.
+  Before, the IDs were only those of a Navi 21 card (73bf/ab28, kept in case
+  that card is still in the machine), so nothing bound the 7900 XTX at boot:
+  the host's snd_hda_intel took its audio function and the card was the
+  host's boot console. amdgpu and radeon are blacklisted. `vreset.service`
+  (it only ran `echo device_specific > .../0000:0a:00.0/reset_method`, which
+  the kernel rejects for this card) is disabled. `/etc/modules` still lists
+  `vfio_virqfd` (gone since kernel 6.2; a harmless warning).
+- **The card**: Sapphire NITRO+ RX 7900 XTX Vapor-X, host `0000:0a:00.0`
+  `[1002:744c]` (rev c8) and `.1` HDMI audio `[1002:ab30]`, IOMMU groups 18
+  and 19. No reset method (`Inappropriate ioctl for device` on reset).
+- **VM 222** `Ubuntu-SLQHub`, made by hand (not `create-vm.sh`): q35, OVMF
+  with `pre-enrolled-keys=0`, `cpu: host`, 12 cores, 40960 MB, `balloon: 0`,
+  530G on `VMDisc01`, `hostpci0: 0000:0a:00,pcie=1` (all functions, no
+  `x-vga`), default display, agent on, `onboot: 1`. Ubuntu 24.04 from the
+  24.04.2 ISO, hostname `slq-hub`, Linux user `adminsorenlyder`, IP
+  30.11.0.222, `/` on LVM with the whole disk (526.95g). HWE kernel
+  7.0.0-38-generic with `amdgpu.runpm=0`, amdgpu-dkms `7.1.9-2407772.24.04`
+  (31.60), Docker 29.9.2. In the guest the card is `01:00.0`: `CP RS64
+  enable`, `PCIE atomic ops is not supported` (KFD accepts it anyway - GFX11
+  RS64 firmware), `BAR=256M`, 24560M VRAM.
+- **VM 104** `OllamaWebui` (the old GPU VM): `onboot: 0`, kept as a fallback.
+  35000 MB, 470G. The top of its config (bios, machine, hostpci) not seen.
 
-- 07:51:29 `vfio-pci 0000:0a:00.0: vgaarb: deactivate vga console` - the card
-  was the host's boot VGA; `snd_hda_intel 0000:0a:00.1: GPU sound probed, but
-  not operational` - the host's sound driver had the card's audio function
-  until the VM took it (no early vfio-pci binding).
-- 07:51:45 `vfio-pci 0000:0a:00.0: Unsupported reset method 'device_specific'`
-  - something on the host writes `device_specific` to the card's
-  `reset_method` (vendor-reset style; vendor-reset does not support Navi 31).
-  Source not found yet.
-- 08:25:44, after ~34 idle minutes at the language screen: `QEMU[4519]: error:
-  kvm run failed Bad address` with a register dump: the guest was in amdgpu
-  (`mov r12d,[r12]`, R12 = rmmio + 0x15198, R14 = register 0x5466) - a plain
-  register read on the card's MMIO BAR that the host could not satisfy
-  (EFAULT). QEMU stopped the VM; the console froze on its last frame.
-- 08:56:36 (a reset from the UI): `kvm: vfio: Unable to power on device, stuck
-  in D3`, then `vfio_bar_restore: reset recovery - restoring BARs` for both
-  functions. `qm status` afterwards: `status: running`, `qmpstatus: prelaunch`
-  (reset after an internal error leaves QEMU paused in prelaunch, so the tree
-  shows no "running" overlay).
+## What happened on the first install
 
-Working explanation, not proven: the guest's amdgpu runtime power
-management (BACO is on by default for Navi 31) put the idle card into D3, and
-the card did not come back; the read at 08:25 was the next access. The
-alternative is QEMU issue #2574 ("kvm run failed Bad address" with Navi 31
-and guest kernels 6.7+, no cause found there); the installer's kernel is 6.8
-with the in-box amdgpu, while the Hub runs kernel 7.0 with amdgpu-dkms 31.60.
-Precaution taken: `amdgpu.runpm=0` (written by `install.sh`, and by hand
-before the card goes back in), and Ubuntu is installed without the card. Asked
-Søren for the host's passthrough setup. What it showed:
+Kept for diagnosis - the error strings are what to search for next time.
 
-- The card: `0a:00.0` `[1002:744c]` Sapphire NITRO+ RX 7900 XTX Vapor-X
-  `[1da2:e471]` (rev c8), `0a:00.1` HDMI audio `[1002:ab30]`; no other
-  functions.
-- Host command line: `BOOT_IMAGE=/boot/vmlinuz-6.8.12-37-pve
-  root=/dev/mapper/pve-root ro quiet iommu=pt` (GRUB, LVM root).
-- `/etc/modprobe.d/vfio.conf`: `options vfio-pci ids=1002:73bf,1002:ab28` -
-  the IDs of a Navi 21 card (RX 6800/6900), **not** this one - plus softdeps
-  for radeon, amdgpu and snd_hda_intel. amdgpu and radeon are blacklisted.
-  So nothing bound the 7900 XTX to vfio-pci at boot: the host's sound driver
-  took its audio function and the card was the host's boot console until a
-  VM started.
-- `/etc/systemd/system/vreset.service` writes `device_specific` (the
-  vendor-reset setup, probably for the earlier card).
-- `qm config 104` bottom half: 35000 MB, 470G on `VMDisc01`, onboot 0; the top
-  (bios, machine, cpu, hostpci, args) was cut off - asked for it again.
+1. **Card moved from VM 104 without a host reboot**: VM 222 would not start -
+   `error writing '1' to '/sys/bus/pci/devices/0000:0a:00.0/reset':
+   Inappropriate ioctl for device`, then `kvm: ../hw/pci/pci.c:1654:
+   pci_irq_handler: Assertion '0 <= irq_num && irq_num < PCI_NUM_PINS'
+   failed` (the card answered config reads with 0xFF). A host reboot fixed it.
+2. **The Ubuntu installer with the card, idle ~34 minutes**: `QEMU[4519]:
+   error: kvm run failed Bad address` - amdgpu reading register 0x5466
+   (`mov r12d,[r12]`, R12 = rmmio + 0x15198) and the host unable to satisfy
+   it. The console froze. A reset from the UI then logged `kvm: vfio: Unable
+   to power on device, stuck in D3` and `vfio_bar_restore: reset recovery -
+   restoring BARs`, leaving `qmpstatus: prelaunch` (no "running" overlay in
+   the tree).
+3. **A false stop in `install.sh`**: "the amdgpu module is not loaded" while
+   `/proc/modules` listed it - `lsmod | grep -q` under pipefail (SIGPIPE).
+   Fixed in 0.1.3.
 
-Proposed host changes, in the reboot that puts the card back into VM 222:
-`options vfio-pci ids=1002:744c,1002:ab30,1002:73bf,1002:ab28
-disable_idle_d3=1` (the old IDs kept in case that card is still in the
-machine; `disable_idle_d3` because early binding would otherwise park the
-unused card in D3), `vfio vfio_iommu_type1 vfio_pci` in `/etc/modules`,
-`systemctl disable vreset.service`, `update-initramfs -u -k all`. Check after
-the reboot: both functions on vfio-pci before anything else, `Y` in
-`/sys/module/vfio_pci/parameters/disable_idle_d3`, no `snd_hda_intel
-0000:0a` or `device_specific` lines in the journal.
+### The D3 problem
 
-Applied at 10:27 (the host reboot still to come): `vfio.conf` now reads
-`options vfio-pci ids=1002:744c,1002:ab30,1002:73bf,1002:ab28
-disable_idle_d3=1` plus the three softdeps; `vreset.service` (its whole job:
-`ExecStart=/usr/bin/bash -c 'echo device_specific >
-/sys/bus/pci/devices/0000:0a:00.0/reset_method'`, `After=multi-user.target`)
-disabled; initramfs rebuilt for every installed kernel (6.8.12-37/-15/-11/-2
-and two old 5.15 kernels; GRUB host, so "No /etc/kernel/proxmox-boot-uuids
-found" is expected); `hostpci0: 0000:0a:00,pcie=1` back on VM 222. The
-after-reboot checks are not done yet.
-Whether a plain reboot of VM 222 (which `install.sh` does once) hits the
-reset problem is not known yet.
+Working explanation, not proven: amdgpu's runtime power management (BACO, on
+by default for Navi 31) put the idle card into D3, and it did not come back;
+the read at step 2 was the next access. Step 1 fits too (the card left in a
+low-power state after VM 104). The alternative is QEMU issue #2574 ("kvm run
+failed Bad address" with Navi 31 and guest kernels 6.7+, no cause found
+there). In place now: `amdgpu.runpm=0` in the guest (`install.sh` writes it,
+the GPU check reports it), `disable_idle_d3=1` and early vfio-pci binding on
+the host, and Ubuntu installed without the card (`docs/INSTALL.md`). Since
+then the VM rebooted once with the card (`install.sh`'s reboot) and came
+back. Watch for the two error strings above in `journalctl -b | grep QEMU` on
+the host if the VM ever stops by itself.
 
 ## What has been checked, and how
 
 | Area | Checked by |
 |---|---|
+| Real hardware | VM 222 (above): `install.sh` 0.1.3 end to end - stages `vm`, `config`, `system`, `gpu`, `build`, `models`, `start`, `selftest` - and every self-test line passed (image generation skipped). So the VM check's sysfs reads work on a real q35/OVMF VM with the card, amdgpu-dkms 31.60 builds and loads on 7.0.0-38, ROCm sees the card (`/dev/kfd`), the llama.cpp ROCm image and the ComfyUI torch build use it, and the sandbox firewall holds. |
 | Scheduler | 14 unit tests: priorities, aging, slots, affinity, leases with in-lease switching (two leases that both want ComfyUI, a full residency), cancellation, preload, a crashed model server noticed and loaded again. |
 | Model APIs | 23 tests against a fake llama-server: Ollama (chat, generate, show, tags, embed, key in the path), OpenAI (chat, stream, tools, images), Anthropic (messages, stream, tools, thinking), LAN guard, CORS, key priority. |
 | Agent | 22 tests: plain turns, tools in chat and project folders, revisions, stopping (in a tool and while writing), retry/edit, SSE replay, attachments, image generation switching the card and back, MCP over HTTP (approval, always-allow, masked secrets) and over stdio in the sandbox, escalation (explicit and automatic), subagents, compaction, skills, memory, artifacts. |
 | SLQ Sync | 8 tests (one: writes never follow a symlink planted in the folder), including a round trip with the real `slq_sync.py` client from the SLQ Companion repo against a live server (clone, both-way edits, a conflict, its release). Skipped when that file is not next to this repo. |
 | Libraries | 5 tests with keyword-hashing fake embedders: text and page-image indexing, fused search, re-ranking, replacing and deleting documents, GPU indexing through the queue, broken files. |
 | Web UI | `tsc` + `vite build`; every page and the main flows clicked through in Chromium (Playwright) against `python -m tests.devserver` (the Hub with fake services): sign-in, chat with markdown/maths/code, tool strip, artifact panel, approvals, subagent, image tool, projects (files, editor, settings, sync), libraries, all settings tabs, dark mode, phone width. |
-| Shell scripts | `shellcheck`. `create-vm.sh --dry-run` prints every command. `install.sh`'s VM check: 12 cases against fake `/sys` and `/proc` trees (card present or not, its audio function alone, a card asleep in D3hot, i440fx, bare metal, Secure Boot on, legacy BIOS, no AVX2, low space with and without LVM), and once against a real sysfs (not a Proxmox VM). The `amdgpu.runpm=0` GRUB drop-in, sourced the way `grub-mkconfig` does, appends to the existing command line. The `qm config ... hostpci` one-liner in INSTALL.md against a fake `qm`. |
+| Shell scripts | `shellcheck`. `create-vm.sh --dry-run` prints every command. `install.sh`'s VM check: 12 cases against fake `/sys` and `/proc` trees (card present or not, its audio function alone, a card asleep in D3hot, i440fx, bare metal, Secure Boot on, legacy BIOS, no AVX2, low space with and without LVM). The `amdgpu.runpm=0` GRUB drop-in, sourced the way `grub-mkconfig` does, appends to the existing command line. The `qm config ... hostpci` one-liner in INSTALL.md against a fake `qm`. |
+| Self-test | Against `tests.devserver`: the chat line says "incl. loading" on a cold card and "already loaded" after a preload. |
 | Compose | `docker compose config` (v2.40.3) with a `.env` written the way `install.sh` writes it: renders, and the admin password hash arrives intact. |
 | llama.cpp | b11783 built from source (CPU): every command line the Hub builds parses; the real supervisor started the real llama-server through the Hub's scheduler, runner and client with a tiny random model - load, streaming (the real chunk format), a killed server noticed and reloaded, unload. Embeddings (strings and `content` arrays) and `/v1/rerank` answer in the shapes the Hub expects. |
-| ComfyUI | v0.42.3 on CPU with placeholder model files: all seven workflow graphs (Qwen-Image 2.1 generate, turbo, edit with 1 and 3 images, background removal, FLUX.2 klein generate and edit) pass ComfyUI's own validation. Not rendered (no real weights). |
+| ComfyUI | v0.42.3 on CPU with placeholder model files: all seven workflow graphs (Qwen-Image 2.1 generate, turbo, edit with 1 and 3 images, background removal, FLUX.2 klein generate and edit) pass ComfyUI's own validation. |
 | MCP over stdio | A real stdio MCP server through the real sandbox daemon (`execd.py`): initialize, a server-to-client ping, tools, an 18 KB result. |
 
 ## Not verified - check these on the real system
 
 1. **create-vm.sh** on the real Proxmox host: storage names, the hostpci copy
    from VM 104, cloud-init snippets on `local`, the guest agent IP wait. (The
-   first VM was made by hand, so this is still untested.) Likewise the VM
-   check in `install.sh` on a real q35/OVMF VM with the card: the sysfs paths
-   it reads (PCI vendor/class, host bridge id, the `SecureBoot` EFI variable).
-2. **install.sh** end to end on Ubuntu 24.04: HWE kernel 7.0, amdgpu-dkms 31.60
-   building against it, `/dev/kfd`, PCIe atomics, Docker CE, the firewall unit.
-   Progress on VM 222 (2026-10-22, from 6.8.0-147-generic): stages `vm`,
-   `config` and `system` ran to the end - so the VM check passed and
-   amdgpu-dkms built for `7.0.0-38-generic` (the script stops otherwise);
-   Docker 29.9.2 (compose plugin 5.6.1, buildx 0.38.1, containerd 2.4.2) and
-   `slq-hub-firewall.service` installed. The host had been rebooted at 10:31
-   with the new vfio settings: vfio-pci now binds the card at boot (`vfio_pci:
-   add [1002:744c...]`, `deactivate vga console` at boot, no `snd_hda_intel
-   0000:0a` line; `Failed to find module 'vfio_virqfd'` is a stale
-   `/etc/modules` line, harmless on 6.8). After the VM's own reboot into
-   7.0.0-38 it came back (`qmpstatus: running`, no D3 or EFAULT lines on the
-   host), but the GPU check stopped: "the amdgpu module is not loaded". That
-   was a false result: `/proc/modules` had `amdgpu 22007808 0 - Live ...
-   (OE)`; the check was `lsmod | grep -q '^amdgpu'` under pipefail (SIGPIPE),
-   fixed in 0.1.3. What the VM showed: `/proc/cmdline` =
-   `BOOT_IMAGE=/vmlinuz-7.0.0-38-generic
-   root=/dev/mapper/ubuntu--vg-ubuntu--lv ro amdgpu.runpm=0` (so `/` is on
-   LVM after all); `dkms status`: `amdgpu/7.1.9-2407772.24.04` installed for
-   6.8.0-147 and 7.0.0-38; dmesg: `amdgpu version: 7.1.9.31600000`, the card
-   at guest address `01:00.0` (IP discovery `0x1002:0x744C 0x1DA2:0xE471
-   0xC8`), `CP RS64 enable`, **`PCIE atomic ops is not supported`**, BAR 0
-   released and re-assigned but `BAR=256M` (no large BAR), 24560M VRAM, 20043M
-   GTT, DMUB firmware loading - the rest of the log (KFD) not seen yet. On
-   atomics: KFD on GFX11 with RS64 CP firmware accepts a card without PCIe
-   atomics when the MEC firmware is >= 509, so `/dev/kfd` may still appear;
-   the GPU check stops if KFD skips the card. Likely reason for the missing
-   atomics: QEMU (8.2+) only enables AtomicOps on the root port for a
-   single-function vfio device, and the card is passed with all functions
-   (GPU + audio, multifunction). Passing only `0000:0a:00.0` should give the
-   guest atomics - not tried. With 0.1.3 the GPU check passed: kernel
-   7.0.0-38, amdgpu loaded, runpm=0, `/dev/kfd` present (so KFD accepted the
-   card without atomics), `/dev/dri/renderD128`, render GID 993. `sudo vgs`:
-   `ubuntu-vg` 526.95g with 0 free - the root LV already has the whole disk.
-   The `build` stage started (SearXNG pulled first); `models`, `start` and
-   `selftest` follow.
-3. **llama.cpp on the card** (`server-rocm-b11783`): the flags parse (checked
-   on a CPU build), but VRAM use (~21 GiB expected for Qwen3.8-27B with an 80K
-   pool), ROCm itself and real tokens/s are unknown until the first load.
-4. **Qwen3.8 templates**: tool calls parsed by llama-server (`--jinja`),
+   first VM was made by hand.)
+2. **llama.cpp on the card beyond the self-test**: VRAM with Qwen3.8-27B and
+   its 80K pool (~21 GiB expected; the Hub had preloaded the model, so the
+   self-test's 0.3 GB was before the load - from 0.1.5 it prints the VRAM in
+   use after its chat), tokens/s on long answers, two parallel requests,
+   Qwen3.6-35B-A3B, switching between them.
+3. **Qwen3.8 templates**: tool calls parsed by llama-server (`--jinja`),
    `reasoning_content` passed back within a turn, `reasoning_effort`
    (low/medium/xhigh), `enable_thinking`. The Hub also parses text tool calls
    (Qwen3-Coder XML and Hermes JSON) as a fallback.
-5. **ComfyUI on the card**: the torch ROCm 7.14 wheels, the Qwen-Image 2.1 int8
-   kernels on gfx1100, a real render, VRAM release with `/free` before the LLM
-   loads again. (The graphs themselves pass ComfyUI's validation.)
-6. **Embeddings and re-ranking** with the real GGUFs: the Qwen3-VL-Embedding
-   chat format written out in `app/rag/library.py`, the re-ranker's score scale
-   (log-odds or probability: both handled).
-7. **Sandbox isolation** on the VM: the self-test checks that the sandbox cannot
-   reach the Hub or the proxy, and can reach the internet.
-8. **Nginx Proxy Manager**: SSE streaming (`proxy_buffering off`), uploads
+4. **ComfyUI on the card**: torch sees it, but no render yet (`sudo bash
+   /opt/slq-hub/update.sh compose exec hub python -m app.cli selftest
+   --images`): the Qwen-Image 2.1 int8 kernels on gfx1100, FLUX.2 klein (it
+   is installed), VRAM release with `/free` before the LLM loads again.
+5. **Embeddings and re-ranking**: text embeddings answer (1024 dimensions);
+   the Qwen3-VL-Embedding chat format in `app/rag/library.py` and the
+   re-ranker's score scale (log-odds or probability: both handled) wait for
+   the first library upload.
+6. **Nginx Proxy Manager**: SSE streaming (`proxy_buffering off`), uploads
    (`client_max_body_size`), the session cookie behind HTTPS.
-9. **PWA** install on a phone through hub.slq.dk.
-10. **FamilyLog** against the Hub's Ollama API with its real settings, and
-    TwinCAT Coagent (format still unknown; all three formats and CORS exist).
+7. **PWA** install on a phone through hub.slq.dk.
+8. **FamilyLog** against the Hub's Ollama API with its real settings, and
+   TwinCAT Coagent (format still unknown; all three formats and CORS exist).
+9. **Days of uptime with the card**: no `kvm run failed Bad address` or
+   `stuck in D3` (see "The D3 problem"); whether stopping and starting the VM
+   (not a reboot inside it) needs a host reboot.
+10. **PCIe atomics**: the guest has none, likely because the card is passed
+    with all its functions (QEMU 8.2+ enables AtomicOps on the root port only
+    for a single-function device). KFD, llama.cpp and torch work without.
+    Passing only `0000:0a:00.0` should give them - not tried, only worth it if
+    something needs them.
 
 ## Where things are
 

@@ -386,7 +386,7 @@ stage_start() {
     local port
     port="$(env_get HUB_PORT)"; port="${port:-8080}"
     for _ in $(seq 1 100); do
-        if curl -fsS -o /dev/null "http://127.0.0.1:$port/hub/api/health"; then
+        if curl -fs -o /dev/null "http://127.0.0.1:$port/hub/api/health"; then   # quiet while it starts
             ok "the Hub answers on port $port"
             return
         fi

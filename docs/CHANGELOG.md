@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.5 - 2026-10-22
+
+- Self-test: the chat line says whether the model was already loaded (the Hub
+  preloads the default model, so "incl. loading" was wrong) and how much VRAM
+  is in use after the answer.
+- `install.sh`: no curl error lines while it waits for the Hub to start.
+- `docs/HANDOFF.md`: the first install on the real hardware - the machine as
+  installed, what went wrong on the way, what is still open.
+
 ## 0.1.4 - 2026-10-22
 
 - `install.sh`: the GPU check rounds the VRAM it reports (a 24 GB card showed

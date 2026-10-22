@@ -172,6 +172,21 @@ def selftest(images: bool = False) -> int:
         default = json.loads((env.data_dir / "settings.json").read_text()).get("models", {}).get("default") \
             if (env.data_dir / "settings.json").is_file() else None
         default = default or next((m["id"] for m in models if m.get("default")), None)
+
+        def resident() -> str | None:        # the model on the card now (the Hub preloads the default)
+            try:
+                ms = c.get(hub_url + "/api/ps", headers=api, timeout=30).json().get("models") or []
+                return ms[0].get("model") if ms else None
+            except Exception:  # noqa: BLE001
+                return None
+
+        def vram_used() -> float | None:
+            try:
+                return (c.get(env.llm_url + "/gpu", headers=internal, timeout=10).json().get("vram_used") or 0) / 1024**3
+            except Exception:  # noqa: BLE001
+                return None
+
+        was_loaded = default is not None and resident() == default
         t0 = time.monotonic()
         r = c.post(hub_url + "/v1/chat/completions", headers=api, timeout=900, json={
             "model": default, "max_tokens": 64, "temperature": 0,
@@ -185,9 +200,13 @@ def selftest(images: bool = False) -> int:
             body = r.json()
             text = (body["choices"][0]["message"].get("content") or "").strip()
             tps = (body.get("timings") or {}).get("predicted_per_second")
-            detail = f"{default} answered {text[:20]!r} in {secs:.1f} s (incl. loading)"
+            detail = (f"{default} answered {text[:20]!r} in {secs:.1f} s "
+                      f"({'already loaded' if was_loaded else 'incl. loading'})")
             if tps:
                 detail += f", {tps:.0f} tokens/s"
+            used = vram_used()
+            if used:
+                detail += f"; {used:.1f} GB VRAM in use"
             rep.line("PASS" if "OK" in text.upper() else "WARN", "chat model", detail)
         r = c.post(hub_url + "/v1/embeddings", headers=api, timeout=300, json={"model": "embed-text", "input": "hello"})
         if r.status_code == 200:
