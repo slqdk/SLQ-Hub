@@ -32,8 +32,13 @@ the card (GPU at host address `0000:0a:00.0`) failed with
 and then `kvm: ../hw/pci/pci.c:1654: pci_irq_handler: Assertion '0 <= irq_num
 && irq_num < PCI_NUM_PINS' failed` - the card no longer answered config reads
 (the RDNA3 reset problem the design expected). Advised: reboot the Proxmox
-host. Whether that fixed it, and whether a plain reboot of VM 222 (which
-`install.sh` does once) hits the same problem, is not known yet.
+host. After the host reboot VM 222 started and showed the Ubuntu installer's
+language screen; then the console stopped taking keys, and the Proxmox tree
+showed the VM without the "running" overlay (status other than running).
+Cause not known yet: asked for `qm status 222 --verbose` (qmpstatus) and the
+host journal, and suggested installing Ubuntu without the card and adding it
+back before `install.sh`. Whether a plain reboot of VM 222 (which
+`install.sh` does once) hits the reset problem is not known yet.
 
 ## What has been checked, and how
 
