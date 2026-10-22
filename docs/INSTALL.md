@@ -71,19 +71,21 @@ Ubuntu: the BIOS type cannot be changed afterwards without reinstalling.
 | Processors | type **host**, 8–12 cores | AVX2 and the rest of the real CPU |
 | Memory | 40960 MB, ballooning off | passthrough locks all of it anyway |
 | Disk | 500 GB, VirtIO SCSI single | models and images need ~150 GB to begin with |
-| Display | Default | the Proxmox console during the Ubuntu install |
-| PCI device | the RX 7900 XTX: All Functions, ROM-Bar, PCI-Express, **not** Primary GPU | |
+| Display | Default | the Proxmox console |
+| PCI device | the RX 7900 XTX: All Functions, ROM-Bar, PCI-Express, **not** Primary GPU - **added after Ubuntu is installed** (below) | |
 | Options | Start at boot on, QEMU Guest Agent on | |
 
+Install Ubuntu **without the card**. On the first install the VM stopped
+while the installer sat idle with the card: the card stopped answering and
+was then stuck in D3, its power-saving state (see Troubleshooting). The likely
+cause is the GPU driver putting the idle card to sleep, so the card goes in
+once the installed system is told to keep it awake.
+
 For a VM that already exists, on the host (here VM 222 with its disks on
-`VMDisc01`; this shuts VM 104 down and copies its GPU lines without
-`x-vga`):
+`VMDisc01`):
 
     qm stop 222
-    qm shutdown 104 --timeout 180 --forceStop 1
-    qm set 104 --onboot 0
     qm set 222 --machine q35 --bios ovmf --efidisk0 VMDisc01:1,efitype=4m,pre-enrolled-keys=0 --cpu host --memory 40960 --balloon 0 --agent enabled=1 --onboot 1
-    qm config 104 | grep '^hostpci' | while read -r key val; do val="$(sed -E 's/(^|,)x-vga=(1|on)//; s/^,//' <<<"$val")"; [[ $val == *pcie=1* ]] || val="$val,pcie=1"; qm set 222 --"${key%:}" "$val"; done
     qm config 222
 
 In the Ubuntu Server 24.04 installer:
@@ -98,14 +100,27 @@ In the Ubuntu Server 24.04 installer:
 6. Featured snaps: none. Not `docker` in particular: `install.sh` installs
    Docker CE itself.
 
-After the reboot, log in over SSH and get the repo:
+After the reboot, log in over SSH, get the repo, and tell the kernel to keep
+the card awake (`amdgpu.runpm=0`; `install.sh` writes the same file later):
 
     sudo apt update && sudo apt install -y git qemu-guest-agent
     sudo git clone https://github.com/slqdk/SLQ-Hub /opt/slq-hub
+    sudo mkdir -p /etc/default/grub.d && echo 'GRUB_CMDLINE_LINUX_DEFAULT="$GRUB_CMDLINE_LINUX_DEFAULT amdgpu.runpm=0"' | sudo tee /etc/default/grub.d/90-slq-hub.cfg && sudo update-grub
+    sudo poweroff
 
-Then continue in step 2 at "Then start the installer". The installer checks
-the VM first (the card, `q35`, Secure Boot, disk space) and stops with what to
-fix.
+Now move the card, on the host. This shuts VM 104 down, keeps it from
+starting at boot, and copies its GPU lines without `x-vga`:
+
+    qm shutdown 104 --timeout 180 --forceStop 1
+    qm set 104 --onboot 0
+    qm config 104 | grep '^hostpci' | while read -r key val; do val="$(sed -E 's/(^|,)x-vga=(1|on)//; s/^,//' <<<"$val")"; [[ $val == *pcie=1* ]] || val="$val,pcie=1"; qm set 222 --"${key%:}" "$val"; done
+    qm start 222
+
+If the start fails with a reset error (`Inappropriate ioctl for device`, then
+a `pci_irq_handler` assertion), reboot the Proxmox host: the card did not
+reset after VM 104. Then continue in step 2 at "Then start the installer".
+The installer checks the VM first (the card, `q35`, Secure Boot, disk space)
+and stops with what to fix.
 
 ## 2. Install (in the new VM)
 
@@ -231,7 +246,7 @@ versions) are in `/srv/slq-hub/.env`. After editing it, run:
 |---|---|
 | `create-vm.sh`: "PCI device already in use" | VM 104 is still running. Shut it down in the Proxmox UI and run the script again. |
 | The installer stops at "VM check" | It says what to change (the card, `q35`, Secure Boot, disk space). Fix it and run the installer again. |
-| The Proxmox console stays black while installing Ubuntu by hand | Remove the PCI device, install Ubuntu, then add the card again. |
+| The VM stops by itself: the console freezes, Proxmox no longer shows it as running (`qm status 222 --verbose` says `internal-error` or `prelaunch`), and the host log (`journalctl -b \| grep QEMU`) has `kvm run failed Bad address` or `stuck in D3` | The card went to sleep and did not wake up. Stop the VM and reboot the host. In the VM, `cat /proc/cmdline` must show `amdgpu.runpm=0`. |
 | The installer stops at "GPU check" with `/dev/kfd` missing | Reboot the Proxmox host once (RDNA3 reset problem), then run the installer again. |
 | The installer stops with "PCI rejects atomics" | The VM must be q35 with `pcie=1` on the GPU's hostpci line. Check `qm config <id>` on the host. |
 | "amdgpu-dkms did not build" | `dkms status` and the `make.log` it names. Send them to me. |

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.2 - 2026-10-22
+
+- `install.sh` keeps the passed-through card awake: it puts
+  `amdgpu.runpm=0` on the VM's kernel command line, and the GPU check says so
+  if it is not in effect. The VM check shows the card's power state.
+- `docs/INSTALL.md`: a VM made by hand gets Ubuntu installed without the card;
+  the card goes in after `amdgpu.runpm=0` is set. Troubleshooting for a VM that
+  stops by itself (`kvm run failed Bad address`, `stuck in D3`).
+
 ## 0.1.1 - 2026-10-22
 
 - `install.sh` checks the VM before it installs anything: the AMD card is

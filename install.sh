@@ -86,7 +86,13 @@ stage_vm() {
     [[ -n "$gpu" ]] || die "there is no AMD graphics card in this VM. On the Proxmox host: shut this VM
          down, shut down the VM that has the card now, and add the card here (Hardware -> Add ->
          PCI Device: All Functions, ROM-Bar, PCI-Express; not Primary GPU). Then run this again."
-    ok "AMD graphics card at $gpu"
+    local pstate
+    pstate="$(cat "$SYSFS/bus/pci/devices/$gpu/power_state" 2>/dev/null || true)"
+    ok "AMD graphics card at $gpu${pstate:+ (power state $pstate)}"
+    if [[ "$pstate" == D3* ]]; then
+        warn "the card is in $pstate (asleep). If it does not wake up, the VM stops; the next stage
+         keeps it awake from the reboot on (amdgpu.runpm=0)."
+    fi
 
     local hb="$SYSFS/bus/pci/devices/0000:00:00.0" id=""
     [[ -r "$hb/vendor" && -r "$hb/device" ]] && id="$(<"$hb/vendor"):$(<"$hb/device")"
@@ -221,6 +227,23 @@ stage_system() {
     ok "system packages up to date"
     timedatectl set-timezone Europe/Copenhagen 2>/dev/null || true
 
+    # Keep the passed-through card awake (D0). On the first install the VM
+    # stopped while the card sat idle: it stopped answering ("kvm run failed
+    # Bad address") and was then "stuck in D3" (docs/HANDOFF.md). The likely
+    # cause is amdgpu's runtime power management putting the idle card into
+    # D3; runpm=0 turns that off. Active from the reboot.
+    if command -v update-grub >/dev/null; then
+        install -d -m 0755 /etc/default/grub.d
+        # shellcheck disable=SC2016  # expanded by grub-mkconfig when it reads the file
+        printf '%s\n' '# SLQ Hub (install.sh): keep the passed-through GPU out of D3' \
+            'GRUB_CMDLINE_LINUX_DEFAULT="$GRUB_CMDLINE_LINUX_DEFAULT amdgpu.runpm=0"' \
+            > /etc/default/grub.d/90-slq-hub.cfg
+        update-grub >/dev/null 2>&1 || warn "update-grub failed - run it by hand: sudo update-grub"
+        ok "amdgpu.runpm=0 on the kernel command line (from the next boot)"
+    else
+        warn "update-grub not found - add amdgpu.runpm=0 to the kernel command line by hand"
+    fi
+
     # AMD supports Radeon on Ubuntu 24.04 with the HWE kernel (7.0). The
     # generic HWE package brings headers, modules-extra and firmware.
     apt-get -y -q install linux-generic-hwe-24.04
@@ -290,6 +313,14 @@ stage_gpu() {
     fi
     lsmod | grep -q '^amdgpu' || die "the amdgpu module is not loaded. Check: dmesg | grep -i amdgpu"
     ok "amdgpu module loaded"
+    local runpm
+    runpm="$(cat /sys/module/amdgpu/parameters/runpm 2>/dev/null || true)"
+    if [[ "$runpm" == 0 ]]; then
+        ok "the card stays awake (amdgpu.runpm=0)"
+    else
+        warn "amdgpu runpm is '${runpm:-?}', not 0: an idle card may go into D3 and stop the VM.
+         Check that /proc/cmdline has amdgpu.runpm=0 (/etc/default/grub.d/90-slq-hub.cfg, then sudo update-grub)."
+    fi
     if dmesg 2>/dev/null | grep -qi 'PCI rejects atomics'; then
         die "the kernel skipped the GPU for ROCm: 'PCI rejects atomics'. gfx11 needs PCIe atomics
          in a VM (or newer MEC firmware). Check the VM's hostpci line has pcie=1 and the

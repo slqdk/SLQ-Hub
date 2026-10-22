@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.1.1, 2026-10-22)
+## State (0.1.2, 2026-10-22)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -32,13 +32,43 @@ the card (GPU at host address `0000:0a:00.0`) failed with
 and then `kvm: ../hw/pci/pci.c:1654: pci_irq_handler: Assertion '0 <= irq_num
 && irq_num < PCI_NUM_PINS' failed` - the card no longer answered config reads
 (the RDNA3 reset problem the design expected). Advised: reboot the Proxmox
-host. After the host reboot VM 222 started and showed the Ubuntu installer's
-language screen; then the console stopped taking keys, and the Proxmox tree
-showed the VM without the "running" overlay (status other than running).
-Cause not known yet: asked for `qm status 222 --verbose` (qmpstatus) and the
-host journal, and suggested installing Ubuntu without the card and adding it
-back before `install.sh`. Whether a plain reboot of VM 222 (which
-`install.sh` does once) hits the reset problem is not known yet.
+host. After the host reboot (07:49) VM 222 started with the card (07:51) and
+showed the Ubuntu installer's language screen. The host journal then shows
+(host kernel 6.8.12-37-pve, PVE 8.4.19, AMD CPU):
+
+- 07:51:29 `vfio-pci 0000:0a:00.0: vgaarb: deactivate vga console` - the card
+  was the host's boot VGA; `snd_hda_intel 0000:0a:00.1: GPU sound probed, but
+  not operational` - the host's sound driver had the card's audio function
+  until the VM took it (no early vfio-pci binding).
+- 07:51:45 `vfio-pci 0000:0a:00.0: Unsupported reset method 'device_specific'`
+  - something on the host writes `device_specific` to the card's
+  `reset_method` (vendor-reset style; vendor-reset does not support Navi 31).
+  Source not found yet.
+- 08:25:44, after ~34 idle minutes at the language screen: `QEMU[4519]: error:
+  kvm run failed Bad address` with a register dump: the guest was in amdgpu
+  (`mov r12d,[r12]`, R12 = rmmio + 0x15198, R14 = register 0x5466) - a plain
+  register read on the card's MMIO BAR that the host could not satisfy
+  (EFAULT). QEMU stopped the VM; the console froze on its last frame.
+- 08:56:36 (a reset from the UI): `kvm: vfio: Unable to power on device, stuck
+  in D3`, then `vfio_bar_restore: reset recovery - restoring BARs` for both
+  functions. `qm status` afterwards: `status: running`, `qmpstatus: prelaunch`
+  (reset after an internal error leaves QEMU paused in prelaunch, so the tree
+  shows no "running" overlay).
+
+Working explanation, not proven: the guest's amdgpu runtime power
+management (BACO is on by default for Navi 31) put the idle card into D3, and
+the card did not come back; the read at 08:25 was the next access. The
+alternative is QEMU issue #2574 ("kvm run failed Bad address" with Navi 31
+and guest kernels 6.7+, no cause found there); the installer's kernel is 6.8
+with the in-box amdgpu, while the Hub runs kernel 7.0 with amdgpu-dkms 31.60.
+Precaution taken: `amdgpu.runpm=0` (written by `install.sh`, and by hand
+before the card goes back in), and Ubuntu is installed without the card. Asked
+Søren for `qm config 104` (the VM where the card worked), `lspci -nnk -s
+0a:00`, the host's `/proc/cmdline` and modprobe.d, the source of
+`device_specific`, and which kernel VM 104 ran - possible host changes (early
+vfio-pci binding of all the card's functions, `disable_idle_d3=1`) wait for
+that. Whether a plain reboot of VM 222 (which `install.sh` does once) hits the
+reset problem is not known yet.
 
 ## What has been checked, and how
 
@@ -50,7 +80,7 @@ back before `install.sh`. Whether a plain reboot of VM 222 (which
 | SLQ Sync | 8 tests (one: writes never follow a symlink planted in the folder), including a round trip with the real `slq_sync.py` client from the SLQ Companion repo against a live server (clone, both-way edits, a conflict, its release). Skipped when that file is not next to this repo. |
 | Libraries | 5 tests with keyword-hashing fake embedders: text and page-image indexing, fused search, re-ranking, replacing and deleting documents, GPU indexing through the queue, broken files. |
 | Web UI | `tsc` + `vite build`; every page and the main flows clicked through in Chromium (Playwright) against `python -m tests.devserver` (the Hub with fake services): sign-in, chat with markdown/maths/code, tool strip, artifact panel, approvals, subagent, image tool, projects (files, editor, settings, sync), libraries, all settings tabs, dark mode, phone width. |
-| Shell scripts | `shellcheck`. `create-vm.sh --dry-run` prints every command. `install.sh`'s VM check: 11 cases against fake `/sys` and `/proc` trees (card present or not, its audio function alone, i440fx, bare metal, Secure Boot on, legacy BIOS, no AVX2, low space with and without LVM), and once against a real sysfs (not a Proxmox VM). The `qm config ... hostpci` one-liner in INSTALL.md against a fake `qm`. |
+| Shell scripts | `shellcheck`. `create-vm.sh --dry-run` prints every command. `install.sh`'s VM check: 12 cases against fake `/sys` and `/proc` trees (card present or not, its audio function alone, a card asleep in D3hot, i440fx, bare metal, Secure Boot on, legacy BIOS, no AVX2, low space with and without LVM), and once against a real sysfs (not a Proxmox VM). The `amdgpu.runpm=0` GRUB drop-in, sourced the way `grub-mkconfig` does, appends to the existing command line. The `qm config ... hostpci` one-liner in INSTALL.md against a fake `qm`. |
 | Compose | `docker compose config` (v2.40.3) with a `.env` written the way `install.sh` writes it: renders, and the admin password hash arrives intact. |
 | llama.cpp | b11783 built from source (CPU): every command line the Hub builds parses; the real supervisor started the real llama-server through the Hub's scheduler, runner and client with a tiny random model - load, streaming (the real chunk format), a killed server noticed and reloaded, unload. Embeddings (strings and `content` arrays) and `/v1/rerank` answer in the shapes the Hub expects. |
 | ComfyUI | v0.42.3 on CPU with placeholder model files: all seven workflow graphs (Qwen-Image 2.1 generate, turbo, edit with 1 and 3 images, background removal, FLUX.2 klein generate and edit) pass ComfyUI's own validation. Not rendered (no real weights). |
