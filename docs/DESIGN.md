@@ -718,6 +718,21 @@ routing), and the system prompt says what each costs.
   file from the job's history, and in a person's chat ComfyUI's copy and
   history entry are deleted after the job. The sampler's steps and the
   planner's tokens show as progress in the tool row (at most twice a second).
+  ComfyUI runs with `--disable-metadata` (0.13.5): otherwise every picture
+  and sound file carries the prompt and the whole graph inside (an MP3 as a
+  tag, which ffmpeg copies into anything mixed from it).
+- **One piece of music per call** (0.13.5). In the first real music chat
+  (chat 15) a small model made a "guitar solo" with `sound_generate` and a
+  band with `music_generate` and mixed them: two pieces with their own key,
+  tempo and beat. The system prompt and both tool texts now say that one
+  `music_generate` call makes the whole arrangement (a solo goes in its
+  prompt) and that music made separately never fits together; mixing speech
+  or an effect over music does, and the system prompt carries an ffmpeg
+  command that works (labelled filter output - the small model failed three
+  times on an unlabelled one and handed over). Keep the parts of a mix, so
+  it can be changed. In the sandbox, `ffmpeg` and `ffprobe` are wrappers
+  that add `-hide_banner`: the banner is 2 KB of build flags on every call,
+  in front of what went wrong.
 - **Files.** Named from the text (`tredive-sekunder-tilbage.mp3`, then
   `-2`, ...), in a project under `audio/`. `save_as` may name a file (a path
   in the folder or a sandbox path) or a folder. In a person's chat a file must
@@ -917,8 +932,10 @@ joined), what the model would be sent next (system prompt, history after
 condensing, tools, the request body), the settings that shape a turn (never a
 key or token: cloud gives only whether a key is set, MCP only names and
 status), the queue's jobs during the runs (its monotonic times turned into
-clock times), the tail of llama-server's log and the chat's files (up to
-60 MB). The phone page exports its chats as JSON from the device.
+clock times), the tail of llama-server's log, the chat's pictures and
+attachments, and (0.13.5) the files its turns made or changed, as the folder
+has them now - a song, a mix, a script that failed - newest turn first, up to
+60 MB in all. The phone page exports its chats as JSON from the device.
 
 ---
 
@@ -955,10 +972,11 @@ clock times), the tail of llama-server's log and the chat's files (up to
   gone (0.13.4). Real time with full quality would need the card, at the
   price of a model swap per request. Heard so far: one sentence per model;
   longer texts (the sentence splitting and pauses) not yet.
-- **ACE-Step 1.5 and Stable Audio 3 on gfx1100** have not run on the card:
-  VRAM (XL is about 20 GB with its planner), speed and quality are unknown, as
-  is how well ACE-Step sings Danish. The graphs were validated against a real
-  ComfyUI v0.42.3.
+- **ACE-Step 1.5 and Stable Audio 3 on gfx1100** first ran on the card in
+  chat 15 (2026-10-24), 10 s each: Stable Audio 3 Medium in 8 s, ACE-Step 1.5
+  XL Turbo in 19 s (about 10 s of it loading, 8 s the planner), the LLM back
+  in about 9 s. Still unknown: a 2-3 minute song's time and VRAM (XL is about
+  20 GB with its planner), how they sound, and how well ACE-Step sings Danish.
 - **People's chats in the browser** depend on the browser keeping IndexedDB.
   The app asks for persistent storage, but Safari deletes a website's storage
   after seven days of use without a visit to it - except for a page added to

@@ -34,6 +34,13 @@ RUN python3 -m venv /opt/py \
 
 ENV PATH=/opt/py/bin:$PATH
 
+# ffmpeg and ffprobe without the banner (version and 2 KB of build flags) on every call, which buried what went
+# wrong under text the model had to read every time.
+RUN for t in ffmpeg ffprobe; do \
+        printf '#!/bin/sh\nexec /usr/bin/%s -hide_banner "$@"\n' "$t" > "/usr/local/bin/$t" \
+        && chmod 755 "/usr/local/bin/$t"; \
+    done
+
 COPY execd.py confine.py /opt/execd/
 
 USER sandbox

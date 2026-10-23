@@ -109,6 +109,30 @@ async def test_no_sound_tools_until_a_model_is_downloaded(signed_in, app, fakes)
     assert speech["parameters"]["properties"]["model"]["enum"] == ["roest-v3"]
     assert "en" in speech["parameters"]["properties"]["language"]["enum"]          # Røst reads English too
     assert "speech_generate and sound_generate make audio files" in system(fakes, 0)
+    assert "do not layer two of them" in offered["sound_generate"]["description"]     # no music model to point to
+    # with a music model: one call makes the whole piece - chat 15 mixed a separate "solo" over a band
+    install(app, "roest-v3", "stable-audio-3-medium", "ace-step-1.5-xl-turbo")
+    fakes.llama["requests"].clear()
+    await finish(app, await say(signed_in, c["id"], "And again"))
+    offered = tools_offered(fakes, 0)
+    assert "One music_generate call makes the whole piece" in system(fakes, 0)
+    assert "A solo or lead instrument goes in the same prompt" in offered["music_generate"]["description"]
+    assert "a solo for a song belongs in music_generate's prompt" in offered["sound_generate"]["description"]
+
+
+def test_the_sound_section_of_the_system_prompt():
+    """What the model learns about sound up front: which tools, what they cost, one piece of music per call, and a
+    mix that works (chat 15: three failed ffmpeg calls with an unlabelled filter output)."""
+    from app.agent.prompt import sound_text
+    assert sound_text([]) == ""
+    one = sound_text(["speech"])
+    assert "- speech_generate makes audio files" in one and "slower than real time" in one
+    assert "One music_generate call" not in one and "keep the parts" in one
+    assert ('ffmpeg -i music.mp3 -i voice.mp3 -filter_complex "[0:a]volume=0.3[bg];[bg][1:a]amix=inputs=2:'
+            'duration=longest[out]" -map "[out]" mix.mp3') in one
+    every = sound_text(["speech", "music", "sound"])
+    assert "speech_generate, music_generate and sound_generate make audio files" in every
+    assert "never mix two of them" in every and "a few minutes for a song" in every
 
 
 # ---------------------------------------------------------------- speech

@@ -146,7 +146,7 @@ def run_finished(run_id: str, status: str, steps: list, usage: dict, error: str 
 
 def runs_for_chat(chat_id: int) -> list[dict]:
     with db.connect() as con:
-        rows = con.execute("SELECT * FROM runs WHERE chat_id=? ORDER BY started_at", (chat_id,)).fetchall()
+        rows = con.execute("SELECT * FROM runs WHERE chat_id=? ORDER BY started_at, rowid", (chat_id,)).fetchall()
     out = []
     for r in rows:
         d = dict(r)

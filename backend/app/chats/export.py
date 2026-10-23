@@ -7,8 +7,9 @@
   the live event log of the runs still in memory, what the model would be
   sent next (system prompt, history after condensing, tools, the request),
   the settings that shape a turn (never a key or a token), the queue around
-  the runs, the model server's recent log, and the chat's pictures and
-  attachments.
+  the runs, the model server's recent log, the chat's pictures and
+  attachments, and the files its turns made or changed (as they are now) -
+  a song, a mix, a script that failed.
 """
 from __future__ import annotations
 
@@ -24,11 +25,13 @@ from ..projects import blobs
 from . import store
 
 FORMAT = 1
-MAX_FILES_BYTES = 60 * 1024 * 1024        # pictures and attachments in one bundle
+MAX_FILES_BYTES = 60 * 1024 * 1024        # pictures, attachments and the turns' files in one bundle
 MAX_FILE_BYTES = 25 * 1024 * 1024
 RESULT_CHARS = 1500                        # a tool result in the transcript
 ARG_CHARS = 300                            # a long string in a tool call's arguments, in the transcript
 SAFE_SECTIONS = ("models", "queue", "agent", "web", "sandbox", "images", "sound", "libraries")
+STORED = (".png", ".jpg", ".jpeg", ".webp", ".gif", ".mp3", ".ogg", ".opus", ".flac", ".m4a", ".mp4", ".webm", ".zip",
+          ".gz", ".xz", ".7z")                   # compressed already: deflating them again only costs time
 EXT = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "image/gif": ".gif", "application/pdf": ".pdf",
        "text/plain": ".txt", "text/markdown": ".md", "application/json": ".json"}
 
@@ -113,6 +116,21 @@ def referenced_files(rows: list[dict]) -> list[dict]:
         f["name"] = f["name"] or up.get("filename") or ""
         f["mime"] = f["mime"] or up.get("mime") or ""
         f["size"] = up.get("size")
+    return list(seen.values())
+
+
+def made_files(runs: list[dict]) -> list[dict]:
+    """The files the turns made or changed in the working folder (each run's "files" step, as the card under the
+    answer showed them), the newest turn first, once each."""
+    seen: dict[str, dict] = {}
+    for r in reversed(runs):                    # runs_for_chat gives them in the order they ran
+        for step in r.get("steps") or []:
+            if step.get("type") != "files":
+                continue
+            for f in step.get("files") or []:
+                path = str(f.get("path") or "")
+                if path and path not in seen:
+                    seen[path] = {"path": path, "run": r.get("id"), "new": bool(f.get("new", True))}
     return list(seen.values())
 
 
@@ -403,6 +421,8 @@ async def bundle(hub, agent, chat: dict) -> bytes:
                 versions.append({"version": v, "created_at": got["created_at"], "content": got["content"]})
         artifacts.append({"id": a["id"], "title": a["title"], "type": a["type"], "versions": versions})
     files = referenced_files(rows)
+    made = made_files(runs)
+    wd = agent.workdir(chat)
 
     def build() -> bytes:
         buf = io.BytesIO()
@@ -423,6 +443,24 @@ async def bundle(hub, agent, chat: dict) -> bytes:
                 packed = f["mime"].startswith(("image/png", "image/jpeg", "image/webp", "image/gif"))
                 z.writestr(name, data, compress_type=zipfile.ZIP_STORED if packed else zipfile.ZIP_DEFLATED)
                 f["path"] = paths[f["sha"]] = name
+            for f in made:                      # as they are in the folder now: a later turn may have changed them
+                try:
+                    p = wd.resolve(f["path"])
+                    size = p.stat().st_size if p.is_file() else -1
+                except (OSError, ValueError):
+                    size = -1
+                if size < 0:
+                    f["skipped"] = "not in the folder any more"
+                    continue
+                f["size"] = size
+                if size > MAX_FILE_BYTES or total + size > MAX_FILES_BYTES:
+                    f["skipped"] = "too big for the bundle"
+                    continue
+                data = p.read_bytes()
+                total += len(data)
+                f["zip"] = "made/" + wd.rel(p)
+                z.writestr(f["zip"], data, compress_type=zipfile.ZIP_STORED if p.suffix.lower() in STORED
+                           else zipfile.ZIP_DEFLATED)
             chat_json = {
                 "exported": {"app": "SLQ Hub", "version": version, "at": now_iso(), "format": FORMAT},
                 "chat": chat,
@@ -440,6 +478,7 @@ async def bundle(hub, agent, chat: dict) -> bytes:
                                     if r.ended else None} for r in live],
                 "artifacts": artifacts,
                 "files": files,
+                "made": made,
             }
             z.writestr("chat.json", json.dumps(chat_json, ensure_ascii=False, indent=1))
             z.writestr("context.json", json.dumps(context, ensure_ascii=False, indent=1))
@@ -476,4 +515,6 @@ events/<run>.json      the live event log of the {runs} run(s) still in the Hub'
 logs/queue.json        the queue's jobs while the chat's runs went on
 logs/llama-server.txt  the model server's recent output
 files/                 the chat's pictures and attachments
+made/                  the files the turns made or changed in the working folder, as
+                       they are there now (chat.json "made" says which were left out)
 """

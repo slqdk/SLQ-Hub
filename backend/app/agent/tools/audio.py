@@ -283,7 +283,9 @@ def _music_dynamic(ctx: ToolContext) -> tuple[str, dict]:
     text = (MUSIC_TEXT + " Roughly 1-3 minutes for a 2-minute song, plus a minute or two when the model has to "
             "load.\n- prompt: the style as a rich description or comma-separated tags - genre, era, mood, "
             "instruments, tempo feel, the singer (gender, timbre), production. E.g. \"upbeat Danish indie pop, warm "
-            "female vocals, jangly guitars, handclaps, bright 2010s production\".\n- lyrics: one short line per sung "
+            "female vocals, jangly guitars, handclaps, bright 2010s production\". A solo or lead instrument goes in "
+            "the same prompt (\"..., wild fast electric guitar solo\"): one call makes the whole arrangement, and "
+            "music made separately never fits it.\n- lyrics: one short line per sung "
             "phrase, section tags on their own lines: [verse], [chorus], [bridge], [intro], [outro], [instrumental]; "
             "in the language given as language. Empty for an instrumental.\n- duration: seconds, 10-300 - give the "
             "lyrics room: a verse and a chorus need 45-60 s, a whole song 2-3 minutes.\n- bpm, key (\"A minor\") and "
@@ -340,6 +342,11 @@ def _sound_dynamic(ctx: ToolContext) -> tuple[str, dict]:
     models = pipe.installed("sound")
     if not models:
         return SOUND_TEXT, _sound_params([])
+    # its music and instrument parts never line up with other music: no shared key, tempo or beat (chat 15)
+    alone = (" Its music and instrument parts stand alone: they do not follow a song from music_generate (no "
+             "shared key, tempo or beat), so a solo for a song belongs in music_generate's prompt."
+             if pipe.available("music") else " Pieces of music made separately do not fit together (no shared key, "
+             "tempo or beat), so do not layer two of them.")
     text = (SOUND_TEXT[:-1] + " in seconds, plus loading the model.\nprompt: describe the sound precisely in English - "
             "the source and "
             "its material, the action and how it starts, lasts and fades, the space (dry room, hall, arena, outdoors; "
@@ -347,8 +354,8 @@ def _sound_dynamic(ctx: ToolContext) -> tuple[str, dict]:
             "bottle shattering on concrete, sharp impact, scattered fragments\", \"Ice hockey arena horn at the end "
             "of a period, loud and slightly distorted, huge echoing hall\", \"Lo-fi hip-hop drum loop, dusty snare, "
             "swung hi-hats\".\nkind: sfx (default), ambience, one-shot, loop, instrument or music - it adds the tag "
-            "the model was trained with.\nduration: seconds - 1-3 for impacts and one-shots, 3-6 for short actions, "
-            "6-30 for ambience and loops, up to 380 for music.\nModels: " +
+            "the model was trained with." + alone + "\nduration: seconds - 1-3 for impacts and one-shots, 3-6 for "
+            "short actions, 6-30 for ambience and loops, up to 380 for music.\nModels: " +
             ", ".join(f"{e['id']} ({e['name']})" for e in models))
     return text, _sound_params([e["id"] for e in models])
 

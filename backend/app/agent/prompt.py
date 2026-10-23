@@ -65,8 +65,16 @@ wants it."""
 SOUND = """
 
 # Sound
-- {tools} make audio files in the working folder, which the user plays under your answer. {how} Write \
-text for speech exactly as it should be spoken."""
+- {tools} {make} audio files in the working folder, which the user plays under your answer. {how} Write \
+text for speech exactly as it should be spoken.{music}
+- To put speech or an effect over music, mix the files with ffmpeg in bash and keep the parts, so the mix can be \
+changed: ffmpeg -i music.mp3 -i voice.mp3 -filter_complex "[0:a]volume=0.3[bg];[bg][1:a]amix=inputs=2:\
+duration=longest[out]" -map "[out]" mix.mp3"""
+# Chat 15 (2026-10-24): a "guitar solo" from sound_generate mixed over a band from music_generate - two pieces
+# with their own key, tempo and beat.
+ONE_PIECE = """
+- One music_generate call makes the whole piece: put every instrument, any solo and the mood in its prompt. \
+Pieces of music made separately do not fit together (their key, tempo and beat differ), so never mix two of them."""
 SOUND_TOOLS = {"speech": "speech_generate", "music": "music_generate", "sound": "sound_generate"}
 
 
@@ -81,7 +89,8 @@ def sound_text(abilities: list[str]) -> str:
     if "music" in abilities or "sound" in abilities:
         how.append("Music and sound effects run on the GPU: seconds for an effect, a few minutes for a song.")
     names = tools[0] if len(tools) == 1 else ", ".join(tools[:-1]) + " and " + tools[-1]
-    return SOUND.format(tools=names, how=" ".join(how))
+    return SOUND.format(tools=names, make="makes" if len(tools) == 1 else "make", how=" ".join(how),
+                        music=ONE_PIECE if "music" in abilities else "")
 
 
 WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")

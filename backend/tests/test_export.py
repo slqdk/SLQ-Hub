@@ -96,9 +96,39 @@ async def test_the_bundle_has_everything_but_secrets(signed_in, app, fakes):
 
     md = z.read("transcript.md").decode()
     assert f"![kat.png]({pic['path']})" in md and "(5000 characters)" in md
+    assert z.read("made/noter.txt") == b"x" * 5000                           # the file the turn wrote
+    assert data["made"] == [{"path": "noter.txt", "run": run.id, "new": True, "size": 5000, "zip": "made/noter.txt"}]
 
     everything = b"".join(z.read(n) for n in names)
     assert b"sk-secret-123456" not in everything
+
+
+async def test_the_bundle_has_the_files_the_turns_made(signed_in, app, fakes, monkeypatch):
+    """A song, a mix, a script that failed: what the card under each answer listed, as the folder has it now -
+    once each, the newest turn first, and said so when one is gone or too big."""
+    from app.chats import export
+    monkeypatch.setattr(export, "MAX_FILE_BYTES", 1000)
+    c = await new_chat(signed_in)
+
+    async def turn(*writes: tuple[str, str]) -> str:
+        fakes.llama["requests"].clear()
+        fakes.llama["replies"] = [{"content": "", "tool_calls": [
+            {"name": "write_file", "arguments": {"path": path, "content": text}} for path, text in writes]},
+            {"content": "Done."}, {"content": "Files"}]
+        return (await finish(app, await say(signed_in, c["id"], "Write"))).id
+
+    first = await turn(("mix/intro.txt", "one"), ("gone.txt", "soon gone"), ("big.txt", "x" * 2000))
+    second = await turn(("mix/intro.txt", "two"))
+    folder = app.state.hub.env.workspace_dir / "chats" / str(c["id"])
+    (folder / "gone.txt").unlink()
+    z = zipfile.ZipFile(io.BytesIO((await signed_in.get(f"/hub/api/chats/{c['id']}/export")).content))
+    made = {f["path"]: f for f in json.loads(z.read("chat.json"))["made"]}
+    assert list(made) == ["mix/intro.txt", "big.txt", "gone.txt"]
+    assert made["mix/intro.txt"]["run"] == second and z.read("made/mix/intro.txt") == b"two"
+    assert made["gone.txt"]["run"] == first and made["gone.txt"]["skipped"] == "not in the folder any more"
+    assert made["big.txt"]["skipped"] == "too big for the bundle" and made["big.txt"]["size"] == 2000
+    assert {n for n in z.namelist() if n.startswith("made/")} == {"made/mix/intro.txt"}
+    assert "made/" in z.read("README.txt").decode()
 
 
 async def test_export_of_an_unknown_chat_or_format(signed_in):

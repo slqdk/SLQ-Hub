@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.13.5 - 2026-10-24
+
+- **Music in one piece.** In the first real music chat the assistant made a
+  "guitar solo" with the sound-effect model and a band with the music model,
+  then mixed them - two pieces with their own key, tempo and beat, which
+  cannot fit together. It now knows that one music call makes the whole
+  arrangement, with the solo described in its prompt. Speech or an effect
+  over music still works, and the assistant now has an ffmpeg command for
+  that mix that works (Ornith needed three tries and a hand-over).
+- When it mixes, it keeps the parts, so the mix can be changed without
+  making them again.
+- Pictures and sound files no longer carry ComfyUI's prompt and workflow
+  inside (an MP3 had the whole graph as a tag, and ffmpeg copied it into
+  the mix).
+- ffmpeg and ffprobe in the sandbox leave out their banner: 2 KB of build
+  flags on every call, in front of the actual error.
+- The troubleshooting export now includes the files the chat's turns made
+  or changed - a song, a mix, a script - as they are in the folder now,
+  within the 60 MB.
+
 ## 0.13.4 - 2026-10-24
 
 - **Full-quality speech only.** In the second listening test Røst v3 Turbo
