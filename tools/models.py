@@ -37,7 +37,7 @@ def load_catalog(path: Path = CATALOG) -> dict:
 
 def all_entries(cat: dict) -> list[dict]:
     out = []
-    for group in ("llm", "aux", "comfy"):
+    for group in ("llm", "aux", "comfy", "audio"):
         for e in cat.get(group, []):
             out.append({**e, "group": group})
     return out

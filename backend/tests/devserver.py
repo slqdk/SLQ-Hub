@@ -4,7 +4,8 @@
 
 Signs in as soren / "correct horse battery". The fake model answers by
 keyword: "files" (writes and runs a script), "jingle" (a command makes a
-sound, a PDF and notes: the card under the answer), "game" (slow steps, to try
+sound, a PDF and notes: the card under the answer), "announce" (speech),
+"song" (music), "horn" (a sound effect), "game" (slow steps, to try
 sending a message while it works), "page" (makes an artifact),
 "think" (reasons first), "search" (web search), "picture" (an image),
 "loop" (repeats the same searches until the Hub makes it answer), or
@@ -31,8 +32,8 @@ from app.main import create_app
 from app.state import Transports
 
 from .conftest import _install_fake_models
-from .mocks import (HostRouter, make_civitai, make_civitai_delivery, make_comfy, make_hf, make_llama, make_mcp_http,
-                    make_sandbox, make_searxng, make_supervisor)
+from .mocks import (HostRouter, float_wav, make_civitai, make_civitai_delivery, make_comfy, make_hf, make_llama,
+                    make_mcp_http, make_sandbox, make_searxng, make_speech, make_supervisor)
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -97,6 +98,23 @@ def responder(body: dict) -> dict:
             return {"tool_calls": [{"name": "write_file", "arguments": {
                 "path": "notes/jingle.md", "content": "# Jingle\n\nA 440 Hz tone, 1.2 s.\n"}}]}
         return {"content": "Done: **jingle.wav** (1.2 s), a one-page **guide.pdf** and notes in `notes/jingle.md`."}
+    if "announce" in low:
+        if tools_done == 0:
+            return {"content": "Making the announcement.", "tool_calls": [{"name": "speech_generate", "arguments": {
+                "text": "Tredive sekunder tilbage af tredje periode!", "language": "da", "voice": "mic"}}]}
+        return {"content": "Here it is: **tredive-sekunder-tilbage-af-tredje-periode.mp3**, read by Mic (Røst v3)."}
+    if "song" in low:
+        if tools_done == 0:
+            return {"tool_calls": [{"name": "music_generate", "arguments": {
+                "prompt": "upbeat Danish stadium rock, male vocals, crowd chants", "duration": 45, "bpm": 132,
+                "key": "A minor", "language": "da", "save_as": "club-song.mp3",
+                "lyrics": "[verse]\nVi spiller på is\n[chorus]\nJegerup, Jegerup!"}}]}
+        return {"content": "The song is ready: **club-song.mp3** (45 s, 132 BPM)."}
+    if "horn" in low:
+        if tools_done == 0:
+            return {"tool_calls": [{"name": "sound_generate", "arguments": {
+                "prompt": "Ice hockey arena horn at the end of a period, loud, huge echoing hall", "duration": 3}}]}
+        return {"content": "The horn: **ice-hockey-arena-horn-at-the-end-of-a-period.mp3** (3 s)."}
     if "page" in low:
         if tools_done == 0:
             return {"tool_calls": [{"name": "todo_write", "arguments": {"todos": [
@@ -236,6 +254,13 @@ def _tone(seconds: float = 1.2, hz: float = 440.0, rate: int = 22050) -> bytes:
     return buf.getvalue()
 
 
+def _voice(hz: float, seconds: float = 6.0, rate: int = 24000) -> bytes:
+    """A voiced tone with harmonics, as 32-bit float like the Røst samples: the Hub reads its pitch to call the
+    voice male or female."""
+    return float_wav([0.09 * sum(math.sin(2 * math.pi * k * hz * i / rate) / k for k in range(1, 8))
+                      for i in range(int(seconds * rate))], rate)
+
+
 PDF = (b"%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n"
        b"3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 300 144]/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>"
        b"endobj\n4 0 obj<</Length 44>>stream\nBT /F1 24 Tf 40 70 Td (Jingle guide) Tj ET\nendstream endobj\n"
@@ -266,7 +291,10 @@ def main() -> None:
     base = Path(a.data or tempfile.mkdtemp(prefix="hub-dev-"))
     data, models = base / "data", base / "models"
     _install_fake_models(models, {"qwen3.8-27b", "qwen3.6-35b-a3b", "embed-text", "rerank", "embed-vl",
-                                  "qwen-image-2.1", "qwen-image-2.1-turbo", "ernie-image-turbo", "z-image-turbo"})
+                                  "qwen-image-2.1", "qwen-image-2.1-turbo", "ernie-image-turbo", "z-image-turbo",
+                                  "roest-v3", "ace-step-1.5-xl-turbo", "stable-audio-3-medium"})
+    for name, hz in (("mic", 118), ("nic", 205)):              # the voices: a low one and a high one, as WAV
+        (models / "speech" / "roest-v3" / "voices" / f"{name}.wav").write_bytes(_voice(hz))
     dist = ROOT / "frontend" / "dist"
     env = Env(data_dir=data, models_dir=models, llm_url="http://supervisor", llm_host="llm", comfy_url="http://comfy",
               searxng_url="http://searxng", sandbox_url="http://sandbox:7000", sandbox_ip="172.31.250.20",
@@ -274,15 +302,16 @@ def main() -> None:
               trusted_proxies=(a.proxy,) if a.proxy else (), lan_host=a.lan_host,
               lan_networks=tuple(_networks(["127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"])),
               admin_user="soren", admin_password_hash=auth.hash_password("correct horse battery", n=2**10),
-              static_dir=dist if (dist / "index.html").is_file() else None)
-    fakes = {"sup": {}, "llama": {"responder": responder}, "comfy": {},
-             "sandbox": {"handler": sandbox_handler(data / "workspace")}, "mcp": {}}
+              static_dir=dist if (dist / "index.html").is_file() else None, speech_url="http://speech:7100")
+    fakes = {"sup": {}, "llama": {"responder": responder}, "comfy": {"audio_seconds": 3.0},
+             "sandbox": {"handler": sandbox_handler(data / "workspace")}, "mcp": {}, "speech": {}}
     router = HostRouter({"supervisor": make_supervisor(fakes["sup"]), "llm": make_llama(fakes["llama"]),
                          "comfy": make_comfy(fakes["comfy"]), "sandbox:7000": make_sandbox(fakes["sandbox"]),
                          "searxng": make_searxng(), "mcp.test": make_mcp_http(fakes["mcp"]),
                          "huggingface.co": make_hf(HF_DEMO), "civitai.com": make_civitai(CIVITAI_DEMO),
-                         "delivery.civitai.test": make_civitai_delivery(CIVITAI_DEMO)})
-    t = Transports(llm=router, runner=router, comfy=router, sandbox=router, web=router)
+                         "delivery.civitai.test": make_civitai_delivery(CIVITAI_DEMO),
+                         "speech:7100": make_speech(fakes["speech"])})
+    t = Transports(llm=router, runner=router, comfy=router, sandbox=router, web=router, speech=router)
     app = create_app(env, t, startup=False)
     print(f"SLQ Hub (fake services) on http://127.0.0.1:{a.port}  data: {base}")
     uvicorn.run(app, host="127.0.0.1", port=a.port, log_level="warning", proxy_headers=False)   # as in production

@@ -10,14 +10,14 @@ from app.main import create_app
 from app.state import Transports
 
 from .mocks import (HostRouter, make_civitai, make_civitai_delivery, make_comfy, make_hf, make_llama, make_mcp_http,
-                    make_sandbox, make_searxng, make_supervisor)
+                    make_sandbox, make_searxng, make_speech, make_supervisor)
 
 CATALOG = Path(__file__).resolve().parents[1] / "app" / "catalog" / "models.json"
 
 
 def _install_fake_models(models_dir: Path, ids: set[str]) -> None:
     cat = json.loads(CATALOG.read_text())
-    for group in ("llm", "aux", "comfy"):
+    for group in ("llm", "aux", "comfy", "audio"):
         for e in cat[group]:
             if e["id"] in ids:
                 for f in e["files"]:
@@ -36,6 +36,7 @@ class Fakes:
         self.mcp = {}
         self.hf = {}
         self.civitai = {}
+        self.speech = {}
 
 
 @pytest.fixture
@@ -54,7 +55,8 @@ def hub_env(tmp_path):
                sandbox_ip="172.31.250.20", internal_token="tok", secret_key="secret", public_url="https://hub.test",
                trusted_proxies=("10.9.9.9",),
                lan_networks=tuple(_networks(["127.0.0.0/8", "30.11.0.0/20"])),
-               admin_user="soren", admin_password_hash=auth.hash_password("correct horse battery", n=2**10))
+               admin_user="soren", admin_password_hash=auth.hash_password("correct horse battery", n=2**10),
+               speech_url="http://speech:7100", speech_models="/models")
 
 
 @pytest.fixture
@@ -70,8 +72,9 @@ def app(hub_env, fakes):
         "huggingface.co": make_hf(fakes.hf),
         "civitai.com": make_civitai(fakes.civitai),
         "delivery.civitai.test": make_civitai_delivery(fakes.civitai),
+        "speech:7100": make_speech(fakes.speech),
     })
-    t = Transports(llm=router, runner=router, comfy=router, sandbox=router, web=router)
+    t = Transports(llm=router, runner=router, comfy=router, sandbox=router, web=router, speech=router)
     application = create_app(hub_env, t, startup=False)
     application.state.router = router
     return application

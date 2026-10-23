@@ -22,12 +22,13 @@ log = logging.getLogger("hub")
 
 @dataclass
 class Transports:
-    """Injected in tests: fake llama-server / supervisor / ComfyUI / sandbox."""
+    """Injected in tests: fake llama-server / supervisor / ComfyUI / sandbox / speech service."""
     llm: httpx.AsyncBaseTransport | None = None
     runner: httpx.AsyncBaseTransport | None = None
     comfy: httpx.AsyncBaseTransport | None = None
     sandbox: httpx.AsyncBaseTransport | None = None
     web: httpx.AsyncBaseTransport | None = None
+    speech: httpx.AsyncBaseTransport | None = None
 
 
 @dataclass

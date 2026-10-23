@@ -195,5 +195,116 @@
         {"repo": "Comfy-Org/z_image_turbo", "path": "split_files/vae/ae.safetensors", "dest": "comfy/vae/ae.safetensors", "size": 335304388}
       ]
     }
+  ],
+  "audio": [
+    {
+      "id": "roest-v3",
+      "name": "Røst v3",
+      "description": "Danish text to speech from the CoRal project (the Alexandra Institute and partners): Resemble AI's Chatterbox trained on more than 2,000 hours of Danish, rated 4.23 of 5 by native speakers. Two voices, Mic and Nic, or any voice from a 10-20 s clip. English only with a heavy Danish accent. OpenRAIL licence.",
+      "default": false,
+      "engine": "speech",
+      "family": "chatterbox-mtl",
+      "abilities": ["speech"],
+      "languages": ["da"],
+      "sampling": {"temperature": 0.8, "top_p": 0.95, "min_p": 0.05, "repetition_penalty": 2.0, "cfg_weight": 0.5},
+      "files": [
+        {"repo": "CoRal-project/roest-v3-chatterbox-500m", "path": "t3_mtl23ls_v2.safetensors", "dest": "speech/roest-v3/t3_mtl23ls_v2.safetensors", "size": 2143989752, "role": "t3"},
+        {"repo": "CoRal-project/roest-v3-chatterbox-500m", "path": "s3gen.pt", "dest": "speech/chatterbox/s3gen.pt", "size": 1057165844, "role": "s3gen"},
+        {"repo": "CoRal-project/roest-v3-chatterbox-500m", "path": "ve.pt", "dest": "speech/chatterbox/ve.pt", "size": 5698626, "role": "ve"},
+        {"repo": "CoRal-project/roest-v3-chatterbox-500m", "path": "grapheme_mtl_merged_expanded_v1.json", "dest": "speech/roest-v3/grapheme_mtl_merged_expanded_v1.json", "size": 70011, "role": "tokenizer"},
+        {"repo": "CoRal-project/roest-v3-chatterbox-500m", "path": "audio_samples/00_mic_00_t0.8_p0.95_e0.5_c0.5_m0.05_r2.0.wav", "dest": "speech/roest-v3/voices/mic.wav", "size": 856400, "role": "voice", "voice": "mic"},
+        {"repo": "CoRal-project/roest-v3-chatterbox-500m", "path": "audio_samples/00_nic_00_t0.8_p0.95_e0.5_c0.5_m0.05_r2.0.wav", "dest": "speech/roest-v3/voices/nic.wav", "size": 952400, "role": "voice", "voice": "nic"}
+      ]
+    },
+    {
+      "id": "roest-v3-turbo",
+      "name": "Røst v3 Turbo",
+      "description": "The faster Danish voice from the same project (Chatterbox Turbo, 350M): about three times quicker on the CPU and a little less natural (4.01 of 5). The same voices, Mic and Nic. For long texts. OpenRAIL licence.",
+      "default": false,
+      "engine": "speech",
+      "family": "chatterbox-turbo",
+      "abilities": ["speech"],
+      "languages": ["da"],
+      "sampling": {"temperature": 0.75, "top_p": 0.95, "top_k": 800, "repetition_penalty": 1.2},
+      "files": [
+        {"repo": "CoRal-project/roest-v3-chatterbox-350m", "path": "t3_turbo_v1.safetensors", "dest": "speech/roest-v3-turbo/t3_turbo_v1.safetensors", "size": 1915480052, "role": "t3"},
+        {"repo": "CoRal-project/roest-v3-chatterbox-350m", "path": "s3gen_meanflow.safetensors", "dest": "speech/roest-v3-turbo/s3gen_meanflow.safetensors", "size": 1064875036, "role": "s3gen"},
+        {"repo": "CoRal-project/roest-v3-chatterbox-350m", "path": "ve.safetensors", "dest": "speech/roest-v3-turbo/ve.safetensors", "size": 5695784, "role": "ve"},
+        {"repo": "CoRal-project/roest-v3-chatterbox-350m", "path": "vocab.json", "dest": "speech/roest-v3-turbo/tokenizer/vocab.json", "size": 999186, "role": "tokenizer"},
+        {"repo": "CoRal-project/roest-v3-chatterbox-350m", "path": "merges.txt", "dest": "speech/roest-v3-turbo/tokenizer/merges.txt", "size": 456318, "role": "tokenizer"},
+        {"repo": "CoRal-project/roest-v3-chatterbox-350m", "path": "added_tokens.json", "dest": "speech/roest-v3-turbo/tokenizer/added_tokens.json", "size": 418, "role": "tokenizer"},
+        {"repo": "CoRal-project/roest-v3-chatterbox-350m", "path": "special_tokens_map.json", "dest": "speech/roest-v3-turbo/tokenizer/special_tokens_map.json", "size": 470, "role": "tokenizer"},
+        {"repo": "CoRal-project/roest-v3-chatterbox-350m", "path": "tokenizer_config.json", "dest": "speech/roest-v3-turbo/tokenizer/tokenizer_config.json", "size": 3878, "role": "tokenizer"},
+        {"repo": "CoRal-project/roest-v3-chatterbox-350m", "path": "audio_samples/00_mic_00_t0.8_p0.95_k1000_r1.2.wav", "dest": "speech/roest-v3-turbo/voices/mic.wav", "size": 937040, "role": "voice", "voice": "mic"},
+        {"repo": "CoRal-project/roest-v3-chatterbox-350m", "path": "audio_samples/00_nic_00_t0.8_p0.95_k1000_r1.2.wav", "dest": "speech/roest-v3-turbo/voices/nic.wav", "size": 960080, "role": "voice", "voice": "nic"}
+      ]
+    },
+    {
+      "id": "chatterbox-multilingual-v3",
+      "name": "Chatterbox Multilingual V3",
+      "description": "Resemble AI's speech model for 23 languages (English, German, Swedish, Norwegian, French, Spanish ... and Danish): a default voice, Røst's two Danish voices (they keep their accent in other languages), or any voice from a 10-20 s clip, and expressiveness that can be turned up. MIT licence. Shares 1 GB of files with Røst v3.",
+      "default": false,
+      "engine": "speech",
+      "family": "chatterbox-mtl",
+      "abilities": ["speech"],
+      "languages": ["ar", "da", "de", "el", "en", "es", "fi", "fr", "he", "hi", "it", "ja", "ko", "ms", "nl", "no", "pl", "pt", "ru", "sv", "sw", "tr", "zh"],
+      "sampling": {"temperature": 0.8, "top_p": 1.0, "min_p": 0.05, "repetition_penalty": 2.0, "cfg_weight": 0.5},
+      "expressive": true,
+      "files": [
+        {"repo": "ResembleAI/chatterbox", "path": "t3_mtl23ls_v3.safetensors", "dest": "speech/chatterbox/t3_mtl23ls_v3.safetensors", "size": 2143989928, "role": "t3"},
+        {"repo": "ResembleAI/chatterbox", "path": "s3gen.pt", "dest": "speech/chatterbox/s3gen.pt", "size": 1057165844, "role": "s3gen"},
+        {"repo": "ResembleAI/chatterbox", "path": "ve.pt", "dest": "speech/chatterbox/ve.pt", "size": 5698626, "role": "ve"},
+        {"repo": "ResembleAI/chatterbox", "path": "grapheme_mtl_merged_expanded_v1.json", "dest": "speech/chatterbox/grapheme_mtl_merged_expanded_v1.json", "size": 69989, "role": "tokenizer"},
+        {"repo": "ResembleAI/chatterbox", "path": "conds.pt", "dest": "speech/chatterbox/conds.pt", "size": 107374, "role": "conds"},
+        {"repo": "CoRal-project/roest-v3-chatterbox-500m", "path": "audio_samples/00_mic_00_t0.8_p0.95_e0.5_c0.5_m0.05_r2.0.wav", "dest": "speech/roest-v3/voices/mic.wav", "size": 856400, "role": "voice", "voice": "mic"},
+        {"repo": "CoRal-project/roest-v3-chatterbox-500m", "path": "audio_samples/00_nic_00_t0.8_p0.95_e0.5_c0.5_m0.05_r2.0.wav", "dest": "speech/roest-v3/voices/nic.wav", "size": 952400, "role": "voice", "voice": "nic"}
+      ]
+    },
+    {
+      "id": "ace-step-1.5-xl-turbo",
+      "name": "ACE-Step 1.5 XL Turbo",
+      "description": "Songs with vocals from your lyrics, or instrumentals, 10 s to 5 minutes, in 50+ languages (best in English; Danish works but is less polished). A 4B planner lays out the song and a 4B diffusion model renders it in 8 steps; about 20 GB of VRAM. MIT licence.",
+      "default": false,
+      "engine": "comfy",
+      "family": "ace-step-1.5",
+      "abilities": ["music"],
+      "settings": {"steps": 8, "cfg": 1.0, "shift": 3.0},
+      "files": [
+        {"repo": "Comfy-Org/ace_step_1.5_ComfyUI_files", "path": "split_files/diffusion_models/acestep_v1.5_xl_turbo_bf16.safetensors", "dest": "comfy/diffusion_models/acestep_v1.5_xl_turbo_bf16.safetensors", "size": 9974719892, "role": "unet"},
+        {"repo": "Comfy-Org/ace_step_1.5_ComfyUI_files", "path": "split_files/text_encoders/qwen_0.6b_ace15.safetensors", "dest": "comfy/text_encoders/qwen_0.6b_ace15.safetensors", "size": 1191588248, "role": "text_encoder"},
+        {"repo": "Comfy-Org/ace_step_1.5_ComfyUI_files", "path": "split_files/text_encoders/qwen_4b_ace15.safetensors", "dest": "comfy/text_encoders/qwen_4b_ace15.safetensors", "size": 8379154232, "role": "planner"},
+        {"repo": "Comfy-Org/ace_step_1.5_ComfyUI_files", "path": "split_files/vae/ace_1.5_vae.safetensors", "dest": "comfy/vae/ace_1.5_vae.safetensors", "size": 337431732, "role": "vae"}
+      ]
+    },
+    {
+      "id": "ace-step-1.5-turbo",
+      "name": "ACE-Step 1.5 Turbo",
+      "description": "The lighter ACE-Step: a 2B renderer and a 1.7B planner, faster and half the size, a little less polished than XL. MIT licence.",
+      "default": false,
+      "engine": "comfy",
+      "family": "ace-step-1.5",
+      "abilities": ["music"],
+      "settings": {"steps": 8, "cfg": 1.0, "shift": 3.0},
+      "files": [
+        {"repo": "Comfy-Org/ace_step_1.5_ComfyUI_files", "path": "split_files/diffusion_models/acestep_v1.5_turbo.safetensors", "dest": "comfy/diffusion_models/acestep_v1.5_turbo.safetensors", "size": 4787825604, "role": "unet"},
+        {"repo": "Comfy-Org/ace_step_1.5_ComfyUI_files", "path": "split_files/text_encoders/qwen_0.6b_ace15.safetensors", "dest": "comfy/text_encoders/qwen_0.6b_ace15.safetensors", "size": 1191588248, "role": "text_encoder"},
+        {"repo": "Comfy-Org/ace_step_1.5_ComfyUI_files", "path": "split_files/text_encoders/qwen_1.7b_ace15.safetensors", "dest": "comfy/text_encoders/qwen_1.7b_ace15.safetensors", "size": 3708523360, "role": "planner"},
+        {"repo": "Comfy-Org/ace_step_1.5_ComfyUI_files", "path": "split_files/vae/ace_1.5_vae.safetensors", "dest": "comfy/vae/ace_1.5_vae.safetensors", "size": 337431732, "role": "vae"}
+      ]
+    },
+    {
+      "id": "stable-audio-3-medium",
+      "name": "Stable Audio 3 Medium",
+      "description": "Sound effects, ambience, loops, one-shots, single instruments and instrumental music - no singing - from 1 s to 6 minutes, in seconds on the card. Trained on licensed audio. Stability AI Community License: free for individuals and organisations under USD 1M revenue a year.",
+      "default": false,
+      "engine": "comfy",
+      "family": "stable-audio-3",
+      "abilities": ["sound"],
+      "settings": {"steps": 8, "cfg": 1.0},
+      "files": [
+        {"repo": "Comfy-Org/stable-audio-3", "path": "checkpoints/stable_audio_3_medium.safetensors", "dest": "comfy/checkpoints/stable_audio_3_medium.safetensors", "size": 9222116660, "role": "checkpoint"},
+        {"repo": "Comfy-Org/stable-audio-3", "path": "text_encoders/t5gemma_b_b_ul2.safetensors", "dest": "comfy/text_encoders/t5gemma_b_b_ul2.safetensors", "size": 1187264003, "role": "text_encoder"}
+      ]
+    }
   ]
 }

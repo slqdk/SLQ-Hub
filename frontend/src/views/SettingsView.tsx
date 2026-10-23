@@ -127,7 +127,8 @@ function ModelsTab({ s }: { s: S }) {
   const { models, refreshModels, toast, queue, modelNames } = useApp();
   const [busy, setBusy] = useState<string | null>(null);
   const [advanced, setAdvanced] = useState<ModelEntry | null>(null);
-  const downloading = !!models && [...models.llm, ...models.aux, ...models.comfy].some((m) => m.downloads.some((d) => d.status === "downloading" || d.status === "queued"));
+  const downloading = !!models && [...models.llm, ...models.aux, ...models.comfy, ...(models.audio ?? [])]
+    .some((m) => m.downloads.some((d) => d.status === "downloading" || d.status === "queued"));
   useInterval(refreshModels, downloading ? 2000 : 15000);
 
   const act = async (label: string, fn: () => Promise<unknown>) => {
@@ -188,6 +189,10 @@ function ModelsTab({ s }: { s: S }) {
           <ConfirmButton className="btn quiet small" confirmText="Remove it and its file?" disabled={!!busy}
             onConfirm={() => remove(m)}>Remove</ConfirmButton>
         </> : null} />
+      {!!models.audio?.length && <ModelGroup title="Sound, music and speech" items={models.audio} busy={busy}
+        onDownload={download} onCancel={cancel}
+        note="Speech runs on the CPU, so the chat model stays loaded; music and sound effects run on the card through ComfyUI. Once one is downloaded, ask for it in any chat."
+        extra={(m) => <span className="tag">{m.engine === "speech" ? "CPU" : "GPU"}</span>} />}
       {advanced && <ModelSettings model={advanced} thinkingInChats={!!s.data?.settings.agent?.thinking_in_chats}
         onClose={() => setAdvanced(null)} onSaved={() => { setAdvanced(null); refreshModels(); }} />}
       {addingHF && <AddFromHF onClose={() => setAddingHF(false)} onAdded={() => { setAddingHF(false); refreshModels(); }} />}
@@ -1101,6 +1106,13 @@ function AgentTab({ s }: { s: S }) {
   const imageModels = (models?.comfy ?? []).filter((m) => m.installed && !(m.requires ?? []).length);
   const imageOptions = imageModels.length ? imageModels.map((m) => ({ value: m.id, label: m.name }))
     : [{ value: current, label: "No image model downloaded" }];
+  const soundModels = (models?.audio ?? []).filter((m) => m.installed);
+  const soundOptions = (ability: string, language?: "da" | "other") => {
+    const fit = soundModels.filter((m) => (m.abilities ?? []).includes(ability)
+      && (language !== "other" || (m.languages ?? []).some((l) => l !== "da")));
+    return [{ value: "", label: fit.length ? `The first downloaded (${fit[0].name})` : "None downloaded" },
+      ...fit.map((m) => ({ value: m.id, label: m.name }))];
+  };
   return (
     <div>
       <SectionForm s={s} section="agent" title="The assistant" fields={[
@@ -1136,6 +1148,15 @@ function AgentTab({ s }: { s: S }) {
         { key: "timeout_s", label: "Default time limit for a command (seconds)", type: "number", min: 5, max: 3600 },
         { key: "max_timeout_s", label: "Longest a command may run (seconds)", type: "number", min: 10, max: 7200 },
       ]} />
+      {soundModels.length > 0 && <SectionForm s={s} section="sound" title="Sound" fields={[
+        { key: "music_model", label: "Model for music", type: "select", options: soundOptions("music"),
+          help: "Songs and instrumentals (music_generate). The assistant can still use another downloaded model if you name it." },
+        { key: "sound_model", label: "Model for sound effects", type: "select", options: soundOptions("sound") },
+        { key: "speech_model_da", label: "Voice model for Danish", type: "select", options: soundOptions("speech", "da"),
+          help: "Røst v3 sounds best; Røst v3 Turbo is about three times faster." },
+        { key: "speech_model", label: "Voice model for other languages", type: "select", options: soundOptions("speech", "other"),
+          help: "Used when it speaks the language; otherwise a model that does." },
+      ]} />}
       <SectionForm s={s} section="images" title="Images" fields={[
         { key: "model", label: "Model for pictures", type: "select", options: imageOptions,
           help: "Ask for a picture in any chat. The assistant can still use the other model if you name it." },
@@ -1469,6 +1490,13 @@ function CloudTab({ s }: { s: S }) {
 interface SystemData { version: string; services: Record<string, any>; gpu: { vram_total?: number; vram_used?: number };
   disk: Record<string, { total?: number; used?: number; free?: number }>; lastLoadError: string | null }
 
+/** The speech service's /health in a line: its CPU threads, the voice models in memory, whether it is speaking. */
+function speechDetail(h?: { threads?: number; loaded?: string[]; busy?: boolean }): string {
+  if (!h) return "answering";
+  const loaded = h.loaded?.length ? `loaded: ${h.loaded.join(", ")}` : "no voice model loaded";
+  return `${h.threads ?? "?"} CPU threads, ${loaded}${h.busy ? ", speaking" : ""}`;
+}
+
 function SystemTab() {
   const { toast, theme, setTheme, auth, refreshAuth } = useApp();
   const [sys, setSys] = useState<SystemData | null>(null);
@@ -1519,6 +1547,7 @@ function SystemTab() {
         <div className="list" style={{ marginBottom: 20 }}>
           {svc("Model server", !sys.services.llm?.error, sys.services.llm?.error ?? `${procs.length} process${procs.length === 1 ? "" : "es"}: ${procs.join(", ") || "none"}`)}
           {svc("ComfyUI", !sys.services.comfyui?.error, sys.services.comfyui?.error ?? `torch ${sys.services.comfyui?.system?.pytorch_version ?? "?"}`)}
+          {svc("Speech (CPU)", sys.services.speech?.ok, sys.services.speech?.ok ? speechDetail(sys.services.speech.health) : sys.services.speech?.error ?? `HTTP ${sys.services.speech?.status}`)}
           {svc("Web search (SearXNG)", sys.services.searxng?.ok, sys.services.searxng?.ok ? "answering" : sys.services.searxng?.error ?? `HTTP ${sys.services.searxng?.status}`)}
           {svc("Sandbox", sys.services.sandbox?.ok, sys.services.sandbox?.ok ? "answering" : sys.services.sandbox?.error ?? `HTTP ${sys.services.sandbox?.status}`)}
           <div className="list-row"><Lamp state="off" /><span className="grow"><b>GPU memory</b>

@@ -12,7 +12,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from .catalog import Catalog
+from .catalog import GROUPS, Catalog
 
 CIVITAI_LOGIN = ("Civitai wants a signed-in user for this file: create an API key at civitai.com (Account settings -> "
                  "API keys), put CIVITAI_TOKEN=... in /srv/slq-hub/.env, restart the Hub (update.sh compose up -d) "
@@ -49,7 +49,7 @@ class Downloads:
 
     def enqueue(self, entry_id: str) -> list[str]:
         entry = None
-        for group in ("llm", "aux", "comfy"):
+        for group in GROUPS:
             entry = self.catalog.get(group, entry_id)
             if entry:
                 break
@@ -58,7 +58,7 @@ class Downloads:
         added = []
         deps = [entry]
         for dep in entry.get("requires", []):
-            d = self.catalog.get("comfy", dep) or self.catalog.get("llm", dep) or self.catalog.get("aux", dep)
+            d = next((x for x in (self.catalog.get(g, dep) for g in GROUPS) if x), None)
             if d:
                 deps.insert(0, d)
         for e in deps:

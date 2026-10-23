@@ -85,7 +85,8 @@ function ToolRow({ tool, actions }: { tool: ToolView; actions: TurnActions }) {
           <span className="tool-name">{tool.subagent ? `Subagent: ${tool.subagent.description}` : toolLabel(tool.name)}</span>
         </span>
         <span className="tool-sum">{tool.subagent ? "" : summary}</span>
-        <span className="tool-time">{tool.state === "approval" ? "waiting for you" : tool.seconds != null ? seconds(tool.seconds) : busy ? "running" : ""}</span>
+        <span className="tool-time">{tool.state === "approval" ? "waiting for you" : tool.seconds != null ? seconds(tool.seconds)
+          : busy ? (tool.progress ? `${tool.progress.value}/${tool.progress.max}` : "running") : ""}</span>
       </button>
       {tool.state === "approval" && actions.runId && <Approval tool={tool} runId={actions.runId} />}
       {tool.children && tool.children.length > 0 && (open || busy) && (

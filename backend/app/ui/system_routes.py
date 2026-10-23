@@ -12,6 +12,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from .. import auth, hf
+from ..catalog import GROUPS
 from ..config import DEFAULTS
 from ..gpu.scheduler import SchedulerError
 from ..images import sources
@@ -162,7 +163,7 @@ async def models(request: Request):
     for f in downloads["files"]:
         by_model.setdefault(f["model"], []).append(f)
     out = {}
-    for group in ("llm", "aux", "comfy"):
+    for group in GROUPS:
         out[group] = []
         for e in hub.catalog.entries(group):
             out[group].append({**e, "installed": hub.catalog.installed(e),
@@ -242,7 +243,7 @@ async def hf_add(body: HFAdd, request: Request):
 
 
 def _unique_id(hub, want: str) -> str:
-    taken = {e["id"] for g in ("llm", "aux", "comfy") for e in hub.catalog.entries(g)}
+    taken = {e["id"] for g in GROUPS for e in hub.catalog.entries(g)}
     mid, n = want, 2
     while mid in taken:
         mid = f"{want}-{n}"
@@ -480,11 +481,19 @@ async def delete_key(key_id: int):
 
 # ---------------------------------------------------------------- system
 
-async def _probe(url: str, transport=None, timeout: float = 4) -> dict:
+async def _probe(url: str, transport=None, timeout: float = 4, details: bool = False) -> dict:
     try:
         async with httpx.AsyncClient(timeout=timeout, transport=transport) as c:
             r = await c.get(url)
-        return {"ok": r.status_code < 400, "status": r.status_code}
+        out = {"ok": r.status_code < 400, "status": r.status_code}
+        if details and r.status_code < 400:
+            try:
+                body = r.json()
+                if isinstance(body, dict):
+                    out["health"] = body
+            except ValueError:
+                pass
+        return out
     except httpx.HTTPError as exc:
         return {"ok": False, "error": exc.__class__.__name__}
 
@@ -514,6 +523,7 @@ async def system(request: Request):
         "services": {
             "llm": runner,
             "comfyui": comfy,
+            "speech": await _probe(env.speech_url + "/health", hub.transports.speech, details=True),
             "searxng": await _probe(env.searxng_url + "/healthz", hub.transports.web),
             "sandbox": await _probe(env.sandbox_url + "/health", hub.transports.sandbox),
         },

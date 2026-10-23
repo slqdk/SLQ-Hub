@@ -131,7 +131,7 @@ class DeviceTurns:
     def __init__(self, hub):
         self.hub = hub
         self.turns: dict[str, DeviceTurn] = {}
-        self._confine: tuple[float, bool] = (0.0, False)
+        self._confine: tuple[float, bool] = (float("-inf"), False)   # asked on first use (monotonic starts at boot)
         _registries.add(self)
 
     @property

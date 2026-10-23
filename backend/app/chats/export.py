@@ -28,7 +28,7 @@ MAX_FILES_BYTES = 60 * 1024 * 1024        # pictures and attachments in one bund
 MAX_FILE_BYTES = 25 * 1024 * 1024
 RESULT_CHARS = 1500                        # a tool result in the transcript
 ARG_CHARS = 300                            # a long string in a tool call's arguments, in the transcript
-SAFE_SECTIONS = ("models", "queue", "agent", "web", "sandbox", "images", "libraries")
+SAFE_SECTIONS = ("models", "queue", "agent", "web", "sandbox", "images", "sound", "libraries")
 EXT = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "image/gif": ".gif", "application/pdf": ".pdf",
        "text/plain": ".txt", "text/markdown": ".md", "application/json": ".json"}
 

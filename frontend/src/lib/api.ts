@@ -96,6 +96,7 @@ export interface Display {
   library_hits?: { doc_id: number; filename: string; page: number; score: number; image: string | null; via: string[]; text: string }[];
   sources?: { title: string; url: string }[];
   mcp?: { server: string; tool: string };
+  audio?: { path: string; seconds: number; model: string }[];
   [k: string]: unknown;
 }
 export interface Todo { content: string; status: "pending" | "in_progress" | "completed" }
@@ -156,6 +157,8 @@ export interface ModelEntry { id: string; name: string; description?: string; de
   server?: Record<string, unknown>; thinking?: { efforts?: string[]; default_effort?: string; default?: boolean };
   context_per_request?: number; parameter_size?: string; quantization?: string; aliases?: string[]; requires?: string[];
   custom?: boolean; family?: string; abilities?: string[]; sdxl?: SdxlSettings; architecture?: string;
+  /** Sound models: where they run (the card through ComfyUI, or the CPU speech service) and what they speak. */
+  engine?: "comfy" | "speech"; languages?: string[];
   /** Sampling per mode (instruct = without thinking): the card's, the family's, or set in Settings (sampling_own). */
   sampling?: Partial<Record<"instruct" | "thinking", Sampling>>; sampling_card?: Partial<Record<"instruct" | "thinking", Sampling>>;
   sampling_own?: boolean; thinking_mode?: "on" | "off";
@@ -182,7 +185,7 @@ export interface HFLookup { repo: string; url: string; choices: HFChoice[];
   meta: { architecture?: string | null; context_length?: number | null; parameters?: number | null;
     tools?: boolean | null; thinking?: boolean | null };
   suggested: { id: string; name: string }; freeDisk: number; vram: number }
-export interface ModelsData { llm: ModelEntry[]; aux: ModelEntry[]; comfy: ModelEntry[]; current: string | null;
+export interface ModelsData { llm: ModelEntry[]; aux: ModelEntry[]; comfy: ModelEntry[]; audio?: ModelEntry[]; current: string | null;
   defaults: { default: string; fallback_alias: string; preload: boolean }; sdxl?: SdxlChoices }
 
 export interface ApiKey { id: number; name: string; prefix: string; priority: string; allowed_ips: string;

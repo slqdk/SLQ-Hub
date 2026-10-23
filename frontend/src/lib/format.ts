@@ -51,7 +51,7 @@ export function residencyName(need: string | null | undefined, names: Record<str
   if (!need) return "Nothing loaded";
   const [kind, id] = need.split(":", 2);
   if (kind === "llm") return names[id] ?? id;
-  if (kind === "comfy") return "ComfyUI (images)";
+  if (kind === "comfy") return "ComfyUI (pictures, sound)";
   if (kind === "embedgpu") return "Indexing pages";
   if (kind === "idle") return "Nothing loaded";
   return need;

@@ -33,7 +33,7 @@ decided and how the pieces fit; `docs/INSTALL.md` is the step-by-step guide.
 | Cloud | Automatic escalation for hard tasks, but **only in web chats inside projects where it is switched on** (off by default), and after the stronger local model. API calls from apps never leave the house. |
 | Images | Understand (vision), generate, edit, and classical processing (crop, scale, convert, OCR). |
 | Image engine | ComfyUI, headless behind the Hub. |
-| Other media in v1 | None (no speech, no video). |
+| Sound (0.13.0) | The agent makes speech, music and sound effects as audio files. Speech runs on the CPU in its own container (Chatterbox: Røst v3 for Danish, Chatterbox Multilingual V3 for 23 languages), so the chat model stays on the card; music (ACE-Step 1.5) and sound effects (Stable Audio 3) run in ComfyUI through the queue. No video. |
 | Where images are made | In the chat only. No separate studio section. |
 | API clients | FamilyLog (Ollama API) and TwinCAT Coagent (format unknown, so all three: OpenAI, Ollama, Anthropic, with a CORS allowlist). |
 | Queue policy | Priority + FIFO. Interactive web chat before apps, apps before background work. FIFO within a priority. Jobs for the loaded model are grouped to avoid model swaps. |
@@ -64,6 +64,8 @@ Proxmox host
     │              llama-server per model when the Hub says so. Internal only.
     ├── comfyui    ComfyUI on PyTorch ROCm 7.14. Internal only
     │              (127.0.0.1:8188 on the VM for maintenance through an SSH tunnel).
+    ├── speech     Text to speech on the CPU (Chatterbox, Røst; CPU PyTorch).
+    │              No GPU. Internal only.
     ├── searxng    Web search for the agent. Internal only.
     └── sandbox    Ubuntu with Python, Node, ImageMagick, Tesseract, ffmpeg …
                    runs the agent's commands as uid 1000 in /workspace.
@@ -72,7 +74,7 @@ Proxmox host
 
 Networks:
 
-- `core` — hub, llm, comfyui, searxng.
+- `core` — hub, llm, comfyui, speech, searxng.
 - `sbx` — hub and sandbox only. The sandbox is not on `core`, has no Docker
   socket, and `DOCKER-USER` rules on the VM drop its traffic to private
   ranges (internet stays open for `pip install`, `git clone`, …).
@@ -84,6 +86,7 @@ Volumes (host paths, all under `/srv/slq-hub`):
 | `data/` | `hub.db`, settings, chats, uploads, generated images, project files, sync revisions, skills, memory, libraries. Backed up by `update.sh`. |
 | `models/llm/` | GGUF files. Not backed up (re-downloadable). |
 | `models/comfy/` | ComfyUI model folders (`diffusion_models/`, `text_encoders/`, `vae/`, …). |
+| `models/speech/` | The speech models (made by the Hub on the first download; the speech container mounts `models/` read-only). |
 | `comfy/` | ComfyUI input/output/user folders. |
 
 ---
@@ -91,8 +94,10 @@ Volumes (host paths, all under `/srv/slq-hub`):
 ## 3. The GPU scheduler (the queue)
 
 There is one card. Everything that touches it goes through
-`backend/app/gpu/scheduler.py`: web chat turns, API calls from apps, image
-jobs and library indexing. The queue lives in memory, as in SLQ: a request
+`backend/app/gpu/scheduler.py`: web chat turns, API calls from apps, image,
+music and sound-effect jobs, and library indexing. CPU work does not ask the
+queue: the CPU embedding models, and speech, which runs in its own container
+without a GPU. The queue lives in memory, as in SLQ: a request
 that was waiting when the backend restarted cannot be resumed anyway,
 because its connection is gone. Finished jobs are written to the database
 for statistics.
@@ -174,6 +179,21 @@ in a unified KV pool, q8_0 cache and the context chosen when adding them:
 | `embed-text` | `Qwen/Qwen3-Embedding-0.6B-GGUF` `Qwen3-Embedding-0.6B-Q8_0.gguf` | — | CPU (`--device none`); started when needed, stopped after 15 idle minutes. |
 | `rerank` | `ggml-org/Qwen3-Reranker-0.6B-Q8_0-GGUF` | — | CPU, the same way. |
 | `embed-vl` | `mradermacher/Qwen3-VL-Embedding-2B-GGUF` Q8_0 + mmproj | — | Page images for libraries. Always CPU for queries; indexing on the CPU by default, or on the GPU as a background queue job (Settings → Assistant → Libraries). |
+
+**Sound models** (0.13.0; Settings → Models → Sound, music and speech; none
+is downloaded by default). Details in section 8.
+
+| Id | Files | Runs on | Licence |
+|---|---|---|---|
+| `roest-v3` | `CoRal-project/roest-v3-chatterbox-500m`: T3 (2.1 GB), Resemble's S3Gen (1.1 GB) and voice encoder, the voices Mic and Nic | CPU | OpenRAIL |
+| `roest-v3-turbo` | `CoRal-project/roest-v3-chatterbox-350m`: T3 (1.9 GB), the two-step S3Gen (1.1 GB), its GPT-2 tokenizer, the same voices | CPU | OpenRAIL |
+| `chatterbox-multilingual-v3` | `ResembleAI/chatterbox`: `t3_mtl23ls_v3` (2.1 GB), the built-in voice `conds.pt`; S3Gen, voice encoder and voices shared with Røst v3 | CPU | MIT |
+| `ace-step-1.5-xl-turbo` | `Comfy-Org/ace_step_1.5_ComfyUI_files`: XL turbo bf16 (10 GB), Qwen3 0.6B encoder, 4B planner (8.4 GB), VAE | GPU | MIT |
+| `ace-step-1.5-turbo` | the same repository: turbo (4.8 GB), 1.7B planner (3.7 GB), shared encoder and VAE | GPU | MIT |
+| `stable-audio-3-medium` | `Comfy-Org/stable-audio-3`: checkpoint (9.2 GB), T5Gemma encoder (1.2 GB) | GPU | Stability AI Community (free under USD 1M revenue) |
+
+Not chosen: YuE and OmniVoice (non-commercial licences), MiniMax Music
+(unclear licence, slow), Stable Audio Open (superseded by Stable Audio 3).
 
 VRAM budget for Qwen3.8-27B (from its config: 16 full-attention layers × 4
 KV heads × 256 head dim): weights 15.3 GiB + mmproj 0.9 + recurrent state
@@ -346,12 +366,13 @@ message's time with the conversation.
 | `bash` | Runs in the sandbox in the project folder, with a timeout and output limits. Long output goes to a file, and the model gets the head, the tail and the path. |
 | `view_image`, `image_transform`, `image_ocr` | Look at an image; crop, resize, rotate, convert and compress (Pillow); Tesseract OCR (dan+eng). |
 | `image_generate`, `image_edit`, `image_remove_background` | ComfyUI through the queue (the lease switches residency). |
+| `speech_generate`, `music_generate`, `sound_generate` | Audio files in the working folder (0.13.0, section 8): speech on the CPU (the speech service), music and sound effects in ComfyUI through the queue. Offered when a model for them is downloaded. |
 | `skill` | Loads a skill's SKILL.md, or one of its other files (`skill(name, file)`). |
 | `memory` | One tool with commands: view, create, str_replace, insert, delete, rename. Global memory (`/memories`) plus per-project memory (`/memories/project`). |
 | `library_search` | Present when the chat or project has libraries: text and page-image search, with page images for the vision model. |
 | `artifact` | Create or update an HTML, React, SVG, Mermaid, Markdown or code artifact, with versions. Shown in the side panel in a sandboxed iframe. React and Babel are served locally, so it works offline. |
 | `todo_write` | A visible checklist for long tasks. It helps a 27B model keep track of them. |
-| `task` | A subagent with a fresh context and the tools except artifact, todo_write, image generation, task and escalate, inside the same lease. Its steps show nested under the call; only its report goes back. |
+| `task` | A subagent with a fresh context and the tools except artifact, todo_write, image and sound generation, task and escalate, inside the same lease. Its steps show nested under the call; only its report goes back. |
 | MCP tools | From configured servers: streamable HTTP, or stdio servers that run inside the sandbox through a pipe in the sandbox daemon. These ask first, with "Always allow" per tool. |
 | `escalate` | Present when someone can take over: the stronger local model (Settings → Assistant), or the cloud where escalation is on. Its description names who. |
 
@@ -466,8 +487,10 @@ startup sweep uses it after a restart. Turns whose device never comes back
 are deleted after an hour, and a person has at most four such turns waiting.
 ComfyUI keeps nothing either (`images.pipeline.EPHEMERAL`): after each job
 the Hub deletes its history entry and, through the mounted folders
-(`HUB_COMFY_FILES`), the output and input pictures. What does stay: the queue
-log's row for each answer (the person's name, "Chat", the model, the times).
+(`HUB_COMFY_FILES`), the output and input pictures and sounds. The speech
+service keeps no voice prompt from a person's clip (`cache_voice` false). What
+does stay: the queue log's row for each answer (the person's name, "Chat",
+the model, the times).
 
 ---
 
@@ -517,7 +540,7 @@ restore, and the sync devices.
 
 ---
 
-## 8. Images
+## 8. Images and sound
 
 - **Vision input.** Pasted or attached images, and `read_file` / `view_image`
   on project images, go to Qwen3.8 as images. They are downscaled to at most
@@ -597,6 +620,76 @@ restore, and the sync devices.
 - **Outputs.** Generated images appear in the chat and are saved in the
   project's `images/` folder when the chat is in a project.
 
+### Sound (0.13.0)
+
+Three tools make one audio file each in the working folder, and the card under
+the answer plays it (`backend/app/audio/`, `backend/app/agent/tools/audio.py`).
+A tool is offered only when a model for it is downloaded, never in subagents;
+its description is built per turn from the downloaded models (voices, languages,
+routing), and the system prompt says what each costs.
+
+- **Speech (`speech_generate`)** runs on the CPU in the `speech` container
+  (`services/speech/server.py`): Resemble AI's Chatterbox at a pinned commit on
+  CPU PyTorch 2.11, an aiohttp server on the `core` network. It never asks the
+  queue, like the CPU embedding models: the chat model stays loaded with its
+  prompt cache, and a sentence costs seconds instead of two model swaps.
+  - **Models.** Røst v3 (CoRal, 0.5B, Danish; reads English with a heavy
+    accent, and the result says so), Røst v3 Turbo (350M, about three times
+    faster, a little less natural; clips over five seconds), Chatterbox
+    Multilingual V3 (23 languages, a built-in voice, expressiveness). Røst v3
+    and Chatterbox Multilingual V3 share S3Gen and the voice encoder (only T3
+    differs); Turbo has its own two-step S3Gen.
+  - **Which model.** The one named in the call; otherwise Settings → Assistant
+    → Sound: the voice model for Danish, or the one for other languages -
+    unless that one does not speak the language and another downloaded model
+    does. Empty settings mean the first downloaded.
+  - **Voices.** A model's own (Mic and Nic, described as male and female from
+    the samples' median pitch; Chatterbox's `default`), or a clip in the
+    working folder (5-20 s of one person). ffmpeg converts a clip in the
+    sandbox - confined to the turn in a person's chat - to a 24 kHz mono WAV
+    (its first 30 s, local files only), so no media library parses users'
+    files in the Hub or the speech service. Both read WAVs with the same small
+    reader (`wavfile.py`, `parse_wav`: PCM of 8-32 bits and 32/64-bit float -
+    the Røst samples are float).
+  - **How it speaks.** The text is cut into pieces of at most 260 characters at
+    sentence ends (then commas, then words); each is spoken with the same voice
+    and seed + its number, trimmed at -45 dB, and the pieces are joined with
+    0.15 s pauses (0.45 s between paragraphs) and encoded once (MP3 96 kb/s,
+    Opus 48 kb/s, FLAC or WAV). A ceiling of three speech tokens per character
+    (at most 1000) stops a model that loses its place. Expressiveness sets
+    Chatterbox's exaggeration, with guidance 0.3 from 0.65 up (its own advice).
+    Chatterbox's Perth watermark stays in.
+  - **The service.** One request at a time; the progress per piece streams
+    back as NDJSON (the tool row shows it), and a Hub that goes away stops the
+    work after the piece in hand. At most two models in memory, the least
+    recently used dropped first and its memory handed back (`malloc_trim`); all
+    dropped after 15 idle minutes. A clip's voice prompt waits for the next
+    request only when the Hub asks (`cache_voice`): for the owner, never in a
+    person's chat. 6,000 characters per call.
+- **Music (`music_generate`)**: ACE-Step 1.5 in ComfyUI's native nodes, as in
+  the official template: `UNETLoader`, `DualCLIPLoader` (type `ace`: the 0.6B
+  encoder and the planner), `TextEncodeAceStepAudio1.5` (style, lyrics with
+  section tags, BPM, key, time signature, language, length, seed),
+  `EmptyAceStep1.5LatentAudio`, AuraFlow sampling with shift 3, 8 euler steps
+  at cfg 1, `VAEDecodeAudio`, `SaveAudioAdvanced` (MP3 V0, FLAC or Opus
+  128 kb/s). 10-300 s; no lyrics means an instrumental; English is strongest.
+- **Sound effects (`sound_generate`)**: Stable Audio 3 Medium with its
+  T5Gemma encoder: the prompt gets the tag the model was trained with
+  (`TrackType: SFX`, `Instrument` or `Music, VocalType: Instrumental`, by
+  `kind`), a BPM for loops and music, and the length; 8 lcm steps at cfg 1;
+  0.5-380 s.
+- **On the card**, music and sound effects go the way pictures do: the turn's
+  lease switches to `comfy` (or the pipeline takes its own `audio` job), the
+  graph is checked against `/object_info`, `run_job(kind="audio")` takes the
+  file from the job's history, and in a person's chat ComfyUI's copy and
+  history entry are deleted after the job. The sampler's steps and the
+  planner's tokens show as progress in the tool row (at most twice a second).
+- **Files.** Named from the text (`tredive-sekunder-tilbage.mp3`, then
+  `-2`, ...), in a project under `audio/`. `save_as` may name a file (a path
+  in the folder or a sandbox path) or a folder. In a person's chat a file must
+  fit the 25 MB a device turn sends back: a FLAC over 120 s is refused before
+  the card works on it, and a result too big says so.
+
 ---
 
 ## 9. Libraries (multimodal RAG)
@@ -654,10 +747,13 @@ running, amber waiting, blue your action is needed (a tool asks), red fault.
 - **Libraries.** Documents with indexing progress and a search to try.
 
 Settings: models (download with progress, load, free the GPU, server
-parameters), queue, apps and keys (with connection examples and CORS),
-assistant (agent, libraries, web, sandbox, images), skills, memory, MCP
-servers (and the tools you always allow), cloud, system (services, VRAM,
-disk, logs, theme, password).
+parameters; the sound models in their own group, each marked CPU or GPU),
+queue, apps and keys (with connection examples and CORS), assistant (agent,
+libraries, web, sandbox, images, sound: the model for music, for sound effects,
+and the voice models for Danish and for other languages), skills, memory, MCP
+servers (and the tools you always allow), cloud, system (services - the speech
+service with its threads and loaded models - VRAM, disk, logs, theme,
+password).
 
 On mobile it shows one column, and the panels become overlays. It is an
 installable PWA (manifest, icons, a service worker that caches only the app
@@ -730,6 +826,13 @@ assistant made), each sent with every message.
   - public DNS servers (Docker's embedded DNS would otherwise forward to the
     LAN resolver).
 - **Web fetch.** `web_fetch` refuses private and loopback addresses.
+- **Speech service.** On `core` only: not published, and the sandbox's
+  network cannot reach it. It reads only files under `/models/speech`
+  (resolved paths; the models folder is mounted read-only), a voice file only
+  as `.wav` and at most 25 MB, a clip only as WAV bytes (users' audio is
+  converted by ffmpeg in the sandbox first), at most 6,000 characters. Model
+  files load with `torch.load(weights_only=True)` or safetensors; Hugging Face
+  is offline; it writes nothing but its tmpfs `/tmp`.
 - **Phone chat page.** A client of the model API like any app (LAN guard,
   key, address limit). It renders answers with the UI's sanitising Markdown
   renderer and runs on the Hub's origin, so a signed-in browser opening it
@@ -759,7 +862,13 @@ assistant made), each sent with every message.
 4. Start the new version and wait for health.
 5. On failure, roll back code, images and data automatically.
 
-`update.sh status|backups|rollback` exist too.
+`update.sh status|backups|rollback` exist too. An update makes the folders
+the services mount when a new version adds one (owned by uid 1000).
+
+**Self-test.** `python -m app.cli selftest` checks every service, the
+sandbox's isolation and one answer with its tokens/s; `--images` makes a
+picture, and `--speech` speaks a sentence with each downloaded voice model and
+reports the real-time factor.
 
 **Logs.** `update.sh compose logs -f <service>`. The Hub keeps an error log
 and per-model llama-server logs, viewable in Settings → System.
@@ -803,6 +912,14 @@ clock times), the tail of llama-server's log and the chat's files (up to
 - **Landlock in the sandbox container** needs the kernel's LSM list to include
   it and Docker's seccomp profile to allow its three system calls. Without
   it people simply get no code (the self-test's "sandbox for people" line).
+- **Speech on the CPU** has not run on the VM: its speed on the VM's cores is
+  unknown (`selftest --speech` reports the real-time factor), and so is how the
+  Røst voices sound through this service. Tested with random-weight models of
+  the real architectures.
+- **ACE-Step 1.5 and Stable Audio 3 on gfx1100** have not run on the card:
+  VRAM (XL is about 20 GB with its planner), speed and quality are unknown, as
+  is how well ACE-Step sings Danish. The graphs were validated against a real
+  ComfyUI v0.42.3.
 - **People's chats in the browser** depend on the browser keeping IndexedDB.
   The app asks for persistent storage, but Safari deletes a website's storage
   after seven days of use without a visit to it - except for a page added to

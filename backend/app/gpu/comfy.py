@@ -1,7 +1,7 @@
 """Client for the headless ComfyUI in the `comfyui` container.
 
-Only the scheduler's image jobs call run(); the scheduler has made sure no
-LLM is on the card first.
+Only the scheduler's image and sound jobs call it; the scheduler has made
+sure no LLM is on the card first.
 """
 from __future__ import annotations
 
@@ -31,12 +31,16 @@ class ComfyError(RuntimeError):
 ProgressFn = Callable[[int, int, str | None], Awaitable[None] | None]
 
 
+LOADERS = {"LoadImage": "image", "LoadImageMask": "image", "LoadAudio": "audio"}   # node -> its file input
+OUTPUT_KINDS = ("images", "audio")          # what saving nodes put in a job's history
+
+
 def input_images(graph: dict) -> list[str]:
-    """The pictures a graph loads from ComfyUI's input folder."""
+    """The files a graph loads from ComfyUI's input folder (pictures, sound)."""
     out = []
     for node in graph.values():
-        if isinstance(node, dict) and node.get("class_type") in ("LoadImage", "LoadImageMask"):
-            name = (node.get("inputs") or {}).get("image")
+        if isinstance(node, dict) and node.get("class_type") in LOADERS:
+            name = (node.get("inputs") or {}).get(LOADERS[node["class_type"]])
             if isinstance(name, str) and name:
                 out.append(name)
     return out
@@ -125,6 +129,12 @@ class Comfy:
                           keep: bool = True) -> tuple[list[tuple[str, bytes]], dict[str, list[str]]]:
         """Like run(), plus the text outputs by node id (PreviewAny shows text). keep=False: ComfyUI keeps
         nothing of the job afterwards (forget())."""
+        return await self.run_job(graph, on_progress, timeout, keep, kind="images")
+
+    async def run_job(self, graph: dict, on_progress: ProgressFn | None = None, timeout: float = 1800,
+                      keep: bool = True, kind: str = "images") -> tuple[list[tuple[str, bytes]], dict[str, list[str]]]:
+        """Queue a workflow, wait for it, and return the files its saving nodes wrote - pictures (kind "images")
+        or sound ("audio") - with the text outputs by node id."""
         client_id = uuid.uuid4().hex
         prompt_id: str | None = None
         hist: dict | None = None
@@ -138,19 +148,20 @@ class Comfy:
             status = hist.get("status") or {}
             if status.get("status_str") == "error":
                 raise ComfyError("ComfyUI reported an error: " + _status_message(status))
-            images: list[tuple[str, bytes]] = []
+            files: list[tuple[str, bytes]] = []
             texts: dict[str, list[str]] = {}
             for node_id, out in (hist.get("outputs") or {}).items():
                 if isinstance(out.get("text"), list):
                     texts[str(node_id)] = [str(t) for t in out["text"]]
-                for img in out.get("images") or []:
-                    if img.get("type") not in (None, "output"):
+                for item in out.get(kind) or []:
+                    if item.get("type") not in (None, "output"):
                         continue
-                    data = await self.view(img["filename"], img.get("subfolder", ""), img.get("type", "output"))
-                    images.append((img["filename"], data))
-            if not images:
-                raise ComfyError("the workflow finished without an output image")
-            return images, texts
+                    data = await self.view(item["filename"], item.get("subfolder", ""), item.get("type", "output"))
+                    files.append((item["filename"], data))
+            if not files:
+                raise ComfyError("the workflow finished without an output image" if kind == "images" else
+                                 "the workflow finished without a sound file")
+            return files, texts
         except asyncio.CancelledError:
             if prompt_id:
                 await asyncio.shield(self.interrupt(prompt_id))
@@ -161,7 +172,7 @@ class Comfy:
 
     async def forget(self, graph: dict, prompt_id: str | None, hist: dict | None = None) -> None:
         """Delete what ComfyUI keeps of a job: its history entry (the prompt and file names, in memory) and, with
-        its folders mounted here, the pictures the job saved and the ones it loaded. Best effort."""
+        its folders mounted here, the pictures and sound the job saved and the files it loaded. Best effort."""
         files: list[tuple[str, str, str]] = [("input", "", name) for name in input_images(graph)]
         if prompt_id:
             if hist is None:
@@ -170,8 +181,10 @@ class Comfy:
                 except ComfyError:
                     hist = None
             for out in ((hist or {}).get("outputs") or {}).values():
-                for img in out.get("images") or []:
-                    files.append((img.get("type") or "output", img.get("subfolder") or "", img.get("filename") or ""))
+                for kind in OUTPUT_KINDS:
+                    for item in out.get(kind) or []:
+                        files.append((item.get("type") or "output", item.get("subfolder") or "",
+                                      item.get("filename") or ""))
             try:
                 async with self.client(10) as c:
                     await c.post(self.url + "/history", json={"delete": [prompt_id]})
@@ -206,7 +219,7 @@ class Comfy:
                 return
             await asyncio.sleep(1.0)
         await self.interrupt(prompt_id)
-        raise ComfyError(f"the image job did not finish within {int(timeout)} s")
+        raise ComfyError(f"the ComfyUI job did not finish within {int(timeout)} s")
 
     async def _run_ws(self, graph: dict, client_id: str, on_progress: ProgressFn | None, timeout: float) -> str:
         ws_url = self.url.replace("http://", "ws://").replace("https://", "wss://") + f"/ws?clientId={client_id}"
@@ -223,7 +236,7 @@ class Comfy:
                 left = deadline - time.monotonic()
                 if left <= 0:
                     await self.interrupt(prompt_id)
-                    raise ComfyError(f"the image job did not finish within {int(timeout)} s")
+                    raise ComfyError(f"the ComfyUI job did not finish within {int(timeout)} s")
                 try:
                     msg = await asyncio.wait_for(ws.recv(), timeout=min(left, 30))
                 except asyncio.TimeoutError:
@@ -248,7 +261,7 @@ class Comfy:
                     raise ComfyError(f"{data.get('node_type', 'a node')} failed: "
                                      f"{data.get('exception_message', '').strip()[:500]}")
                 elif kind == "execution_interrupted":
-                    raise ComfyError("the image job was interrupted")
+                    raise ComfyError("the ComfyUI job was interrupted")
                 elif kind == "execution_success" and data.get("prompt_id") == prompt_id:
                     return prompt_id
                 elif kind == "executing" and data.get("node") is None and data.get("prompt_id") == prompt_id:

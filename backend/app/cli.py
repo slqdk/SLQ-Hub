@@ -1,6 +1,6 @@
 """Command line inside the hub container.
 
-    python -m app.cli selftest [--images]   check every service, load the model, answer once
+    python -m app.cli selftest [--images] [--speech]   check every service, load the model, answer once
     python -m app.cli set-password [USER]   new password (asked, or one line on stdin)
     python -m app.cli create-key NAME [--priority normal|interactive|background]
     python -m app.cli keys                  list API keys
@@ -22,7 +22,7 @@ import time
 import httpx
 
 from . import auth, db
-from .catalog import Catalog
+from .catalog import GROUPS, Catalog
 from .config import load_env
 
 GREEN, RED, YELLOW, DIM, END = "\033[32m", "\033[31m", "\033[33m", "\033[2m", "\033[0m"
@@ -117,7 +117,58 @@ def _sandbox_exec(c: httpx.Client, env, cmd: str, timeout: int = 60) -> dict:
     return r.json()
 
 
-def selftest(images: bool = False) -> int:
+def _speech(rep, c, env, cat, try_it: bool) -> None:
+    """The speech service, and with --speech one sentence from each downloaded speech model (its real-time factor
+    on this machine's CPU)."""
+    try:
+        h = c.get(env.speech_url + "/health", timeout=10).json()
+    except Exception as exc:  # noqa: BLE001
+        rep.line("WARN", "speech", f"not answering ({exc.__class__.__name__}) - text to speech is off",
+                 "bash update.sh compose logs speech")
+        return
+    rep.line("PASS", "speech", f"torch {h.get('torch')} on {h.get('threads')} CPU threads")
+    models = [e for e in cat.entries("audio") if "speech" in (e.get("abilities") or []) and cat.installed(e)]
+    if not try_it:
+        rep.line("SKIP", "speech models", "run with --speech to speak one sentence with each downloaded voice model"
+                 if models else "none downloaded (Settings -> Models -> Sound, music and speech)")
+        return
+    from .audio.pipeline import role_files, speech_files
+    sentences = {"da": ("Hej, det her er en prøve fra SLQ Hub.", "Og her kommer en sætning mere, så farten kan måles."),
+                 "en": ("Hello, this is a test from SLQ Hub.", "And here is one more sentence, to measure the speed.")}
+    for e in models:
+        lang = "da" if "da" in (e.get("languages") or []) else "en"
+        voice = role_files(e, "voice")                  # Røst: its first voice file; Chatterbox: its built-in voice
+        spoken = []
+        try:
+            for text in sentences[lang]:                # the first one loads the model, the second one is the speed
+                body = {"model": {"key": e["id"], "family": e["family"], "files": speech_files(e, env.speech_models)},
+                        "text": text, "language": lang, "seed": 1, "format": "mp3",
+                        "voice": {"path": f"{env.speech_models}/{voice[0]['dest']}"}
+                        if voice and not role_files(e, "conds") else None, **(e.get("sampling") or {})}
+                done = None
+                with c.stream("POST", env.speech_url + "/speak", json=body, timeout=900) as r:
+                    for line in r.iter_lines():
+                        ev = json.loads(line) if line.strip() else {}
+                        if ev.get("event") in ("done", "error"):
+                            done = ev
+                if not done or done.get("event") != "done":
+                    rep.line("FAIL", f"speech: {e['id']}", (done or {}).get("message") or "no answer",
+                             "bash update.sh compose logs speech")
+                    break
+                spoken.append((float(done["seconds"]), float(done["compute"])))
+        except Exception as exc:  # noqa: BLE001
+            rep.line("FAIL", f"speech: {e['id']}", f"{exc.__class__.__name__}: {exc}",
+                     "bash update.sh compose logs speech")
+            continue
+        if len(spoken) == 2:
+            (_, first), (secs, took) = spoken
+            factor = took / max(secs, 0.01)
+            rep.line("PASS", f"speech: {e['id']}", f"{secs:.1f} s of speech took {took:.1f} s: real-time factor "
+                     f"{factor:.2f} ({'faster' if factor < 1 else 'slower'} than real time; the first sentence "
+                     f"took {first:.0f} s with loading the model)")
+
+
+def selftest(images: bool = False, speech: bool = False) -> int:
     env = load_env()
     rep = Report()
     print(f"SLQ Hub {env.version} self-test\n")
@@ -158,7 +209,7 @@ def selftest(images: bool = False) -> int:
 
     # ---- models on disk
     cat = Catalog(env.models_dir, env.data_dir / "models.override.json")
-    missing = [e["id"] for g in ("llm", "aux", "comfy") for e in cat.entries(g)
+    missing = [e["id"] for g in GROUPS for e in cat.entries(g)
                if e.get("default") and not cat.installed(e)]
     if missing:
         rep.line("WARN", "models", "not downloaded: " + ", ".join(missing),
@@ -213,6 +264,7 @@ def selftest(images: bool = False) -> int:
         rep.line("WARN", "comfyui", f"not answering ({exc.__class__.__name__}) - image tools are off",
                  "docker compose logs comfyui")
     _comfy_folders(rep, env)
+    _speech(rep, c, env, cat, speech)
 
     # ---- the model, through the Hub's own API (and its queue)
     key = auth.create_api_key(f"selftest-{os.getpid()}-{int(time.time())}", "interactive", "")
@@ -335,6 +387,7 @@ def main(argv: list[str] | None = None) -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
     st = sub.add_parser("selftest", help="check every service and answer one question")
     st.add_argument("--images", action="store_true", help="also generate one image")
+    st.add_argument("--speech", action="store_true", help="also speak one sentence with each speech model")
     sp = sub.add_parser("set-password", help="set a user's password")
     sp.add_argument("user", nargs="?")
     ck = sub.add_parser("create-key", help="create an API key for an app")
@@ -343,7 +396,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("keys", help="list API keys")
     a = ap.parse_args(argv)
     if a.cmd == "selftest":
-        return selftest(a.images)
+        return selftest(a.images, a.speech)
     if a.cmd == "set-password":
         return set_password(a.user)
     if a.cmd == "create-key":

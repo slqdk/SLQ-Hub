@@ -277,7 +277,7 @@ async def test_code_only_when_allowed_and_confined(signed_in, app, fakes):
         assert "bash starts in it" in system
         # without Landlock in the sandbox there is no bash for people (the owner keeps it)
         fakes.sandbox["landlock"] = 0
-        app.state.hub.extras["device"]._confine = (0.0, False)
+        app.state.hub.extras["device"]._confine = (float("-inf"), False)
         fakes.llama["requests"] = []
         fakes.llama["replies"] = [{"content": "No code here."}]
         await turn(app, phone, {"title": "Code", "messages": [user_msg("List the files")]})
@@ -285,7 +285,7 @@ async def test_code_only_when_allowed_and_confined(signed_in, app, fakes):
         assert "bash" not in names
     # and switched off by the owner: none either
     fakes.sandbox["landlock"] = 7
-    app.state.hub.extras["device"]._confine = (0.0, False)
+    app.state.hub.extras["device"]._confine = (float("-inf"), False)
     await signed_in.patch(f"/hub/api/people/{p['id']}", json={"may_run_code": False}, headers={"Origin": "http://hub"})
     async with client_from(app) as phone:
         await sign_in(phone)

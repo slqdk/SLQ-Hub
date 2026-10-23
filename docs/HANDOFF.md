@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.12.0, 2026-10-23)
+## State (0.13.0, 2026-10-23)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -23,6 +23,12 @@ can be set to work away from home, so the phone page works at
 away, with their chats kept in their own browser - the Hub answers each
 message in a temporary folder and keeps nothing of it (DESIGN §6 "People's
 chats", §11). Code for people runs only where the sandbox has Landlock.
+Since 0.13.0 the assistant makes **sound** (DESIGN §8 "Sound"): speech on the
+CPU in a new `speech` container (Røst v3 for Danish, Chatterbox Multilingual
+V3 for 23 languages), so the chat model stays on the card; music (ACE-Step
+1.5) and sound effects (Stable Audio 3) on the card through ComfyUI and the
+queue. No sound model is downloaded by default (Settings → Models → Sound,
+music and speech), and none has run on the real machine yet.
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
 host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU
@@ -128,6 +134,7 @@ the host if the VM ever stops by itself.
 | llama.cpp | b11783 built from source (CPU): every command line the Hub builds parses; `--no-cache-idle-slots` (0.11.2) measured with that binary and a tiny model: a 3,997-token conversation whose state (1.02 MiB) was bigger than a 1 MiB RAM cache was dropped when a short request ran on the other slot (its next message reused 0 tokens and read 4,005), while with the flag - or with a cache big enough - all 3,997 were reused; the server's trace shows the idle slot saved to the RAM cache and cleared; the real supervisor started the real llama-server through the Hub's scheduler, runner and client with a tiny random model - load, streaming (the real chunk format), a killed server noticed and reloaded, unload. Embeddings (strings and `content` arrays) and `/v1/rerank` answer in the shapes the Hub expects. |
 | ComfyUI | v0.42.3 on CPU with placeholder model files: all workflow graphs (Qwen-Image 2.1 generate, turbo, edit with 1 and 3 images, background removal, FLUX.2 klein generate and edit, ERNIE-Image and Turbo each with and without the prompt enhancer, Z-Image Turbo, Chroma1-HD with the default and a given negative, SDXL with clip skip 2 and tags and plain, and SDXL with every sampler and scheduler the settings offer: 41 in all) pass ComfyUI's own validation. Z-Image, Chroma and SDXL follow `image_z_image_turbo.json`, `image_chroma_text_to_image.json` and `image_sdxl_simple.json` (fetched 2026-10-22), including `TextGenerate`'s dynamic `sampling_mode.*` inputs. The ERNIE graphs follow the official templates (`Comfy-Org/workflow_templates`: `image_ernie_image.json`, `image_ernie_image_turbo.json`, fetched 2026-10-22). Tests: the graph shapes, and an agent turn with only Turbo downloaded (the enhancer's text comes back through `PreviewAny` into the tool result), the enhancer switched off, an edit with ERNIE chosen going to Qwen-Image. |
 | MCP over stdio | A real stdio MCP server through the real sandbox daemon (`execd.py`): initialize, a server-to-client ping, tools, an 18 KB result. |
+| Sound (0.13.0) | 18 tests (`tests/test_audio.py`) against a fake speech service and a fake ComfyUI: the catalog and downloads; no sound tools until a model is downloaded, then the voices with their labels read from float WAV samples (as the Røst files are); a Danish sentence spoken and saved (the request, the result, the card, the next free name); English going to Chatterbox with expressiveness and a voice memo converted by the sandbox's ffmpeg (the command, the copy removed, the voice kept for the owner); Røst Turbo's accent note and tokenizer folder; every error (unknown voice, missing or unreadable clip, bad extension, model not downloaded, the service's error, a 400, the service down); a song's graph; a song in a project under `audio/`, the Settings model, `save_as` as a sandbox path and as a folder; Stable Audio 3's prompt tags and FLAC; missing nodes; a person's sound and speech (the clip converted confined to her turn, ComfyUI's copy and history deleted, her voice not kept, a 300 s FLAC refused); a file too big for her device said so; both WAV readers (PCM of 8-32 bits, float 32/64, extensible, stereo, a LIST chunk, a stream's data size, refusals); the service's text pieces, limits, paths and voice cache; the compose service (no GPU, `models/` read-only, no CPU cap). The speech service itself (`server.py` in a venv with the pinned packages; torch 2.11.0 from PyPI on the CPU where the image has the CPU build of the same version) against random-weight models of both real architectures on 2 threads, 23 checks: MP3, WAV, FLAC and Opus that decode at the length it reports; the built-in voice; voice files as 16-bit WAV and as float WAV written by libsndfile (80-byte header) and by ffmpeg; a 48 kHz stereo clip resampled; a clip's voice kept only with `cache_voice`; a non-WAV clip refused; two paragraphs as pieces with progress; every refusal (empty, too long, format, a path outside the models, a model file as a voice, unknown family, a language it does not speak, a 0.5 s clip, Turbo's five seconds); a client that leaves (stopped after the piece in hand, free again); `/free`; a dropped model's memory handed back (4.4 GB loaded, 1.9 GB after `gc`, 0.84 GB after `malloc_trim`). ComfyUI v0.42.3 (CPU, placeholder files): all 26 sound graphs pass its validation (both ACE-Step models in each format, an instrumental waltz in an unknown language, Stable Audio 3 for every kind and format, 380 s); the Hub's client on real audio jobs (`EmptyAudio` → `SaveAudioAdvanced`) gets MP3, FLAC and Opus that decode at the right length, and `keep=False` deletes the file and the history entry. ffmpeg 6.1.1 with the clip command: an AAC voice memo (its first 30 s), an MP3 and a video's sound become 24 kHz mono WAV; a text file named `.mp3` and a playlist pointing to the web are refused. The updater's `ensure_folders` in a temporary root. In Chromium (19 checks): the models page's sound group with CPU/GPU tags, Settings → Assistant → Sound, the speech service in Settings → System, speech, a song and a horn in a chat with the card playing each, the tool rows, phone width. An independent review (a separate agent, the whole diff) found seven issues, all fixed: the Røst voice samples are 32-bit float WAVs (their sizes are exactly an 80-byte libsndfile header plus float samples), which Python's `wave` cannot read - every Danish request would have failed; a person's voice kept in the service's cache; `save_as` with a sandbox path landing in a nested folder; a long FLAC never reaching a person's device; a voice path read before its size was checked; the speech service missing from the status views; the docs. |
 | People (0.11.0) | 19 tests (`tests/test_people.py`): adding, changing, signing out and removing a person (user names, case, passwords); home only (refused from outside before the password; a session taken outside is signed out) and away; every owner route 403 for a person, the sync API and the model API (`/v1`, `/api`) 401; settings reduced to three defaults with no secrets; a device turn (her name and no memory in the system prompt, no bash/memory/library tools, the photo seen, no chat/run/prompt rows left, folder and photo gone after `/done`, the queue log with her name and "Chat"); pictures, files and artifacts back to the device, an artifact changed in the next turn; bash only when allowed and Landlock present, sent confined; turns private between people and bad requests refused (paths out of the folder, `.hub/home`); the queue as a person sees it; swept turns and ledgers (a list written into the folder by her code is ignored); the run dropped and deleted files reported; ComfyUI's history entries and output/input pictures deleted for her and kept for the owner; a picture the owner or another turn stores meanwhile kept; only the skills switched on (list, prompt, the skill tool); at most four turns waiting for a device; the time each message was sent, from the device. 5 tests (`tests/test_sandbox_daemon.py`, real Landlock, skipped without it): a confined command reads and writes its folder only (not a sibling file, another turn's folder, `/root`; `TMPDIR` inside), `/dev/null`, `/dev/urandom`, process substitution and child processes work, `/dev/shm` and `/dev/pts` do not; background, `setsid` and `nohup` processes are killed when it ends, the owner's are not; bad confine settings refused. By hand on this build machine (kernel 6.18, ABI 7) as uid 1000: Landlock denies a confined process another process's `environ`, `mem` and `maps`, while `cmdline` stays readable (documented). The Hub's ComfyUI client against real ComfyUI v0.42.3 (CPU, a LoadImage → SaveImage graph): with `keep=False` the output file, the input file and the history entry are gone; with `keep=True` they stay. In Chromium (Playwright, 19 checks): Settings → People (add, list, the user name from the name), her chat at phone size (her sidebar, the thinking levels, no libraries), a title, a picture shown from the device's store, an artifact, an attachment and a file the assistant wrote in the Files panel, both chats and the picture after a reload with the Hub's copies gone, the owner seeing none of it, Export all chats → Import on a second browser with the picture, her session refused by the owner API, and not one refused request from her pages. An independent review (a separate agent, the whole diff) found five issues - `/dev/shm` writable, disabled skills readable, abandoned turns unbounded, the model API open to her session, `/proc/<pid>/cmdline` visible - the first four are fixed, the last is documented. |
 
 ## Not verified - check these on the real system
@@ -268,6 +275,44 @@ the host if the VM ever stops by itself.
     Safari and Chrome, an MP3 from the sandbox playing in Safari on an iPhone
     (the player asks for byte ranges), and whether Qwen3.8 now names the
     file and cleans up scratch files as the system prompt asks.
+28. **The speech image** (0.13.0): never built (no Docker daemon where this
+    was made). `python:3.12-slim`, torch and torchaudio 2.11.0 from PyTorch's
+    CPU index (torchaudio's `2.11.0+cpu` wheel for Python 3.12 is listed
+    there; torch's index page was too long to read from here), the pinned
+    requirements (all have wheels; none was compiled in the venv), chatterbox
+    from GitHub's tarball of commit `5de7a54`; the build ends with an import
+    check. A failed build stops the update before anything is stopped (the
+    clone goes back to the old commit); the build's output above "the build
+    failed" says why.
+29. **The real voice models**: Røst v3, Røst v3 Turbo and Chatterbox
+    Multilingual V3 have not been downloaded or loaded here
+    (huggingface.co was out of reach); the service ran only with random
+    weights of the same architectures. The catalog's paths and sizes come
+    from the repositories' file lists. `selftest --speech` is the check: it
+    speaks with Røst's Mic file (a float WAV) and Chatterbox's built-in
+    voice. Also unseen: whether Mic and Nic come out as "male voice" and
+    "female voice" from their pitch, and how Røst sounds through this
+    service's sentence splitting and pauses.
+30. **Speech speed on the VM**: unknown. The service uses all cores but two
+    (10 threads on VM 222). `selftest --speech` reports the real-time factor
+    once the model is loaded; if Røst v3 is slow, Røst v3 Turbo is about three
+    times faster.
+31. **Memory with sound**: two voice models in the speech container (about
+    4 GB each, a 12 GB limit) while ComfyUI reads ACE-Step XL's 20 GB of files
+    and the LLM's file is mapped, in a 40 GB VM. Watch `free -h` and the
+    kernel log for OOM kills the first time both run.
+32. **ACE-Step 1.5 and Stable Audio 3 on the card**: VRAM (XL Turbo with its
+    4B planner about 20 GB), the time per song and per effect, whether the
+    planner runs well under ROCm, how Danish lyrics sound. ACE-Step 1.5 Turbo
+    is the lighter choice if XL does not fit or is slow.
+33. **A person's voice clip in the real sandbox**: ffmpeg confined by
+    Landlock to her turn folder - tried with a fake sandbox and with the real
+    ffmpeg separately, not together.
+34. **Chinese, Japanese, Hebrew and Russian in Chatterbox Multilingual**:
+    their optional text helpers are not in the image (the Chinese one would
+    download a table from Hugging Face; the service runs offline), so these
+    languages are spoken from the plain text and probably worse - Chinese
+    likely badly. Danish, English and the other European languages need none.
 
 ## Where things are
 
@@ -282,6 +327,8 @@ the host if the VM ever stops by itself.
 | `backend/app/agent/tools/` | The tools; `meta_tools.py` has `task` and `escalate`; `mcp.py` the MCP client. |
 | `backend/app/projects/` | Projects, folders, the sync store and the `/api/sync` protocol. |
 | `backend/app/images/` | ComfyUI workflows, the image pipeline (by family), `sources.py` (SDXL checkpoints from Civitai and Hugging Face links). |
+| `backend/app/audio/`, `backend/app/agent/tools/audio.py` | Sound: the ACE-Step and Stable Audio 3 graphs (`workflows.py`), the pipeline (models, routing, ComfyUI through the queue, speech), the speech service's client and voice labels (`speech.py`), the WAV reader (`wavfile.py`); the three tools. |
+| `services/speech/server.py` | The speech service (Chatterbox on the CPU): text pieces, voices, the two model families, NDJSON over aiohttp. |
 | `backend/app/rag/` | Libraries: extraction, indexing, search, the `library_search` tool. |
 | `backend/app/cli.py` | `selftest`, `set-password`, `create-key`, `keys`. |
 | `frontend/src/` | The UI: `views/` (chat, project, libraries, settings), `components/`, `lib/turns.ts` (the turn view model for history and live runs). |
@@ -289,7 +336,7 @@ the host if the VM ever stops by itself.
 | `backend/app/agent/device.py`, `backend/app/ui/people_routes.py` | People's chats (device turns: the temporary folder, the result, what is deleted) and the People settings API. `backend/app/gate.py` has `MEMBER_ROUTES`. |
 | `frontend/src/person/` | The chat a person gets (`PersonApp.tsx`), their IndexedDB store (`store.ts`), the device-turn flow (`turns.ts`). |
 | `services/sandbox/confine.py` | Landlock confinement for people's commands (used by `execd.py`). |
-| `services/` | The llm supervisor, the ComfyUI image, the sandbox daemon. |
+| `services/` | The llm supervisor, the ComfyUI image, the sandbox daemon, the speech service. |
 
 ## Working on it
 
@@ -321,4 +368,6 @@ the host if the VM ever stops by itself.
   request for another model waits too.
 - The run's live events are kept in memory for an hour; the stored messages
   are permanent.
-- No custom ComfyUI workflows yet; no speech or video.
+- No custom ComfyUI workflows yet; no video. Speech, music and sound effects
+  are one file per call (no voice conversion, no editing of a song; ffmpeg in
+  bash mixes and cuts).

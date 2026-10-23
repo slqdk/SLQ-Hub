@@ -52,6 +52,8 @@ class Env:
     ui_port: int = 8080                # published ports on the VM
     ollama_port: int = 11434
     comfy_files: Path | None = None    # ComfyUI's input/ and output/ (mounted), to delete people's pictures there
+    speech_url: str = "http://127.0.0.1:7100"   # the speech service (text to speech on the CPU)
+    speech_models: str = "/models"     # the models folder as the speech service sees it
 
     @property
     def db_path(self) -> Path:
@@ -108,6 +110,8 @@ def load_env() -> Env:
         ui_port=int(e.get("HUB_PORT") or 8080),
         ollama_port=int(e.get("HUB_OLLAMA_PORT") or 11434),
         comfy_files=Path(e["HUB_COMFY_FILES"]) if e.get("HUB_COMFY_FILES") else None,
+        speech_url=e.get("HUB_SPEECH_URL", "http://127.0.0.1:7100").rstrip("/"),
+        speech_models=e.get("HUB_SPEECH_MODELS", "/models").rstrip("/") or "/models",
     )
 
 
@@ -161,6 +165,12 @@ DEFAULTS: dict = {
         "enhance_prompts": True,           # ERNIE-Image: let its own prompt enhancer expand the prompt
         "cfg": 1.0,
         "default_size": 1024,
+    },
+    "sound": {                             # "" = the first downloaded one (Settings -> Models order)
+        "music_model": "",
+        "sound_model": "",
+        "speech_model_da": "",             # Danish speech
+        "speech_model": "",                # every other language
     },
     "libraries": {
         "page_images": "cpu",              # cpu | gpu | off: embed page images for visual search (gpu = fast,

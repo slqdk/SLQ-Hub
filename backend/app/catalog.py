@@ -56,6 +56,9 @@ def family_sampling(architecture: str | None) -> dict | None:
     if (architecture or "").lower().startswith("qwen3"):          # qwen3, qwen3moe, qwen35, qwen35moe, qwen3next
         return copy.deepcopy(QWEN3_SAMPLING)
     return None
+# The catalog's groups: language models, CPU helpers, picture models (ComfyUI), and sound - music and sound effects
+# (ComfyUI) and speech (the speech service).
+GROUPS = ("llm", "aux", "comfy", "audio")
 EDITABLE_SERVER_KEYS = {"ctx", "parallel", "kv_unified", "cache_type", "gpu_layers", "flash_attn",
                         "cache_ram_mib", "extra"}
 
@@ -90,7 +93,7 @@ class Catalog:
         data = json.loads(self.bundled.read_text(encoding="utf-8"))
         over = self._read(self.override_path)
         # Models added from Hugging Face (Settings -> Models), after the bundled ones.
-        known = {e["id"] for g in ("llm", "aux", "comfy") for e in data.get(g, [])}
+        known = {e["id"] for g in GROUPS for e in data.get(g, [])}
         custom = self._read(self.custom_path)
         for c in custom.get("llm") or []:
             if isinstance(c, dict) and c.get("id") and c["id"] not in known and c.get("files") and c.get("server"):
@@ -178,7 +181,7 @@ class Catalog:
         """Add a language model from Hugging Face (hf.make_entry) or, with
         group "comfy", an SDXL picture model from a link (sources.make_entry)."""
         with self._lock:
-            taken = {e["id"] for g in ("llm", "aux", "comfy") for e in self._data.get(g, [])}
+            taken = {e["id"] for g in GROUPS for e in self._data.get(g, [])}
             if entry["id"] in taken:
                 raise ValueError(f"There is already a model called {entry['id']}.")
             data = self._read(self.custom_path)

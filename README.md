@@ -6,8 +6,9 @@ other app on the network calls models through the Hub's queue.
 
 - **Web UI**: chats and projects with an agent that searches the web, works
   on project files, runs code in a sandbox, sees, generates and edits images,
-  builds live artifacts, uses skills and memory, and can hand hard tasks to a
-  cloud model where you allow it.
+  speaks text and makes music and sound effects, builds live artifacts, uses
+  skills and memory, and can hand hard tasks to a cloud model where you allow
+  it.
 - **Model API** for other apps (FamilyLog, TwinCAT Coagent, …) in three
   formats — Ollama, OpenAI and Anthropic — all through one priority queue.
 - **People**: others in the household get the same chat with their own
@@ -17,7 +18,9 @@ other app on the network calls models through the Hub's queue.
   key, no login; the chats stay on the phone.
 - **SLQ Sync** for project files, protocol-compatible with SLQSync.exe.
 - **Models**: Qwen3.8-27B and Qwen3.6-35B-A3B on llama.cpp (ROCm), Qwen-Image
-  2.1 on ComfyUI, Qwen3 embeddings for document libraries.
+  2.1 on ComfyUI, Qwen3 embeddings for document libraries; optional sound
+  models - Røst v3 and Chatterbox for speech (on the CPU), ACE-Step 1.5 for
+  songs and Stable Audio 3 for sound effects (on the card).
 
 | Document | |
 |---|---|
@@ -35,5 +38,5 @@ other app on the network calls models through the Hub's queue.
     cd ../backend && python -m tests.devserver      # the Hub with fake services on :8080
 
 `tests.devserver` runs the whole app against fake llama-server, ComfyUI,
-sandbox and search services, so the UI can be worked on without a GPU
+sandbox, speech and search services, so the UI can be worked on without a GPU
 (sign in as `soren` / `correct horse battery`).

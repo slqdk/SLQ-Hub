@@ -62,6 +62,28 @@ Use them when the user wants an image made or changed, and write the prompt the 
 wants it."""
 
 
+SOUND = """
+
+# Sound
+- {tools} make audio files in the working folder, which the user plays under your answer. {how} Write \
+text for speech exactly as it should be spoken."""
+SOUND_TOOLS = {"speech": "speech_generate", "music": "music_generate", "sound": "sound_generate"}
+
+
+def sound_text(abilities: list[str]) -> str:
+    """The system prompt's sound section for the downloaded sound models ('' when there are none)."""
+    tools = [SOUND_TOOLS[a] for a in abilities if a in SOUND_TOOLS]
+    if not tools:
+        return ""
+    how = []
+    if "speech" in abilities:
+        how.append("Speech runs on the CPU: a few seconds per sentence.")
+    if "music" in abilities or "sound" in abilities:
+        how.append("Music and sound effects run on the GPU: seconds for an effect, a few minutes for a song.")
+    names = tools[0] if len(tools) == 1 else ", ".join(tools[:-1]) + " and " + tools[-1]
+    return SOUND.format(tools=names, how=" ".join(how))
+
+
 WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 
@@ -90,11 +112,12 @@ def system_prompt(*, user: str, model_name: str, folder_text: str, sandbox_path:
                   skills: list[dict], project: dict | None, summary: str = "", images_available: bool = True,
                   tz: str | None = None, handover_to: str = "", subagent: bool = False,
                   cloud_model: str = "", taken_over_from: str = "", memory: bool = True, code: bool = True,
-                  dropped: int = 0) -> str:
+                  dropped: int = 0, sound: list[str] | None = None) -> str:
     now = datetime.now(ZoneInfo(tz) if tz else local_tz())
     tools_line = TOOLS_LINE.format(sandbox_path=sandbox_path) if code else NO_CODE_LINE
     text = BASE.format(user=user, model=model_name, date=now.strftime("%A %d %B %Y"), folder=folder_text,
                        tools_line=tools_line, image_gen=IMAGE_GEN if images_available else "")
+    text += sound_text(sound or [])
     if memory:
         mem = ("Memory files:\n" + "\n".join(f"- {p}: {d}" for p, d in memory_index)) if memory_index else \
             "There are no memory files yet."

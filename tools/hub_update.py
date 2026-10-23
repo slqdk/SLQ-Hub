@@ -52,7 +52,10 @@ ENV_FILE = HUB_ROOT / ".env"
 COMPOSE = ROOT / "deploy" / "docker-compose.yml"
 OVERRIDE = HUB_ROOT / "docker-compose.override.yml"
 PROJECT = "slq-hub"
-BUILT = ("hub", "llm", "comfyui", "sandbox")          # services with their own image
+BUILT = ("hub", "llm", "comfyui", "sandbox", "speech")  # services with their own image
+# Folders the services mount, made (owned by uid 1000, the containers' user) before they start: Docker would
+# create a missing one as root, and the Hub could not download into it.
+FOLDERS = ("data", "models/llm", "models/comfy", "models/speech", "comfy/input", "comfy/output", "comfy/user")
 KEEP = 3
 TIMEOUT = 300
 POLL = float(os.environ.get("HUB_UPDATE_POLL", "3"))
@@ -349,6 +352,24 @@ def prune_backups(keep: int) -> list[str]:
     return gone
 
 
+def ensure_folders(root: Path = HUB_ROOT) -> list[str]:
+    """Make the mounted folders that are missing (an update can add one); returns those it made."""
+    made = []
+    for rel in FOLDERS:
+        p = root / rel
+        if p.is_dir():
+            continue
+        new = [q for q in (p, *p.parents) if root in q.parents and not q.exists()]   # it and missing parents
+        p.mkdir(parents=True, exist_ok=True)
+        for q in new:
+            try:
+                os.chown(q, 1000, 1000)
+            except OSError:
+                pass
+        made.append(rel)
+    return made
+
+
 def put_back(commit: str, images: dict[str, str | None], backup: str | None, timeout: float) -> bool:
     out.head("Putting the previous version back...")
     compose("stop")
@@ -357,7 +378,9 @@ def put_back(commit: str, images: dict[str, str | None], backup: str | None, tim
     rebuild = False
     for svc in BUILT:
         want = images.get(svc)
-        if want and image_id(svc, "rollback") == want:
+        if want is None:                       # the service is new in the version being put back: nothing to restore
+            continue
+        if image_id(svc, "rollback") == want:
             run(["docker", "tag", image_ref(svc, "rollback"), image_ref(svc, "latest")], check=True)
         else:
             rebuild = True
@@ -369,7 +392,7 @@ def put_back(commit: str, images: dict[str, str | None], backup: str | None, tim
     if backup:
         restore_data(backup)
         out.ok(f"Data   : restored from {backup}")
-    compose("up", "-d", capture=False, check=True)
+    compose("up", "-d", "--remove-orphans", capture=False, check=True)    # a service the old version lacks goes
     return wait_healthy(timeout)
 
 
@@ -446,6 +469,9 @@ def cmd_update(args) -> int:
         out.ok(f"Backup : {tar.name} ({human(tar.stat().st_size)})")
 
     out.head("Starting the new version...")
+    made = ensure_folders()
+    if made:
+        out.ok("Folders: made " + ", ".join(made))
     compose("up", "-d", "--remove-orphans", capture=False, check=True)
     if wait_healthy(args.timeout):
         gone = prune_backups(args.keep)
@@ -516,7 +542,7 @@ def cmd_status(args) -> int:
     preflight(need_clean=False)
     out.info(f"Clone  : {ROOT} at {git('rev-parse', '--short', 'HEAD').stdout.strip()}, "
              f"version {read_version_at()}")
-    for svc in ("hub", "llm", "comfyui", "searxng", "sandbox"):
+    for svc in ("hub", "llm", "comfyui", "speech", "searxng", "sandbox"):
         state = container_state(svc)
         (out.ok if state == "running" else out.warn)(f"{svc:<8}: {state}")
     (out.ok if answers() else out.bad)("Hub answers" if answers() else "Hub does not answer")

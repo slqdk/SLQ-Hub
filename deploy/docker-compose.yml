@@ -41,6 +41,7 @@ services:
       HUB_SANDBOX_URL: http://172.31.250.20:7000
       HUB_SANDBOX_IP: 172.31.250.20
       HUB_COMFY_FILES: /comfy
+      HUB_SPEECH_URL: http://speech:7100
     ports:
       - "${HUB_PORT:-8080}:8080"          # web UI + API (Nginx Proxy Manager points here)
       - "${HUB_OLLAMA_PORT:-11434}:8080"  # the same app on Ollama's usual port
@@ -101,6 +102,30 @@ services:
       - ${HUB_ROOT:-/srv/slq-hub}/comfy/user:/opt/ComfyUI/user
     ports:
       - "127.0.0.1:8188:8188"   # maintenance only: ssh -L 8188:127.0.0.1:8188 <vm>
+    networks: [core]
+
+  # Text to speech on the CPU (Chatterbox, Røst): no GPU, so the chat model stays on the card while it speaks.
+  speech:
+    build:
+      context: ../services/speech
+    image: slq-hub-speech:latest
+    container_name: slq-hub-speech
+    restart: unless-stopped
+    init: true
+    environment:
+      SPEECH_THREADS: ${SPEECH_THREADS:-}
+      TZ: ${TZ:-Europe/Copenhagen}
+    volumes:
+      # all of models/, read-only: the Hub makes models/speech when it downloads the first voice model (a folder
+      # Docker made for a mount of its own would belong to root, and the Hub could not write into it). The
+      # service reads only files under /models/speech.
+      - ${HUB_ROOT:-/srv/slq-hub}/models:/models:ro
+    tmpfs:
+      - /tmp:size=1g
+    # No hard CPU cap (one above the VM's cores would stop the container from starting): the service uses all
+    # cores but two, or SPEECH_THREADS, and under contention it yields to the Hub and the model containers.
+    cpu_shares: 512
+    mem_limit: ${SPEECH_MEM:-12g}
     networks: [core]
 
   searxng:

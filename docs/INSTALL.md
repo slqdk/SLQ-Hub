@@ -271,6 +271,34 @@ When the Hub has run well for a while, delete VM 104 on the host:
 
     qm destroy 104
 
+## 9. Sound: speech, music and sound effects
+
+The assistant makes audio files - an announcement, a song, a sound effect -
+once a model for it is downloaded: **Settings → Models → Sound, music and
+speech**.
+
+| For | Model | Download | Runs on |
+|---|---|---|---|
+| Danish speech | Røst v3 (or Røst v3 Turbo: three times faster, a little less natural) | 3.2 GB (3.0 GB) | the CPU |
+| Speech in other languages | Chatterbox Multilingual V3 (shares 1 GB with Røst v3) | 3.2 GB | the CPU |
+| Songs and instrumentals | ACE-Step 1.5 XL Turbo (or ACE-Step 1.5 Turbo: half the size) | 19.9 GB (10.0 GB) | the card |
+| Sound effects, ambience, loops | Stable Audio 3 Medium | 10.4 GB | the card |
+
+Speech runs in its own container on the CPU, so the chat model stays loaded;
+music and sound effects switch the card to ComfyUI, as pictures do. Then ask
+in a chat - "Lav en speak der siger tredive sekunder tilbage af tredje
+periode", "A two-minute club song with these lyrics: ...", "An ice hockey
+arena horn". **Settings → Assistant → Sound** chooses the model for each kind.
+
+After downloading a voice model, check it and see how fast it speaks on this
+machine:
+
+    sudo bash /opt/slq-hub/update.sh compose exec hub python -m app.cli selftest --speech
+
+The speech container uses all CPU cores but two. `SPEECH_THREADS` and
+`SPEECH_MEM` in `.env` change that (then `sudo bash /opt/slq-hub/update.sh
+compose up -d`).
+
 ## Daily operation
 
 All commands run in the VM from `/opt/slq-hub`:
@@ -281,6 +309,7 @@ All commands run in the VM from `/opt/slq-hub`:
 | Status | `sudo bash /opt/slq-hub/update.sh status` |
 | Follow the Hub's log | `sudo bash /opt/slq-hub/update.sh compose logs -f hub` |
 | A model server's log | `sudo bash /opt/slq-hub/update.sh compose logs -f llm` |
+| The speech service's log | `sudo bash /opt/slq-hub/update.sh compose logs -f speech` |
 | Backups / roll back | `sudo bash /opt/slq-hub/update.sh backups` / `... rollback` |
 | Run the self-test again | `sudo bash /opt/slq-hub/update.sh compose exec hub python -m app.cli selftest` |
 | More language models | Settings → Models → Add from Hugging Face (GGUF repositories; gated ones need `HF_TOKEN` in `.env`) |
@@ -303,5 +332,7 @@ versions) are in `/srv/slq-hub/.env`. After editing it, run:
 | "amdgpu-dkms did not build" | `dkms status` and the `make.log` it names. Send them to me. |
 | A model download fails | Run the installer again: downloads resume. |
 | The self-test fails at "load model" | `sudo bash /opt/slq-hub/update.sh compose logs llm` shows llama-server's own words. |
+| Speech fails with "the speech service is not answering" | `sudo bash /opt/slq-hub/update.sh compose ps speech` and `... compose logs speech`. |
+| An update stops at "the build failed" | Nothing was changed; the build's output just above that line says why. Send it to me. |
 | The UI works on the LAN but not through the proxy | Check the proxy host's port (8080) and that Websockets support is on. |
 | A chat behaves strangely (loops, odd answers, stops) | The chat's ⋯ menu → **Export for troubleshooting**, and send me the ZIP. On the phone page: menu → **Export this chat**. |

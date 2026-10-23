@@ -16,6 +16,7 @@ MODULES = [
     "app.chats.feature",
     "app.agent.feature",
     "app.images.feature",
+    "app.audio.feature",
     "app.rag.feature",
 ]
 

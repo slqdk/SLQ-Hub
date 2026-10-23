@@ -224,6 +224,56 @@ def _png(size=(8, 8), color=(200, 30, 30, 255)) -> bytes:
 PNG_1x1 = _png()
 
 
+def silent_mp3(seconds: float = 1.0) -> bytes:
+    """A real MP3 of silence: MPEG-1 Layer III frames (128 kbit/s, 44.1 kHz, 1152 samples each) whose side
+    information is all zero - browsers and decoders play it for `seconds`."""
+    frame = b"\xff\xfb\x90\x64" + b"\x00" * 413                 # 417 bytes: 144 * 128000 / 44100
+    return frame * max(1, round(seconds * 44100 / 1152))
+
+
+def wav_tone(seconds: float = 1.0, hz: float = 330.0, rate: int = 24000) -> bytes:
+    import io
+    import math
+    import struct
+    import wave
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(b"".join(struct.pack("<h", int(8000 * math.sin(2 * math.pi * hz * i / rate)))
+                               for i in range(int(seconds * rate))))
+    return buf.getvalue()
+
+
+def float_wav(samples, rate: int = 24000) -> bytes:
+    """A mono 32-bit float WAV as libsndfile (torchaudio.save) writes it - fmt, fact and PEAK chunks, an 80-byte
+    header - which is how the Røst voice samples on Hugging Face are stored."""
+    import struct
+
+    import numpy as np
+    x = np.asarray(samples, dtype="<f4")
+    data = x.tobytes()
+    fmt = struct.pack("<HHIIHH", 3, 1, rate, rate * 4, 4, 32)
+    fact = struct.pack("<I", len(x))
+    peak = struct.pack("<IIfI", 1, 0, float(np.max(np.abs(x))) if x.size else 0.0, 0)
+    chunks = b"".join(cid + struct.pack("<I", len(body)) + body
+                      for cid, body in ((b"fmt ", fmt), (b"fact", fact), (b"PEAK", peak), (b"data", data)))
+    return b"RIFF" + struct.pack("<I", 4 + len(chunks)) + b"WAVE" + chunks
+
+
+AUDIO_SAVERS = ("SaveAudio", "SaveAudioMP3", "SaveAudioOpus", "SaveAudioAdvanced")
+
+
+def _saved_audio(graph: dict, pid: str) -> tuple[str, str] | None:
+    """(node id, file name) when a graph saves sound, as ComfyUI names it under output/audio/."""
+    for node_id, node in graph.items():
+        if node.get("class_type") in AUDIO_SAVERS:
+            fmt = (node.get("inputs") or {}).get("format") or "flac"
+            return node_id, f"{pid}_00001_.{fmt}"
+    return None
+
+
 def make_comfy(state: dict) -> FastAPI:
     app = FastAPI()
     state.setdefault("prompts", [])
@@ -244,7 +294,9 @@ def make_comfy(state: dict) -> FastAPI:
                  "CLIPTextEncode", "EmptyFlux2LatentImage", "Flux2Scheduler", "ConditioningZeroOut",
                  "ImageScaleToTotalPixels", "VAEEncode", "ReferenceLatent", "GetImageSize", "TextGenerate",
                  "PreviewAny", "ModelSamplingAuraFlow", "EmptySD3LatentImage", "T5TokenizerOptions", "BasicScheduler",
-                 "CheckpointLoaderSimple", "CLIPSetLastLayer"]
+                 "CheckpointLoaderSimple", "CLIPSetLastLayer", "DualCLIPLoader", "TextEncodeAceStepAudio1.5",
+                 "EmptyAceStep1.5LatentAudio", "VAEDecodeAudio", "SaveAudioAdvanced", "EmptyLatentAudio", "LoadAudio"]
+        names = [n for n in names if n not in state.get("missing_nodes", ())]
         return {n: {"input": {}, "output": []} for n in names}
 
     @app.post("/free")
@@ -271,9 +323,11 @@ def make_comfy(state: dict) -> FastAPI:
         body = await request.json()
         state["prompts"].append(body["prompt"])
         pid = f"p{len(state['prompts'])}"
-        if state.get("files"):                                # and the picture into its output folder
-            (state["files"] / "output").mkdir(parents=True, exist_ok=True)
-            (state["files"] / "output" / f"{pid}.png").write_bytes(PNG_1x1)
+        sound = _saved_audio(body["prompt"], pid)
+        if state.get("files"):                                # and the picture (or sound) into its output folder
+            out = state["files"] / "output" / ("audio" if sound else "")
+            out.mkdir(parents=True, exist_ok=True)
+            (out / (sound[1] if sound else f"{pid}.png")).write_bytes(silent_mp3(1) if sound else PNG_1x1)
         return {"prompt_id": pid, "number": len(state["prompts"]), "node_errors": {}}
 
     @app.post("/history")
@@ -283,16 +337,68 @@ def make_comfy(state: dict) -> FastAPI:
 
     @app.get("/history/{pid}")
     async def history(pid: str):
-        outputs = {"9": {"images": [{"filename": f"{pid}.png", "subfolder": "", "type": "output"}]}}
         graph = state["prompts"][int(pid[1:]) - 1] if pid[1:].isdigit() and int(pid[1:]) <= len(state["prompts"]) else {}
+        sound = _saved_audio(graph, pid)
+        outputs = {sound[0]: {"audio": [{"filename": sound[1], "subfolder": "audio", "type": "output"}]}} if sound \
+            else {"9": {"images": [{"filename": f"{pid}.png", "subfolder": "", "type": "output"}]}}
         for node_id, node in graph.items():                   # PreviewAny shows the text it was given
             if node.get("class_type") == "PreviewAny":
                 outputs[node_id] = {"text": [state.get("preview_text", "An enhanced, detailed prompt.")]}
         return {pid: {"status": {"status_str": "success", "completed": True, "messages": []}, "outputs": outputs}}
 
     @app.get("/view")
-    async def view():
+    async def view(filename: str = ""):
+        if filename.rsplit(".", 1)[-1] in ("mp3", "flac", "opus"):
+            return Response(state.get("audio_bytes") or silent_mp3(state.get("audio_seconds", 1.0)),
+                            media_type="audio/mpeg")
         return Response(PNG_1x1, media_type="image/png")
+
+    return app
+
+
+# ---------------------------------------------------------------- speech service
+
+def make_speech(state: dict) -> FastAPI:
+    """The speech service's protocol (services/speech/server.py): NDJSON progress lines, then the audio."""
+    import base64
+    import re as _re
+    app = FastAPI()
+    state.setdefault("requests", [])
+
+    @app.get("/health")
+    async def health():
+        if state.get("down"):
+            return JSONResponse({"error": "down"}, status_code=503)
+        return {"ok": True, "torch": "2.11.0+cpu", "threads": 10, "loaded": [], "voices": 0, "busy": False}
+
+    @app.post("/free")
+    async def free():
+        return {"freed": 0}
+
+    @app.post("/speak")
+    async def speak(request: Request):
+        from fastapi.responses import StreamingResponse
+        body = await request.json()
+        state["requests"].append(body)
+        if state.get("refuse"):
+            return JSONResponse({"error": state["refuse"]}, status_code=400)
+        pieces = [x for x in _re.split(r"(?<=[.!?])\s+", body.get("text", "").strip()) if x] or [""]
+        seconds = round(max(0.5, len(body.get("text", "")) / 14), 2)
+
+        async def gen():
+            yield json.dumps({"event": "queued", "busy": False}) + "\n"
+            yield json.dumps({"event": "started", "pieces": len(pieces)}) + "\n"
+            for i in range(len(pieces)):
+                yield json.dumps({"event": "progress", "piece": i + 1, "pieces": len(pieces)}) + "\n"
+            if state.get("error"):
+                yield json.dumps({"event": "error", "message": state["error"]}) + "\n"
+                return
+            data = wav_tone(seconds) if body.get("format") == "wav" else silent_mp3(seconds)
+            yield json.dumps({"event": "done", "format": body.get("format"), "sample_rate": 24000,
+                              "seconds": seconds, "compute": 1.5, "seed": body.get("seed"), "pieces": len(pieces),
+                              "threads": 10, "audio": base64.b64encode(data).decode()}) + "\n"
+
+        return StreamingResponse(gen(), media_type="application/x-ndjson")
 
     return app
 

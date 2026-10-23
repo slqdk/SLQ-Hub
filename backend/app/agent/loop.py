@@ -53,7 +53,7 @@ def loop_notice(reason: str) -> str:
 
 
 def _ensure_tools_loaded() -> None:
-    from .tools import files, images, knowledge, shell, web  # noqa: F401 - registration
+    from .tools import audio, files, images, knowledge, shell, web  # noqa: F401 - registration
     from . import meta_tools  # noqa: F401
 
 
@@ -642,13 +642,15 @@ class Agent:
                    taken_over_from: str = "", device=None) -> str:
         skills = self.hub.extras["skills"].chosen(chat, project)
         images = self.hub.extras.get("images")
+        audio = self.hub.extras.get("audio")
+        sound = [a for a in ("speech", "music", "sound") if audio and audio.available(a)] if not subagent else []
         if device is not None:                   # a person's chat: their name, no memory, code if allowed
             return system_prompt(user=device.name, model_name=entry["name"],
                                  folder_text=device_folder_text(wd.sandbox_path, device.code),
                                  sandbox_path=wd.sandbox_path, memory_index=[], skills=skills, project=None,
                                  images_available=bool(images and images.available()), handover_to=handover_to,
                                  subagent=subagent, taken_over_from=taken_over_from, memory=False,
-                                 code=device.code, dropped=device.dropped)
+                                 code=device.code, dropped=device.dropped, sound=sound)
         mem = self.hub.extras["memory"].index(project["id"] if project else None)
         user = self.hub.settings.get("agent", "user_name") or (self.hub.env.admin_user or "the user").title()
         return system_prompt(user=user, model_name=entry["name"], folder_text=folder_text(project, wd.sandbox_path),
@@ -656,7 +658,7 @@ class Agent:
                              summary="" if subagent else chat.get("summary") or "",
                              images_available=bool(images and images.available()),
                              handover_to=handover_to, subagent=subagent, cloud_model=cloud_model,
-                             taken_over_from=taken_over_from)
+                             taken_over_from=taken_over_from, sound=sound)
 
     def build_messages(self, chat: dict, project: dict | None, wd: projects.Workdir, entry: dict, run: Run,
                        handover_to: str = "", taken_over_from: str = "") -> list[dict]:

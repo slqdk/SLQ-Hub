@@ -14,6 +14,7 @@ export interface ToolView {
   images?: ImageRef[];
   display?: Display | null;
   seconds?: number;
+  progress?: { value: number; max: number };   // a long GPU or speech job, while it runs
   children?: Item[];
   subagent?: { description: string; finished: boolean };
 }
@@ -193,6 +194,12 @@ function applyStream(items: Item[], ev: RunEvent): void {
       if (t) t.state = "approval";
       break;
     }
+    case "image_progress":
+    case "audio_progress": {
+      const t = findTool(items, d.id);
+      if (t && Number(d.max) > 0) t.progress = { value: Number(d.value) || 0, max: Number(d.max) };
+      break;
+    }
     case "tool_result": {
       const t = findTool(items, d.id);
       if (!t) break;
@@ -293,7 +300,8 @@ export function toolSummary(t: ToolView): string {
     case "web_search": return s("query");
     case "web_fetch": return s("url");
     case "library_search": return s("query");
-    case "image_generate": case "image_edit": return s("prompt");
+    case "image_generate": case "image_edit": case "music_generate": case "sound_generate": return s("prompt");
+    case "speech_generate": return s("text");
     case "image_transform": case "image_ocr": case "image_remove_background": return s("path") || s("image");
     case "memory": return `${s("command")} ${s("path")}`.trim();
     case "skill": return s("name");

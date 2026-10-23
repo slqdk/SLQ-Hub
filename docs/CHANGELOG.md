@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.13.0 - 2026-10-23
+
+- **Speech, music and sound effects.** The assistant makes sound itself: an
+  announcement read aloud, a song with your lyrics, a horn or a crowd. Each is
+  an audio file in the chat's folder, played in the card under the answer.
+  Download the models under Settings → Models → Sound, music and speech:
+  - **Speech** runs on the server's CPU in a new container, so the chat model
+    stays on the card and a sentence costs seconds instead of a model swap.
+    Røst v3 speaks Danish - the CoRal project's voices Mic and Nic, or any
+    voice from a 10-20 s clip you give it; Røst v3 Turbo is about three times
+    faster; Chatterbox Multilingual V3 speaks 23 languages and can sound
+    livelier.
+  - **Songs**: ACE-Step 1.5 (XL Turbo, or the lighter Turbo) sings your
+    lyrics, or plays an instrumental, up to five minutes.
+  - **Sound effects**: Stable Audio 3 Medium - effects, ambience, loops and
+    instrumental pieces.
+
+  Settings → Assistant → Sound chooses the model for each, and `selftest
+  --speech` speaks a sentence with each voice model and says how fast. In a
+  person's chat ComfyUI keeps no copy of the sound and the speech service
+  keeps nothing of her voice. From chat 12, where an announcement had to go
+  through a cloud voice (edge-tts) in bash.
+- Settings → System and `update.sh status` show the speech service.
+- An update makes the folders the services mount when a new version adds
+  one.
+- Fixed: for the first five minutes after the VM started, people's chats
+  could get no code (the Landlock check was skipped while the clock since boot
+  read under five minutes).
+
 ## 0.12.0 - 2026-10-23
 
 - **The files an answer made, in a card under it.** Whatever the assistant
