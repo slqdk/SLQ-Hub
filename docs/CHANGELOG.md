@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.13.4 - 2026-10-24
+
+- **Full-quality speech only.** In the second listening test Røst v3 Turbo
+  said wrong words with 8-bit weights even when only its MLP layers were in
+  8 bits. Speed is worth nothing if the words are wrong, so the **Speech
+  speed** setting is gone: every voice model runs with its full weights and
+  its own decoder. A saved speed setting is simply dropped.
+- **Røst v3 Turbo first for Danish.** It sounded best in the listening test
+  and is the quicker one (about 4 seconds of work per second of speech on the
+  VM, Røst v3 about 6). With both downloaded and no choice made in Settings →
+  Assistant → Sound, Danish goes to Røst v3 Turbo; Røst v3 is still there to
+  choose.
+- Chatterbox Multilingual V3 is for the other languages: its Danish keeps an
+  English accent, which is how the model speaks, not a setting.
+- `selftest --speech` speaks one sample per voice model again, and Settings
+  lists those.
+
 ## 0.13.3 - 2026-10-23
 
 - **After the first listening test.** Røst v3 Turbo at Best sounded best (and

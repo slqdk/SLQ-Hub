@@ -73,7 +73,7 @@ def chat_dir(app, chat_id: int) -> Path:
 async def test_the_sound_models_are_in_the_catalog_and_download(signed_in, app):
     r = await signed_in.get("/hub/api/models")
     audio = {m["id"]: m for m in r.json()["audio"]}
-    assert list(audio) == ["roest-v3", "roest-v3-turbo", "chatterbox-multilingual-v3", "ace-step-1.5-xl-turbo",
+    assert list(audio) == ["roest-v3-turbo", "roest-v3", "chatterbox-multilingual-v3", "ace-step-1.5-xl-turbo",
                            "ace-step-1.5-turbo", "stable-audio-3-medium"]
     assert not any(m["installed"] for m in audio.values())
     assert {m["engine"] for m in audio.values()} == {"speech", "comfy"}
@@ -123,7 +123,7 @@ async def test_a_danish_sentence_is_spoken_and_saved(signed_in, app, fakes):
     run = await finish(app, await say(signed_in, c["id"], "Lav en speaker der siger tredive sekunder tilbage"))
     assert run.status == "done", run.events[-1]
     body = fakes.speech["requests"][0]
-    assert body["model"] == {"key": "roest-v3", "family": "chatterbox-mtl", "int8": False, "files": {
+    assert body["model"] == {"key": "roest-v3", "family": "chatterbox-mtl", "files": {
         "t3": "/models/speech/roest-v3/t3_mtl23ls_v2.safetensors", "s3gen": "/models/speech/chatterbox/s3gen.pt",
         "ve": "/models/speech/chatterbox/ve.pt",
         "tokenizer": "/models/speech/roest-v3/grapheme_mtl_merged_expanded_v1.json"}}
@@ -209,72 +209,88 @@ async def test_rost_turbo_reads_english_with_a_note(signed_in, app, fakes):
     assert res["ok"] and "Røst v3 Turbo speaks English with a heavy Danish accent" in res["text"], res
 
 
-async def test_the_speech_speed_setting(signed_in, app, fakes):
-    """Faster: 8-bit weights for T3's MLP layers (attention stays full), every model; fastest: every layer in 8 bits
-    and Turbo's two-step decoder (from Røst v3 Turbo) for the 500M models. Without Røst v3 Turbo the result says
-    why the decoder stayed; a Turbo model has that decoder already."""
-    install(app, "roest-v3")
+async def test_danish_goes_to_rost_turbo_when_both_are_downloaded(signed_in, app, fakes):
+    """Røst v3 Turbo comes first (0.13.4): quicker, and it sounded best in the listening tests on the Hub; the Sound
+    setting still picks Røst v3."""
+    install(app, "roest-v3", "roest-v3-turbo")
     c = await new_chat(signed_in)
 
-    async def speak(text: str, speed: str, language: str = "da") -> tuple[dict, dict]:
-        r = await signed_in.put("/hub/api/settings", json={"section": "sound", "values": {"speech_speed": speed}})
-        assert r.status_code == 200, r.text
+    async def speak() -> tuple[str, str]:
         fakes.llama["requests"].clear()
         fakes.llama["replies"] = [{"tool_calls": [{"name": "speech_generate", "arguments": {
-            "text": text, "language": language}}]}, {"content": "Ok."}]
-        res = tool_result(await finish(app, await say(signed_in, c["id"], "Speak")))
-        return fakes.speech["requests"][-1]["model"], res
+            "text": "Hej.", "language": "da"}}]}, {"content": "Ok."}, {"content": "Hej"}]
+        await finish(app, await say(signed_in, c["id"], "Sig hej"))
+        return fakes.speech["requests"][-1]["model"]["key"], tools_offered(fakes, 0)["speech_generate"]["description"]
 
-    model, res = await speak("Hej.", "best")
-    assert model["int8"] is False and "decoder" not in model["files"] and "Note" not in res["text"]
-    model, res = await speak("Hej.", "faster")                         # the MLP layers, its own ten-step decoder
-    assert model["int8"] == "mlp" and "decoder" not in model["files"] and "Note" not in res["text"]
-    model, res = await speak("Hej.", "fastest")                        # no Røst v3 Turbo yet: the ten-step decoder
-    assert model["int8"] == "all" and "decoder" not in model["files"]
-    assert "The fastest speech setting needs Røst v3 Turbo downloaded" in res["text"]
-    install(app, "roest-v3", "roest-v3-turbo")
-    model, res = await speak("Hej.", "fastest")
-    assert model["files"]["decoder"] == "/models/speech/roest-v3-turbo/s3gen_meanflow.safetensors"
-    assert model["files"]["s3gen"] == "/models/speech/chatterbox/s3gen.pt" and model["int8"] == "all"
-    assert "Note" not in res["text"]
-    model, res = await speak("Hej.", "faster")
-    assert model["int8"] == "mlp" and "decoder" not in model["files"]
-    r = await signed_in.put("/hub/api/settings", json={"section": "sound", "values": {"speech_model_da":
-                                                                                      "roest-v3-turbo"}})
-    for speed, int8 in (("faster", "mlp"), ("fastest", "all")):        # Turbo has that decoder already
-        model, res = await speak("Hej.", speed)
-        assert model["key"] == "roest-v3-turbo" and model["int8"] == int8 and "decoder" not in model["files"]
-        assert "Note" not in res["text"]
-    # a piece that ran to the token ceiling is said so
+    key, text = await speak()
+    assert key == "roest-v3-turbo" and "Without model, Danish goes to Røst v3 Turbo." in text
+    r = await signed_in.put("/hub/api/settings", json={"section": "sound", "values": {"speech_model_da": "roest-v3"}})
+    assert r.status_code == 200, r.text
+    key, text = await speak()
+    assert key == "roest-v3" and "Without model, Danish goes to Røst v3." in text
+
+
+async def test_a_piece_that_ran_to_the_token_ceiling_is_said_so(signed_in, app, fakes):
+    """Full weights only (0.13.4: 8-bit T3 said wrong words), so the request carries no speed knobs; a piece the model
+    did not end by itself is named in the result, with the usual fix."""
+    install(app, "roest-v3")
     fakes.speech["capped"] = 1
-    model, res = await speak("Hej. Farvel.", "best")
-    assert "did not stop by itself on 1 of 2 piece(s)" in res["text"] and "another seed" in res["text"]
+    fakes.llama["replies"] = [{"tool_calls": [{"name": "speech_generate", "arguments": {
+        "text": "Hej. Farvel.", "language": "da"}}]}, {"content": "Ok."}, {"content": "Hej"}]
+    c = await new_chat(signed_in)
+    res = tool_result(await finish(app, await say(signed_in, c["id"], "Speak")))
+    model = fakes.speech["requests"][-1]["model"]
+    assert set(model) == {"key", "family", "files"} and set(model["files"]) == {"t3", "s3gen", "ve", "tokenizer"}
+    assert res["ok"] and "did not stop by itself on 1 of 2 piece(s)" in res["text"], res
+    assert "another seed" in res["text"]
+
+
+async def test_a_setting_a_newer_version_removed_does_not_block_saving(signed_in, app):
+    """0.13.2-0.13.3 stored sound.speech_speed. The Sound form sends back the whole section it was given, and an
+    unknown key is refused - so the stale key is dropped when settings.json is read, the rest kept."""
+    hub = app.state.hub
+    hub.settings.path.parent.mkdir(parents=True, exist_ok=True)
+    hub.settings.path.write_text(json.dumps({"sound": {"speech_model_da": "roest-v3-turbo", "speech_speed": "faster"},
+                                             "web": {"search_results": 5}}))
+    hub.settings._data = hub.settings._load()                       # the Hub restarting after the update
+    sound = (await signed_in.get("/hub/api/settings")).json()["settings"]["sound"]
+    assert "speech_speed" not in sound and sound["speech_model_da"] == "roest-v3-turbo" and sound["music_model"] == ""
+    assert hub.settings.get("web", "search_results") == 5
+    r = await signed_in.put("/hub/api/settings", json={"section": "sound", "values": {**sound, "speech_model": ""}})
+    assert r.status_code == 200, r.text
+    assert "speech_speed" not in json.loads(hub.settings.path.read_text())["sound"]
+    r = await signed_in.put("/hub/api/settings", json={"section": "sound", "values": {"speech_speed": "best"}})
+    assert r.status_code == 400                                      # still refused when sent
 
 
 async def test_the_self_tests_speech_samples_play_in_settings(signed_in, app):
-    """selftest --speech leaves data/selftest/speech-*.mp3 and speech.json; the Sound settings list and play them -
-    for the owner only."""
+    """selftest --speech leaves data/selftest/speech-<model>.mp3 and speech.json; the Sound settings list and play
+    them - for the owner only."""
     from .mocks import silent_mp3
     folder = app.state.hub.env.data_dir / "selftest"
     folder.mkdir(parents=True, exist_ok=True)
-    runs = [("roest-v3", "Røst v3", "best", 5.75), ("roest-v3", "Røst v3", "faster", 3.1),
-            ("roest-v3", "Røst v3", "fastest", 2.28), ("roest-v3-turbo", "Røst v3 Turbo", "best", 3.75)]
-    for model, _, setting, _ in runs:
-        (folder / f"speech-{model}-{setting}.mp3").write_bytes(silent_mp3(1.0))
+    runs = [("roest-v3", "Røst v3", 5.75), ("roest-v3-turbo", "Røst v3 Turbo", 3.9),
+            ("chatterbox-multilingual-v3", "Chatterbox Multilingual V3", 5.6)]
+    for model, _, _ in runs:
+        (folder / f"speech-{model}.mp3").write_bytes(silent_mp3(1.0))
+    (folder / "speech-roest-v3-faster.mp3").write_bytes(silent_mp3(1.0))           # left by a 0.13.2-0.13.3 run
     (folder / "notes.txt").write_text("not a sample")
     assert (await signed_in.get("/hub/api/sound/samples")).json()["samples"] == []    # no list (0.13.1): none
-    (folder / "speech.json").write_text(json.dumps({"at": "2026-10-23 21:30", "cpu": "AMD Ryzen 9 5950X (avx2)",
+    (folder / "speech.json").write_text(json.dumps({"at": "2026-10-24 09:30", "cpu": "AMD Ryzen 9 5950X (avx2)",
                                                     "threads": 10, "samples": [
-        {"file": f"speech-{m}-{st}.mp3", "model": m, "name": n, "setting": st, "text": "Og her kommer en sætning mere.",
-         "seconds": 3.4, "compute": round(3.4 * f, 1), "factor": f, "capped": st == "fastest"}
-        for m, n, st, f in runs]}))
+        *({"file": f"speech-{m}.mp3", "model": m, "name": n, "text": "Og her kommer en sætning mere.", "seconds": 3.4,
+           "compute": round(3.4 * f, 1), "factor": f, "capped": m == "chatterbox-multilingual-v3"} for m, n, f in runs),
+        {"file": "speech-roest-v3-faster.mp3", "model": "roest-v3", "name": "Røst v3", "setting": "faster"},
+        {"file": "speech-gone.mp3", "model": "gone", "name": "Gone"},                  # its file is not there
+        {"file": "../hub.db", "model": "x"}]}))
     r = await signed_in.get("/hub/api/sound/samples")
     assert r.status_code == 200, r.text
     data = r.json()
-    assert (data["at"], data["threads"]) == ("2026-10-23 21:30", 10)
-    assert [(s["model"], s["setting"]) for s in data["samples"]] == [(m, st) for m, _, st, _ in runs]
+    assert (data["at"], data["threads"]) == ("2026-10-24 09:30", 10)
+    assert [s["model"] for s in data["samples"]] == [m for m, _, _ in runs]           # the speed runs are gone
     assert data["samples"][2]["capped"] is True and data["samples"][0]["factor"] == 5.75
-    r = await signed_in.get("/hub/api/sound/samples/speech-roest-v3-faster.mp3")
+    assert "setting" not in data["samples"][0]
+    r = await signed_in.get("/hub/api/sound/samples/speech-roest-v3-turbo.mp3")
     assert r.status_code == 200 and r.headers["content-type"] == "audio/mpeg" and r.content[:2] == b"\xff\xfb"
     for bad in ("notes.txt", "..%2Fhub.db", "speech-x.mp3", "speech-..%2F..%2Fhub.db.mp3"):
         assert (await signed_in.get(f"/hub/api/sound/samples/{bad}")).status_code == 404, bad

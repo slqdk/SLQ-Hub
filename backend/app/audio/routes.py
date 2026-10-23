@@ -1,6 +1,6 @@
 """The speech samples of the last self-test (selftest --speech), for Settings -> Assistant -> Sound: the same
-sentence in each speech-speed setting, with what each cost, to listen to before choosing. Owner only (people's
-sessions reach only MEMBER_ROUTES)."""
+sentence and seed with each downloaded voice model, with what each cost, to choose a voice model by ear. Owner
+only (people's sessions reach only MEMBER_ROUTES)."""
 from __future__ import annotations
 
 import json
@@ -27,15 +27,15 @@ async def samples(request: Request):
     except (OSError, ValueError):
         meta = {}
     out = []
-    for m in meta.get("samples") or []:             # in the self-test's order; only files it described (the
-        if not isinstance(m, dict) or not SAMPLE.match(str(m.get("file") or "")):    # 0.13.1 run wrote no list,
-            continue                                                                 # and its settings differ)
+    for m in meta.get("samples") or []:             # in the self-test's order, only the files it described
+        if not isinstance(m, dict) or not SAMPLE.match(str(m.get("file") or "")) or m.get("setting"):
+            continue                                # (a 0.13.2-0.13.3 run's speed settings are gone)
         p = folder / m["file"]
         if not p.is_file():
             continue
-        out.append({"file": p.name, "model": m.get("model"), "name": m.get("name"), "setting": m.get("setting"),
-                    "text": m.get("text"), "seconds": m.get("seconds"), "compute": m.get("compute"),
-                    "factor": m.get("factor"), "capped": bool(m.get("capped")), "size": p.stat().st_size})
+        out.append({"file": p.name, "model": m.get("model"), "name": m.get("name"), "text": m.get("text"),
+                    "seconds": m.get("seconds"), "compute": m.get("compute"), "factor": m.get("factor"),
+                    "capped": bool(m.get("capped")), "size": p.stat().st_size})
     return {"at": meta.get("at"), "cpu": meta.get("cpu"), "threads": meta.get("threads"), "samples": out}
 
 

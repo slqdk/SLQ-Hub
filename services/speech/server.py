@@ -12,15 +12,12 @@ A /speak body:
 
     {"model": {"key": "roest-v3", "family": "chatterbox-mtl" | "chatterbox-turbo",
                "files": {"t3": path, "s3gen": path, "ve": path, "tokenizer": path (mtl: a .json file,
-                         turbo: a folder), "conds": path (optional),
-                         "decoder": path (optional, mtl: Turbo's two-step S3Gen instead of the ten-step one)},
-               "int8": false | "mlp" | "all" (8-bit weights for T3: its MLP layers, or every linear layer)},
+                         turbo: a folder), "conds": path (optional)}},
      "text": "...", "language": "da",
      "voice": {"path": "/models/speech/.../mic.wav"} | {"audio": "<base64 of a WAV>"} | null,
      "cache_voice": false,
      "exaggeration": 0.5, "cfg_weight": 0.5, "temperature": 0.8, "top_p": 0.95, "min_p": 0.05, "top_k": 1000,
-     "repetition_penalty": 2.0, "seed": 1234, "format": "mp3" | "wav" | "flac" | "ogg",
-     "t3_threads": 5 (optional: T3 on fewer threads, for the self-test's measurement)}
+     "repetition_penalty": 2.0, "seed": 1234, "format": "mp3" | "wav" | "flac" | "ogg"}
 
 Every path must lie under SPEECH_MODELS (default /models/speech). The text is cut into sentences (the models
 handle a sentence or two at a time), each is spoken with the same voice and seed, the pieces are trimmed and
@@ -35,7 +32,6 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import contextlib
 import gc
 import hashlib
 import io
@@ -269,51 +265,6 @@ def give_back_memory() -> None:
         pass
 
 
-@contextlib.contextmanager
-def t3_threads(p: dict):
-    """T3 on fewer threads when the request asks (p["t3_threads"]): one token at a time is limited by memory more
-    than by cores, so fewer threads may be as fast. The decoder gets them all back."""
-    n = int(p.get("t3_threads") or 0)
-    if not n:
-        yield
-        return
-    import torch
-    before = torch.get_num_threads()
-    torch.set_num_threads(n)
-    try:
-        yield
-    finally:
-        torch.set_num_threads(before)
-
-
-def int8_weights(module, mlp_only: bool = False) -> int:
-    """A transformer's linear layers with 8-bit weights (dynamic quantization, a scale per output channel): T3
-    reads a quarter of the bytes per token - 2.3-2.5x faster on VM 222's Ryzen 9 5950X. Per channel costs the
-    same time as one scale per layer and keeps closer to the full weights. With mlp_only the attention layers -
-    which keep the speech aligned with the text - stay full: with every layer in 8 bits, a listening test found
-    a skipped word and slurred first words. GPT-2's Conv1D layers (Turbo) are linear layers with the weight
-    transposed; they become nn.Linear first. Returns how many layers changed."""
-    import torch
-    from transformers.pytorch_utils import Conv1D
-    for parent in list(module.modules()):
-        for name, child in list(parent.named_children()):
-            if isinstance(child, Conv1D):
-                nx, nf = child.weight.shape                 # x @ weight + bias, weight (in, out)
-                lin = torch.nn.Linear(nx, nf)
-                with torch.no_grad():
-                    lin.weight.copy_(child.weight.t())
-                    lin.bias.copy_(child.bias)
-                setattr(parent, name, lin)
-    qconfig = torch.ao.quantization.per_channel_dynamic_qconfig
-    linear = [n for n, m in module.named_modules() if isinstance(m, torch.nn.Linear)]
-    if mlp_only:        # Llama: layers.N.mlp.{gate,up,down}_proj; GPT-2: h.N.mlp.{c_fc,c_proj}
-        spec = {n: qconfig for n in linear if ".mlp." in f".{n}."}
-    else:
-        spec = {torch.nn.Linear: qconfig}
-    torch.ao.quantization.quantize_dynamic(module, spec, dtype=torch.qint8, inplace=True)
-    return len(linear) - sum(isinstance(m, torch.nn.Linear) for m in module.modules())
-
-
 def inside_models(path: str) -> Path:
     p = Path(path).resolve()
     if MODELS_ROOT != p and MODELS_ROOT not in p.parents:
@@ -338,13 +289,12 @@ class Model:
 
     family = ""
 
-    def __init__(self, files: dict, int8: str = ""):
+    def __init__(self, files: dict):
         import perth
         import torch
         from chatterbox.models.voice_encoder import VoiceEncoder
         self.torch = torch
         self.files = files
-        self.int8 = int8
         ve = VoiceEncoder()
         ve_path = inside_models(files["ve"])
         if ve_path.suffix == ".safetensors":
@@ -419,8 +369,8 @@ class Multilingual(Model):
 
     family = "chatterbox-mtl"
 
-    def __init__(self, files: dict, int8: str = ""):
-        super().__init__(files, int8)
+    def __init__(self, files: dict):
+        super().__init__(files)
         from safetensors.torch import load_file
         from chatterbox.models.s3gen import S3Gen
         from chatterbox.models.t3 import T3
@@ -431,20 +381,9 @@ class Multilingual(Model):
         if "model" in state.keys():
             state = state["model"][0]
         t3.load_state_dict(state)
-        if int8:
-            int8_weights(t3.tfmr, mlp_only=int8 == "mlp")
         self.t3 = t3.eval()
-        if files.get("decoder"):
-            # Turbo's distilled decoder: two steps without guidance instead of ten with it, the same speech tokens
-            # and voice prompt - about six times less work for the part that costs the most on the CPU
-            s3gen = S3Gen(meanflow=True)
-            s3gen.load_state_dict(load_file(inside_models(files["decoder"])), strict=True)
-            self.steps = 2
-        else:
-            s3gen = S3Gen()
-            s3gen.load_state_dict(self.torch.load(inside_models(files["s3gen"]), map_location="cpu",
-                                                  weights_only=True))
-            self.steps = 0
+        s3gen = S3Gen()
+        s3gen.load_state_dict(self.torch.load(inside_models(files["s3gen"]), map_location="cpu", weights_only=True))
         self.s3gen = s3gen.eval()
         self.tokenizer = MTLTokenizer(str(inside_models(files["tokenizer"])))
 
@@ -459,7 +398,6 @@ class Multilingual(Model):
         torch = self.torch
         import torch.nn.functional as F
         from chatterbox.mtl_tts import SUPPORTED_LANGUAGES, punc_norm
-        from chatterbox.models.s3gen.const import S3GEN_SIL
         from chatterbox.models.s3tokenizer import drop_invalid_tokens
         lang = (language or "").lower()
         if lang not in SUPPORTED_LANGUAGES:
@@ -469,7 +407,7 @@ class Multilingual(Model):
         tokens = F.pad(tokens, (1, 0), value=self.t3.hp.start_text_token)
         tokens = F.pad(tokens, (0, 1), value=self.t3.hp.stop_text_token)
         t0 = time.time()
-        with torch.inference_mode(), t3_threads(p):
+        with torch.inference_mode():
             speech = self.t3.inference(t3_cond=voice.t3, text_tokens=tokens, max_new_tokens=max_tokens(text),
                                        temperature=p["temperature"], cfg_weight=p["cfg_weight"],
                                        repetition_penalty=p["repetition_penalty"], min_p=p["min_p"],
@@ -482,16 +420,9 @@ class Multilingual(Model):
             if speech.numel() == 0:
                 return np.zeros(0, np.float32), stats
             t1 = time.time()
-            if self.steps:
-                # as Turbo does it, after dropping T3's last token: emitted just before the end with weak
-                # attention, it decodes to noise (upstream's own note); three silence tokens close the sound
-                speech = torch.cat([speech[:-1] if speech.numel() > 1 else speech,
-                                    torch.tensor([S3GEN_SIL] * 3, dtype=torch.long)])
-                wav, _ = self.s3gen.inference(speech_tokens=speech, ref_dict=voice.gen, n_cfm_timesteps=self.steps)
-                wav = wav.squeeze(0).detach().cpu().numpy()
-            else:
-                wav, _ = self.s3gen.inference(speech_tokens=speech, ref_dict=voice.gen)
-                wav = wav.squeeze(0).detach().cpu().numpy()[: max(1, speech.numel() - 1) * TOKEN_SAMPLES]
+            # upstream drops T3's last token: emitted just before the end with weak attention, it decodes to noise
+            wav, _ = self.s3gen.inference(speech_tokens=speech, ref_dict=voice.gen)
+            wav = wav.squeeze(0).detach().cpu().numpy()[: max(1, speech.numel() - 1) * TOKEN_SAMPLES]
             stats["decoder"] = time.time() - t1
         return self.watermarker.apply_watermark(wav, sample_rate=SR).astype(np.float32), stats
 
@@ -502,8 +433,8 @@ class Turbo(Model):
 
     family = "chatterbox-turbo"
 
-    def __init__(self, files: dict, int8: str = ""):
-        super().__init__(files, int8)
+    def __init__(self, files: dict):
+        super().__init__(files)
         from safetensors.torch import load_file
         from transformers import AutoTokenizer
         from chatterbox.models.s3gen import S3Gen
@@ -522,8 +453,6 @@ class Turbo(Model):
             state = state["model"][0]
         t3.load_state_dict(state)
         del t3.tfmr.wte
-        if int8:
-            int8_weights(t3.tfmr, mlp_only=int8 == "mlp")
         self.t3 = t3.eval()
         s3gen = S3Gen(meanflow=True)
         s3gen.load_state_dict(load_file(inside_models(files["s3gen"])), strict=True)
@@ -552,7 +481,7 @@ class Turbo(Model):
         ids = self.tokenizer(punc_norm(text), return_tensors="pt", padding=True, truncation=True).input_ids
         limit = max_tokens(text)
         t0 = time.time()
-        with torch.inference_mode(), t3_threads(p):
+        with torch.inference_mode():
             speech = self.t3.inference_turbo(t3_cond=voice.t3, text_tokens=ids, temperature=p["temperature"],
                                              top_k=int(p["top_k"]), top_p=p["top_p"],
                                              repetition_penalty=p["repetition_penalty"], max_gen_len=limit)
@@ -600,8 +529,7 @@ class Speaker:
                 raise ValueError(f"the model's {role} file is not given")
         for path in files.values():              # every file there and inside the models, before anything is built
             inside_models(str(path))
-        int8 = {True: "all", "all": "all", "mlp": "mlp"}.get(spec.get("int8"), "")   # true: every layer
-        key = str(spec.get("key") or "") + "|" + "|".join(f"{k}={files[k]}" for k in sorted(files)) + f"|int8={int8}"
+        key = str(spec.get("key") or "") + "|" + "|".join(f"{k}={files[k]}" for k in sorted(files))
         with self._mutex:
             if key in self.models:
                 self.models.move_to_end(key)
@@ -611,11 +539,9 @@ class Speaker:
                 log.info("dropped %s", gone.split("|", 1)[0])
         give_back_memory()
         t0 = time.time()
-        m = FAMILIES[family](files, int8)
-        extras = [x for x, on in (("Turbo's decoder", family == "chatterbox-mtl" and bool(files.get("decoder"))),
-                                  ("8-bit T3" if int8 == "all" else "8-bit MLP", bool(int8))) if on]
-        m.label = str(spec.get("key") or family) + (f" ({', '.join(extras)})" if extras else "")
-        log.info("loaded %s in %.1f s", m.label, time.time() - t0)
+        m = FAMILIES[family](files)
+        m.label = str(spec.get("key") or family)
+        log.info("loaded %s (%s) in %.1f s", m.label, family, time.time() - t0)
         with self._mutex:
             self.models[key] = m
         return m
@@ -689,8 +615,6 @@ def make_app(speaker: Speaker):
             if fmt not in FORMATS:
                 raise ValueError(f"format is one of {', '.join(FORMATS)}")
             p = params(body)
-            if body.get("t3_threads") is not None:      # the self-test's question: is T3 faster on fewer threads?
-                p["t3_threads"] = max(1, min(speaker.threads, int(body["t3_threads"])))
             seed = int(body.get("seed") if body.get("seed") is not None else random.randint(1, 2**31 - 1))
             voice_spec = body.get("voice") or None
             if voice_spec is not None and not isinstance(voice_spec, dict):

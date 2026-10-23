@@ -171,8 +171,6 @@ DEFAULTS: dict = {
         "sound_model": "",
         "speech_model_da": "",             # Danish speech
         "speech_model": "",                # every other language
-        "speech_speed": "best",            # best | faster: 8-bit weights for T3 | fastest: also Turbo's two-step
-                                           # decoder for Røst v3 and Chatterbox (it comes with Røst v3 Turbo)
     },
     "libraries": {
         "page_images": "cpu",              # cpu | gpu | off: embed page images for visual search (gpu = fast,
@@ -204,7 +202,9 @@ class Settings:
             stored = {}
         for section, values in stored.items():
             if isinstance(values, dict) and isinstance(merged.get(section), dict):
-                merged[section].update(values)
+                # a setting a newer version removed is dropped: the UI sends back what it was given, and
+                # update() refuses keys it does not know (sound.speech_speed, gone in 0.13.4)
+                merged[section].update({k: v for k, v in values.items() if k in DEFAULTS[section]})
             else:
                 merged[section] = values
         return merged

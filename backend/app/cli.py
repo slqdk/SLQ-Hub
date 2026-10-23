@@ -138,66 +138,48 @@ def _speech(rep, c, env, cat, try_it: bool) -> None:
     from .audio.pipeline import role_files, speech_files
     sentences = {"da": ("Hej.", "Og her kommer en sætning mere, så farten kan måles."),
                  "en": ("Hello.", "And here is one more sentence, to measure the speed.")}
-    # Turbo's two-step decoder, for the fastest setting of the 500M models (it comes with Røst v3 Turbo)
-    decoder = next((f"{env.speech_models}/{role_files(t, 's3gen')[0]['dest']}" for t in models
-                    if t.get("family") == "chatterbox-turbo" and role_files(t, "s3gen")), None)
     out = Path(env.data_dir) / "selftest"
     out.mkdir(parents=True, exist_ok=True)
     for old in out.glob("speech-*.mp3"):                  # the samples are always the last run's
         old.unlink(missing_ok=True)
-    saved, samples = [], []
+    samples = []
     for e in models:
         lang = "da" if "da" in (e.get("languages") or []) else "en"
         voice = role_files(e, "voice")                  # Røst: its first voice file; Chatterbox: its built-in voice
-        # (setting, Turbo's decoder, 8-bit T3) - as Settings -> Assistant -> Sound -> Speech speed would send them:
-        # faster = the MLP layers in 8 bits, fastest = every layer (and Turbo's decoder for the 500M models)
-        modes = [("best", False, False), ("faster", False, "mlp")]
-        if e.get("family") == "chatterbox-mtl" and decoder:
-            modes += [("fastest", True, "all")]
-        elif e.get("family") == "chatterbox-mtl":
-            rep.line("SKIP", f"speech: {e['id']}", "fastest needs Røst v3 Turbo downloaded (its two-step decoder)")
+        spoken = []
+        try:
+            for text in sentences[lang]:                # the first loads the model, the second is the speed
+                body = {"model": {"key": e["id"], "family": e["family"], "files": speech_files(e, env.speech_models)},
+                        "text": text, "language": lang, "seed": 1, "format": "mp3",
+                        "voice": {"path": f"{env.speech_models}/{voice[0]['dest']}"}
+                        if voice and not role_files(e, "conds") else None, **(e.get("sampling") or {})}
+                spoken.append(_say(c, env, body))
+        except Exception as exc:  # noqa: BLE001
+            rep.line("FAIL", f"speech: {e['id']}", str(exc), "bash update.sh compose logs speech")
+            continue
+        first, done = spoken
+        secs, took = float(done["seconds"]), float(done["compute"])
+        t3, dec, tokens = done.get("t3_seconds"), done.get("decoder_seconds"), done.get("tokens")
+        factor = took / max(secs, 0.01)
+        where = f"; T3 {tokens} tokens in {t3:.1f} s ({tokens / max(t3, 0.01):.1f}/s), decoder {dec:.1f} s" \
+            if t3 is not None and dec is not None and tokens else ""
+        name = f"speech-{e['id']}.mp3"
+        (out / name).write_bytes(base64.b64decode(done["audio"]))
+        line = (f"{secs:.1f} s of speech in {took:.1f} s, real-time factor {factor:.2f}{where} "
+                f"(loading {float(first['compute']):.0f} s)")
+        if done.get("capped"):
+            rep.line("WARN", f"speech: {e['id']}", line + " - it did not stop by itself (ran to its length limit): "
+                     "the end is probably noise", f"listen to {name}")
         else:
-            modes += [("fastest", False, "all")]          # Turbo: its own two-step decoder either way
-        for mode, fast_decoder, int8 in modes:
-            files = speech_files(e, env.speech_models)
-            if fast_decoder:
-                files["decoder"] = decoder
-            spoken = []
-            try:
-                for text in sentences[lang]:            # the first loads the model, the second is the speed
-                    body = {"model": {"key": e["id"], "family": e["family"], "files": files, "int8": int8},
-                            "text": text, "language": lang, "seed": 1, "format": "mp3",
-                            "voice": {"path": f"{env.speech_models}/{voice[0]['dest']}"}
-                            if voice and not role_files(e, "conds") else None, **(e.get("sampling") or {})}
-                    spoken.append(_say(c, env, body))
-            except Exception as exc:  # noqa: BLE001
-                rep.line("FAIL", f"speech: {e['id']}", f"{mode}: {exc}", "bash update.sh compose logs speech")
-                continue
-            first, done = spoken
-            secs, took = float(done["seconds"]), float(done["compute"])
-            t3, dec, tokens = done.get("t3_seconds"), done.get("decoder_seconds"), done.get("tokens")
-            factor = took / max(secs, 0.01)
-            where = f"; T3 {tokens} tokens in {t3:.1f} s ({tokens / max(t3, 0.01):.1f}/s), decoder {dec:.1f} s" \
-                if t3 is not None and dec is not None and tokens else ""
-            name = f"speech-{e['id']}-{mode}.mp3"
-            (out / name).write_bytes(base64.b64decode(done["audio"]))
-            saved.append(name)
-            line = (f"{mode}: {secs:.1f} s of speech in {took:.1f} s, real-time factor {factor:.2f}{where} "
-                    f"(loading {float(first['compute']):.0f} s)")
-            if done.get("capped"):
-                rep.line("WARN", f"speech: {e['id']}", line + " - it did not stop by itself (ran to its length "
-                         "limit): the end is probably noise", f"listen to {name}")
-            else:
-                rep.line("PASS", f"speech: {e['id']}", line)
-            samples.append({"file": name, "model": e["id"], "name": e.get("name") or e["id"], "setting": mode,
-                            "text": sentences[lang][1], "seconds": secs, "compute": took, "factor": round(factor, 2),
-                            "t3_seconds": t3, "decoder_seconds": dec, "tokens": tokens,
-                            "capped": bool(done.get("capped"))})
-    if saved:
+            rep.line("PASS", f"speech: {e['id']}", line)
+        samples.append({"file": name, "model": e["id"], "name": e.get("name") or e["id"], "text": sentences[lang][1],
+                        "seconds": secs, "compute": took, "factor": round(factor, 2), "t3_seconds": t3,
+                        "decoder_seconds": dec, "tokens": tokens, "capped": bool(done.get("capped"))})
+    if samples:
         (out / "speech.json").write_text(json.dumps({"at": time.strftime("%Y-%m-%d %H:%M"), "cpu": h.get("cpu"),
                                                      "threads": h.get("threads"), "samples": samples}, indent=1))
-        rep.line("PASS", "speech files", f"{len(saved)} samples, the same sentence and seed in each setting: listen "
-                 "under Settings -> Assistant -> Sound")
+        rep.line("PASS", "speech files", f"{len(samples)} samples, the same sentence and seed with each voice model: "
+                 "listen under Settings -> Assistant -> Sound")
 
 
 def _say(c, env, body: dict) -> dict:

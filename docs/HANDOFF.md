@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.13.3, 2026-10-23)
+## State (0.13.4, 2026-10-24)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -29,11 +29,12 @@ V3 for 23 languages), so the chat model stays on the card; music (ACE-Step
 1.5) and sound effects (Stable Audio 3) on the card through ComfyUI and the
 queue. No sound model is downloaded by default (Settings → Models → Sound,
 music and speech). On VM 222 the speech container runs Røst v3, Røst v3
-Turbo and Chatterbox. Søren's first listening test (below): Røst v3 Turbo at
-full weights sounds best - about 4x slower than real time - while 8-bit
-weights everywhere made mistakes, so 0.13.3's "Faster" puts only the MLP
-layers in 8 bits (not heard yet). Music and sound effects have not run on
-the card yet.
+Turbo and Chatterbox. Søren's two listening tests (below): Røst v3 Turbo at
+full weights sounds best - about 4x slower than real time - and 8-bit weights
+said wrong words even in the MLP layers only, so 0.13.4 removed the speed
+setting (full weights only) and puts Røst v3 Turbo first for Danish.
+Chatterbox speaks Danish with an English accent: other languages only. Music
+and sound effects have not run on the card yet.
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
 host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU
@@ -133,6 +134,7 @@ the host if the VM ever stops by itself.
 | Chat export | 7 tests (`tests/test_export.py`), one of them the model server's log without the vision models' position warnings: Markdown (thinking, tool calls and results, one section per turn, the turn line), the ZIP (every part; full tool arguments; the model card and safe settings - a cloud API key set in Settings appears nowhere in it; the picture as a file and linked in the transcript; context.json with the system prompt, history, tools and request, the picture left out; the event log with streamed pieces joined; the queue job of the run), 404/400/401, joining events, file names. Both menu items and the phone page's Export this chat clicked through in Chromium (downloads named after the chat, unzipped, the phone file has no whole key). |
 | Settings 0.10.0 | In Chromium against the dev server (12 checks): the hand-over setting (Qwen3.8 27B by default), a model's Settings dialog (sampling prefilled from the card, thinking "Always think first" and a new temperature saved, "Use the model's own sampling" back to the card with thinking kept, the composer of a new chat following the model's thinking), Add from Hugging Face searching "Ornith 1.5 9B" (two repositories listed, a click looks one up, Q8_0 preselected for 9B, BF16 "twice the size of Q8_0"), and a live hand-over (Qwen3.6 35B-A3B repeats a web search, refused twice, Qwen3.8 27B answers; the notice live and after a reload; the footer names both models). |
 | Keys away from home | In Chromium against the dev server started as if behind a proxy (`--proxy 127.0.0.1 --public-url https://hub.example.test --lan-host 192.168.1.10`; uvicorn without its own proxy handling, as in production) (16 checks): the Apps page and dialog text, "Where it works" hiding "Only the home network" when away, the phone link through the public address and the home-only link, the list's per-key choice, switching a home-network key to away removing that limit (and back), the phone page from outside (`X-Forwarded-For: 203.0.113.9`) with a home key ("not through ...", "The Hub sees this phone at 203.0.113.9"), Try again after the key was switched (the key from the link was kept), an answer from outside, an away key connecting straight away. |
+| Listening test, 0.13.3 (2026-10-23/24) | Søren played the 0.13.3 samples in Settings: Røst v3 Turbo with only its MLP layers in 8 bits ("Faster") and with every layer in 8 bits ("Fastest") both said wrong words; every Chatterbox sample still sounds English. Hence 0.13.4: no 8-bit weights and no borrowed decoder - every model at full weights with its own decoder - and Røst v3 Turbo first for Danish. Røst v3's 0.13.3 Faster/Fastest samples got no comment. |
 | Listening test, 0.13.2 (2026-10-23) | Søren played the self-test's samples in Settings → Assistant → Sound (the same Danish sentence, seed 1). Røst v3 Turbo at Best (factor 3.92) "clearly best", Røst v3 at Best (5.82) next. Every Chatterbox sample sounds like an English speaker trying to speak Danish. Røst v3 Turbo with every layer in 8 bits (2.10) skipped a word; Røst v3 with every layer in 8 bits, with its own decoder (3.11) and with Turbo's (1.95), pronounced the first word oddly and sounded clipped, otherwise correct. Hence 0.13.3: 8-bit MLP layers only as "Faster" (the attention layers keep the speech aligned with the text), every layer as "Fastest" with the warning, and the advice to use Røst v3 Turbo at Best for Danish. |
 | Real hardware, 0.13.1 self-test (2026-10-23) | `selftest --speech` on VM 222 (AMD Ryzen 9 5950X, AVX2 only, 10 threads), the same Danish sentence with seed 1, one line per setting (best / Turbo's decoder / Turbo's decoder + 8-bit, as 0.13.1 ordered them). Røst v3: 3.4 s of speech in 19.6 s, factor 5.75, T3 91 tokens at 6.4/s (14.2 s) and decoder 5.3 s; Turbo's decoder: T3 15.4 s, decoder 1.4 s (factor 6.16 - but only 2.7 s of sound came out of the same 91 tokens: listen); + 8-bit: 3.2 s in 7.4 s, factor 2.28, T3 85 tokens at 15.7/s, decoder 1.9 s. Røst v3 Turbo: factor 3.75, T3 11.0/s; 8-bit: 1.82, T3 26.4/s (faster than real time). Chatterbox Multilingual V3 with Resemble's repetition penalty: stopped by itself at 79 tokens (2.7 s) in both full-weight runs - factor 7.46, decoder 6.2 s, and 5.62 with Turbo's decoder (1.2 s); with 8-bit weights it ran to the ceiling (228 tokens, 9.0 s, the self-test's WARN). T3 on 5 threads as fast as on 10 (15.8 vs 15.7, 25.5 vs 26.4, 14.3 vs 12.9 tokens/s). So T3 is two thirds of the time on this CPU and 8-bit weights the big lever: 0.13.2 made 8-bit "faster" and the decoder "fastest". Samples not heard yet (`scp` without a destination, then the samples moved into Settings). |
 | Real hardware, 0.13.0 self-test (2026-10-23) | `selftest --speech` on VM 222, every line passed: GPU 24.0 GB (11.1 GB in use with Ornith 1.5 9B loaded); the sandbox, its isolation and internet; **Landlock ABI 8** for people's code ("people's code stays in its folder"); web search; ComfyUI (torch 2.14.1+rocm7.14) and its folders; the speech service - the image built, torch 2.11.0+cpu on 10 threads; Røst v3: 3.4 s of speech in 20.4 s, a real-time factor of 5.95 (the first sentence 27 s with loading), with its Mic voice file (a float WAV, read by the new reader); Chatterbox Multilingual V3: 9.0 s of speech in 46.6 s (factor 5.18) for a 51-character Danish sentence - 9.0 s is exactly that sentence's token ceiling, so it most likely did not stop by itself (0.13.1: Resemble's repetition penalty 1.2 instead of Røst's 2.0, and the self-test says when a piece ran to the ceiling); Ornith answering at 60 tokens/s; embeddings. |
@@ -143,6 +145,7 @@ the host if the VM ever stops by itself.
 | ComfyUI | v0.42.3 on CPU with placeholder model files: all workflow graphs (Qwen-Image 2.1 generate, turbo, edit with 1 and 3 images, background removal, FLUX.2 klein generate and edit, ERNIE-Image and Turbo each with and without the prompt enhancer, Z-Image Turbo, Chroma1-HD with the default and a given negative, SDXL with clip skip 2 and tags and plain, and SDXL with every sampler and scheduler the settings offer: 41 in all) pass ComfyUI's own validation. Z-Image, Chroma and SDXL follow `image_z_image_turbo.json`, `image_chroma_text_to_image.json` and `image_sdxl_simple.json` (fetched 2026-10-22), including `TextGenerate`'s dynamic `sampling_mode.*` inputs. The ERNIE graphs follow the official templates (`Comfy-Org/workflow_templates`: `image_ernie_image.json`, `image_ernie_image_turbo.json`, fetched 2026-10-22). Tests: the graph shapes, and an agent turn with only Turbo downloaded (the enhancer's text comes back through `PreviewAny` into the tool result), the enhancer switched off, an edit with ERNIE chosen going to Qwen-Image. |
 | MCP over stdio | A real stdio MCP server through the real sandbox daemon (`execd.py`): initialize, a server-to-client ping, tools, an 18 KB result. |
 | Sound (0.13.0) | 18 tests (`tests/test_audio.py`) against a fake speech service and a fake ComfyUI: the catalog and downloads; no sound tools until a model is downloaded, then the voices with their labels read from float WAV samples (as the Røst files are); a Danish sentence spoken and saved (the request, the result, the card, the next free name); English going to Chatterbox with expressiveness and a voice memo converted by the sandbox's ffmpeg (the command, the copy removed, the voice kept for the owner); Røst Turbo's accent note and tokenizer folder; every error (unknown voice, missing or unreadable clip, bad extension, model not downloaded, the service's error, a 400, the service down); a song's graph; a song in a project under `audio/`, the Settings model, `save_as` as a sandbox path and as a folder; Stable Audio 3's prompt tags and FLAC; missing nodes; a person's sound and speech (the clip converted confined to her turn, ComfyUI's copy and history deleted, her voice not kept, a 300 s FLAC refused); a file too big for her device said so; both WAV readers (PCM of 8-32 bits, float 32/64, extensible, stereo, a LIST chunk, a stream's data size, refusals); the service's text pieces, limits, paths and voice cache; the compose service (no GPU, `models/` read-only, no CPU cap). The speech service itself (`server.py` in a venv with the pinned packages; torch 2.11.0 from PyPI on the CPU where the image has the CPU build of the same version) against random-weight models of both real architectures on 2 threads, 23 checks: MP3, WAV, FLAC and Opus that decode at the length it reports; the built-in voice; voice files as 16-bit WAV and as float WAV written by libsndfile (80-byte header) and by ffmpeg; a 48 kHz stereo clip resampled; a clip's voice kept only with `cache_voice`; a non-WAV clip refused; two paragraphs as pieces with progress; every refusal (empty, too long, format, a path outside the models, a model file as a voice, unknown family, a language it does not speak, a 0.5 s clip, Turbo's five seconds); a client that leaves (stopped after the piece in hand, free again); `/free`; a dropped model's memory handed back (4.4 GB loaded, 1.9 GB after `gc`, 0.84 GB after `malloc_trim`). ComfyUI v0.42.3 (CPU, placeholder files): all 26 sound graphs pass its validation (both ACE-Step models in each format, an instrumental waltz in an unknown language, Stable Audio 3 for every kind and format, 380 s); the Hub's client on real audio jobs (`EmptyAudio` → `SaveAudioAdvanced`) gets MP3, FLAC and Opus that decode at the right length, and `keep=False` deletes the file and the history entry. ffmpeg 6.1.1 with the clip command: an AAC voice memo (its first 30 s), an MP3 and a video's sound become 24 kHz mono WAV; a text file named `.mp3` and a playlist pointing to the web are refused. The updater's `ensure_folders` in a temporary root. In Chromium (19 checks): the models page's sound group with CPU/GPU tags, Settings → Assistant → Sound, the speech service in Settings → System, speech, a song and a horn in a chat with the card playing each, the tool rows, phone width. An independent review (a separate agent, the whole diff) found seven issues, all fixed: the Røst voice samples are 32-bit float WAVs (their sizes are exactly an 80-byte libsndfile header plus float samples), which Python's `wave` cannot read - every Danish request would have failed; a person's voice kept in the service's cache; `save_as` with a sandbox path landing in a nested folder; a long FLAC never reaching a person's device; a voice path read before its size was checked; the speech service missing from the status views; the docs. |
+| Sound, full weights only (0.13.4) | 22 tests in `tests/test_audio.py`: the request carries only key, family and files (no speed knobs) and a capped piece is named in the result; a `settings.json` from 0.13.3 with `sound.speech_speed` loads without it and the whole Sound section saves (the key is still refused when sent); the samples list skips 0.13.2-0.13.3 speed runs, missing files and bad names; with both Røst models downloaded Danish goes to Røst v3 Turbo and the tool says so, the Sound setting still picks Røst v3. The real speech service (random weights, 2 threads) with the self-test's speech lines: one sample per model, speech.json without settings, the WARN for a piece that ran to the ceiling. In Chromium against the dev server started with a 0.13.3 settings file (27 checks): Turbo first on the models page, no speed choice, the Danish choice and its help, Save over the old file (the stale key gone from the file), one sample per model playing, speech in a chat by Røst v3 Turbo, phone width. Not on the VM yet. |
 | People (0.11.0) | 19 tests (`tests/test_people.py`): adding, changing, signing out and removing a person (user names, case, passwords); home only (refused from outside before the password; a session taken outside is signed out) and away; every owner route 403 for a person, the sync API and the model API (`/v1`, `/api`) 401; settings reduced to three defaults with no secrets; a device turn (her name and no memory in the system prompt, no bash/memory/library tools, the photo seen, no chat/run/prompt rows left, folder and photo gone after `/done`, the queue log with her name and "Chat"); pictures, files and artifacts back to the device, an artifact changed in the next turn; bash only when allowed and Landlock present, sent confined; turns private between people and bad requests refused (paths out of the folder, `.hub/home`); the queue as a person sees it; swept turns and ledgers (a list written into the folder by her code is ignored); the run dropped and deleted files reported; ComfyUI's history entries and output/input pictures deleted for her and kept for the owner; a picture the owner or another turn stores meanwhile kept; only the skills switched on (list, prompt, the skill tool); at most four turns waiting for a device; the time each message was sent, from the device. 5 tests (`tests/test_sandbox_daemon.py`, real Landlock, skipped without it): a confined command reads and writes its folder only (not a sibling file, another turn's folder, `/root`; `TMPDIR` inside), `/dev/null`, `/dev/urandom`, process substitution and child processes work, `/dev/shm` and `/dev/pts` do not; background, `setsid` and `nohup` processes are killed when it ends, the owner's are not; bad confine settings refused. By hand on this build machine (kernel 6.18, ABI 7) as uid 1000: Landlock denies a confined process another process's `environ`, `mem` and `maps`, while `cmdline` stays readable (documented). The Hub's ComfyUI client against real ComfyUI v0.42.3 (CPU, a LoadImage → SaveImage graph): with `keep=False` the output file, the input file and the history entry are gone; with `keep=True` they stay. In Chromium (Playwright, 19 checks): Settings → People (add, list, the user name from the name), her chat at phone size (her sidebar, the thinking levels, no libraries), a title, a picture shown from the device's store, an artifact, an attachment and a file the assistant wrote in the Files panel, both chats and the picture after a reload with the Hub's copies gone, the owner seeing none of it, Export all chats → Import on a second browser with the picture, her session refused by the owner API, and not one refused request from her pages. An independent review (a separate agent, the whole diff) found five issues - `/dev/shm` writable, disabled skills readable, abandoned turns unbounded, the model API open to her session, `/proc/<pid>/cmdline` visible - the first four are fixed, the last is documented. |
 
 ## Not verified - check these on the real system
@@ -282,26 +285,24 @@ the host if the VM ever stops by itself.
     (the player asks for byte ranges), and whether Qwen3.8 now names the
     file and cleans up scratch files as the system prompt asks.
 28. **The speech image**: built on VM 222 by the 0.13.0 update and running
-    (torch 2.11.0+cpu). Not seen: Røst v3 Turbo's files downloaded and loaded.
-29. **The real voice models**: Røst v3 and Chatterbox Multilingual V3
-    downloaded and spoke in the 0.13.0 self-test (Røst with its Mic file, a
-    float WAV). Not yet heard: how they sound through this service's
-    sentence splitting and pauses, and whether Mic and Nic come out as "male
-    voice" and "female voice" from their pitch (the tool description shows
-    it).
-30. **The 0.13.3 "Faster" (8-bit MLP layers, attention full)**: not measured
-    on the VM or heard. Here (random weights, 2 threads) it made T3 1.4x
-    quicker for Turbo and 1.5x for the 500M models, against 1.9x and 1.8x with
-    every layer in 8 bits; whether it avoids the skipped word and slurred
-    first words is for the ear (the idea: those are alignment errors, and
-    alignment lives in the attention layers). Turbo's decoder on Røst v3's
-    tokens was only heard together with 8-bit weights. T3 is as fast on 5
-    threads as on 10, so overlapping the next sentence's T3 with this
-    sentence's decoder could save 15-20% on longer texts (estimated; not
-    built - the two would share torch's global random generator, which
-    breaks the seed's repeatability). Faster than that with full quality
-    means the card: a speech residency would swap the chat model out per
-    request (or sit beside a small one, which the scheduler cannot do yet).
+    (torch 2.11.0+cpu); Røst v3 Turbo's files downloaded and loaded in the
+    0.13.1 self-test. Not seen: the 0.13.4 image (only code removed).
+29. **The real voice models**: all three spoke on the VM, one sentence each
+    with seed 1, and were heard in Settings (Røst v3 Turbo best, Røst v3 next,
+    Chatterbox English-accented). Not yet heard: a longer text through this
+    service's sentence splitting and pauses, a cloned voice, and whether Mic
+    and Nic come out as "male voice" and "female voice" from their pitch (the
+    tool description shows it).
+30. **Faster speech with full quality**: 8-bit weights are out (0.13.4: they
+    said wrong words, even with the attention layers full), as are bf16 and
+    weight-only int8 (both slower on this CPU). T3 is as fast on 5 threads as
+    on 10, so overlapping the next sentence's T3 with this sentence's decoder
+    could save 15-20% on longer texts (estimated; not built - the two would
+    share torch's global random generator, which breaks the seed's
+    repeatability). Beyond that, full quality faster means the card: a speech
+    residency would swap the chat model out per request (or sit beside a
+    small one, which the scheduler cannot do yet). Offered to Søren, not
+    asked for.
 31. **Memory with sound**: two voice models in the speech container (about
     4 GB each, a 12 GB limit) while ComfyUI reads ACE-Step XL's 20 GB of files
     and the LLM's file is mapped, in a 40 GB VM. Watch `free -h` and the
@@ -319,10 +320,9 @@ the host if the VM ever stops by itself.
     languages are spoken from the plain text and probably worse - Chinese
     likely badly. Danish, English and the other European languages need none.
 35. **Chatterbox stopping by itself**: with Resemble's repetition penalty
-    (0.13.1) it stopped at 79 tokens in both full-weight runs, but ran to the
-    ceiling with 8-bit weights (one run; 0.13.2's 8-bit weights have a scale
-    per channel, closer to the full ones). Watch the self-test's WARN lines
-    and the "did not stop by itself" note in results.
+    (0.13.1) it stopped at 79 tokens in both full-weight runs (it ran to the
+    ceiling once with 8-bit weights, which are gone). Watch the self-test's
+    WARN lines and the "did not stop by itself" note in results.
 
 ## Where things are
 

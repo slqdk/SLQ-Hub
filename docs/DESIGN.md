@@ -633,16 +633,21 @@ routing), and the system prompt says what each costs.
   CPU PyTorch 2.11, an aiohttp server on the `core` network. It never asks the
   queue, like the CPU embedding models: the chat model stays loaded with its
   prompt cache, and a sentence costs seconds instead of two model swaps.
-  - **Models.** Røst v3 (CoRal, 0.5B, Danish; reads English with a heavy
-    accent, and the result says so), Røst v3 Turbo (350M, about three times
-    faster, a little less natural; clips over five seconds), Chatterbox
-    Multilingual V3 (23 languages, a built-in voice, expressiveness). Røst v3
-    and Chatterbox Multilingual V3 share S3Gen and the voice encoder (only T3
-    differs); Turbo has its own two-step S3Gen.
+  - **Models.** Røst v3 Turbo (CoRal, 350M, Danish; reads English with a
+    heavy accent, and the result says so; voice clips over five seconds),
+    Røst v3 (0.5B, rated more natural by CoRal's listeners, about 1.5 times
+    slower on the VM's CPU), Chatterbox Multilingual V3 (23 languages, a
+    built-in voice, expressiveness; its Danish has an English accent in every
+    sample heard - a limit of the model, not a setting: its tokenizer has
+    Danish and æ/ø/å). Røst v3 and Chatterbox Multilingual V3 share S3Gen and
+    the voice encoder (only T3 differs); Turbo has its own two-step S3Gen. In
+    the listening test on the VM (0.13.2) Røst v3 Turbo sounded best, so it
+    comes first in the catalog.
   - **Which model.** The one named in the call; otherwise Settings → Assistant
     → Sound: the voice model for Danish, or the one for other languages -
     unless that one does not speak the language and another downloaded model
-    does. Empty settings mean the first downloaded.
+    does. Empty settings mean the first downloaded in catalog order - for
+    Danish, Røst v3 Turbo when it is there.
   - **Voices.** A model's own (Mic and Nic, described as male and female from
     the samples' median pitch; Chatterbox's `default`), or a clip in the
     working folder (5-20 s of one person). ffmpeg converts a clip in the
@@ -673,27 +678,28 @@ routing), and the system prompt says what each costs.
     time went - T3's tokens and seconds, the decoder's seconds - and how many
     pieces ran to the token ceiling instead of stopping by themselves; the
     result then says the end may be noise and another seed usually helps.
-  - **Speed** (0.13.1-0.13.3). On VM 222 (Ryzen 9 5950X, AVX2, 10 threads)
-    Røst v3 takes about 20 s for 3.4 s of speech, a real-time factor of 6:
-    T3 (one token at a time, 6.4 a second) 14 s, the ten-step decoder 5 s;
-    Røst v3 Turbo about 3.9. 8-bit weights for T3 (dynamic quantisation of
-    its linear layers, a scale per output channel; GPT-2's Conv1D layers
-    become `nn.Linear` first, exactly) make it 2.3-2.5x quicker on that CPU -
-    but in the first listening test, with every layer in 8 bits, Turbo
-    skipped a word and Røst v3 slurred its first word. Settings → Assistant →
-    Sound → Speech speed: **best** - full weights, each model's own decoder
-    (Røst v3 Turbo at best sounded best of all); **faster** - 8-bit weights
-    for the MLP layers only, the attention layers (which keep the speech
-    aligned with the text) full: T3 1.4-1.5x quicker here, not yet heard;
-    **fastest** - every layer in 8 bits, and Turbo's distilled two-step
-    decoder for Røst v3 and Chatterbox (the same speech tokens and voice
-    prompt; it comes with Røst v3 Turbo; their decoder 4x quicker) - Røst v3
-    at 1.95. `selftest --speech` speaks the same sentence and seed in every
-    setting, and Settings → Assistant → Sound plays the samples with what each
-    cost, to choose by ear. T3 is as fast on 5 threads as on 10 (memory, not
-    cores, limits it; a request may ask for `t3_threads`). bf16 was slower on
-    a CPU without native bf16, and torch's int8 weight-only matmul 4x slower
-    than float on the CPU. Speech that would clip is turned down as a whole.
+  - **Speed: full weights only** (0.13.4). On VM 222 (Ryzen 9 5950X, AVX2,
+    10 threads) Røst v3 takes about 20 s for 3.4 s of speech, a real-time
+    factor of 6: T3 (one token at a time, 6.4 a second) 14 s, the ten-step
+    decoder 5 s; Røst v3 Turbo about 3.9. 0.13.1-0.13.3 offered a Speech speed
+    setting: 8-bit weights for T3 (dynamic quantisation, a scale per output
+    channel) made it 2.3-2.5x quicker, and Turbo's distilled two-step decoder
+    could serve the 500M models. The listening tests rejected it: with every
+    layer in 8 bits Turbo skipped a word and Røst v3 slurred its first word,
+    and with only the MLP layers in 8 bits (attention full) Turbo still said
+    wrong words. Wrong words make speech useless, so the setting is gone and
+    every model runs with its full weights and its own decoder. Also tried and
+    not worth it on this CPU: bf16 (slower without native bf16), torch's int8
+    weight-only matmul (4x slower than float), fewer threads for T3 (as fast
+    on 5 as on 10 - memory, not cores, limits it - but no quicker). Running
+    one piece's decoder while T3 makes the next could save perhaps 15-20 % on
+    longer texts; not built, because both would draw from torch's global
+    random generator and a seed would no longer repeat. Faster with full
+    quality means the card - a model swap per request, or a speech model
+    beside a small chat model, which the scheduler cannot do yet.
+    `selftest --speech` speaks the same sentence and seed with each voice
+    model, and Settings → Assistant → Sound plays the samples with what each
+    cost, to choose by ear. Speech that would clip is turned down as a whole.
 - **Music (`music_generate`)**: ACE-Step 1.5 in ComfyUI's native nodes, as in
   the official template: `UNETLoader`, `DualCLIPLoader` (type `ace`: the 0.6B
   encoder and the planner), `TextEncodeAceStepAudio1.5` (style, lyrics with
@@ -897,9 +903,9 @@ the services mount when a new version adds one (owned by uid 1000).
 **Self-test.** `python -m app.cli selftest` checks every service, the
 sandbox's isolation and one answer with its tokens/s; `--images` makes a
 picture, and `--speech` speaks the same sentence with each downloaded voice
-model in each speech-speed setting, reports the real-time factor with T3's and
-the decoder's share, and saves each in `data/selftest/` (with `speech.json`),
-where Settings → Assistant → Sound plays them.
+model, reports the real-time factor with T3's and the decoder's share, and
+saves each in `data/selftest/` (with `speech.json`), where Settings →
+Assistant → Sound plays them.
 
 **Logs.** `update.sh compose logs -f <service>`. The Hub keeps an error log
 and per-model llama-server logs, viewable in Settings → System.
@@ -943,12 +949,12 @@ clock times), the tail of llama-server's log and the chat's files (up to
 - **Landlock in the sandbox container** needs the kernel's LSM list to include
   it and Docker's seccomp profile to allow its three system calls. Without
   it people simply get no code (the self-test's "sandbox for people" line).
-- **Speech on the CPU** runs on the VM: a real-time factor of about 6 for
-  Røst v3 with full weights, 2.3 with the fastest setting, 1.8 for Røst v3
-  Turbo with 8-bit weights (0.13.1 self-test). Whether 8-bit weights and
-  Turbo's decoder sound worse is for the ear (the samples in Settings). Real
-  time is within reach only for Turbo's token part; on the card it would be
-  for all, at the price of a model swap per request.
+- **Speech on the CPU** runs on the VM at full weights: a real-time factor
+  of about 4 for Røst v3 Turbo and 6 for Røst v3 (0.13.1-0.13.3 self-tests).
+  8-bit weights were about twice as quick but said wrong words, so they are
+  gone (0.13.4). Real time with full quality would need the card, at the
+  price of a model swap per request. Heard so far: one sentence per model;
+  longer texts (the sentence splitting and pauses) not yet.
 - **ACE-Step 1.5 and Stable Audio 3 on gfx1100** have not run on the card:
   VRAM (XL is about 20 GB with its planner), speed and quality are unknown, as
   is how well ACE-Step sings Danish. The graphs were validated against a real

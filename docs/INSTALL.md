@@ -279,7 +279,7 @@ speech**.
 
 | For | Model | Download | Runs on |
 |---|---|---|---|
-| Danish speech | Røst v3 (or Røst v3 Turbo: three times faster, a little less natural) | 3.2 GB (3.0 GB) | the CPU |
+| Danish speech | Røst v3 Turbo (or Røst v3: more natural to CoRal's listeners, 1.5 times slower) | 3.0 GB (3.2 GB) | the CPU |
 | Speech in other languages | Chatterbox Multilingual V3 (shares 1 GB with Røst v3) | 3.2 GB | the CPU |
 | Songs and instrumentals | ACE-Step 1.5 XL Turbo (or ACE-Step 1.5 Turbo: half the size) | 19.9 GB (10.0 GB) | the card |
 | Sound effects, ambience, loops | Stable Audio 3 Medium | 10.4 GB | the card |
@@ -295,12 +295,14 @@ machine:
 
     sudo bash /opt/slq-hub/update.sh compose exec hub python -m app.cli selftest --speech
 
-It speaks the same sentence with each voice model in each **Speech speed**
-setting (Best; Faster: 8-bit weights; Fastest: also Turbo's decoder for Røst
-v3 and Chatterbox, which needs Røst v3 Turbo downloaded) and shows how long
-each took. Then open **Settings → Assistant → Sound**: under Speech samples
-each one plays, with its real-time factor (seconds of work per second of
-speech). Choose the fastest setting that still sounds right.
+It speaks the same sentence with each voice model and shows how long each
+took. Then open **Settings → Assistant → Sound**: under Speech samples each
+one plays, with its real-time factor (seconds of work per second of speech).
+Choose the **Voice model for Danish** by ear - on VM 222 Røst v3 Turbo
+sounded best and is the quicker one (about 4 seconds of work per second of
+speech), and it is what Danish gets when nothing is chosen. Chatterbox
+Multilingual V3 speaks Danish with an English accent; keep it for other
+languages.
 
 The files are in `/srv/slq-hub/data/selftest/` on the VM too. To copy them to
 your PC (PowerShell; the last argument is where they go):

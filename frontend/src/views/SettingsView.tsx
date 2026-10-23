@@ -1107,7 +1107,6 @@ function AgentTab({ s }: { s: S }) {
   const imageOptions = imageModels.length ? imageModels.map((m) => ({ value: m.id, label: m.name }))
     : [{ value: current, label: "No image model downloaded" }];
   const soundModels = (models?.audio ?? []).filter((m) => m.installed);
-  const hasTurbo = soundModels.some((m) => m.family === "chatterbox-turbo");   // brings the two-step decoder
   const soundOptions = (ability: string, language?: "da" | "other") => {
     const fit = soundModels.filter((m) => (m.abilities ?? []).includes(ability)
       && (language !== "other" || (m.languages ?? []).some((l) => l !== "da")));
@@ -1154,16 +1153,10 @@ function AgentTab({ s }: { s: S }) {
           help: "Songs and instrumentals (music_generate). The assistant can still use another downloaded model if you name it." },
         { key: "sound_model", label: "Model for sound effects", type: "select", options: soundOptions("sound") },
         { key: "speech_model_da", label: "Voice model for Danish", type: "select", options: soundOptions("speech", "da"),
-          help: "Røst v3 Turbo is faster; listen to both under Speech samples. Chatterbox speaks Danish with an English accent." },
+          help: "Røst v3 Turbo is the faster; in this Hub's listening test it also sounded best. Chatterbox speaks Danish " +
+            "with an English accent. Listen to each under Speech samples." },
         { key: "speech_model", label: "Voice model for other languages", type: "select", options: soundOptions("speech", "other"),
           help: "Used when it speaks the language; otherwise a model that does." },
-        { key: "speech_speed", label: "Speech speed", type: "select", options: [
-          { value: "best", label: "Best: full weights, each model's own decoder" },
-          { value: "faster", label: "Faster: 8-bit weights for the MLP layers, attention stays full" },
-          { value: "fastest", label: `Fastest: every layer 8-bit, Turbo's decoder for Røst v3 and Chatterbox${hasTurbo ? "" : " (needs Røst v3 Turbo)"}` }],
-          help: "The token part is two thirds of the time here. With every layer in 8 bits it is 2.3-2.5 times quicker, " +
-            "but a listening test found a skipped word and slurred first words; Faster keeps the attention layers - " +
-            "which keep the speech in step with the text - at full weights. Listen to the samples below before choosing." },
       ]} />}
       {soundModels.some((m) => (m.abilities ?? []).includes("speech")) && <SpeechSamples />}
       <SectionForm s={s} section="images" title="Images" fields={[
@@ -1499,13 +1492,11 @@ function CloudTab({ s }: { s: S }) {
 interface SystemData { version: string; services: Record<string, any>; gpu: { vram_total?: number; vram_used?: number };
   disk: Record<string, { total?: number; used?: number; free?: number }>; lastLoadError: string | null }
 
-interface SpeechSample { file: string; model?: string; name?: string; setting?: string; text?: string; seconds?: number;
-  compute?: number; factor?: number; capped?: boolean }
-const SPEED_NAMES: Record<string, string> = { best: "Best", faster: "Faster (8-bit MLP)",
-  fastest: "Fastest (8-bit everywhere, Turbo's decoder)" };
+interface SpeechSample { file: string; model?: string; name?: string; text?: string; seconds?: number; compute?: number;
+  factor?: number; capped?: boolean }
 
-/** The last speech self-test's samples: the same sentence and seed with each voice model in each speed setting,
- * what each cost, and a player - to choose Settings -> Assistant -> Sound -> Speech speed by ear. */
+/** The last speech self-test's samples: the same sentence and seed with each voice model, what each cost, and a
+ * player - to choose the voice models above by ear. */
 function SpeechSamples() {
   const [data, setData] = useState<{ at?: string; cpu?: string; threads?: number; samples: SpeechSample[] } | null>(null);
   useEffect(() => {
@@ -1518,7 +1509,7 @@ function SpeechSamples() {
       <h3 style={{ margin: 0 }}>Speech samples</h3>
       {!data.samples.length ? (
         <p className="muted" style={{ margin: 0, maxWidth: "62ch" }}>None yet. The self-test speaks the same sentence with each
-          voice model in each speed setting and puts the samples here: on the VM,{" "}
+          voice model and puts the samples here: on the VM,{" "}
           <code className="mono">sudo bash /opt/slq-hub/update.sh compose exec hub python -m app.cli selftest --speech</code></p>
       ) : (
         <>
@@ -1528,7 +1519,7 @@ function SpeechSamples() {
           <div className="list">
             {data.samples.map((s) => (
               <div className="list-row" key={s.file}>
-                <span className="grow"><b>{s.name ?? s.model ?? s.file}</b> · {SPEED_NAMES[s.setting ?? ""] ?? s.setting}
+                <span className="grow"><b>{s.name ?? s.model ?? s.file}</b>
                   <div className="meta">{s.seconds != null && s.compute != null
                     ? `${s.seconds.toFixed(1)} s of speech in ${s.compute.toFixed(1)} s, real-time factor ${s.factor?.toFixed(2)}` : s.file}
                     {s.capped ? " - it did not stop by itself, so the end is probably noise" : ""}</div>

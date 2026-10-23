@@ -198,28 +198,9 @@
   ],
   "audio": [
     {
-      "id": "roest-v3",
-      "name": "Røst v3",
-      "description": "Danish text to speech from the CoRal project (the Alexandra Institute and partners): Resemble AI's Chatterbox trained on more than 2,000 hours of Danish, rated 4.23 of 5 by native speakers. Two voices, Mic and Nic, or any voice from a 10-20 s clip. English only with a heavy Danish accent. OpenRAIL licence.",
-      "default": false,
-      "engine": "speech",
-      "family": "chatterbox-mtl",
-      "abilities": ["speech"],
-      "languages": ["da"],
-      "sampling": {"temperature": 0.8, "top_p": 0.95, "min_p": 0.05, "repetition_penalty": 2.0, "cfg_weight": 0.5},
-      "files": [
-        {"repo": "CoRal-project/roest-v3-chatterbox-500m", "path": "t3_mtl23ls_v2.safetensors", "dest": "speech/roest-v3/t3_mtl23ls_v2.safetensors", "size": 2143989752, "role": "t3"},
-        {"repo": "CoRal-project/roest-v3-chatterbox-500m", "path": "s3gen.pt", "dest": "speech/chatterbox/s3gen.pt", "size": 1057165844, "role": "s3gen"},
-        {"repo": "CoRal-project/roest-v3-chatterbox-500m", "path": "ve.pt", "dest": "speech/chatterbox/ve.pt", "size": 5698626, "role": "ve"},
-        {"repo": "CoRal-project/roest-v3-chatterbox-500m", "path": "grapheme_mtl_merged_expanded_v1.json", "dest": "speech/roest-v3/grapheme_mtl_merged_expanded_v1.json", "size": 70011, "role": "tokenizer"},
-        {"repo": "CoRal-project/roest-v3-chatterbox-500m", "path": "audio_samples/00_mic_00_t0.8_p0.95_e0.5_c0.5_m0.05_r2.0.wav", "dest": "speech/roest-v3/voices/mic.wav", "size": 856400, "role": "voice", "voice": "mic"},
-        {"repo": "CoRal-project/roest-v3-chatterbox-500m", "path": "audio_samples/00_nic_00_t0.8_p0.95_e0.5_c0.5_m0.05_r2.0.wav", "dest": "speech/roest-v3/voices/nic.wav", "size": 952400, "role": "voice", "voice": "nic"}
-      ]
-    },
-    {
       "id": "roest-v3-turbo",
       "name": "Røst v3 Turbo",
-      "description": "The faster Danish voice from the same project (Chatterbox Turbo, 350M): about 1.5 times quicker than Røst v3 on this Hub's CPU, rated a little less natural by CoRal's listeners (4.01 of 5) - in this Hub's first listening test it sounded best. The same voices, Mic and Nic. OpenRAIL licence.",
+      "description": "Danish text to speech from the CoRal project (the Alexandra Institute and partners): Resemble AI's Chatterbox Turbo (350M) trained on Danish. The quicker Danish voice on this Hub's CPU (about 1.5 times quicker than Røst v3) and the one that sounded best in this Hub's listening test, though CoRal's listeners rated it a little less natural (4.01 of 5). Two voices, Mic and Nic, or any voice from a clip longer than 5 s. English only with a heavy Danish accent. OpenRAIL licence.",
       "default": false,
       "engine": "speech",
       "family": "chatterbox-turbo",
@@ -237,6 +218,25 @@
         {"repo": "CoRal-project/roest-v3-chatterbox-350m", "path": "tokenizer_config.json", "dest": "speech/roest-v3-turbo/tokenizer/tokenizer_config.json", "size": 3878, "role": "tokenizer"},
         {"repo": "CoRal-project/roest-v3-chatterbox-350m", "path": "audio_samples/00_mic_00_t0.8_p0.95_k1000_r1.2.wav", "dest": "speech/roest-v3-turbo/voices/mic.wav", "size": 937040, "role": "voice", "voice": "mic"},
         {"repo": "CoRal-project/roest-v3-chatterbox-350m", "path": "audio_samples/00_nic_00_t0.8_p0.95_k1000_r1.2.wav", "dest": "speech/roest-v3-turbo/voices/nic.wav", "size": 960080, "role": "voice", "voice": "nic"}
+      ]
+    },
+    {
+      "id": "roest-v3",
+      "name": "Røst v3",
+      "description": "The larger Danish voice from the same project (Chatterbox, 500M): trained on more than 2,000 hours of Danish and rated the most natural by CoRal's listeners (4.23 of 5), but about 1.5 times slower than Røst v3 Turbo on this Hub's CPU, and second in this Hub's listening test. Two voices, Mic and Nic, or any voice from a 10-20 s clip. English only with a heavy Danish accent. OpenRAIL licence.",
+      "default": false,
+      "engine": "speech",
+      "family": "chatterbox-mtl",
+      "abilities": ["speech"],
+      "languages": ["da"],
+      "sampling": {"temperature": 0.8, "top_p": 0.95, "min_p": 0.05, "repetition_penalty": 2.0, "cfg_weight": 0.5},
+      "files": [
+        {"repo": "CoRal-project/roest-v3-chatterbox-500m", "path": "t3_mtl23ls_v2.safetensors", "dest": "speech/roest-v3/t3_mtl23ls_v2.safetensors", "size": 2143989752, "role": "t3"},
+        {"repo": "CoRal-project/roest-v3-chatterbox-500m", "path": "s3gen.pt", "dest": "speech/chatterbox/s3gen.pt", "size": 1057165844, "role": "s3gen"},
+        {"repo": "CoRal-project/roest-v3-chatterbox-500m", "path": "ve.pt", "dest": "speech/chatterbox/ve.pt", "size": 5698626, "role": "ve"},
+        {"repo": "CoRal-project/roest-v3-chatterbox-500m", "path": "grapheme_mtl_merged_expanded_v1.json", "dest": "speech/roest-v3/grapheme_mtl_merged_expanded_v1.json", "size": 70011, "role": "tokenizer"},
+        {"repo": "CoRal-project/roest-v3-chatterbox-500m", "path": "audio_samples/00_mic_00_t0.8_p0.95_e0.5_c0.5_m0.05_r2.0.wav", "dest": "speech/roest-v3/voices/mic.wav", "size": 856400, "role": "voice", "voice": "mic"},
+        {"repo": "CoRal-project/roest-v3-chatterbox-500m", "path": "audio_samples/00_nic_00_t0.8_p0.95_e0.5_c0.5_m0.05_r2.0.wav", "dest": "speech/roest-v3/voices/nic.wav", "size": 952400, "role": "voice", "voice": "nic"}
       ]
     },
     {
