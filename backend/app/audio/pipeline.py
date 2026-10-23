@@ -224,20 +224,21 @@ class AudioPipeline:
 
     def speed(self, entry: dict, speed: str | None = None) -> tuple[dict, list[str]]:
         """What Settings -> Assistant -> Sound -> speech speed changes in a model's request, and notes for the result.
-        faster: Turbo's two-step decoder for the 500M models (Røst v3, Chatterbox) - about a quarter of the
-        decoder's work; Turbo models have it already. fastest: also 8-bit weights for T3, every model (measured
-        1.4x for the 500M models' T3 and 2.1x for Turbo's)."""
+        Ordered by what VM 222's self-test measured (Ryzen 9 5950X, 10 threads), where T3 is two thirds of the time:
+        faster - 8-bit weights for T3, every model (T3 2.3-2.5x quicker); fastest - also Turbo's two-step decoder
+        for the 500M models (Røst v3, Chatterbox: their decoder about 4x quicker). Turbo models have that decoder
+        already, so for them fastest is faster."""
         speed = speed or str(self.hub.settings.get("sound", "speech_speed") or "best")
         if speed not in SPEEDS or speed == "best":
             return {}, []
-        extra: dict = {"int8": speed == "fastest"}
-        if entry.get("family") != "chatterbox-mtl":
+        extra: dict = {"int8": True}
+        if speed != "fastest" or entry.get("family") != "chatterbox-mtl":
             return extra, []
         decoder = self.fast_decoder()
         if decoder:
             extra["decoder"] = decoder
             return extra, []
-        return extra, ["The faster speech setting needs Røst v3 Turbo downloaded (it brings the two-step decoder), "
+        return extra, ["The fastest speech setting needs Røst v3 Turbo downloaded (it brings the two-step decoder), "
                        "so this used the ten-step decoder."]
 
     def _voice(self, entry: dict, voice: str | bytes | None) -> tuple[dict | None, str]:

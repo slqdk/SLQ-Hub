@@ -210,8 +210,8 @@ async def test_rost_turbo_reads_english_with_a_note(signed_in, app, fakes):
 
 
 async def test_the_speech_speed_setting(signed_in, app, fakes):
-    """Faster: Turbo's two-step decoder (from Røst v3 Turbo) for the 500M models; fastest: also 8-bit T3. Without
-    Røst v3 Turbo the result says why the decoder stayed; Turbo models get neither."""
+    """Faster: 8-bit T3, every model; fastest: also Turbo's two-step decoder (from Røst v3 Turbo) for the 500M models.
+    Without Røst v3 Turbo the result says why the decoder stayed; for a Turbo model fastest is faster."""
     install(app, "roest-v3")
     c = await new_chat(signed_in)
 
@@ -226,26 +226,61 @@ async def test_the_speech_speed_setting(signed_in, app, fakes):
 
     model, res = await speak("Hej.", "best")
     assert model["int8"] is False and "decoder" not in model["files"] and "Note" not in res["text"]
-    model, res = await speak("Hej.", "faster")                         # no Røst v3 Turbo yet: the ten-step decoder
-    assert "decoder" not in model["files"] and model["int8"] is False
-    assert "The faster speech setting needs Røst v3 Turbo downloaded" in res["text"]
+    model, res = await speak("Hej.", "faster")                         # 8-bit, its own ten-step decoder
+    assert model["int8"] is True and "decoder" not in model["files"] and "Note" not in res["text"]
+    model, res = await speak("Hej.", "fastest")                        # no Røst v3 Turbo yet: the ten-step decoder
+    assert model["int8"] is True and "decoder" not in model["files"]
+    assert "The fastest speech setting needs Røst v3 Turbo downloaded" in res["text"]
     install(app, "roest-v3", "roest-v3-turbo")
-    model, res = await speak("Hej.", "faster")
-    assert model["files"]["decoder"] == "/models/speech/roest-v3-turbo/s3gen_meanflow.safetensors"
-    assert model["files"]["s3gen"] == "/models/speech/chatterbox/s3gen.pt" and model["int8"] is False
-    assert "Note" not in res["text"]
     model, res = await speak("Hej.", "fastest")
-    assert model["int8"] is True and model["files"]["decoder"].endswith("s3gen_meanflow.safetensors")
+    assert model["files"]["decoder"] == "/models/speech/roest-v3-turbo/s3gen_meanflow.safetensors"
+    assert model["files"]["s3gen"] == "/models/speech/chatterbox/s3gen.pt" and model["int8"] is True
+    assert "Note" not in res["text"]
+    model, res = await speak("Hej.", "faster")
+    assert model["int8"] is True and "decoder" not in model["files"]
     r = await signed_in.put("/hub/api/settings", json={"section": "sound", "values": {"speech_model_da":
                                                                                       "roest-v3-turbo"}})
-    model, res = await speak("Hej.", "fastest")                        # Turbo has that decoder; 8-bit T3 too
-    assert model["key"] == "roest-v3-turbo" and model["int8"] is True and "decoder" not in model["files"]
-    model, res = await speak("Hej.", "faster")
-    assert model["key"] == "roest-v3-turbo" and model["int8"] is False and "Note" not in res["text"]
+    for speed in ("faster", "fastest"):                                # Turbo has that decoder: 8-bit either way
+        model, res = await speak("Hej.", speed)
+        assert model["key"] == "roest-v3-turbo" and model["int8"] is True and "decoder" not in model["files"]
+        assert "Note" not in res["text"]
     # a piece that ran to the token ceiling is said so
     fakes.speech["capped"] = 1
     model, res = await speak("Hej. Farvel.", "best")
     assert "did not stop by itself on 1 of 2 piece(s)" in res["text"] and "another seed" in res["text"]
+
+
+async def test_the_self_tests_speech_samples_play_in_settings(signed_in, app):
+    """selftest --speech leaves data/selftest/speech-*.mp3 and speech.json; the Sound settings list and play them -
+    for the owner only."""
+    from .mocks import silent_mp3
+    folder = app.state.hub.env.data_dir / "selftest"
+    folder.mkdir(parents=True, exist_ok=True)
+    runs = [("roest-v3", "Røst v3", "best", 5.75), ("roest-v3", "Røst v3", "faster", 3.1),
+            ("roest-v3", "Røst v3", "fastest", 2.28), ("roest-v3-turbo", "Røst v3 Turbo", "best", 3.75)]
+    for model, _, setting, _ in runs:
+        (folder / f"speech-{model}-{setting}.mp3").write_bytes(silent_mp3(1.0))
+    (folder / "notes.txt").write_text("not a sample")
+    assert (await signed_in.get("/hub/api/sound/samples")).json()["samples"] == []    # no list (0.13.1): none
+    (folder / "speech.json").write_text(json.dumps({"at": "2026-10-23 21:30", "cpu": "AMD Ryzen 9 5950X (avx2)",
+                                                    "threads": 10, "samples": [
+        {"file": f"speech-{m}-{st}.mp3", "model": m, "name": n, "setting": st, "text": "Og her kommer en sætning mere.",
+         "seconds": 3.4, "compute": round(3.4 * f, 1), "factor": f, "capped": st == "fastest"}
+        for m, n, st, f in runs]}))
+    r = await signed_in.get("/hub/api/sound/samples")
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert (data["at"], data["threads"]) == ("2026-10-23 21:30", 10)
+    assert [(s["model"], s["setting"]) for s in data["samples"]] == [(m, st) for m, _, st, _ in runs]
+    assert data["samples"][2]["capped"] is True and data["samples"][0]["factor"] == 5.75
+    r = await signed_in.get("/hub/api/sound/samples/speech-roest-v3-faster.mp3")
+    assert r.status_code == 200 and r.headers["content-type"] == "audio/mpeg" and r.content[:2] == b"\xff\xfb"
+    for bad in ("notes.txt", "..%2Fhub.db", "speech-x.mp3", "speech-..%2F..%2Fhub.db.mp3"):
+        assert (await signed_in.get(f"/hub/api/sound/samples/{bad}")).status_code == 404, bad
+    await add_person(signed_in)
+    async with client_from(app) as phone:
+        await sign_in(phone)
+        assert (await phone.get("/hub/api/sound/samples")).status_code == 403
 
 
 async def test_speech_errors_are_reported(signed_in, app, fakes):

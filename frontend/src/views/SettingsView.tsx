@@ -1158,14 +1158,14 @@ function AgentTab({ s }: { s: S }) {
         { key: "speech_model", label: "Voice model for other languages", type: "select", options: soundOptions("speech", "other"),
           help: "Used when it speaks the language; otherwise a model that does." },
         { key: "speech_speed", label: "Speech speed", type: "select", options: [
-          { value: "best", label: "Best: each model's own decoder, full weights" },
-          { value: "faster", label: `Faster: Turbo's two-step decoder for Røst v3 and Chatterbox${hasTurbo ? "" : " (needs Røst v3 Turbo)"}` },
-          { value: "fastest", label: "Fastest: also 8-bit weights, every voice model" }],
-          help: "The decoder turns speech tokens into sound; Røst v3's and Chatterbox's takes ten steps, Turbo's two, " +
-            "about a quarter of the work. 8-bit weights make the token part 1.4 (Røst v3) to 2 (Turbo) times faster. " +
-            "The self-test's speech check measures each on this machine and saves the same sentence in each, to " +
-            "listen to before choosing." },
+          { value: "best", label: "Best: full weights, each model's own decoder" },
+          { value: "faster", label: "Faster: 8-bit weights" },
+          { value: "fastest", label: `Fastest: 8-bit, and Turbo's decoder for Røst v3 and Chatterbox${hasTurbo ? "" : " (needs Røst v3 Turbo)"}` }],
+          help: "Faster gives the token part (two thirds of the time here) 8-bit weights: 2.3-2.5 times quicker on this " +
+            "machine. Fastest also decodes Røst v3 and Chatterbox with Turbo's two-step decoder instead of their " +
+            "ten-step one. Listen to the samples below before choosing." },
       ]} />}
+      {soundModels.some((m) => (m.abilities ?? []).includes("speech")) && <SpeechSamples />}
       <SectionForm s={s} section="images" title="Images" fields={[
         { key: "model", label: "Model for pictures", type: "select", options: imageOptions,
           help: "Ask for a picture in any chat. The assistant can still use the other model if you name it." },
@@ -1498,6 +1498,50 @@ function CloudTab({ s }: { s: S }) {
 
 interface SystemData { version: string; services: Record<string, any>; gpu: { vram_total?: number; vram_used?: number };
   disk: Record<string, { total?: number; used?: number; free?: number }>; lastLoadError: string | null }
+
+interface SpeechSample { file: string; model?: string; name?: string; setting?: string; text?: string; seconds?: number;
+  compute?: number; factor?: number; capped?: boolean }
+const SPEED_NAMES: Record<string, string> = { best: "Best", faster: "Faster (8-bit)", fastest: "Fastest (8-bit, Turbo's decoder)" };
+
+/** The last speech self-test's samples: the same sentence and seed with each voice model in each speed setting,
+ * what each cost, and a player - to choose Settings -> Assistant -> Sound -> Speech speed by ear. */
+function SpeechSamples() {
+  const [data, setData] = useState<{ at?: string; cpu?: string; threads?: number; samples: SpeechSample[] } | null>(null);
+  useEffect(() => {
+    api<{ at?: string; cpu?: string; threads?: number; samples: SpeechSample[] }>("/hub/api/sound/samples")
+      .then(setData).catch(() => setData({ samples: [] }));
+  }, []);
+  if (!data) return null;
+  return (
+    <section className="stack" style={{ marginBottom: 28 }}>
+      <h3 style={{ margin: 0 }}>Speech samples</h3>
+      {!data.samples.length ? (
+        <p className="muted" style={{ margin: 0, maxWidth: "62ch" }}>None yet. The self-test speaks the same sentence with each
+          voice model in each speed setting and puts the samples here: on the VM,{" "}
+          <code className="mono">sudo bash /opt/slq-hub/update.sh compose exec hub python -m app.cli selftest --speech</code></p>
+      ) : (
+        <>
+          <p className="muted" style={{ margin: 0, maxWidth: "62ch" }}>From the self-test of {data.at}
+            {data.threads ? ` (${data.threads} threads${data.cpu ? ` on ${data.cpu}` : ""})` : ""}: “{data.samples[0].text}”, the same
+            seed in each. The real-time factor is the seconds of work for one second of speech.</p>
+          <div className="list">
+            {data.samples.map((s) => (
+              <div className="list-row" key={s.file}>
+                <span className="grow"><b>{s.name ?? s.model ?? s.file}</b> · {SPEED_NAMES[s.setting ?? ""] ?? s.setting}
+                  <div className="meta">{s.seconds != null && s.compute != null
+                    ? `${s.seconds.toFixed(1)} s of speech in ${s.compute.toFixed(1)} s, real-time factor ${s.factor?.toFixed(2)}` : s.file}
+                    {s.capped ? " - it did not stop by itself, so the end is probably noise" : ""}</div>
+                  <audio controls preload="none" src={`/hub/api/sound/samples/${encodeURIComponent(s.file)}`}
+                    style={{ width: "100%", maxWidth: 420, marginTop: 6 }} />
+                </span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
 
 /** The speech service's /health in a line: its CPU threads (and CPU), the voice models in memory, whether it is
  * speaking. */

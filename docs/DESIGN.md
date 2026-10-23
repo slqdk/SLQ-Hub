@@ -673,22 +673,23 @@ routing), and the system prompt says what each costs.
     time went - T3's tokens and seconds, the decoder's seconds - and how many
     pieces ran to the token ceiling instead of stopping by themselves; the
     result then says the end may be noise and another seed usually helps.
-  - **Speed** (0.13.1). On VM 222's CPU (10 threads) Røst v3 took 20.4 s for
-    3.4 s of speech, a real-time factor of 6. Measured with the models'
-    architectures (random weights, 2 threads), the work splits evenly between
-    T3 (one token at a time, about 4 a second) and the decoder (ten flow
-    steps with guidance, then the vocoder). Settings → Assistant → Sound →
-    Speech speed: **best** (each model's own decoder, full weights);
-    **faster** - Turbo's distilled two-step decoder for Røst v3 and Chatterbox,
-    the same speech tokens and voice prompt (it comes with Røst v3 Turbo):
-    the decoder 4x quicker, a sentence about 1.5x; **fastest** - also 8-bit
-    weights for T3 (dynamic quantisation of its linear layers; GPT-2's Conv1D
-    layers become `nn.Linear` first, exactly): T3 1.4x quicker for the 500M
-    models and 2.1x for Turbo's. `selftest --speech` measures every setting on
-    the machine, saves the same sentence in each to listen to, and times T3 on
-    half the threads too (one token at a time is limited by memory more than
-    by cores; a request may ask for `t3_threads`). bf16 was measured slower on
-    a CPU without native bf16 and is not offered.
+  - **Speed** (0.13.1, ordered by measurement in 0.13.2). On VM 222 (Ryzen 9
+    5950X, AVX2, 10 threads) Røst v3 takes about 20 s for 3.4 s of speech, a
+    real-time factor of 6: T3 (one token at a time, 6.4 a second) 14 s, the
+    ten-step decoder 5 s. Settings → Assistant → Sound → Speech speed:
+    **best** - full weights, each model's own decoder; **faster** - 8-bit
+    weights for T3 (dynamic quantisation of its linear layers with a scale per
+    output channel; GPT-2's Conv1D layers become `nn.Linear` first, exactly):
+    T3 2.3-2.5x quicker on that CPU (Røst v3 15.7 tokens a second, Turbo 26 -
+    faster than real time); **fastest** - also Turbo's distilled two-step
+    decoder for Røst v3 and Chatterbox (the same speech tokens and voice
+    prompt; it comes with Røst v3 Turbo): their decoder 4x quicker. Measured
+    for one sentence: Røst v3 5.75 / 2.28 (fastest), Røst v3 Turbo 3.75 / 1.82
+    (8-bit), Chatterbox 7.46 / 2.35. `selftest --speech` speaks the same
+    sentence and seed in every setting, and Settings → Assistant → Sound plays
+    the samples with what each cost, to choose by ear. T3 measured as fast on
+    5 threads as on 10 (it is limited by memory, not cores; a request may ask
+    for `t3_threads`). bf16 was slower on a CPU without native bf16.
 - **Music (`music_generate`)**: ACE-Step 1.5 in ComfyUI's native nodes, as in
   the official template: `UNETLoader`, `DualCLIPLoader` (type `ace`: the 0.6B
   encoder and the planner), `TextEncodeAceStepAudio1.5` (style, lyrics with
@@ -773,7 +774,8 @@ Settings: models (download with progress, load, free the GPU, server
 parameters; the sound models in their own group, each marked CPU or GPU),
 queue, apps and keys (with connection examples and CORS), assistant (agent,
 libraries, web, sandbox, images, sound: the model for music, for sound effects,
-and the voice models for Danish and for other languages), skills, memory, MCP
+the voice models for Danish and for other languages, the speech speed, and
+the last speech self-test's samples with players), skills, memory, MCP
 servers (and the tools you always allow), cloud, system (services - the speech
 service with its threads and loaded models - VRAM, disk, logs, theme,
 password).
@@ -892,7 +894,8 @@ the services mount when a new version adds one (owned by uid 1000).
 sandbox's isolation and one answer with its tokens/s; `--images` makes a
 picture, and `--speech` speaks the same sentence with each downloaded voice
 model in each speech-speed setting, reports the real-time factor with T3's and
-the decoder's share, and saves each in `data/selftest/` to listen to.
+the decoder's share, and saves each in `data/selftest/` (with `speech.json`),
+where Settings → Assistant → Sound plays them.
 
 **Logs.** `update.sh compose logs -f <service>`. The Hub keeps an error log
 and per-model llama-server logs, viewable in Settings → System.
@@ -936,12 +939,12 @@ clock times), the tail of llama-server's log and the chat's files (up to
 - **Landlock in the sandbox container** needs the kernel's LSM list to include
   it and Docker's seccomp profile to allow its three system calls. Without
   it people simply get no code (the self-test's "sandbox for people" line).
-- **Speech on the CPU** runs on the VM (0.13.0 self-test): slower than real
-  time, a factor of about 6 for Røst v3 on 10 threads. The faster settings
-  (0.13.1) were measured only with random weights here; their speed on the
-  VM and how they sound are what `selftest --speech` shows. Real time on
-  the CPU is not expected with these models; on the card it would be, at the
-  price of a model swap per request.
+- **Speech on the CPU** runs on the VM: a real-time factor of about 6 for
+  Røst v3 with full weights, 2.3 with the fastest setting, 1.8 for Røst v3
+  Turbo with 8-bit weights (0.13.1 self-test). Whether 8-bit weights and
+  Turbo's decoder sound worse is for the ear (the samples in Settings). Real
+  time is within reach only for Turbo's token part; on the card it would be
+  for all, at the price of a model swap per request.
 - **ACE-Step 1.5 and Stable Audio 3 on gfx1100** have not run on the card:
   VRAM (XL is about 20 GB with its planner), speed and quality are unknown, as
   is how well ACE-Step sings Danish. The graphs were validated against a real

@@ -33,7 +33,7 @@ from app.state import Transports
 
 from .conftest import _install_fake_models
 from .mocks import (HostRouter, float_wav, make_civitai, make_civitai_delivery, make_comfy, make_hf, make_llama,
-                    make_mcp_http, make_sandbox, make_searxng, make_speech, make_supervisor)
+                    make_mcp_http, make_sandbox, make_searxng, make_speech, make_supervisor, silent_mp3)
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -295,6 +295,16 @@ def main() -> None:
                                   "roest-v3", "ace-step-1.5-xl-turbo", "stable-audio-3-medium"})
     for name, hz in (("mic", 118), ("nic", 205)):              # the voices: a low one and a high one, as WAV
         (models / "speech" / "roest-v3" / "voices" / f"{name}.wav").write_bytes(_voice(hz))
+    samples = data / "selftest"                                 # what selftest --speech leaves: Settings -> Sound
+    samples.mkdir(parents=True, exist_ok=True)
+    runs = (("best", 3.4, 19.6), ("faster", 3.3, 10.4), ("fastest", 3.2, 7.4))
+    for setting, secs, _ in runs:
+        (samples / f"speech-roest-v3-{setting}.mp3").write_bytes(silent_mp3(secs))
+    (samples / "speech.json").write_text(json.dumps({
+        "at": "2026-10-23 21:30", "cpu": "AMD Ryzen 9 5950X 16-Core Processor (avx2)", "threads": 10,
+        "samples": [{"file": f"speech-roest-v3-{st}.mp3", "model": "roest-v3", "name": "Røst v3", "setting": st,
+                     "text": "Og her kommer en sætning mere, så farten kan måles.", "seconds": secs, "compute": took,
+                     "factor": round(took / secs, 2), "capped": False} for st, secs, took in runs]}))
     dist = ROOT / "frontend" / "dist"
     env = Env(data_dir=data, models_dir=models, llm_url="http://supervisor", llm_host="llm", comfy_url="http://comfy",
               searxng_url="http://searxng", sandbox_url="http://sandbox:7000", sandbox_ip="172.31.250.20",

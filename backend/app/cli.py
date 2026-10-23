@@ -138,26 +138,24 @@ def _speech(rep, c, env, cat, try_it: bool) -> None:
     from .audio.pipeline import role_files, speech_files
     sentences = {"da": ("Hej.", "Og her kommer en sætning mere, så farten kan måles."),
                  "en": ("Hello.", "And here is one more sentence, to measure the speed.")}
-    # Turbo's two-step decoder, for the faster settings of the 500M models (it comes with Røst v3 Turbo)
+    # Turbo's two-step decoder, for the fastest setting of the 500M models (it comes with Røst v3 Turbo)
     decoder = next((f"{env.speech_models}/{role_files(t, 's3gen')[0]['dest']}" for t in models
                     if t.get("family") == "chatterbox-turbo" and role_files(t, "s3gen")), None)
     out = Path(env.data_dir) / "selftest"
     out.mkdir(parents=True, exist_ok=True)
-    saved = []
+    for old in out.glob("speech-*.mp3"):                  # the samples are always the last run's
+        old.unlink(missing_ok=True)
+    saved, samples = [], []
     for e in models:
         lang = "da" if "da" in (e.get("languages") or []) else "en"
         voice = role_files(e, "voice")                  # Røst: its first voice file; Chatterbox: its built-in voice
         # (setting, Turbo's decoder, 8-bit T3) - as Settings -> Assistant -> Sound -> Speech speed would send them
-        modes = [("best", False, False)]
+        modes = [("best", False, False), ("faster", False, True)]
         if e.get("family") == "chatterbox-mtl" and decoder:
-            modes += [("faster", True, False), ("fastest", True, True)]
+            modes += [("fastest", True, True)]
         elif e.get("family") == "chatterbox-mtl":
-            rep.line("SKIP", f"speech: {e['id']}", "faster needs Røst v3 Turbo downloaded (its two-step decoder)")
-            modes += [("fastest", False, True)]
-        else:
-            modes += [("fastest", False, True)]           # Turbo: its own two-step decoder either way
-        last: tuple[dict, dict] | None = None
-        for mode, fast_decoder, int8 in modes:
+            rep.line("SKIP", f"speech: {e['id']}", "fastest needs Røst v3 Turbo downloaded (its two-step decoder)")
+        for mode, fast_decoder, int8 in modes:              # (a Turbo model's fastest is its faster)
             files = speech_files(e, env.speech_models)
             if fast_decoder:
                 files["decoder"] = decoder
@@ -188,26 +186,15 @@ def _speech(rep, c, env, cat, try_it: bool) -> None:
                          "limit): the end is probably noise", f"listen to {name}")
             else:
                 rep.line("PASS", f"speech: {e['id']}", line)
-            last = (body, done)
-        threads = int(h.get("threads") or 0)
-        if last and threads >= 4:
-            # one token at a time is limited by memory more than by cores: the last setting again, T3 on half
-            body, done = last
-            try:
-                half = _say(c, env, {**body, "t3_threads": threads // 2})
-                rep.line("PASS", f"speech: {e['id']}", f"T3 on {threads // 2} threads: {_rate(half):.1f} tokens/s "
-                         f"(on {threads}: {_rate(done):.1f})")
-            except Exception as exc:  # noqa: BLE001
-                rep.line("WARN", f"speech: {e['id']}", f"T3 on {threads // 2} threads: {exc}")
+            samples.append({"file": name, "model": e["id"], "name": e.get("name") or e["id"], "setting": mode,
+                            "text": sentences[lang][1], "seconds": secs, "compute": took, "factor": round(factor, 2),
+                            "t3_seconds": t3, "decoder_seconds": dec, "tokens": tokens,
+                            "capped": bool(done.get("capped"))})
     if saved:
-        host = os.environ.get("HUB_ROOT", "/srv/slq-hub")
-        rep.line("PASS", "speech files", f"{len(saved)} saved to listen to: {host}/data/selftest/ on the VM "
-                 "(the same sentence and seed in each setting)")
-
-
-def _rate(done: dict) -> float:
-    """T3's tokens a second in a /speak "done" event."""
-    return float(done.get("tokens") or 0) / max(float(done.get("t3_seconds") or 0), 0.01)
+        (out / "speech.json").write_text(json.dumps({"at": time.strftime("%Y-%m-%d %H:%M"), "cpu": h.get("cpu"),
+                                                     "threads": h.get("threads"), "samples": samples}, indent=1))
+        rep.line("PASS", "speech files", f"{len(saved)} samples, the same sentence and seed in each setting: listen "
+                 "under Settings -> Assistant -> Sound")
 
 
 def _say(c, env, body: dict) -> dict:

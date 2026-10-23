@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.13.2 - 2026-10-23
+
+- **Listen to the speech samples in Settings.** Settings → Assistant → Sound
+  now plays the last speech self-test's samples - the same sentence and seed
+  with each voice model in each speed setting - with what each cost. No more
+  copying files off the VM.
+- **Speech speed, reordered by what the VM measured.** On the Ryzen 9 5950X
+  the token part is two thirds of the time, and 8-bit weights make it 2.3-2.5
+  times faster (Røst v3 Turbo then makes its tokens faster than real time);
+  Turbo's decoder only shortens the remaining third. So **Faster** is now
+  8-bit weights with each model's own decoder, and **Fastest** adds Turbo's
+  decoder for Røst v3 and Chatterbox. One sentence on the VM: Røst v3 5.75
+  seconds of work per second of speech at Best, 2.28 at Fastest; Røst v3
+  Turbo 3.75 and 1.82.
+- The 8-bit weights get a scale per output channel: as fast, and closer to the
+  full weights.
+- Chatterbox stops by itself again with Resemble's repetition penalty (79
+  tokens in both full-weight runs); it ran to its limit once with 8-bit
+  weights, which the self-test warns about.
+
 ## 0.13.1 - 2026-10-23
 
 - **Faster speech, your choice.** The first self-test on the VM measured Røst

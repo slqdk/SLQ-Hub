@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.13.1, 2026-10-23)
+## State (0.13.2, 2026-10-23)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -28,11 +28,12 @@ CPU in a new `speech` container (Røst v3 for Danish, Chatterbox Multilingual
 V3 for 23 languages), so the chat model stays on the card; music (ACE-Step
 1.5) and sound effects (Stable Audio 3) on the card through ComfyUI and the
 queue. No sound model is downloaded by default (Settings → Models → Sound,
-music and speech). On VM 222 the speech container builds and runs, and Røst
-v3 and Chatterbox speak - about six times slower than real time on 10
-threads, so 0.13.1 added a speech-speed setting (Turbo's two-step decoder,
-8-bit weights) and a self-test that measures each and saves samples to
-listen to. Music and sound effects have not run on the card yet.
+music and speech). On VM 222 the speech container runs Røst v3, Røst v3
+Turbo and Chatterbox: about six times slower than real time with full
+weights; with 8-bit weights (Settings → Assistant → Sound → Speech speed)
+2.3 for Røst v3 and 1.8 for Røst v3 Turbo. The self-test's samples play in
+those settings, to choose by ear - not done yet. Music and sound effects
+have not run on the card yet.
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
 host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU
@@ -132,6 +133,7 @@ the host if the VM ever stops by itself.
 | Chat export | 7 tests (`tests/test_export.py`), one of them the model server's log without the vision models' position warnings: Markdown (thinking, tool calls and results, one section per turn, the turn line), the ZIP (every part; full tool arguments; the model card and safe settings - a cloud API key set in Settings appears nowhere in it; the picture as a file and linked in the transcript; context.json with the system prompt, history, tools and request, the picture left out; the event log with streamed pieces joined; the queue job of the run), 404/400/401, joining events, file names. Both menu items and the phone page's Export this chat clicked through in Chromium (downloads named after the chat, unzipped, the phone file has no whole key). |
 | Settings 0.10.0 | In Chromium against the dev server (12 checks): the hand-over setting (Qwen3.8 27B by default), a model's Settings dialog (sampling prefilled from the card, thinking "Always think first" and a new temperature saved, "Use the model's own sampling" back to the card with thinking kept, the composer of a new chat following the model's thinking), Add from Hugging Face searching "Ornith 1.5 9B" (two repositories listed, a click looks one up, Q8_0 preselected for 9B, BF16 "twice the size of Q8_0"), and a live hand-over (Qwen3.6 35B-A3B repeats a web search, refused twice, Qwen3.8 27B answers; the notice live and after a reload; the footer names both models). |
 | Keys away from home | In Chromium against the dev server started as if behind a proxy (`--proxy 127.0.0.1 --public-url https://hub.example.test --lan-host 192.168.1.10`; uvicorn without its own proxy handling, as in production) (16 checks): the Apps page and dialog text, "Where it works" hiding "Only the home network" when away, the phone link through the public address and the home-only link, the list's per-key choice, switching a home-network key to away removing that limit (and back), the phone page from outside (`X-Forwarded-For: 203.0.113.9`) with a home key ("not through ...", "The Hub sees this phone at 203.0.113.9"), Try again after the key was switched (the key from the link was kept), an answer from outside, an away key connecting straight away. |
+| Real hardware, 0.13.1 self-test (2026-10-23) | `selftest --speech` on VM 222 (AMD Ryzen 9 5950X, AVX2 only, 10 threads), the same Danish sentence with seed 1, one line per setting (best / Turbo's decoder / Turbo's decoder + 8-bit, as 0.13.1 ordered them). Røst v3: 3.4 s of speech in 19.6 s, factor 5.75, T3 91 tokens at 6.4/s (14.2 s) and decoder 5.3 s; Turbo's decoder: T3 15.4 s, decoder 1.4 s (factor 6.16 - but only 2.7 s of sound came out of the same 91 tokens: listen); + 8-bit: 3.2 s in 7.4 s, factor 2.28, T3 85 tokens at 15.7/s, decoder 1.9 s. Røst v3 Turbo: factor 3.75, T3 11.0/s; 8-bit: 1.82, T3 26.4/s (faster than real time). Chatterbox Multilingual V3 with Resemble's repetition penalty: stopped by itself at 79 tokens (2.7 s) in both full-weight runs - factor 7.46, decoder 6.2 s, and 5.62 with Turbo's decoder (1.2 s); with 8-bit weights it ran to the ceiling (228 tokens, 9.0 s, the self-test's WARN). T3 on 5 threads as fast as on 10 (15.8 vs 15.7, 25.5 vs 26.4, 14.3 vs 12.9 tokens/s). So T3 is two thirds of the time on this CPU and 8-bit weights the big lever: 0.13.2 made 8-bit "faster" and the decoder "fastest". Samples not heard yet (`scp` without a destination, then the samples moved into Settings). |
 | Real hardware, 0.13.0 self-test (2026-10-23) | `selftest --speech` on VM 222, every line passed: GPU 24.0 GB (11.1 GB in use with Ornith 1.5 9B loaded); the sandbox, its isolation and internet; **Landlock ABI 8** for people's code ("people's code stays in its folder"); web search; ComfyUI (torch 2.14.1+rocm7.14) and its folders; the speech service - the image built, torch 2.11.0+cpu on 10 threads; Røst v3: 3.4 s of speech in 20.4 s, a real-time factor of 5.95 (the first sentence 27 s with loading), with its Mic voice file (a float WAV, read by the new reader); Chatterbox Multilingual V3: 9.0 s of speech in 46.6 s (factor 5.18) for a 51-character Danish sentence - 9.0 s is exactly that sentence's token ceiling, so it most likely did not stop by itself (0.13.1: Resemble's repetition penalty 1.2 instead of Røst's 2.0, and the self-test says when a piece ran to the ceiling); Ornith answering at 60 tokens/s; embeddings. |
 | Real hardware, chat 9 (2026-10-22) | Søren's troubleshooting export: FLUX.2 klein 4B made 3 pictures at 1024² in ~17 s (about 10 s to swap Ornith out and klein in, then ~0.45 s per step, 4 steps), Qwen-Image 2.1 edited one in 76 s (including the swap from klein), the LLM was back in 5-7 s each time. Ornith 1.5 9B (`ornith-1.5-9b-2`, probably Q8_0) generated 63-65 tokens/s, Qwen3.5 9B BF16 41 tokens/s; prompt processing ~2,000-3,250 tokens/s; a 1024² picture costs ~1,026 tokens for these vision models; the prompt cache reused 7,550 of 7,578 tokens between turns (none after a picture: the LLM was unloaded). |
 | Tab rows | In Chromium: the old CSS gave `.tabs` 1px of vertical overflow (scrollHeight 42, clientHeight 41 - a scrollbar with Windows' classic scrollbars, reported by Søren); the inset-shadow rule gives none. |
@@ -286,15 +288,18 @@ the host if the VM ever stops by itself.
     sentence splitting and pauses, and whether Mic and Nic come out as "male
     voice" and "female voice" from their pitch (the tool description shows
     it).
-30. **Speech speed on the VM**: Røst v3 about 6x slower than real time on 10
-    threads (above). The 0.13.1 settings - Turbo's two-step decoder for the
-    500M models, 8-bit T3 - were measured only with random weights here
-    (decoder 4x quicker; T3 1.4x for the 500M models, 2.1x for Turbo); on
-    the VM `selftest --speech` measures each and saves the samples in
-    `/srv/slq-hub/data/selftest/`. Whether the two-step decoder and 8-bit
-    weights sound worse is for the ear. The self-test also times T3 on half
-    the threads: if that is as fast, the service could give T3 fewer threads
-    by default (not done without that number).
+30. **How the speed settings sound**: measured on the VM (above), not yet
+    heard. Listen in Settings → Assistant → Sound after `selftest --speech`:
+    whether 8-bit weights change pronunciation or prosody, and whether
+    Turbo's decoder on Røst v3's tokens sounds right - in 0.13.1 it gave
+    2.7 s of sound where the ten-step decoder gave 3.4 s from the same 91
+    tokens (more cut as silence below -45 dB: a quieter start or end, or
+    missing speech). The 0.13.2 self-test measures the new order (8-bit with
+    the model's own decoder as "faster"); not run yet. T3 is as fast on 5
+    threads as on 10, so overlapping the next sentence's T3 with this
+    sentence's decoder could save 15-20% on longer texts (estimated; not
+    built - the two would share torch's global random generator, which
+    breaks the seed's repeatability).
 31. **Memory with sound**: two voice models in the speech container (about
     4 GB each, a 12 GB limit) while ComfyUI reads ACE-Step XL's 20 GB of files
     and the LLM's file is mapped, in a 40 GB VM. Watch `free -h` and the
@@ -311,10 +316,11 @@ the host if the VM ever stops by itself.
     download a table from Hugging Face; the service runs offline), so these
     languages are spoken from the plain text and probably worse - Chinese
     likely badly. Danish, English and the other European languages need none.
-35. **Chatterbox stopping by itself**: in the 0.13.0 self-test it most likely
-    ran to the token ceiling (9.0 s for a short sentence) with Røst's
-    repetition penalty 2.0; 0.13.1 uses Resemble's 1.2. The self-test's speech
-    lines now say WARN when a piece ran to the ceiling.
+35. **Chatterbox stopping by itself**: with Resemble's repetition penalty
+    (0.13.1) it stopped at 79 tokens in both full-weight runs, but ran to the
+    ceiling with 8-bit weights (one run; 0.13.2's 8-bit weights have a scale
+    per channel, closer to the full ones). Watch the self-test's WARN lines
+    and the "did not stop by itself" note in results.
 
 ## Where things are
 

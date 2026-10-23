@@ -171,8 +171,8 @@ DEFAULTS: dict = {
         "sound_model": "",
         "speech_model_da": "",             # Danish speech
         "speech_model": "",                # every other language
-        "speech_speed": "best",            # best | faster: Turbo's two-step decoder for Røst v3 and Chatterbox
-                                           # (it comes with Røst v3 Turbo) | fastest: also 8-bit weights for T3
+        "speech_speed": "best",            # best | faster: 8-bit weights for T3 | fastest: also Turbo's two-step
+                                           # decoder for Røst v3 and Chatterbox (it comes with Røst v3 Turbo)
     },
     "libraries": {
         "page_images": "cpu",              # cpu | gpu | off: embed page images for visual search (gpu = fast,
