@@ -22,9 +22,7 @@ failing call. If something is impossible, say so plainly.
 
 # The working folder
 {folder}
-- File tools take paths relative to the working folder. bash starts in it ({sandbox_path}) inside a sandbox \
-(Ubuntu with Python, Node, ImageMagick, ffmpeg, Tesseract) that has internet access but no access to the local \
-network. Install what you need with pip or npm.
+{tools_line}
 - Attachments the user sends are copied to .hub/attachments/ in the working folder.
 
 # Images
@@ -36,13 +34,20 @@ Put substantial things the user will look at, reuse or iterate on into an artifa
 page or small app (html, or react: one component with a default export, styled with Tailwind classes or inline \
 styles, importing only from "react"), a diagram (mermaid or svg), a document (markdown) or longer code. Keep \
 the chat reply short when the content is in an artifact. Update an existing artifact (same id) instead of \
-creating a new one when the user asks for changes.
+creating a new one when the user asks for changes."""
+
+MEMORY = """
 
 # Memory
 You have a memory that persists across chats (memory tool, files under /memories). Check it when earlier \
 context might help, and save durable facts the user tells you or asks you to remember (preferences, people, \
 projects, decisions) - briefly, without duplicates, never passwords or secrets.
 {memory_index}"""
+
+TOOLS_LINE = """- File tools take paths relative to the working folder. bash starts in it ({sandbox_path}) inside a sandbox \
+(Ubuntu with Python, Node, ImageMagick, ffmpeg, Tesseract) that has internet access but no access to the local \
+network. Install what you need with pip or npm."""
+NO_CODE_LINE = "- File tools take paths relative to the working folder. There is no code execution (no bash) in this chat."
 
 IMAGE_GEN = """
 - image_generate, image_edit and image_remove_background run on the GPU and take 15-90 s each. \
@@ -53,13 +58,16 @@ wants it."""
 def system_prompt(*, user: str, model_name: str, folder_text: str, sandbox_path: str, memory_index: list,
                   skills: list[dict], project: dict | None, summary: str = "", images_available: bool = True,
                   tz: str = "Europe/Copenhagen", handover_to: str = "", subagent: bool = False,
-                  cloud_model: str = "", taken_over_from: str = "") -> str:
+                  cloud_model: str = "", taken_over_from: str = "", memory: bool = True, code: bool = True,
+                  dropped: int = 0) -> str:
     now = datetime.now(ZoneInfo(tz))
-    mem = ("Memory files:\n" + "\n".join(f"- {p}: {d}" for p, d in memory_index)) if memory_index else \
-        "There are no memory files yet."
+    tools_line = TOOLS_LINE.format(sandbox_path=sandbox_path) if code else NO_CODE_LINE
     text = BASE.format(user=user, model=model_name, date=now.strftime("%A %d %B %Y"), folder=folder_text,
-                       sandbox_path=sandbox_path, image_gen=IMAGE_GEN if images_available else "",
-                       memory_index=mem)
+                       tools_line=tools_line, image_gen=IMAGE_GEN if images_available else "")
+    if memory:
+        mem = ("Memory files:\n" + "\n".join(f"- {p}: {d}" for p, d in memory_index)) if memory_index else \
+            "There are no memory files yet."
+        text += MEMORY.format(memory_index=mem)
     if skills:
         lines = "\n".join(f"- {s['name']}: {s['description']}" for s in skills)
         text += ("\n\n# Skills\nThese skills are enabled. When a task matches one, load it with the skill tool "
@@ -83,10 +91,25 @@ def system_prompt(*, user: str, model_name: str, folder_text: str, sandbox_path:
     if summary:
         text += ("\n\n# Earlier in this conversation\nThe earlier part of this chat was condensed into this "
                  "summary:\n" + summary.strip())
+    if dropped:
+        text += (f"\n\n# Earlier in this conversation\nThe first {dropped} messages of this chat were left out to "
+                 "fit your context.")
     if subagent:
         text += ("\n\n# You are a subagent\nAnother agent gave you one focused task. Do it with the tools you "
                  "have, then answer with a complete, self-contained report of what you found or did - that "
                  "report is all the other agent will see.")
+    return text
+
+
+def device_folder_text(sandbox_path: str, code: bool = False) -> str:
+    """A person's chat: their files live on their own device, the server keeps nothing."""
+    text = (f"This chat's files live on the user's own device. For this answer they are in a temporary folder "
+            f"({sandbox_path}): what the user attached is in .hub/attachments/, and the files you create or change "
+            "here are sent to the user's device when you finish. Nothing stays on the server, and there is no "
+            "memory across chats.")
+    if code:
+        text += (" bash may touch only this folder (no shared memory either, so Python multiprocessing does not "
+                 "work), and nothing it starts keeps running after the command.")
     return text
 
 

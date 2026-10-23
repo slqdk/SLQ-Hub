@@ -6,7 +6,7 @@ import asyncio
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 
-from .. import db
+from .. import auth, db
 from ..state import get_hub
 from .tools import REGISTRY
 
@@ -17,7 +17,10 @@ router = APIRouter(prefix="/hub/api")
 
 @router.get("/skills")
 async def list_skills(request: Request):
-    return get_hub(request).extras["skills"].list()
+    skills = get_hub(request).extras["skills"].list()
+    if auth.is_member(getattr(request.state, "user", None)):     # people see (and get) only the ones switched on
+        skills = [s for s in skills if s["enabled"]]
+    return skills
 
 
 @router.post("/skills")

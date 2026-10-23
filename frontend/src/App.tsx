@@ -6,6 +6,7 @@ import { Sidebar } from "./components/Sidebar";
 import { Toasts } from "./components/ui";
 import { useRoute } from "./lib/router";
 import { useApp } from "./state";
+import { PersonApp } from "./person/PersonApp";
 import { ChatView } from "./views/ChatView";
 import { LibrariesView } from "./views/LibrariesView";
 import { Login } from "./views/Login";
@@ -43,6 +44,7 @@ export function App() {
 
   if (!auth) return null;
   if (!auth.signedIn) return <><Login setup={auth.setupNeeded} /><Toasts /></>;
+  if (auth.user?.role === "member") return <PersonApp />;          // a person the owner added: chats on their device
 
   const chat = { openPanel, refs, onRefs: setRefs, keepPanel };
   let main;

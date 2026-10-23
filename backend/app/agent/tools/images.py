@@ -18,9 +18,11 @@ IMAGE_EXT = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tif", ".tiff"}
 
 
 def _image_bytes(ctx: ToolContext, ref: str) -> tuple[bytes, str]:
-    """A path in the working folder, or an uploaded image's sha."""
+    """A path in the working folder, or an uploaded image's sha (in a person's chat: only one of its own)."""
     ref = (ref or "").strip()
-    if re.fullmatch(r"[0-9a-f]{64}", ref) and blobs.exists(ref):
+    device = getattr(ctx.engine, "device", None)
+    mine = device is None or ref in getattr(device, "shas", ())
+    if re.fullmatch(r"[0-9a-f]{64}", ref) and blobs.exists(ref) and mine:
         return blobs.read(ref), ref[:12] + ".png"
     p = ctx.workdir.resolve(ref)
     if not p.is_file():

@@ -65,8 +65,10 @@ svg{max-width:100%;max-height:100vh;height:auto}</style></head><body>${content}<
 </script></body></html>`;
 }
 
-export function ArtifactPanel({ chatId, id, version, onClose }: { chatId: number; id: string; version?: number;
-  onClose: () => void }) {
+export function ArtifactPanel({ chatId, id, version, onClose, loader }: { chatId: number; id: string; version?: number;
+  onClose: () => void;
+  loader?: (id: string, version?: number) => Promise<Artifact>;     // a person's chat: artifacts live on the device
+}) {
   const { toast } = useApp();
   const [art, setArt] = useState<Artifact | null>(null);
   const [v, setV] = useState<number | undefined>(version);
@@ -77,12 +79,12 @@ export function ArtifactPanel({ chatId, id, version, onClose }: { chatId: number
   useEffect(() => setV(version), [version, id]);
   useEffect(() => {
     let alive = true;
-    api<Artifact>(`/hub/api/chats/${chatId}/artifacts/${encodeURIComponent(id)}`, { query: { version: v } })
+    (loader ? loader(id, v) : api<Artifact>(`/hub/api/chats/${chatId}/artifacts/${encodeURIComponent(id)}`, { query: { version: v } }))
       .then((a) => alive && setArt(a), (e) => toast((e as Error).message, "fault"));
     return () => {
       alive = false;
     };
-  }, [chatId, id, v, toast]);
+  }, [chatId, id, v, toast, loader]);
 
   const doc = useMemo(() => (art && RUNNABLE.has(art.type) ? artifactDoc(art.type, art.content) : ""), [art]);
   if (!art) return <aside className="panel"><div className="panel-head"><h2>Loading</h2>
@@ -115,7 +117,7 @@ export function ArtifactPanel({ chatId, id, version, onClose }: { chatId: number
         <button className="icon-btn" onClick={async () => toast((await copyText(art.content)) ? "Copied" : "Copying failed", "run")}
           aria-label="Copy the source"><Copy size={16} /></button>
         <button className="icon-btn" onClick={download} aria-label="Download"><Download size={16} /></button>
-        <button className="icon-btn" onClick={() => setSaving(true)} aria-label="Save to the folder"><Save size={16} /></button>
+        {!loader && <button className="icon-btn" onClick={() => setSaving(true)} aria-label="Save to the folder"><Save size={16} /></button>}
         <button className="icon-btn" onClick={onClose} aria-label="Close"><X size={18} /></button>
       </div>
       {runnable && (

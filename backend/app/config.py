@@ -51,6 +51,7 @@ class Env:
     lan_host: str = ""                 # the VM's LAN address, for "how to connect" in the UI
     ui_port: int = 8080                # published ports on the VM
     ollama_port: int = 11434
+    comfy_files: Path | None = None    # ComfyUI's input/ and output/ (mounted), to delete people's pictures there
 
     @property
     def db_path(self) -> Path:
@@ -106,6 +107,7 @@ def load_env() -> Env:
         lan_host=e.get("HUB_LAN_HOST", ""),
         ui_port=int(e.get("HUB_PORT") or 8080),
         ollama_port=int(e.get("HUB_OLLAMA_PORT") or 11434),
+        comfy_files=Path(e["HUB_COMFY_FILES"]) if e.get("HUB_COMFY_FILES") else None,
     )
 
 

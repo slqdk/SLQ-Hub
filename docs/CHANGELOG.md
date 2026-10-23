@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.11.0 - 2026-10-23
+
+- **People: others in the household get the Hub's chat with their own
+  login.** Settings -> People -> Add a person: their name (what the assistant
+  calls them), a user name and a password, where the login works - at home
+  (the LAN and WireGuard) or at home and away (also through hub.slq.dk) -
+  and whether they may run code. New password, Sign out everywhere and Remove
+  are in the list.
+- **The same chat as yours**: the model, the picture model, thinking levels
+  (Think hard with Qwen3.8), web search, pictures made and edited by asking
+  for them, attachments and photos, artifacts in the side panel, the files
+  the assistant makes, subagents, and the skills you have switched on
+  (read-only). No Settings, libraries, projects, memory, MCP servers or
+  cloud, and their sign-in does not open the model API (apps use keys).
+  They can change their own password.
+- **Their chats live on their own device.** Chats, pictures, files and
+  artifacts are kept in the browser (IndexedDB). Each message takes the chat
+  and its files to the Hub, which answers in a temporary folder; once the
+  device has the answer, the Hub deletes the folder, the run and the
+  pictures, and ComfyUI keeps no copy either. Chats do not sync between
+  devices: Export all chats and Import chats (the account menu) move them in
+  one file. Clearing the browser's data deletes them.
+- **Code for people, confined.** With "May run code" on, bash runs only in
+  the answer's temporary folder (Linux Landlock): it cannot see your files,
+  other chats, `/tmp` or `/dev/shm`, connects only to web ports, and nothing
+  it starts outlives the command. Without Landlock in the sandbox, people get
+  no code; the self-test says which ("sandbox for people").
+- **The queue** shows their jobs with their name and no chat title. They see
+  yours as "Another job", and can stop only their own.
+- ComfyUI's input and output folders are now mounted in the Hub (`/comfy`),
+  so the copies of people's pictures can be deleted there; the self-test
+  checks them ("comfyui folders"). The update recreates the containers.
+
 ## 0.10.1 - 2026-10-23
 
 - **Phone chat page: a clear way back from Picture.** When Picture is on,

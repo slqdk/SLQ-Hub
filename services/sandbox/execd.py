@@ -5,9 +5,13 @@ Runs as the unprivileged `sandbox` user inside the sandbox container. Every
 call needs the shared token in X-Internal-Token. Working directories must be
 inside /workspace (the Hub's project and chat folders).
 
-    GET  /health
-    POST /exec        {cmd, cwd, timeout, env, max_output}
+    GET  /health                          -> {ok, root, uid, landlock: ABI or 0}
+    POST /exec        {cmd, cwd, timeout, env, max_output, confine}
                       -> {exit_code, stdout, stderr, timed_out, duration_ms, truncated}
+                      confine {root, home, require}: the command may touch only
+                      that folder (confine.py, Landlock); with require it is not
+                      run where Landlock is missing (exit code 126). Processes it
+                      leaves running are killed when it ends.
     POST /proc/start  {cmd, cwd, env}     -> {id}         long-lived process with
     POST /proc/write  {id, data}          -> {ok}         pipes (MCP stdio servers)
     POST /proc/read   {id, timeout}       -> {data, eof, exit_code}
@@ -16,11 +20,13 @@ inside /workspace (the Hub's project and chat folders).
 from __future__ import annotations
 
 import collections
+import ctypes
 import json
 import os
 import secrets
 import signal
 import subprocess
+import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -33,6 +39,7 @@ MAX_TIMEOUT = 3600
 DEFAULT_TIMEOUT = 120
 DEFAULT_MAX_OUTPUT = 100_000
 MAX_PROCS = 16
+CONFINE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "confine.py")
 
 
 def _inside_root(path: str) -> str:
@@ -93,6 +100,59 @@ def _drain(stream, sink: Capped) -> None:
         sink.add(chunk)
 
 
+def _confined(cmd: str, cwd: str, conf) -> list[str]:
+    """The command line for a command that may touch only one folder (inside ROOT)."""
+    if not isinstance(conf, dict):
+        raise ValueError("confine must be an object")
+    root = _inside_root(conf.get("root") or "")
+    if cwd != root and not cwd.startswith(root + os.sep):
+        raise ValueError("cwd must be inside the confined folder")
+    home = os.path.realpath(conf.get("home") or os.path.join(root, ".hub", "home"))
+    if home != root and not home.startswith(root + os.sep):
+        raise ValueError("home must be inside the confined folder")
+    return [sys.executable, CONFINE, "--root", root, "--home", home,
+            *(["--require"] if conf.get("require") else []), "--", "bash", "-c", cmd]
+
+
+def landlock_abi() -> int:
+    try:
+        sys.path.insert(0, os.path.dirname(CONFINE))
+        import confine                                   # noqa: PLC0415 - next to this file
+        return confine.abi_version()
+    except Exception:  # noqa: BLE001
+        return 0
+    finally:
+        if sys.path and sys.path[0] == os.path.dirname(CONFINE):
+            sys.path.pop(0)
+
+
+LANDLOCK = landlock_abi()
+RUN_MARK = "SLQ_HUB_RUN"
+
+
+def _end_leftovers(pgid: int, mark: str) -> int:
+    """Kill what a confined command left running - in its process group, or (started with setsid) anywhere,
+    found by the mark in its environment. Twice, for anything forked in between. Returns how many."""
+    try:
+        os.killpg(pgid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        pass
+    needle, me, killed = f"{RUN_MARK}={mark}".encode(), os.getpid(), 0
+    for _ in range(2):
+        for d in os.listdir("/proc"):
+            if not d.isdigit() or int(d) == me:
+                continue
+            try:
+                with open(f"/proc/{d}/environ", "rb") as f:
+                    if needle not in f.read().split(b"\0"):
+                        continue
+                os.kill(int(d), signal.SIGKILL)
+                killed += 1
+            except (OSError, ValueError):
+                continue
+    return killed
+
+
 def run_exec(body: dict) -> dict:
     cmd = body.get("cmd")
     if not isinstance(cmd, str) or not cmd.strip():
@@ -100,8 +160,13 @@ def run_exec(body: dict) -> dict:
     cwd = _inside_root(body.get("cwd") or ROOT)
     timeout = max(1, min(MAX_TIMEOUT, int(body.get("timeout") or DEFAULT_TIMEOUT)))
     cap = max(1000, min(2_000_000, int(body.get("max_output") or DEFAULT_MAX_OUTPUT)))
+    argv = _confined(cmd, cwd, body["confine"]) if body.get("confine") else ["bash", "-c", cmd]
+    env = _env(body.get("env"))
+    mark = ""
+    if body.get("confine"):
+        mark = env[RUN_MARK] = secrets.token_hex(12)
     t0 = time.monotonic()
-    p = subprocess.Popen(["bash", "-c", cmd], cwd=cwd, env=_env(body.get("env")),
+    p = subprocess.Popen(argv, cwd=cwd, env=env,
                          stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL,
                          start_new_session=True)
     out, err = Capped(cap), Capped(cap // 2)
@@ -119,6 +184,8 @@ def run_exec(body: dict) -> dict:
         except ProcessLookupError:
             pass
         p.wait(timeout=10)
+    if mark:
+        _end_leftovers(p.pid, mark)
     for t in threads:
         t.join(timeout=5)
     stdout, t1 = out.text()
@@ -211,7 +278,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):  # noqa: N802
         if urlparse(self.path).path == "/health":
-            return self._send(200, {"ok": True, "root": ROOT, "uid": os.getuid()})
+            return self._send(200, {"ok": True, "root": ROOT, "uid": os.getuid(), "landlock": LANDLOCK})
         self._send(404, {"error": "not found"})
 
     def do_POST(self):  # noqa: N802
@@ -250,7 +317,13 @@ class Handler(BaseHTTPRequestHandler):
 def main() -> None:
     httpd = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
     httpd.daemon_threads = True
-    print(f"slq-hub sandbox daemon on :{PORT}, root {ROOT}, uid {os.getuid()}", flush=True)
+    # Not dumpable: commands run as the same user must not read this process's environment (the token)
+    # from /proc, nor attach to it.
+    try:
+        ctypes.CDLL(None, use_errno=True).prctl(4, 0, 0, 0, 0)          # PR_SET_DUMPABLE = 4
+    except (OSError, AttributeError):
+        pass
+    print(f"slq-hub sandbox daemon on :{PORT}, root {ROOT}, uid {os.getuid()}, landlock ABI {LANDLOCK}", flush=True)
     httpd.serve_forever()
 
 

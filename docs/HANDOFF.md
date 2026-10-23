@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.10.1, 2026-10-23)
+## State (0.11.0, 2026-10-23)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -18,7 +18,11 @@ model server's log, and since 0.10.0 what each model step was sent and the
 system prompts used) - ask for that first. A small model that gets stuck hands
 the turn over to a stronger one on the server (Settings → Assistant). A key
 can be set to work away from home, so the phone page works at
-`https://hub.slq.dk/chat`.
+`https://hub.slq.dk/chat`. Since 0.11.0 the owner can add **people**
+(Settings → People): the same chat with their own login, at home or also
+away, with their chats kept in their own browser - the Hub answers each
+message in a temporary folder and keeps nothing of it (DESIGN §6 "People's
+chats", §11). Code for people runs only where the sandbox has Landlock.
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
 host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU
@@ -123,6 +127,7 @@ the host if the VM ever stops by itself.
 | llama.cpp | b11783 built from source (CPU): every command line the Hub builds parses; the real supervisor started the real llama-server through the Hub's scheduler, runner and client with a tiny random model - load, streaming (the real chunk format), a killed server noticed and reloaded, unload. Embeddings (strings and `content` arrays) and `/v1/rerank` answer in the shapes the Hub expects. |
 | ComfyUI | v0.42.3 on CPU with placeholder model files: all workflow graphs (Qwen-Image 2.1 generate, turbo, edit with 1 and 3 images, background removal, FLUX.2 klein generate and edit, ERNIE-Image and Turbo each with and without the prompt enhancer, Z-Image Turbo, Chroma1-HD with the default and a given negative, SDXL with clip skip 2 and tags and plain, and SDXL with every sampler and scheduler the settings offer: 41 in all) pass ComfyUI's own validation. Z-Image, Chroma and SDXL follow `image_z_image_turbo.json`, `image_chroma_text_to_image.json` and `image_sdxl_simple.json` (fetched 2026-10-22), including `TextGenerate`'s dynamic `sampling_mode.*` inputs. The ERNIE graphs follow the official templates (`Comfy-Org/workflow_templates`: `image_ernie_image.json`, `image_ernie_image_turbo.json`, fetched 2026-10-22). Tests: the graph shapes, and an agent turn with only Turbo downloaded (the enhancer's text comes back through `PreviewAny` into the tool result), the enhancer switched off, an edit with ERNIE chosen going to Qwen-Image. |
 | MCP over stdio | A real stdio MCP server through the real sandbox daemon (`execd.py`): initialize, a server-to-client ping, tools, an 18 KB result. |
+| People (0.11.0) | 18 tests (`tests/test_people.py`): adding, changing, signing out and removing a person (user names, case, passwords); home only (refused from outside before the password; a session taken outside is signed out) and away; every owner route 403 for a person, the sync API and the model API (`/v1`, `/api`) 401; settings reduced to three defaults with no secrets; a device turn (her name and no memory in the system prompt, no bash/memory/library tools, the photo seen, no chat/run/prompt rows left, folder and photo gone after `/done`, the queue log with her name and "Chat"); pictures, files and artifacts back to the device, an artifact changed in the next turn; bash only when allowed and Landlock present, sent confined; turns private between people and bad requests refused (paths out of the folder, `.hub/home`); the queue as a person sees it; swept turns and ledgers (a list written into the folder by her code is ignored); the run dropped and deleted files reported; ComfyUI's history entries and output/input pictures deleted for her and kept for the owner; a picture the owner or another turn stores meanwhile kept; only the skills switched on (list, prompt, the skill tool); at most four turns waiting for a device. 5 tests (`tests/test_sandbox_daemon.py`, real Landlock, skipped without it): a confined command reads and writes its folder only (not a sibling file, another turn's folder, `/root`; `TMPDIR` inside), `/dev/null`, `/dev/urandom`, process substitution and child processes work, `/dev/shm` and `/dev/pts` do not; background, `setsid` and `nohup` processes are killed when it ends, the owner's are not; bad confine settings refused. By hand on this build machine (kernel 6.18, ABI 7) as uid 1000: Landlock denies a confined process another process's `environ`, `mem` and `maps`, while `cmdline` stays readable (documented). The Hub's ComfyUI client against real ComfyUI v0.42.3 (CPU, a LoadImage → SaveImage graph): with `keep=False` the output file, the input file and the history entry are gone; with `keep=True` they stay. In Chromium (Playwright, 19 checks): Settings → People (add, list, the user name from the name), her chat at phone size (her sidebar, the thinking levels, no libraries), a title, a picture shown from the device's store, an artifact, an attachment and a file the assistant wrote in the Files panel, both chats and the picture after a reload with the Hub's copies gone, the owner seeing none of it, Export all chats → Import on a second browser with the picture, her session refused by the owner API, and not one refused request from her pages. An independent review (a separate agent, the whole diff) found five issues - `/dev/shm` writable, disabled skills readable, abandoned turns unbounded, the model API open to her session, `/proc/<pid>/cmdline` visible - the first four are fixed, the last is documented. |
 
 ## Not verified - check these on the real system
 
@@ -226,6 +231,27 @@ the host if the VM ever stops by itself.
     `sent` record, and every turn a `run_prompts` row (the prompt text itself
     once per distinct text). Expected to stay small; worth a look at
     `data/hub.db` after some weeks.
+21. **Landlock in the real sandbox container**: Ubuntu's 7.0 HWE kernel
+    should have it (ABI 7) and Docker 29's seccomp profile should allow its
+    calls, but neither was seen. The self-test's "sandbox for people" line
+    says: PASS with the ABI, WARN without (people then get no code), FAIL if
+    a confined command read a file next to its folder.
+22. **ComfyUI's folders in the Hub**: the update adds two mounts
+    (`HUB_ROOT/comfy/input` and `output` at `/comfy`); the self-test's
+    "comfyui folders" line checks they are there and writable by uid 1000.
+    Not seen: the deletion after a real picture on the card.
+23. **People on real phones and through the proxy**: built and checked in
+    Chromium only. Not tried: IndexedDB on an iPhone (Safari and the
+    home-screen app; storage kept or asked to persist), a chat with big
+    attachments sent with every message over mobile data and through Nginx
+    Proxy Manager (`client_max_body_size`; the Hub takes 120 MB per message),
+    the address NPM passes on for a home-only person at home through
+    hub.slq.dk (hairpin NAT, as in 19), a reload or a lost connection in the
+    middle of an answer on a phone (the answer should be picked up again).
+24. **People with the real models**: whether Qwen3.8 uses the temporary
+    folder sensibly (attachments in `.hub/attachments/`), and how a long
+    chat behaves when its oldest messages are left out (no summary for
+    people's chats).
 
 ## Where things are
 
@@ -244,6 +270,9 @@ the host if the VM ever stops by itself.
 | `backend/app/cli.py` | `selftest`, `set-password`, `create-key`, `keys`. |
 | `frontend/src/` | The UI: `views/` (chat, project, libraries, settings), `components/`, `lib/turns.ts` (the turn view model for history and live runs). |
 | `frontend/src/chat/`, `frontend/chat.html` | The phone chat page (`/chat`): its own entry, on the model API with a key (`hub.ts`), chats in IndexedDB on the device (`store.ts`). |
+| `backend/app/agent/device.py`, `backend/app/ui/people_routes.py` | People's chats (device turns: the temporary folder, the result, what is deleted) and the People settings API. `backend/app/gate.py` has `MEMBER_ROUTES`. |
+| `frontend/src/person/` | The chat a person gets (`PersonApp.tsx`), their IndexedDB store (`store.ts`), the device-turn flow (`turns.ts`). |
+| `services/sandbox/confine.py` | Landlock confinement for people's commands (used by `execd.py`). |
 | `services/` | The llm supervisor, the ComfyUI image, the sandbox daemon. |
 
 ## Working on it
@@ -263,7 +292,14 @@ the host if the VM ever stops by itself.
 
 ## Known limits (by design, for now)
 
-- One user (the admin). API keys for apps.
+- One owner. People the owner adds use the chat with their chats on their
+  own device: no sync between devices (Export/Import moves them), every
+  message carries the chat's files, no projects, libraries or memory. API
+  keys for apps.
+- A person's code shares the sandbox container with the owner's commands:
+  it cannot read their files, environment or memory, but it can see their
+  command lines while they run. No shared memory (`/dev/shm`) for it, so
+  Python multiprocessing does not work there.
 - Tool calls in a turn run one after another, not in parallel.
 - Approvals wait up to ten minutes; the turn keeps its lease meanwhile, so a
   request for another model waits too.

@@ -390,7 +390,7 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
   );
 }
 
-function UserMessage({ message, editing, canEdit, onEdit, onCancel, onSave, onOpenFile }: { message: Message;
+export function UserMessage({ message, editing, canEdit, onEdit, onCancel, onSave, onOpenFile }: { message: Message;
   editing: boolean; canEdit: boolean; onEdit: () => void; onCancel: () => void; onSave: (text: string) => void;
   onOpenFile?: (path: string) => void }) {
   const text = message.content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join("\n\n");
@@ -406,7 +406,8 @@ function UserMessage({ message, editing, canEdit, onEdit, onCancel, onSave, onOp
             <a key={i} className="thumb" href={mediaUrl(b.sha)} target="_blank" rel="noreferrer" title={b.ref ? b.path : b.name}>
               <img src={mediaUrl(b.sha)} alt={b.name ?? "attached image"} loading="lazy" /></a>
           ) : b.type === "file" ? (
-            <a key={i} className="file-chip" href={`${mediaUrl(b.sha)}?download=1`}>{b.name}</a>
+            <a key={i} className="file-chip" download={b.name}
+              href={mediaUrl(b.sha).startsWith("blob:") ? mediaUrl(b.sha) : `${mediaUrl(b.sha)}?download=1`}>{b.name}</a>
           ) : b.type === "file_ref" ? (
             <button key={i} className="file-chip" disabled={!onOpenFile} onClick={() => onOpenFile?.(b.path)}
               title={`Show ${b.path}`}>
@@ -454,7 +455,7 @@ function PendingNote({ content }: { content: Block[] }) {
   );
 }
 
-function runStats(run: RunRecord | undefined, names: Record<string, string>): string {
+export function runStats(run: RunRecord | undefined, names: Record<string, string>): string {
   if (!run) return "";
   const parts: string[] = [];
   const models = Array.from(new Set(run.steps.filter((s) => s.type === "model").map((s) => s.model ?? "")));
@@ -470,7 +471,7 @@ function runStats(run: RunRecord | undefined, names: Record<string, string>): st
   return parts.join(", ");
 }
 
-function TurnFoot({ turn, names, canRetry, onRetry, stats = true }: { turn: AssistantTurn; names: Record<string, string>;
+export function TurnFoot({ turn, names, canRetry, onRetry, stats = true }: { turn: AssistantTurn; names: Record<string, string>;
   canRetry: boolean; onRetry: () => void; stats?: boolean }) {
   const { toast } = useApp();
   return (
@@ -484,7 +485,7 @@ function TurnFoot({ turn, names, canRetry, onRetry, stats = true }: { turn: Assi
   );
 }
 
-function LiveState({ live, queueCurrent, names }: { live: LiveRun; queueCurrent: string | null; names: Record<string, string> }) {
+export function LiveState({ live, queueCurrent, names }: { live: LiveRun; queueCurrent: string | null; names: Record<string, string> }) {
   const [, tick] = useState(0);
   useEffect(() => {
     const t = window.setInterval(() => tick((x) => x + 1), 1000);

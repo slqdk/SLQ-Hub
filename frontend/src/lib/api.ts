@@ -57,11 +57,20 @@ export async function upload(file: File | Blob, name?: string): Promise<Upload> 
   return api<Upload>("/hub/api/uploads", { form: fd });
 }
 
-export const mediaUrl = (sha: string) => `/hub/media/blob/${sha}`;
+// A person's chats keep their pictures on the device: a resolver gives those a local URL.
+let localMedia: ((sha: string) => string | undefined) | null = null;
+export function setLocalMedia(fn: ((sha: string) => string | undefined) | null): void {
+  localMedia = fn;
+}
+export const mediaUrl = (sha: string) => localMedia?.(sha) ?? `/hub/media/blob/${sha}`;
 
 // ------------------------------------------------------------ shapes
 
-export interface User { id: number; username: string }
+/** role "member": a person the owner added (Settings, People); their chats live on their device. */
+export interface User { id: number; username: string; role?: "admin" | "member"; display_name?: string; away?: boolean;
+  may_run_code?: boolean }
+export interface Person { id: number; username: string; display_name: string; away: boolean; may_run_code: boolean;
+  created_at: string; last_seen: string | null }
 export interface AuthStatus { signedIn: boolean; user: User | null; version: string; setupNeeded: boolean }
 
 export type Block =
@@ -127,7 +136,7 @@ export interface Upload { sha: string; name: string; mime: string; size: number;
 
 export interface QueueJob { id: number; owner: string; kind: string; need: string; priority: string; label: string;
   lease: boolean; state: string; position: number | null; waited_s: number; running_s: number | null;
-  switching_to: string | null; meta: { chat_id?: number; model?: string } }
+  switching_to: string | null; meta: { chat_id?: number; model?: string; user_id?: number } }
 export interface QueueSnapshot { current: string | null; switching: string | null; last_error: string | null;
   running: QueueJob[]; pending: QueueJob[] }
 

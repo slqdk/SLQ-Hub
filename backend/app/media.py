@@ -9,6 +9,7 @@ import time
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
 
+from . import auth
 from .chats import store as chats
 from .projects import blobs
 from .state import get_hub
@@ -34,8 +35,11 @@ def _valid(secret: str, sha: str, exp: int, sig: str) -> bool:
 @router.get("/hub/media/blob/{sha}")
 async def blob(sha: str, request: Request, exp: int = 0, sig: str = "", download: bool = False):
     hub = get_hub(request)
-    if getattr(request.state, "user", None) is None and not _valid(hub.env.secret_key, sha, exp, sig):
+    user = getattr(request.state, "user", None)
+    if user is None and not _valid(hub.env.secret_key, sha, exp, sig):
         raise HTTPException(401, "not signed in")
+    if auth.is_member(user) and not hub.extras["device"].owns_blob(user["id"], sha):
+        raise HTTPException(404, "no such file")              # a person sees only their own answers' pictures
     if len(sha) != 64 or not blobs.exists(sha):
         raise HTTPException(404, "no such file")
     meta = chats.get_upload(sha) or {}

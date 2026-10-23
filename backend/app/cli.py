@@ -62,6 +62,54 @@ class Report:
         self.warned += state == "WARN"
 
 
+def _confinement(rep, c, env, hz: dict) -> None:
+    """People's code (accounts the owner added) runs confined to its folder with Landlock; without it, the
+    Hub refuses their code. A probe: a confined command must not see a file next to its folder."""
+    abi = int(hz.get("landlock") or 0)
+    if abi < 1:
+        rep.line("WARN", "sandbox for people", "Landlock is not available, so people's chats cannot run code",
+                 "needs Linux 5.13+ with Landlock; the HWE kernel has it. Other things work.")
+        return
+    probe = ("mkdir -p .hub/confine-test/box && echo secret > .hub/confine-test/outside.txt && cd .hub/confine-test")
+    try:
+        _sandbox_exec(c, env, probe)
+        root = (hz.get("root") or "/workspace").rstrip("/")
+        r = c.post(env.sandbox_url + "/exec", headers={"X-Internal-Token": env.internal_token},
+                   json={"cmd": "cat ../outside.txt 2>&1; echo ok > inside.txt && cat inside.txt",
+                         "cwd": f"{root}/.hub/confine-test/box",
+                         "confine": {"root": f"{root}/.hub/confine-test/box", "require": True}}, timeout=60).json()
+        _sandbox_exec(c, env, "rm -rf .hub/confine-test")
+    except Exception as exc:  # noqa: BLE001
+        rep.line("FAIL", "sandbox for people", f"the confinement probe failed ({exc.__class__.__name__}: {exc})",
+                 "docker compose logs sandbox")
+        return
+    out = r.get("stdout") or ""
+    if "secret" in out:
+        rep.line("FAIL", "sandbox for people", "a confined command read a file outside its folder",
+                 "people's code is not safe here; switch 'May run code' off for everyone")
+    elif "ok" in out:
+        rep.line("PASS", "sandbox for people", f"Landlock ABI {abi}: people's code stays in its folder")
+    else:
+        rep.line("WARN", "sandbox for people", f"the confined probe did not run as expected: {out[:200]}",
+                 "docker compose logs sandbox")
+
+
+def _comfy_folders(rep, env) -> None:
+    """People's pictures: the Hub deletes ComfyUI's copies after each answer, through the mounted folders."""
+    base = env.comfy_files
+    if base is None:
+        rep.line("WARN", "comfyui folders", "not mounted in the Hub (HUB_COMFY_FILES): copies of people's pictures "
+                 "stay in comfy/output", "update: deploy/docker-compose.yml mounts them")
+        return
+    bad = [k for k in ("input", "output") if not (base / k).is_dir() or not os.access(base / k, os.W_OK | os.X_OK)]
+    if bad:
+        rep.line("WARN", "comfyui folders", f"{', '.join(str(base / k) for k in bad)} missing or not writable: "
+                 "copies of people's pictures stay there", "on the VM: sudo chown -R 1000:1000 /srv/slq-hub/comfy "
+                 "(HUB_ROOT/comfy)")
+    else:
+        rep.line("PASS", "comfyui folders", "the copies of people's pictures are deleted after each answer")
+
+
 def _sandbox_exec(c: httpx.Client, env, cmd: str, timeout: int = 60) -> dict:
     r = c.post(env.sandbox_url + "/exec", headers={"X-Internal-Token": env.internal_token},
                json={"cmd": cmd, "cwd": "/workspace", "timeout": timeout}, timeout=timeout + 15)
@@ -142,6 +190,7 @@ def selftest(images: bool = False) -> int:
         else:
             rep.line("WARN", "sandbox internet", f"1.1.1.1:443 is {seen.get('1.1.1.1:443')}",
                      "the agent cannot install packages; check the VM's outbound network")
+        _confinement(rep, c, env, hz)
     except Exception as exc:  # noqa: BLE001
         rep.line("FAIL", "sandbox", f"{exc.__class__.__name__}: {exc}", "docker compose logs sandbox")
 
@@ -163,6 +212,7 @@ def selftest(images: bool = False) -> int:
     except Exception as exc:  # noqa: BLE001
         rep.line("WARN", "comfyui", f"not answering ({exc.__class__.__name__}) - image tools are off",
                  "docker compose logs comfyui")
+    _comfy_folders(rep, env)
 
     # ---- the model, through the Hub's own API (and its queue)
     key = auth.create_api_key(f"selftest-{os.getpid()}-{int(time.time())}", "interactive", "")

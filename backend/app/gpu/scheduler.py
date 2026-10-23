@@ -91,7 +91,8 @@ class Job:
             "lease": self.lease, "state": self.state, "position": position,
             "waited_s": round((self.started_at or now) - self.enqueued_at, 1),
             "running_s": round(now - self.started_at, 1) if self.started_at and self.state == "running" else None,
-            "switching_to": self.switch_to, "meta": {k: v for k, v in self.meta.items() if k in ("chat_id", "model")},
+            "switching_to": self.switch_to,
+            "meta": {k: v for k, v in self.meta.items() if k in ("chat_id", "model", "user_id")},
         }
 
 
@@ -180,6 +181,13 @@ class Scheduler:
             "running": [j.info(now) for j in self.running.values()],
             "pending": [j.info(now, i + 1) for i, j in enumerate(order)],
         }
+
+    def job(self, job_id: int) -> Job | None:
+        """A waiting or running job."""
+        for j in self.pending:
+            if j.id == job_id:
+                return j
+        return self.running.get(job_id)
 
     def cancel(self, job_id: int) -> bool:
         """Cancel from the UI: a waiting job leaves the queue (its waiter gets

@@ -28,7 +28,7 @@ from ..projects import store as projects
 from ..state import Hub
 from . import cloud as cloudmod
 from . import context as C
-from .prompt import folder_text, system_prompt
+from .prompt import device_folder_text, folder_text, system_prompt
 from .runs import Run, RunRegistry
 from .tools import REGISTRY, Tool, ToolContext, ToolResult
 from .tools.base import clip
@@ -109,6 +109,9 @@ class Engine:
         self._step = 0
         self._tool_names: list[str] = []
         self._last_prompt: tuple | None = None
+        # A person's chat, kept on their device (agent/device.py): no memory, libraries, MCP or cloud, code only
+        # when allowed, artifacts and files go back to the device.
+        self.device = None
 
     # ------------------------------------------------------------ helpers
     def emit(self, kind: str, **data) -> None:
@@ -146,13 +149,15 @@ class Engine:
                 continue
             if t.name == "escalate" and not self.can_hand_over():
                 continue
+            if self.device is not None and (t.name in DEVICE_SKIP or (t.name == "bash" and not self.device.code)):
+                continue
             try:
                 if t.available(ctx):
                     out.append(t)
             except Exception:  # noqa: BLE001 - a broken check hides the tool, nothing more
                 continue
         mcp = self.hub.extras.get("mcp")
-        if mcp is not None:
+        if mcp is not None and self.device is None:
             out += mcp.tools()
         return out
 
@@ -461,6 +466,8 @@ class Engine:
 
     def _note_prompt(self, messages: list[dict], tools: list[Tool] | None, reason: str) -> None:
         """Keep the system prompt and tool names the model works with, when they change."""
+        if self.device is not None:          # a person's chat: the Hub keeps nothing of it
+            return
         if tools is not None:
             self._tool_names = [t.name for t in tools]
         if not messages or messages[0].get("role") != "system":
@@ -540,6 +547,16 @@ class Engine:
         job = getattr(self.ticket, "job", None)
         if job is not None:
             job.meta["model"] = target["id"]
+
+
+# Tools a person's chat does not get (agent/device.py): their memory and the owner's libraries stay out.
+DEVICE_SKIP = {"memory", "library_search"}
+
+
+def first_text(rows: list[dict]) -> str:
+    """The first thing the user wrote in a conversation."""
+    return next((b.get("text", "") for r in rows if r["role"] == "user" for b in r["content"]
+                 if b.get("type") == "text"), "")
 
 
 SENT_SAMPLING = ("temperature", "top_p", "top_k", "min_p", "presence_penalty", "frequency_penalty", "repeat_penalty")
@@ -622,10 +639,17 @@ class Agent:
 
     def system_for(self, chat: dict, project: dict | None, wd: projects.Workdir, entry: dict, *,
                    handover_to: str = "", subagent: bool = False, cloud_model: str = "",
-                   taken_over_from: str = "") -> str:
+                   taken_over_from: str = "", device=None) -> str:
         skills = self.hub.extras["skills"].chosen(chat, project)
-        mem = self.hub.extras["memory"].index(project["id"] if project else None)
         images = self.hub.extras.get("images")
+        if device is not None:                   # a person's chat: their name, no memory, code if allowed
+            return system_prompt(user=device.name, model_name=entry["name"],
+                                 folder_text=device_folder_text(wd.sandbox_path, device.code),
+                                 sandbox_path=wd.sandbox_path, memory_index=[], skills=skills, project=None,
+                                 images_available=bool(images and images.available()), handover_to=handover_to,
+                                 subagent=subagent, taken_over_from=taken_over_from, memory=False,
+                                 code=device.code, dropped=device.dropped)
+        mem = self.hub.extras["memory"].index(project["id"] if project else None)
         user = self.hub.settings.get("agent", "user_name") or (self.hub.env.admin_user or "the user").title()
         return system_prompt(user=user, model_name=entry["name"], folder_text=folder_text(project, wd.sandbox_path),
                              sandbox_path=wd.sandbox_path, memory_index=mem, skills=skills, project=project,
@@ -691,10 +715,15 @@ class Agent:
         if (chat.get("title") or "New chat") != "New chat" or engine.ticket is None:
             return
         rows = chats.messages(chat["id"])
-        first = next((b.get("text", "") for r in rows if r["role"] == "user" for b in r["content"]
-                      if b.get("type") == "text"), "")
+        title = await self.title_for(engine, first_text(rows))
+        if title:
+            chats.update_chat(chat["id"], title=title)
+            engine.run.emit("title", title=title)
+
+    async def title_for(self, engine: Engine, first: str) -> str:
+        """A short title for a conversation that starts with `first` ("" when it cannot be made)."""
         if not first.strip():
-            return
+            return ""
         prompt = ("Write a short title (3-6 words, no quotes, no full stop, in the same language) for a "
                   "conversation that starts with:\n\n" + first[:1500])
         try:
@@ -704,12 +733,9 @@ class Agent:
             async for chunk in self.hub.llm.stream_chat(self.hub.main_url, pl):
                 acc.feed(chunk)
         except LlmError:
-            return
+            return ""
         lines = acc.result()["content"].strip().strip('"').splitlines()
-        title = lines[0].strip().strip('"*#').rstrip(".")[:80] if lines else ""
-        if title:
-            chats.update_chat(chat["id"], title=title)
-            engine.run.emit("title", title=title)
+        return lines[0].strip().strip('"*#').rstrip(".")[:80] if lines else ""
 
     async def _turn(self, run: Run, options: dict) -> None:
         chat = chats.get_chat(run.chat_id)

@@ -17,6 +17,10 @@ def _enabled_skills(ctx: ToolContext) -> list[str]:
 async def skill(ctx: ToolContext, args: dict) -> ToolResult:
     store = ctx.hub.extras["skills"]
     name = (args.get("name") or "").strip()
+    if getattr(ctx.engine, "device", None) is not None:          # a person's chat: the skills switched on, no more
+        allowed = _enabled_skills(ctx)
+        if name not in allowed:
+            return ToolResult(f"No skill {name!r}. Skills here: {', '.join(allowed) or 'none'}.", is_error=True)
     try:
         if args.get("file"):
             data = store.read_file(name, args["file"])
@@ -64,10 +68,10 @@ def _artifact_id(title: str) -> str:
 
 
 async def artifact(ctx: ToolContext, args: dict) -> ToolResult:
-    chat_id = ctx.chat["id"]
+    device = getattr(ctx.engine, "device", None)             # a person's chat: artifacts live on their device
     action = args.get("action") or "create"
     aid = (args.get("id") or "").strip() or _artifact_id(args.get("title") or "")
-    current = chats.get_artifact(chat_id, aid)
+    current = device.get_artifact(aid) if device is not None else chats.get_artifact(ctx.chat["id"], aid)
     if action == "update":
         if not current:
             return ToolResult(f"There is no artifact {aid!r} to update.", is_error=True)
@@ -84,8 +88,13 @@ async def artifact(ctx: ToolContext, args: dict) -> ToolResult:
         if kind not in ARTIFACT_TYPES:
             return ToolResult(f"type must be one of {', '.join(ARTIFACT_TYPES)}", is_error=True)
         title = args.get("title") or (current or {}).get("title") or aid
-    version = chats.save_artifact(chat_id, aid, title, kind, content)
+    if device is not None:
+        version = device.save_artifact(aid, title, kind, content)
+    else:
+        version = chats.save_artifact(ctx.chat["id"], aid, title, kind, content)
     ref = {"id": aid, "version": version, "title": title, "type": kind, "language": args.get("language")}
+    if device is not None:
+        ref["content"] = content                             # the device keeps it; the Hub does not
     ctx.emit("artifact", **ref)
     return ToolResult(f"Artifact {aid!r} saved as version {version}. It is shown to the user in the side panel.",
                       display={"artifact": ref})

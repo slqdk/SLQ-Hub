@@ -102,6 +102,10 @@ class RunRegistry:
     def get(self, run_id: str) -> Run | None:
         return self.runs.get(run_id)
 
+    def drop(self, run_id: str) -> None:
+        """Forget a run now, events and all (a person's turn, once their device has it)."""
+        self.runs.pop(run_id, None)
+
     def active_for_chat(self, chat_id: int) -> Run | None:
         for r in self.runs.values():
             if r.chat_id == chat_id and not r.finished:

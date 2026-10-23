@@ -26,7 +26,8 @@ const EFFORT_LABEL: Record<string, string> = { low: "Think a little", medium: "T
 const shortPath = (p: string) => p.split("/").slice(-2).join("/");
 
 export function Composer({ running, onSend, onStop, settings, onSettings, models, pictureModels = [], pictureDefault,
-  libraries, skills, placeholder, autoFocus, refs = [], onRemoveRef, onOpenRef, onBrowseFiles, browseLabel }: {
+  libraries, skills, placeholder, autoFocus, refs = [], onRemoveRef, onOpenRef, onBrowseFiles, browseLabel,
+  uploader = upload, showLibraries = true }: {
   running: boolean;
   onSend: (text: string, uploads: Upload[]) => Promise<boolean>;
   onStop: () => void;
@@ -44,6 +45,8 @@ export function Composer({ running, onSend, onStop, settings, onSettings, models
   onOpenRef?: (path: string) => void;
   onBrowseFiles?: () => void;       // shows the folder's files beside the chat, to pick from
   browseLabel?: string;
+  uploader?: (file: File, name: string) => Promise<Upload>;   // a person's chat keeps attachments on the device
+  showLibraries?: boolean;
 }) {
   const [text, setText] = useState("");
   const [pending, setPending] = useState<Pending[]>([]);
@@ -69,7 +72,7 @@ export function Composer({ running, onSend, onStop, settings, onSettings, models
       const key = ++seq.current;
       const preview = f.type.startsWith("image/") ? URL.createObjectURL(f) : null;
       setPending((p) => [...p, { key, name: f.name || "pasted image", size: f.size, preview, state: "uploading" }]);
-      upload(f, f.name || `pasted-${key}.png`).then(
+      uploader(f, f.name || `pasted-${key}.png`).then(
         (u) => setPending((p) => p.map((x) => (x.key === key ? { ...x, state: "done", upload: u } : x))),
         (e) => setPending((p) => p.map((x) => (x.key === key ? { ...x, state: "failed", error: (e as Error).message } : x))),
       );
@@ -153,10 +156,10 @@ export function Composer({ running, onSend, onStop, settings, onSettings, models
                   <span>{browseLabel ?? "Project files"}<small>Put files in the message, to change them or ask about them</small></span>
                 </button>
               )}
-              <div className="menu-sep" />
-              <div className="menu-head">Libraries to search</div>
-              {libraries.length === 0 && <div className="menu-item faint" style={{ cursor: "default" }}>No libraries yet</div>}
-              {libraries.map((l) => {
+              {showLibraries && <div className="menu-sep" />}
+              {showLibraries && <div className="menu-head">Libraries to search</div>}
+              {showLibraries && libraries.length === 0 && <div className="menu-item faint" style={{ cursor: "default" }}>No libraries yet</div>}
+              {showLibraries && libraries.map((l) => {
                 const on = settings.libraries.includes(l.id);
                 return (
                   <button key={l.id} className="menu-item" role="menuitemcheckbox" aria-checked={on}

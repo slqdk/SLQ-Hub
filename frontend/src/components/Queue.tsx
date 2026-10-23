@@ -60,16 +60,18 @@ export function GpuPlate() {
 }
 
 function JobRow({ job, onCancel }: { job: QueueJob; onCancel: (id: number) => void }) {
-  const { modelNames } = useApp();
+  const { modelNames, auth } = useApp();
   const running = job.state === "running";
   const what = residencyName(job.switching_to ?? job.need, modelNames);
+  // A person may stop only their own jobs; the others are shown without owner or title.
+  const mine = auth?.user?.role !== "member" || job.meta?.user_id === auth.user.id;
   return (
     <div className="job">
       <Lamp state={running ? "run" : "wait"} pulse={running} />
       <div className="job-label">{job.label || ownerName(job.owner)}</div>
-      <button className="btn quiet small" onClick={() => onCancel(job.id)}>{running ? "Stop" : "Remove"}</button>
+      {mine ? <button className="btn quiet small" onClick={() => onCancel(job.id)}>{running ? "Stop" : "Remove"}</button> : <span />}
       <div className="job-meta">
-        {ownerName(job.owner)}, {job.priority}, {what}
+        {job.owner ? `${ownerName(job.owner)}, ` : ""}{job.priority}, {what}
         {job.lease ? ", holds the card for the whole task" : ""}
         {running ? `, running ${seconds(job.running_s)}` : `, waited ${seconds(job.waited_s)}`}
         {job.position ? `, number ${job.position} in line` : ""}
@@ -79,7 +81,8 @@ function JobRow({ job, onCancel }: { job: QueueJob; onCancel: (id: number) => vo
 }
 
 export function QueueModal({ onClose }: { onClose: () => void }) {
-  const { queue, modelNames, toast } = useApp();
+  const { queue, modelNames, toast, auth } = useApp();
+  const member = auth?.user?.role === "member";
   const cancel = async (id: number) => {
     try {
       await api(`/hub/api/queue/${id}/cancel`, { method: "POST" });
@@ -90,7 +93,7 @@ export function QueueModal({ onClose }: { onClose: () => void }) {
   return (
     <Modal title="The GPU queue" onClose={onClose} footer={
       <>
-        <button className="btn" onClick={() => { onClose(); navigate("/settings/models"); }}>Models</button>
+        {!member && <button className="btn" onClick={() => { onClose(); navigate("/settings/models"); }}>Models</button>}
         <button className="btn primary" onClick={onClose}>Close</button>
       </>}>
       <p className="muted" style={{ margin: 0 }}>

@@ -273,12 +273,22 @@ _M004_KEYS_AWAY = """
         ALTER TABLE api_keys ADD COLUMN away INTEGER NOT NULL DEFAULT 0;
 """
 
+# People: accounts besides the owner (role "member"). Their chats and files live on their own device; the
+# Hub only answers. away: the account works through the proxy too; may_run_code: bash in their chats.
+_M005_PEOPLE = """
+        ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'admin';
+        ALTER TABLE users ADD COLUMN display_name TEXT NOT NULL DEFAULT '';
+        ALTER TABLE users ADD COLUMN away INTEGER NOT NULL DEFAULT 1;
+        ALTER TABLE users ADD COLUMN may_run_code INTEGER NOT NULL DEFAULT 0;
+"""
+
 
 MIGRATIONS = [
     (1, _M001_CORE),
     (2, _M002_LIBRARIES),
     (3, _M003_RUN_PROMPTS),
     (4, _M004_KEYS_AWAY),
+    (5, _M005_PEOPLE),
 ]
 
 

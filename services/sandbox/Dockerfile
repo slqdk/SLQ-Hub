@@ -34,7 +34,7 @@ RUN python3 -m venv /opt/py \
 
 ENV PATH=/opt/py/bin:$PATH
 
-COPY execd.py /opt/execd/execd.py
+COPY execd.py confine.py /opt/execd/
 
 USER sandbox
 WORKDIR /workspace

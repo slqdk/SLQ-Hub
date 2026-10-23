@@ -1,7 +1,7 @@
 // Settings: models, the queue, apps and keys, the agent, skills, memory, MCP, cloud, system.
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Copy, Download, Menu, Plus, RefreshCw, Upload as UploadIcon, X } from "lucide-react";
-import { api, type ApiKey, type HFLookup, type HFSearchHit, type ImageLookup, type McpServerConfig, type McpStatus,
+import { api, type ApiKey, type Person, type HFLookup, type HFSearchHit, type ImageLookup, type McpServerConfig, type McpStatus,
   type MemoryFile, type ModelEntry, type Sampling, type SdxlChoices, type SdxlSettings, type Settings, type Skill } from "../lib/api";
 import { ago, bytes, residencyName } from "../lib/format";
 import { navigate } from "../lib/router";
@@ -11,7 +11,8 @@ import { ConfirmButton, Empty, Lamp, Modal, Switch, SwitchRow, copyText, useInte
 import { forgetSettings } from "./ChatView";
 
 const TABS = [
-  { id: "models", label: "Models" }, { id: "queue", label: "Queue" }, { id: "apps", label: "Apps and keys" },
+  { id: "models", label: "Models" }, { id: "queue", label: "Queue" }, { id: "people", label: "People" },
+  { id: "apps", label: "Apps and keys" },
   { id: "agent", label: "Assistant" }, { id: "skills", label: "Skills" }, { id: "memory", label: "Memory" },
   { id: "mcp", label: "MCP servers" }, { id: "cloud", label: "Cloud" }, { id: "system", label: "System" },
 ];
@@ -62,6 +63,7 @@ export function SettingsView({ tab }: { tab: string }) {
           </div>
           {current === "models" && <ModelsTab s={s} />}
           {current === "queue" && <QueueTab s={s} />}
+          {current === "people" && <PeopleTab />}
           {current === "apps" && <AppsTab s={s} />}
           {current === "agent" && <AgentTab s={s} />}
           {current === "skills" && <SkillsTab />}
@@ -743,6 +745,149 @@ function QueueTab({ s }: { s: S }) {
         ]} />
       {open && <QueueModal onClose={() => setOpen(false)} />}
     </div>
+  );
+}
+
+// ------------------------------------------------------------ people
+
+function PeopleTab() {
+  const { toast } = useApp();
+  const [people, setPeople] = useState<Person[] | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [password, setPassword] = useState<Person | null>(null);
+  const load = useCallback(async () => {
+    try {
+      setPeople(await api<Person[]>("/hub/api/people"));
+    } catch (e) {
+      toast((e as Error).message, "fault");
+    }
+  }, [toast]);
+  useEffect(() => {
+    load();
+  }, [load]);
+  const patch = async (p: Person, body: Partial<Person> & { password?: string }, done?: string) => {
+    try {
+      await api(`/hub/api/people/${p.id}`, { method: "PATCH", body });
+      if (done) toast(done, "run");
+      load();
+      return true;
+    } catch (e) {
+      toast((e as Error).message, "fault");
+      return false;
+    }
+  };
+  const signOut = async (p: Person) => {
+    try {
+      const r = await api<{ sessions: number }>(`/hub/api/people/${p.id}/sign-out`, { method: "POST" });
+      toast(r.sessions ? `${p.display_name} is signed out on ${r.sessions} device${r.sessions === 1 ? "" : "s"}` :
+        `${p.display_name} was not signed in anywhere`, "run");
+    } catch (e) {
+      toast((e as Error).message, "fault");
+    }
+  };
+  const remove = async (p: Person) => {
+    try {
+      await api(`/hub/api/people/${p.id}`, { method: "DELETE" });
+      load();
+    } catch (e) {
+      toast((e as Error).message, "fault");
+    }
+  };
+  return (
+    <div>
+      <p className="lead">Others in the household can use the Hub with their own login: the same chat as yours, with
+        models, pictures, thinking and tools. Their chats and files are kept on their own device, not on the Hub, and
+        they see nothing of yours: no Settings, libraries, MCP servers, projects or memory.</p>
+      <div className="row" style={{ marginBottom: 8 }}><h3 style={{ margin: 0 }} className="grow">People</h3>
+        <button className="btn small" onClick={() => setAdding(true)}><Plus size={14} /> Add a person</button></div>
+      <div className="list" style={{ marginBottom: 24 }}>
+        {people === null ? <Empty>Loading</Empty> : people.length === 0 ? <Empty>Nobody yet.</Empty> : people.map((p) => (
+          <div className="list-row" key={p.id} style={{ flexWrap: "wrap" }}>
+            <span className="grow" style={{ minWidth: 180 }}><b>{p.display_name}</b>
+              <div className="meta"><span className="mono">{p.username}</span>, {p.last_seen ? `seen ${ago(p.last_seen)}` : "not signed in yet"}</div></span>
+            <select className="select" style={{ width: 170 }} value={p.away ? "away" : "home"} aria-label={`Where ${p.display_name} can sign in`}
+              onChange={(e) => patch(p, { away: e.target.value === "away" }, e.target.value === "away"
+                ? `${p.display_name} can use the Hub away from home too` : `${p.display_name} can use the Hub only at home`)}>
+              <option value="home">At home</option><option value="away">At home and away</option>
+            </select>
+            <label className="row small" style={{ gap: 6 }} title="Lets the assistant run code (bash, Python) in their chats, kept inside the chat's temporary folder">
+              <Switch checked={p.may_run_code} onChange={(v) => patch(p, { may_run_code: v })} label={`${p.display_name} may run code`} />
+              May run code</label>
+            <button className="btn quiet small" onClick={() => setPassword(p)}>New password</button>
+            <button className="btn quiet small" onClick={() => signOut(p)}>Sign out everywhere</button>
+            <ConfirmButton onConfirm={() => remove(p)} confirmText="Remove the login?">Remove</ConfirmButton>
+          </div>
+        ))}
+      </div>
+      <div className="callout"><b>How it works for them</b>: they sign in at {location.host} with the user name and password
+        you give them, and add the page to their phone's home screen. <b>At home</b> means the LAN and WireGuard;
+        <b> At home and away</b> also lets them in through hub.slq.dk. A new password signs them out everywhere. Their chats
+        stay in the browser they use, so they move between devices with Export and Import in their account menu.
+        <div className="small muted" style={{ marginTop: 6 }}>Code runs inside the answer's temporary folder and cannot see
+          your files (Linux Landlock, checked by the self-test); it can see the command lines of your own commands running
+          at the same moment. Without Landlock, nobody's chat gets code.</div></div>
+      {adding && <AddPerson onClose={() => setAdding(false)} onAdded={() => { setAdding(false); load(); }} />}
+      {password && <NewPassword person={password} onClose={() => setPassword(null)}
+        onSave={async (pw) => { if (await patch(password, { password: pw }, `New password for ${password.display_name}; signed out everywhere`)) setPassword(null); }} />}
+    </div>
+  );
+}
+
+function AddPerson({ onClose, onAdded }: { onClose: () => void; onAdded: () => void }) {
+  const { toast } = useApp();
+  const [name, setName] = useState("");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [away, setAway] = useState(false);
+  const [code, setCode] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const add = async () => {
+    setBusy(true);
+    try {
+      await api("/hub/api/people", { body: { display_name: name, username, password, away, may_run_code: code } });
+      toast(`${name || username} can sign in now`, "run");
+      onAdded();
+    } catch (e) {
+      toast((e as Error).message, "fault");
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal title="Add a person" onClose={onClose} footer={<>
+      <button className="btn" onClick={onClose}>Cancel</button>
+      <button className="btn primary" disabled={busy || !username.trim() || password.length < 10} onClick={add}>Add</button></>}>
+      <label className="field"><span>Name</span><input className="input" autoFocus value={name}
+        onChange={(e) => { setName(e.target.value); if (!username || username === slugName(name)) setUsername(slugName(e.target.value)); }}
+        placeholder="Maria" /><small>What the assistant calls them.</small></label>
+      <label className="field"><span>User name</span><input className="input mono" value={username} autoCapitalize="off"
+        onChange={(e) => setUsername(e.target.value)} placeholder="maria" /></label>
+      <label className="field"><span>Password</span><input className="input" value={password} type="text" autoComplete="off"
+        onChange={(e) => setPassword(e.target.value)} /><small>At least 10 characters. They can change it themselves.</small></label>
+      <label className="field"><span>Where they can sign in</span>
+        <select className="select" value={away ? "away" : "home"} onChange={(e) => setAway(e.target.value === "away")}>
+          <option value="home">At home: the LAN and WireGuard</option>
+          <option value="away">At home and away: also through hub.slq.dk</option></select></label>
+      <SwitchRow checked={code} onChange={setCode} title="May run code">The assistant may run bash and Python in their chats,
+        inside each answer's temporary folder.</SwitchRow>
+    </Modal>
+  );
+}
+
+function slugName(name: string): string {
+  return name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/æ/g, "ae").replace(/ø/g, "oe")
+    .replace(/å/g, "aa").replace(/[^a-z0-9._-]+/g, "").slice(0, 40);
+}
+
+function NewPassword({ person, onClose, onSave }: { person: Person; onClose: () => void; onSave: (pw: string) => void }) {
+  const [pw, setPw] = useState("");
+  return (
+    <Modal title={`New password for ${person.display_name}`} onClose={onClose} footer={<>
+      <button className="btn" onClick={onClose}>Cancel</button>
+      <button className="btn primary" disabled={pw.length < 10} onClick={() => onSave(pw)}>Save</button></>}>
+      <label className="field"><span>New password</span><input className="input" autoFocus value={pw} type="text"
+        autoComplete="off" onChange={(e) => setPw(e.target.value)} />
+        <small>At least 10 characters. They are signed out on every device and sign in again with this.</small></label>
+    </Modal>
   );
 }
 

@@ -25,6 +25,9 @@ Settings → **Apps and keys** → **New key**. One key per app:
 The key (`slqhub_...`) is shown once. A key can be switched off or deleted
 at any time; requests with it then get 401.
 
+People you add under Settings → People sign in to the Hub's own chat; their
+sign-in does not open the model API. An app always needs a key.
+
 The page also shows the exact addresses for this Hub. Below, `HUB` is the
 VM's LAN address (for example `30.11.0.140`).
 

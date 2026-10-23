@@ -24,14 +24,33 @@ SECRET_SETTINGS = {("cloud", "api_key")}
 
 # ---------------------------------------------------------------- queue + events
 
+def queue_for(snap: dict, user: dict | None) -> dict:
+    """What a viewer may see of the queue. People see their own jobs, and that the card is busy - not with
+    what or for whom. (People's jobs carry no chat title, so the owner sees only their name.)"""
+    if not auth.is_member(user):
+        return snap
+
+    def one(j: dict) -> dict:
+        meta = j.get("meta") or {}
+        if meta.get("user_id") == user["id"]:
+            return j
+        return {**j, "owner": "", "label": "Another job", "meta": {k: v for k, v in meta.items() if k == "model"}}
+    return {**snap, "last_error": None, "running": [one(j) for j in snap.get("running") or []],
+            "pending": [one(j) for j in snap.get("pending") or []]}
+
+
 @router.get("/hub/api/queue")
 async def queue(request: Request):
-    return get_hub(request).scheduler.snapshot()
+    return queue_for(get_hub(request).scheduler.snapshot(), getattr(request.state, "user", None))
 
 
 @router.post("/hub/api/queue/{job_id}/cancel")
 async def cancel_job(job_id: int, request: Request):
-    if not get_hub(request).scheduler.cancel(job_id):
+    hub, user = get_hub(request), getattr(request.state, "user", None)
+    job = hub.scheduler.job(job_id)
+    if job is not None and auth.is_member(user) and job.meta.get("user_id") != user["id"]:
+        raise HTTPException(403, "That is not your job.")
+    if not hub.scheduler.cancel(job_id):
         raise HTTPException(404, "That job is not in the queue any more.")
     return {"ok": True}
 
@@ -40,15 +59,16 @@ async def cancel_job(job_id: int, request: Request):
 async def events(request: Request):
     """Live queue snapshots for the header indicator and the queue drawer."""
     hub = get_hub(request)
+    user = getattr(request.state, "user", None)
 
     async def gen():
         q = hub.scheduler.subscribe()
         try:
-            yield f"event: queue\ndata: {json.dumps(hub.scheduler.snapshot())}\n\n".encode()
+            yield f"event: queue\ndata: {json.dumps(queue_for(hub.scheduler.snapshot(), user))}\n\n".encode()
             while True:
                 try:
                     snap = await asyncio.wait_for(q.get(), timeout=15)
-                    yield f"event: queue\ndata: {json.dumps(snap)}\n\n".encode()
+                    yield f"event: queue\ndata: {json.dumps(queue_for(snap, user))}\n\n".encode()
                 except asyncio.TimeoutError:
                     yield b": keep-alive\n\n"
         finally:
@@ -88,9 +108,20 @@ def _unmask_mcp(values: dict, current: dict) -> dict:
     return values
 
 
+def _for_people(hub) -> dict:
+    """The few settings a person's chat needs (defaults for the composer)."""
+    s = hub.settings
+    return {"models": {"default": s.get("models", "default")},
+            "agent": {"thinking_in_chats": s.get("agent", "thinking_in_chats"), "effort": s.get("agent", "effort")},
+            "images": {"model": s.get("images", "model")}}
+
+
 @router.get("/hub/api/settings")
 async def get_settings(request: Request):
     hub = get_hub(request)
+    if auth.is_member(getattr(request.state, "user", None)):
+        mine = _for_people(hub)
+        return {"settings": mine, "defaults": mine}
     return {"settings": _masked(hub.settings.all()), "defaults": _masked(DEFAULTS)}
 
 

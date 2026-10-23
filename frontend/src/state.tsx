@@ -117,10 +117,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [refreshAuth]);
 
   const signedIn = !!auth?.signedIn;
+  const member = auth?.user?.role === "member";          // a person: no projects or chats on the Hub
   useEffect(() => {
     if (!signedIn) return;
     refreshModels();
-    refreshLists();
+    if (!member) refreshLists();
     // The GPU queue, live. EventSource reconnects by itself.
     const es = new EventSource("/hub/api/events");
     es.addEventListener("queue", (e) => {
@@ -132,12 +133,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
     });
     es.onerror = () => setQueueLive(false);
-    const t = window.setInterval(refreshLists, 60000);
+    const t = member ? 0 : window.setInterval(refreshLists, 60000);
     return () => {
       es.close();
-      window.clearInterval(t);
+      if (t) window.clearInterval(t);
     };
-  }, [signedIn, refreshModels, refreshLists]);
+  }, [signedIn, member, refreshModels, refreshLists]);
 
   // The loaded model changes what the model list shows as loaded.
   const current = queue?.current;

@@ -45,13 +45,20 @@ async def login(body: Login, request: Request, response: Response):
     if auth.throttle.blocked(ip):
         raise HTTPException(429, "Too many failed sign-ins - wait ten minutes.")
     user = auth.get_user(body.username.strip())
+    hub = get_hub(request)
+    # A person limited to the home network: refused from elsewhere before the password is even checked, so it
+    # cannot be guessed from outside either.
+    if (user and user.get("role") == auth.MEMBER and not user.get("away")
+            and not netguard.is_lan(ip, hub.env.lan_networks, hub.env.sandbox_ip)):
+        auth.throttle.fail(ip)                            # and user names cannot be tried out freely
+        raise HTTPException(403, "This account works only on the home network.")
     if not user or not auth.verify_password(body.password, user["password_hash"]):
         auth.throttle.fail(ip)
         raise HTTPException(401, "Wrong user name or password.")
     auth.throttle.reset(ip)
     token = auth.create_session(user["id"], request.headers.get("user-agent", ""))
     _set_cookie(response, request, token)
-    return {"user": {"id": user["id"], "username": user["username"]}}
+    return {"user": auth.public_user(user)}
 
 
 @router.post("/hub/api/auth/logout")
@@ -76,7 +83,7 @@ async def setup(body: Login, request: Request, response: Response):
     user = auth.get_user(body.username.strip() or "admin")
     token = auth.create_session(user["id"], request.headers.get("user-agent", ""))
     _set_cookie(response, request, token)
-    return {"user": {"id": user["id"], "username": user["username"]}}
+    return {"user": auth.public_user(user)}
 
 
 @router.post("/hub/api/auth/password")

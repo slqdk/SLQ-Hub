@@ -13,10 +13,15 @@ class SandboxError(RuntimeError):
 async def sandbox_exec(ctx: ToolContext, cmd: str, cwd: str, timeout: int) -> dict:
     hub = ctx.hub
     headers = {"X-Internal-Token": hub.env.internal_token} if hub.env.internal_token else {}
+    body: dict = {"cmd": cmd, "cwd": cwd, "timeout": timeout, "max_output": 200_000}
+    if getattr(ctx.engine, "device", None) is not None:
+        # A person's chat: the command may touch only this turn's temporary folder (Landlock in the sandbox;
+        # refused there when it cannot be enforced), with a home of its own inside it.
+        root = ctx.workdir.sandbox_path
+        body["confine"] = {"root": root, "home": f"{root}/.hub/home", "require": True}
     try:
         async with httpx.AsyncClient(timeout=timeout + 30, transport=hub.transports.sandbox) as c:
-            r = await c.post(hub.env.sandbox_url + "/exec", headers=headers,
-                             json={"cmd": cmd, "cwd": cwd, "timeout": timeout, "max_output": 200_000})
+            r = await c.post(hub.env.sandbox_url + "/exec", headers=headers, json=body)
     except httpx.HTTPError as exc:
         raise SandboxError(f"the sandbox is not answering ({exc.__class__.__name__})") from exc
     if r.status_code >= 400:

@@ -219,12 +219,34 @@ outside the LAN can sync.
 
 TwinCAT Coagent and anything else: see [API.md](API.md).
 
-## 6. Phones and tablets
+## 6. People in the household
 
-The Hub has a chat page made for phones, `http://30.11.0.140:8080/chat`. It
+Give someone their own login: **Settings → People → Add a person**.
+
+1. Their name (what the assistant calls them), a user name and a password
+   (at least 10 characters; they can change it themselves).
+2. **Where they can sign in**: at home (the LAN and WireGuard), or at home
+   and away (also `https://hub.slq.dk`).
+3. **May run code**: off by default. On, the assistant may run bash and
+   Python in their chats, inside each answer's temporary folder - only where
+   the self-test's "sandbox for people" line passes.
+
+They sign in at the Hub's address, on a phone ideally from the home screen
+(iPhone: Safari → Share → **Add to Home Screen**; Android: Chrome → ⋮ →
+**Add to Home screen**). They get the same chat as you - models, pictures,
+thinking, web search, attachments, artifacts - but none of your chats,
+projects, libraries, memory or settings. Their chats are kept in their
+browser, not on the Hub: each device has its own, and **Export all chats** /
+**Import chats** in their account menu moves them. In the list: New password,
+Sign out everywhere, Remove.
+
+## 7. The phone chat page (with a key)
+
+The Hub also has a chat page made for phones, `http://30.11.0.140:8080/chat`,
+for anyone without a login: plain chat, photos and pictures, no agent. It
 uses the model API with its own key, so it works only on the home network
-and cannot see your chats, projects or settings. Its chats are kept on the
-phone.
+(or away, with a key set to At home and away) and cannot see your chats,
+projects or settings. Its chats are kept on the phone.
 
 1. In the Hub: **Settings → Apps and keys → New key**. Name it after the
    person, choose **Interactive**, press **Only the home network** and make
@@ -242,7 +264,7 @@ Phone apps work too, each with its own key: for example Enchanted (iPhone,
 an Ollama app) with the server `http://30.11.0.140:11434` and the key as
 **Bearer Token**.
 
-## 7. Retire VM 104 later
+## 8. Retire VM 104 later
 
 VM 104 stays as a fallback: to go back, shut the Hub VM down and start 104.
 When the Hub has run well for a while, delete VM 104 on the host:

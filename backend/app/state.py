@@ -74,7 +74,7 @@ def build_hub(env: Env, transports: Transports | None = None) -> Hub:
     settings = Settings(env.data_dir / "settings.json")
     catalog = Catalog(env.models_dir, env.data_dir / "models.override.json")
     runner = Runner(env.llm_url, env.internal_token, env.llm_host, transport=t.runner)
-    comfy = Comfy(env.comfy_url, transport=t.comfy)
+    comfy = Comfy(env.comfy_url, transport=t.comfy, files=env.comfy_files)
     backend = GpuBackend(runner, comfy, catalog)
     q = settings.get("queue")
     scheduler = Scheduler(backend, affinity_window=float(q.get("affinity_window_s", 20)),

@@ -3,6 +3,7 @@ lease, or as a job of its own for API callers), outputs saved as uploads."""
 from __future__ import annotations
 
 import base64
+import contextvars
 import io
 import random
 import time
@@ -13,7 +14,7 @@ from PIL import Image
 
 from ..api.common import caller
 from ..chats import store as chats
-from ..gpu.comfy import ComfyError
+from ..gpu.comfy import ComfyError, input_images
 from ..gpu.scheduler import SchedulerError, Ticket
 from ..media import sign
 from ..state import Hub
@@ -22,6 +23,11 @@ from . import workflows as W
 
 class ImageError(RuntimeError):
     pass
+
+
+# Set for a person's chat (agent/device.py): ComfyUI keeps nothing of its jobs - no history entry, no copies of
+# the pictures in its output and input folders. The pictures go to the person's device; the Hub forgets them too.
+EPHEMERAL: contextvars.ContextVar[bool] = contextvars.ContextVar("ephemeral_images", default=False)
 
 
 def family(entry: dict | None) -> str:
@@ -114,6 +120,7 @@ class ImagePipeline:
     async def _run(self, graph: dict, ticket: Ticket | None, owner: str, priority: str, label: str,
                    on_progress=None, texts: dict | None = None) -> list[tuple[str, bytes]]:
         own = None
+        queued = False
         try:
             if ticket is not None:
                 await ticket.switch("comfy")
@@ -121,7 +128,9 @@ class ImagePipeline:
                 own = await self.hub.scheduler.acquire(owner, "image", "comfy", priority, label=label,
                                                        max_wait=float(self.hub.settings.get("queue", "max_wait_s")))
             await self._validate(graph)
-            images, out_texts = await self.hub.comfy.run_outputs(graph, on_progress=on_progress)
+            queued = True
+            images, out_texts = await self.hub.comfy.run_outputs(graph, on_progress=on_progress,
+                                                                 keep=not EPHEMERAL.get())
             if texts is not None:
                 texts.update(out_texts)
             return images
@@ -130,15 +139,23 @@ class ImagePipeline:
         finally:
             if own is not None:
                 await own.release()
+            if not queued and EPHEMERAL.get():            # it never ran: the pictures uploaded for it go
+                self.hub.comfy.delete_files([("input", "", n) for n in input_images(graph)])
 
     async def _upload_inputs(self, images: list[bytes]) -> list[str]:
-        names = []
-        for i, data in enumerate(images):
-            buf = io.BytesIO()
-            with Image.open(io.BytesIO(data)) as img:
-                img = img.convert("RGBA") if img.mode in ("RGBA", "LA", "P") else img.convert("RGB")
-                img.save(buf, "PNG")
-            names.append(await self.hub.comfy.upload_image(buf.getvalue(), f"hub-{int(time.time() * 1000)}-{i}.png"))
+        names: list[str] = []
+        try:
+            for i, data in enumerate(images):
+                buf = io.BytesIO()
+                with Image.open(io.BytesIO(data)) as img:
+                    img = img.convert("RGBA") if img.mode in ("RGBA", "LA", "P") else img.convert("RGB")
+                    img.save(buf, "PNG")
+                names.append(await self.hub.comfy.upload_image(buf.getvalue(),
+                                                               f"hub-{int(time.time() * 1000)}-{i}.png"))
+        except BaseException:
+            if EPHEMERAL.get():
+                self.hub.comfy.delete_files([("input", "", n) for n in names])
+            raise
         return names
 
     def _save(self, outputs: list[tuple[str, bytes]], prefix: str) -> list[dict]:

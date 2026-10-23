@@ -25,7 +25,7 @@ decided and how the pieces fit; `docs/INSTALL.md` is the step-by-step guide.
 | Running services | Docker Compose. `update.sh` with backup and automatic rollback, as in SLQ and FamilyLog. |
 | VM size | 40 GB RAM, 500 GB disk. |
 | Access | Web UI on a subdomain through Nginx Proxy Manager, with login. The model API answers only from LAN/WireGuard, except for keys set to work away from home (a person's phone), which also work through the proxy. |
-| Users | One admin. Other apps get API keys. |
+| Users | One owner (the admin). The owner can add people from the household (0.11.0): the same chat with their own login, at home or also away, their chats kept on their own device. Other apps get API keys. |
 | Inference engine | llama.cpp (`llama-server`), started and stopped by the Hub. No Ollama: one queue, not two. |
 | Language models | Qwen3.8-27B (main, vision, tools, thinking) and Qwen3.6-35B-A3B (fast MoE). |
 | Main model settings | Q4_K_M-class quant, 64K context per conversation, KV cache q8_0. |
@@ -416,6 +416,46 @@ names both models.
 - **Visibility.** Every escalation shows a notice with the model and the
   reason, and the run's steps record it.
 
+### People's chats: device turns (0.11.0)
+
+A person (an account the owner added, `users.role = 'member'`) keeps their
+chats in the browser. Each answer is a **device turn**
+(`app/agent/device.py`):
+
+1. The browser posts the conversation, the chat's files, the pictures of the
+   last 12 messages and the latest version of each artifact to
+   `POST /hub/api/device/turns` (at most 120 MB decoded; two running turns
+   per person).
+2. The Hub writes the files into a temporary folder
+   (`workspace/device/<turn>`), stores the pictures, and runs the normal
+   `Engine` with `engine.device` set: the person's name, no memory, no
+   libraries, no MCP, no cloud escalation (a hand-over to the stronger local
+   model is fine), bash only when allowed, artifacts kept in the turn
+   (`DeviceInfo`), only the skills the owner switched on. Without a stored
+   summary to fold old messages into, the oldest are left out until the
+   context fits (the system prompt says how many).
+3. Events stream from `/events`. The result carries the new messages, the
+   files the assistant made or changed (25 MB each, 100 MB in all), the
+   files it deleted (`removed`), the artifacts, the steps and the title.
+4. The browser fetches the pictures (`/blob/<sha>`) and files (`/file`),
+   saves the chat, then calls `/done`. The Hub deletes the folder, drops the
+   run from memory and deletes every stored file the turn created. A reload
+   in between picks the turn up again (the pending turn is in localStorage).
+
+What the Hub keeps: nothing of the content. No chat, run, prompt or artifact
+rows are written. Stored files are content-addressed and shared, so a turn
+deletes only files that were new when it stored them, a file that the owner
+(or a project, a library) stores meanwhile is released, and one another
+running turn shows too is handed on to that turn (`blobs.on_store`, the
+upload listener). The list of files a turn will delete is kept outside its
+folder (`data/device-turns/<turn>`), where a person's code cannot edit it; a
+startup sweep uses it after a restart. Turns whose device never comes back
+are deleted after an hour, and a person has at most four such turns waiting.
+ComfyUI keeps nothing either (`images.pipeline.EPHEMERAL`): after each job
+the Hub deletes its history entry and, through the mounted folders
+(`HUB_COMFY_FILES`), the output and input pictures. What does stay: the queue
+log's row for each answer (the person's name, "Chat", the model, the times).
+
 ---
 
 ## 7. Projects and files (SLQ Sync)
@@ -604,23 +644,59 @@ shell).
 **The phone chat page (`/chat`)** is a second, small page for the rest of the
 household: one column, a drawer of chats, and a composer with Picture (the
 Settings picture model; square, portrait, landscape), Think, a photo button
-when the model can see, and the model. It is deliberately not the Hub's UI
-with a second account. The Hub stays single-user, and the page is one more
-app on the model API with its own key: it answers only on the LAN, follows
+when the model can see, and the model. It is one more app on the model API
+with its own key (people with a login use the Hub's own chat, below): it
+answers only on the LAN, follows
 the key's address limit and priority (its requests show in the queue under
 the key's name), and cannot reach chats, projects, files, memory or settings.
 Its conversations live in the phone's IndexedDB, never on the Hub. The key
 comes in the link (`/chat#key=…`: read, kept in the browser, removed from the
 address; a fragment is never sent to a server) or is pasted. It has no agent:
-no web search, tools or files - plain chat, photos and pictures. A signed-in
-browser needs no key (the gate accepts the session on the model API).
+no web search, tools or files - plain chat, photos and pictures. The owner's
+signed-in browser needs no key (the gate accepts the owner's session on the
+model API; a person's session is refused there).
+
+**People (0.11.0).** Settings → People adds a person: a name (what the
+assistant calls them), a user name, a password (10+ characters), where the
+login works (at home: `HUB_LAN_CIDRS`; or at home and away: also through the
+proxy) and "May run code". The list has New password (it signs them out
+everywhere), Sign out everywhere and Remove. A person who signs in gets
+`PersonApp` (`frontend/src/person/`): the owner's chat components (composer
+with model, picture model, thinking levels and skills; the turn view; the
+artifact panel; the queue plate) over IndexedDB (`slq-hub-<user name>`:
+chats, per-chat data, files, pictures). Pictures are made by asking; there is
+no Picture button. The account menu has Export all chats / Import chats (one
+JSON file with pictures and files), Change password and Sign out. A Files
+panel lists the chat's files (attachments in `.hub/attachments/`, what the
+assistant made), each sent with every message.
 
 ---
 
 ## 11. Security
 
-- **Login.** The single admin account uses a scrypt password hash. Sessions
-  are HttpOnly cookies that last 30 days, and are `Secure` behind HTTPS.
+- **Login.** The owner and the people the owner adds use scrypt password
+  hashes. Sessions are HttpOnly cookies that last 30 days, and are `Secure`
+  behind HTTPS. Failed sign-ins are throttled per address.
+- **People.** The gate lets a person's session reach only `MEMBER_ROUTES`
+  (models, a few settings, skills, the queue and its events, their own
+  password, their device turns); everything else is 403, the sync API and
+  the model API refuse it. A person limited to the home network is signed
+  out anywhere else, and refused at sign-in from outside before the password
+  is checked. Device turns are bound to their user; pictures are served to a
+  person only from their own turns. Others' queue jobs show as "Another job".
+- **People's code** (only with "May run code", and only where the sandbox
+  reports Landlock) runs through `confine.py`: read and write beneath the
+  turn folder (its home and `TMPDIR` are in it), read the system (`/usr`,
+  `/etc`, `/opt`, `/proc`, ...), `/dev/null`-style devices - nothing else:
+  not `/workspace`, `/home/sandbox`, `/tmp`, `/dev/shm` or terminals. With
+  ABI 4+ it connects only to ports 53, 80 and 443; with ABI 6+ it cannot
+  signal processes or reach abstract sockets outside. Landlock also denies
+  reading other processes' memory and environment, but `/proc/<pid>/cmdline`
+  stays readable: the command lines of the owner's commands and MCP servers
+  running at the same moment are visible to a person's code (so keep secrets
+  out of MCP arguments; they belong in its environment). The daemon is not
+  dumpable (its token), and kills whatever a confined command leaves running
+  (its process group and anything carrying the command's mark).
 - **Keys and tokens.** API keys and sync tokens are stored only as hashes and
   shown once.
 - **Sandbox.** The sandbox has:
@@ -702,6 +778,14 @@ clock times), the tail of llama-server's log and the chat's files (up to
   against a fake server only.
 - **Streaming through Nginx Proxy Manager** needs `proxy_buffering off` (in
   docs/INSTALL.md); the Hub also sends `X-Accel-Buffering: no`.
+- **Landlock in the sandbox container** needs the kernel's LSM list to include
+  it and Docker's seccomp profile to allow its three system calls. Without
+  it people simply get no code (the self-test's "sandbox for people" line).
+- **People's chats in the browser** depend on the browser keeping IndexedDB.
+  The app asks for persistent storage, but Safari deletes a website's storage
+  after seven days of use without a visit to it - except for a page added to
+  the home screen, which is what to do on an iPhone. Export all chats is the
+  backup.
 
 ---
 

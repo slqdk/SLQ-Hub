@@ -7,8 +7,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import time
 import uuid
+from pathlib import Path
 from typing import Awaitable, Callable
 
 import httpx
@@ -19,6 +21,9 @@ except ImportError:  # pragma: no cover
     ws_connect = None
 
 
+log = logging.getLogger("hub.comfy")
+
+
 class ComfyError(RuntimeError):
     pass
 
@@ -26,11 +31,24 @@ class ComfyError(RuntimeError):
 ProgressFn = Callable[[int, int, str | None], Awaitable[None] | None]
 
 
+def input_images(graph: dict) -> list[str]:
+    """The pictures a graph loads from ComfyUI's input folder."""
+    out = []
+    for node in graph.values():
+        if isinstance(node, dict) and node.get("class_type") in ("LoadImage", "LoadImageMask"):
+            name = (node.get("inputs") or {}).get("image")
+            if isinstance(name, str) and name:
+                out.append(name)
+    return out
+
+
 class Comfy:
-    def __init__(self, url: str, transport: httpx.AsyncBaseTransport | None = None, use_ws: bool = True):
+    def __init__(self, url: str, transport: httpx.AsyncBaseTransport | None = None, use_ws: bool = True,
+                 files: Path | None = None):
         self.url = url.rstrip("/")
         self._transport = transport
         self.use_ws = use_ws and ws_connect is not None and transport is None
+        self.files = files            # ComfyUI's input/ and output/ folders as mounted in the Hub (None: not mounted)
         self._object_info: dict | None = None
         self._object_info_at = 0.0
 
@@ -103,11 +121,13 @@ class Comfy:
         """Queue a workflow, wait for it, and return its output images."""
         return (await self.run_outputs(graph, on_progress, timeout))[0]
 
-    async def run_outputs(self, graph: dict, on_progress: ProgressFn | None = None,
-                          timeout: float = 1800) -> tuple[list[tuple[str, bytes]], dict[str, list[str]]]:
-        """Like run(), plus the text outputs by node id (PreviewAny shows text)."""
+    async def run_outputs(self, graph: dict, on_progress: ProgressFn | None = None, timeout: float = 1800,
+                          keep: bool = True) -> tuple[list[tuple[str, bytes]], dict[str, list[str]]]:
+        """Like run(), plus the text outputs by node id (PreviewAny shows text). keep=False: ComfyUI keeps
+        nothing of the job afterwards (forget())."""
         client_id = uuid.uuid4().hex
         prompt_id: str | None = None
+        hist: dict | None = None
         try:
             if self.use_ws:
                 prompt_id = await self._run_ws(graph, client_id, on_progress, timeout)
@@ -135,6 +155,47 @@ class Comfy:
             if prompt_id:
                 await asyncio.shield(self.interrupt(prompt_id))
             raise
+        finally:
+            if not keep:
+                await asyncio.shield(self.forget(graph, prompt_id, hist))
+
+    async def forget(self, graph: dict, prompt_id: str | None, hist: dict | None = None) -> None:
+        """Delete what ComfyUI keeps of a job: its history entry (the prompt and file names, in memory) and, with
+        its folders mounted here, the pictures the job saved and the ones it loaded. Best effort."""
+        files: list[tuple[str, str, str]] = [("input", "", name) for name in input_images(graph)]
+        if prompt_id:
+            if hist is None:
+                try:
+                    hist = await self.history(prompt_id)
+                except ComfyError:
+                    hist = None
+            for out in ((hist or {}).get("outputs") or {}).values():
+                for img in out.get("images") or []:
+                    files.append((img.get("type") or "output", img.get("subfolder") or "", img.get("filename") or ""))
+            try:
+                async with self.client(10) as c:
+                    await c.post(self.url + "/history", json={"delete": [prompt_id]})
+            except httpx.HTTPError:
+                pass
+        self.delete_files(files)
+
+    def delete_files(self, files: list[tuple[str, str, str]]) -> None:
+        """(kind input/output, subfolder, name) - when ComfyUI's folders are mounted here."""
+        if self.files is None:
+            return
+        for kind, sub, name in files:
+            if kind not in ("input", "output") or not name:
+                continue
+            base = (self.files / kind).resolve()
+            p = (base / sub / name).resolve()
+            if base not in p.parents:
+                continue
+            try:
+                p.unlink()
+            except FileNotFoundError:
+                pass
+            except OSError as exc:
+                log.warning("could not delete ComfyUI's %s/%s: %s", kind, name, exc)
 
     async def _poll(self, prompt_id: str, timeout: float) -> None:
         deadline = time.monotonic() + timeout

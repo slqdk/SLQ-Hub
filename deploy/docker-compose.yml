@@ -40,12 +40,16 @@ services:
       HUB_SEARXNG_URL: http://searxng:8080
       HUB_SANDBOX_URL: http://172.31.250.20:7000
       HUB_SANDBOX_IP: 172.31.250.20
+      HUB_COMFY_FILES: /comfy
     ports:
       - "${HUB_PORT:-8080}:8080"          # web UI + API (Nginx Proxy Manager points here)
       - "${HUB_OLLAMA_PORT:-11434}:8080"  # the same app on Ollama's usual port
     volumes:
       - ${HUB_ROOT:-/srv/slq-hub}/data:/data
       - ${HUB_ROOT:-/srv/slq-hub}/models:/models
+      # ComfyUI's picture folders: the Hub deletes the copies of people's pictures there after each answer
+      - ${HUB_ROOT:-/srv/slq-hub}/comfy/input:/comfy/input
+      - ${HUB_ROOT:-/srv/slq-hub}/comfy/output:/comfy/output
     networks:
       core: {}
       sbx:

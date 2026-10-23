@@ -17,6 +17,7 @@ A message's content is a JSON list of blocks:
 """
 from __future__ import annotations
 
+import contextvars
 import hashlib
 import io
 import json
@@ -219,8 +220,15 @@ def list_artifacts(chat_id: int) -> list[dict]:
 
 # ---------------------------------------------------------------- uploads (and generated images)
 
+# A device turn (a person's chat, kept on their device) listens here for the files its tools store, and deletes
+# the ones that were new once the device has them. Set per task, so other turns are not affected.
+upload_listener: contextvars.ContextVar = contextvars.ContextVar("upload_listener", default=None)
+
+
 def save_upload(data: bytes, filename: str, mime: str) -> dict:
-    sha = blobs.store(data)
+    sha = hashlib.sha256(data).hexdigest()
+    new = not blobs.exists(sha)
+    blobs.store(data)
     width = height = None
     if mime.startswith("image/"):
         try:
@@ -231,7 +239,17 @@ def save_upload(data: bytes, filename: str, mime: str) -> dict:
     with db.connect() as con:
         con.execute("INSERT OR IGNORE INTO uploads (sha, filename, mime, size, width, height, created_at)"
                     " VALUES (?,?,?,?,?,?,?)", (sha, filename[:200], mime, len(data), width, height, db.utcnow()))
+    listener = upload_listener.get()
+    if listener is not None:
+        listener(sha, new)
     return {"sha": sha, "name": filename, "mime": mime, "size": len(data), "width": width, "height": height}
+
+
+def forget_upload(sha: str) -> None:
+    """Remove a stored file that nothing keeps (a device turn's, once the device has it)."""
+    with db.connect() as con:
+        con.execute("DELETE FROM uploads WHERE sha=?", (sha,))
+    blobs.delete(sha)
 
 
 def get_upload(sha: str) -> dict | None:

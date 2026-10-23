@@ -11,6 +11,11 @@ straight through).
 * UI API (/hub/api/*) - a signed-in browser, except login/status/health;
   state-changing requests from another origin are refused.
 * everything else - the web app's files.
+
+People (accounts the owner added, role "member") reach only what their chat
+needs (MEMBER_ROUTES): the models, a few settings, the queue, their own
+device turns - not the model API (apps use keys). A person limited to the
+home network is not signed in at all when the request comes from elsewhere.
 """
 from __future__ import annotations
 
@@ -23,6 +28,18 @@ from . import auth, netguard
 from .api.common import Caller
 
 PATH_KEY = re.compile(r"^/k/(slqhub_[A-Za-z0-9_\-]{10,})(/.*)?$")
+# What a person (role member) may use of the UI API; everything else is the owner's.
+MEMBER_ROUTES = [
+    ({"GET"}, re.compile(r"^/hub/api/(models|settings|skills|events|queue)$")),
+    ({"POST"}, re.compile(r"^/hub/api/queue/\d+/cancel$")),
+    ({"POST"}, re.compile(r"^/hub/api/auth/password$")),
+    ({"POST"}, re.compile(r"^/hub/api/device/turns$")),
+    ({"GET", "POST"}, re.compile(r"^/hub/api/device/turns/[A-Za-z0-9_]+(/[A-Za-z0-9_./-]*)?$")),
+]
+
+
+def member_may(method: str, path: str) -> bool:
+    return any(method in methods and pat.match(path) for methods, pat in MEMBER_ROUTES)
 PUBLIC_UI = {"/hub/api/health", "/hub/api/auth/login", "/hub/api/auth/status", "/hub/api/auth/logout",
              "/hub/api/auth/setup"}
 CORS_HEADERS = ("authorization, content-type, x-api-key, anthropic-version, anthropic-beta, "
@@ -105,6 +122,7 @@ class Gate:
         scope = {**scope, "state": state}
         kind = classify(path)
         method = scope["method"]
+        lan = netguard.is_lan(ip, hub.env.lan_networks, hub.env.sandbox_ip)
 
         if kind == "model":
             origin = headers.get("origin")
@@ -119,7 +137,6 @@ class Gate:
                               (b"access-control-max-age", b"600")]
                 await send({"type": "http.response.start", "status": 204, "headers": pre})
                 return await send({"type": "http.response.body", "body": b""})
-            lan = netguard.is_lan(ip, hub.env.lan_networks, hub.env.sandbox_ip)
             raw = path_key or _bearer(headers)
             key = auth.find_api_key(raw) if raw else None
             # From outside the home network only through the proxy (hub.slq.dk): every key when Settings allows
@@ -139,7 +156,7 @@ class Gate:
                 state["caller"] = Caller(owner=key["name"], priority=key["priority"], via="key")
             else:
                 user = auth.session_user(_cookie(headers, auth.SESSION_COOKIE))
-                if user is None:
+                if user is None or auth.is_member(user):     # a person's sign-in is for their chat, not the API
                     msg = "invalid API key" if raw else "an API key is required (Settings -> API keys)"
                     return await _json(send, 401, {"error": {"message": msg, "type": "authentication_error"}}, cors)
                 state["caller"] = Caller(owner="web", priority="interactive", via="session")
@@ -155,18 +172,20 @@ class Gate:
         if kind == "sync":
             raw = _bearer(headers)
             user = auth.user_for_sync_token(raw) if raw else None
-            user = user or auth.session_user(_cookie(headers, auth.SESSION_COOKIE))
-            if user is None:
+            user = _signed_in(user or auth.session_user(_cookie(headers, auth.SESSION_COOKIE)), lan)
+            if user is None or auth.is_member(user):            # people have no projects to sync
                 return await _json(send, 401, {"detail": "sign in with a sync device token"})
             state["user"] = user
             return await self.app(scope, receive, send)
 
         if kind in ("ui", "public", "media"):
-            user = auth.session_user(_cookie(headers, auth.SESSION_COOKIE))
+            user = _signed_in(auth.session_user(_cookie(headers, auth.SESSION_COOKIE)), lan)
             if user is not None:
                 state["user"] = user
             if kind == "ui" and user is None:
                 return await _json(send, 401, {"detail": "not signed in"})
+            if kind == "ui" and auth.is_member(user) and not member_may(method, path):
+                return await _json(send, 403, {"detail": "Only the owner of the Hub can do that."})
             if kind in ("ui", "public") and method in ("POST", "PUT", "PATCH", "DELETE"):
                 origin = headers.get("origin")
                 if origin and not _same_origin(origin, headers, hub.env.public_url):
@@ -174,6 +193,13 @@ class Gate:
             return await self.app(scope, receive, send)
 
         return await self.app(scope, receive, send)
+
+
+def _signed_in(user: dict | None, lan: bool) -> dict | None:
+    """A person limited to the home network counts as signed out anywhere else."""
+    if user is not None and auth.is_member(user) and not user.get("away") and not lan:
+        return None
+    return user
 
 
 def _same_origin(origin: str, headers: Headers, public_url: str) -> bool:

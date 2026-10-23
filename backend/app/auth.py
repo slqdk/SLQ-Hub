@@ -1,9 +1,13 @@
 """Accounts, sessions, API keys and sync device tokens.
 
-One admin account, created from HUB_ADMIN_USER / HUB_ADMIN_PASSWORD_HASH on
-the first start (install.sh writes the hash). Browser sessions are random
-tokens in an HttpOnly cookie; only their SHA-256 is stored. API keys
-(slqhub_...) and sync tokens (slqsync_...) are shown once and stored hashed.
+One admin account (the owner), created from HUB_ADMIN_USER /
+HUB_ADMIN_PASSWORD_HASH on the first start (install.sh writes the hash).
+The owner can add people (role "member"): they sign in with their own user
+name and password, use the chat from their device (their chats are kept
+there, not on the Hub), and may be limited to the home network. Browser
+sessions are random tokens in an HttpOnly cookie; only their SHA-256 is
+stored. API keys (slqhub_...) and sync tokens (slqsync_...) are shown once
+and stored hashed.
 """
 from __future__ import annotations
 
@@ -13,6 +17,7 @@ import hashlib
 import logging
 import hmac
 import os
+import re
 import secrets
 import threading
 import time
@@ -27,6 +32,9 @@ SESSION_DAYS = 30
 API_KEY_PREFIX = "slqhub_"
 SYNC_TOKEN_PREFIX = "slqsync_"
 PRIORITIES = ("interactive", "normal", "background")
+MEMBER = "member"
+USERNAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{1,39}$")
+MIN_PASSWORD = 10
 
 
 # ---------------------------------------------------------------- passwords
@@ -100,8 +108,11 @@ def user_count() -> int:
 
 
 def get_user(username: str) -> dict | None:
+    """By user name, ignoring case (people type it on a phone)."""
     with db.connect() as con:
         r = con.execute("SELECT * FROM users WHERE username=?", (username,)).fetchone()
+        if r is None:
+            r = con.execute("SELECT * FROM users WHERE lower(username)=lower(?)", (username,)).fetchone()
     return dict(r) if r else None
 
 
@@ -119,6 +130,90 @@ def create_user(username: str, password: str) -> None:
     with db.connect() as con:
         con.execute("INSERT INTO users (username, password_hash, created_at) VALUES (?,?,?)",
                     (username, hash_password(password), db.utcnow()))
+
+
+# ---------------------------------------------------------------- people (members)
+
+def _check_username(con, username: str, user_id: int | None = None) -> str:
+    username = (username or "").strip()
+    if not USERNAME.match(username):
+        raise ValueError("A user name is 2-40 letters, digits, dots, dashes or underscores.")
+    r = con.execute("SELECT id FROM users WHERE lower(username)=lower(?)", (username,)).fetchone()
+    if r and r["id"] != user_id:
+        raise ValueError(f"The user name {username!r} is taken.")
+    return username
+
+
+def _check_password(password: str) -> str:
+    if len(password or "") < MIN_PASSWORD:
+        raise ValueError(f"Use at least {MIN_PASSWORD} characters for the password.")
+    return password
+
+
+def create_person(display_name: str, username: str, password: str, away: bool = False,
+                  may_run_code: bool = False) -> dict:
+    name = " ".join((display_name or "").split())[:60]
+    _check_password(password)
+    with db.connect() as con:
+        username = _check_username(con, username)
+        cur = con.execute("INSERT INTO users (username, password_hash, created_at, role, display_name, away,"
+                          " may_run_code) VALUES (?,?,?,?,?,?,?)",
+                          (username, hash_password(password), db.utcnow(), MEMBER, name or username,
+                           int(bool(away)), int(bool(may_run_code))))
+    return get_person(cur.lastrowid)
+
+
+def get_person(user_id: int) -> dict | None:
+    with db.connect() as con:
+        r = con.execute("SELECT u.id, u.username, u.display_name, u.away, u.may_run_code, u.created_at,"
+                        " (SELECT MAX(last_seen) FROM sessions s WHERE s.user_id=u.id) last_seen"
+                        " FROM users u WHERE u.id=? AND u.role=?", (user_id, MEMBER)).fetchone()
+    if not r:
+        return None
+    d = dict(r)
+    d["away"], d["may_run_code"] = bool(d["away"]), bool(d["may_run_code"])
+    return d
+
+
+def list_people() -> list[dict]:
+    with db.connect() as con:
+        ids = [r["id"] for r in con.execute("SELECT id FROM users WHERE role=? ORDER BY lower(display_name)",
+                                            (MEMBER,)).fetchall()]
+    return [p for p in (get_person(i) for i in ids) if p]
+
+
+def update_person(user_id: int, display_name: str | None = None, username: str | None = None,
+                  password: str | None = None, away: bool | None = None, may_run_code: bool | None = None) -> dict | None:
+    if get_person(user_id) is None:
+        return None
+    fields: dict = {}
+    with db.connect() as con:
+        if display_name is not None:
+            fields["display_name"] = " ".join(display_name.split())[:60]
+        if username is not None:
+            fields["username"] = _check_username(con, username, user_id)
+        if password is not None:
+            fields["password_hash"] = hash_password(_check_password(password))
+        if away is not None:
+            fields["away"] = int(bool(away))
+        if may_run_code is not None:
+            fields["may_run_code"] = int(bool(may_run_code))
+        if fields:
+            sets = ", ".join(f"{k}=?" for k in fields)
+            con.execute(f"UPDATE users SET {sets} WHERE id=? AND role=?", (*fields.values(), user_id, MEMBER))
+        if password is not None:
+            con.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))     # a new password signs out
+    return get_person(user_id)
+
+
+def sign_out_everywhere(user_id: int) -> int:
+    with db.connect() as con:
+        return con.execute("DELETE FROM sessions WHERE user_id=?", (user_id,)).rowcount
+
+
+def delete_person(user_id: int) -> bool:
+    with db.connect() as con:
+        return con.execute("DELETE FROM users WHERE id=? AND role=?", (user_id, MEMBER)).rowcount > 0
 
 
 # ---------------------------------------------------------------- login throttle
@@ -170,8 +265,8 @@ def session_user(token: str | None) -> dict | None:
         return None
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
     with db.connect() as con:
-        r = con.execute("SELECT s.token_hash, s.expires_at, s.last_seen, u.id, u.username"
-                        " FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=?",
+        r = con.execute("SELECT s.token_hash, s.expires_at, s.last_seen, u.id, u.username, u.role, u.display_name,"
+                        " u.away, u.may_run_code FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=?",
                         (_sha(token),)).fetchone()
         if not r or r["expires_at"] < now:
             return None
@@ -180,7 +275,25 @@ def session_user(token: str | None) -> dict | None:
             new_exp = (datetime.now(timezone.utc) + timedelta(days=SESSION_DAYS)).isoformat(timespec="seconds")
             con.execute("UPDATE sessions SET last_seen=?, expires_at=? WHERE token_hash=?",
                         (now, new_exp, r["token_hash"]))
-    return {"id": r["id"], "username": r["username"]}
+    return public_user(r)
+
+
+def public_user(r) -> dict:
+    """What the rest of the Hub knows about a signed-in user."""
+    d = dict(r)
+    return {"id": d["id"], "username": d["username"], "role": d.get("role") or "admin",
+            "display_name": d.get("display_name") or "", "away": bool(d.get("away", 1)),
+            "may_run_code": bool(d.get("may_run_code", 0))}
+
+
+def is_member(user: dict | None) -> bool:
+    return bool(user) and user.get("role") == MEMBER
+
+
+def display_name(user: dict | None) -> str:
+    if not user:
+        return ""
+    return user.get("display_name") or user.get("username") or ""
 
 
 def delete_session(token: str | None) -> None:
@@ -291,9 +404,10 @@ def user_for_sync_token(raw: str | None) -> dict | None:
     if not raw or not raw.startswith(SYNC_TOKEN_PREFIX):
         return None
     with db.connect() as con:
-        r = con.execute("SELECT t.id tid, u.id, u.username FROM sync_tokens t JOIN users u ON u.id=t.user_id"
-                        " WHERE t.token_hash=?", (_sha(raw),)).fetchone()
+        r = con.execute("SELECT t.id tid, u.id, u.username, u.role, u.display_name, u.away, u.may_run_code"
+                        " FROM sync_tokens t JOIN users u ON u.id=t.user_id WHERE t.token_hash=?",
+                        (_sha(raw),)).fetchone()
         if not r:
             return None
         con.execute("UPDATE sync_tokens SET last_used=? WHERE id=?", (db.utcnow(), r["tid"]))
-    return {"id": r["id"], "username": r["username"]}
+    return public_user(r)

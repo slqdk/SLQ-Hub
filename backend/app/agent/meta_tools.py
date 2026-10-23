@@ -39,8 +39,9 @@ async def task(ctx: ToolContext, args: dict) -> ToolResult:
     sub = Engine(ctx.hub, ctx.run, ctx.chat, ctx.project, ctx.workdir, ctx.model, parent.ticket, depth=1,
                  parent=ctx.call_id, thinking=parent.thinking, effort=parent.effort, escalation=False)
     sub.cloud = parent.cloud
+    sub.device = parent.device                       # a person's chat: the same limits for its subagents
     system = agent.system_for(ctx.chat, ctx.project, ctx.workdir, ctx.model, subagent=True,
-                              cloud_model=parent.cloud.label if parent.cloud else "")
+                              cloud_model=parent.cloud.label if parent.cloud else "", device=parent.device)
     ctx.emit("subagent", id=ctx.call_id, description=description, state="started")
     try:
         report = await sub.loop([{"role": "system", "content": system}, {"role": "user", "content": prompt}],

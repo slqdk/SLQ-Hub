@@ -66,8 +66,9 @@ def create_app(env: Env | None = None, transports: Transports | None = None, sta
                   openapi_url=None)
     app.state.hub = hub
 
-    from .ui import auth_routes, system_routes
+    from .ui import auth_routes, people_routes, system_routes
     app.include_router(auth_routes.router)
+    app.include_router(people_routes.router)
     app.include_router(system_routes.router)
     for router in hub.extras.get("routers", []):
         app.include_router(router)

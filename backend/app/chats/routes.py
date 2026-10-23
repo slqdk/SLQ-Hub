@@ -228,7 +228,7 @@ async def edit(chat_id: int, body: EditIn, request: Request):
 
 @router.get("/runs")
 async def runs(request: Request):
-    return [_run_info(r) for r in _agent(request).runs.runs.values() if not r.finished]
+    return [_run_info(r) for r in _agent(request).runs.runs.values() if not r.finished and r.chat_id is not None]
 
 
 @router.get("/runs/{run_id}/events")

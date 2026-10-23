@@ -261,13 +261,25 @@ def make_comfy(state: dict) -> FastAPI:
         form = await request.form()
         f = form["image"]
         state["uploads"].append(f.filename)
+        if state.get("files"):                                # like ComfyUI: into its input folder
+            (state["files"] / "input").mkdir(parents=True, exist_ok=True)
+            (state["files"] / "input" / f.filename).write_bytes(await f.read())
         return {"name": f.filename, "subfolder": "", "type": "input"}
 
     @app.post("/prompt")
     async def prompt(request: Request):
         body = await request.json()
         state["prompts"].append(body["prompt"])
-        return {"prompt_id": f"p{len(state['prompts'])}", "number": len(state["prompts"]), "node_errors": {}}
+        pid = f"p{len(state['prompts'])}"
+        if state.get("files"):                                # and the picture into its output folder
+            (state["files"] / "output").mkdir(parents=True, exist_ok=True)
+            (state["files"] / "output" / f"{pid}.png").write_bytes(PNG_1x1)
+        return {"prompt_id": pid, "number": len(state["prompts"]), "node_errors": {}}
+
+    @app.post("/history")
+    async def history_change(request: Request):
+        state.setdefault("history_deleted", []).extend((await request.json()).get("delete") or [])
+        return {}
 
     @app.get("/history/{pid}")
     async def history(pid: str):
@@ -293,7 +305,7 @@ def make_sandbox(state: dict) -> FastAPI:
 
     @app.get("/health")
     async def health():
-        return {"ok": True}
+        return {"ok": True, "uid": 1000, "root": "/workspace", "landlock": state.get("landlock", 7)}
 
     @app.post("/exec")
     async def exec_(request: Request):
