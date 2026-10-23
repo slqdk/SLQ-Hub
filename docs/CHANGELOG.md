@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.10.1 - 2026-10-23
+
+- **Phone chat page: a clear way back from Picture.** When Picture is on,
+  the button becomes a highlighted "Picture ×" chip, labelled even on the
+  smallest phones. Tapping it goes back to chat, and the start text says so.
+  It was a plain toggle before, marked only by its colour.
+- **Phone chat page: thinking levels.** With Qwen3.8 27B the Think button
+  becomes a choice: No thinking, Think a little, Think or Think hard (sent as
+  `reasoning_effort`). Models that can only think or not, like Qwen3.6
+  35B-A3B and the 9B models, keep the on/off button; their chat templates
+  have no levels. A "Think on" saved earlier becomes Think.
+- `/v1/models` lists each chat model's thinking levels (`efforts`).
+
 ## 0.10.0 - 2026-10-22
 
 - **A stuck model hands over to a stronger one.** Settings -> Assistant ->

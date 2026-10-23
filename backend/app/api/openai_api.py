@@ -29,7 +29,8 @@ def _err(status: int, message: str, kind: str = "invalid_request_error", code: s
 async def models(request: Request):
     """The standard list, plus a few fields other clients ignore and the
     phone chat page (/chat) uses: name, kind (chat, embedding, image),
-    vision and thinking, default (what the Hub picks itself) and loaded."""
+    vision and thinking (with the effort levels the model's template takes:
+    reasoning_effort), default (what the Hub picks itself) and loaded."""
     hub = hub_of(request)
     now = int(time.time())
     chat_default = hub.settings.get("models", "default")
@@ -40,8 +41,13 @@ async def models(request: Request):
         return {"id": e["id"], "object": "model", "created": now, "owned_by": "slq-hub",
                 "name": e.get("name") or e["id"], "kind": kind, **more}
 
+    def efforts(e: dict) -> list[str]:
+        if "thinking" not in (e.get("capabilities") or []):
+            return []
+        return list((e.get("thinking") or {}).get("efforts") or [])
+
     data = [item(e, "chat", vision="vision" in (e.get("capabilities") or []),
-                 thinking="thinking" in (e.get("capabilities") or []),
+                 thinking="thinking" in (e.get("capabilities") or []), efforts=efforts(e),
                  default=e["id"] == chat_default, loaded=e["id"] == loaded)
             for e in hub.catalog.llm_models() if hub.catalog.installed(e)]
     data += [item(a, "embedding")

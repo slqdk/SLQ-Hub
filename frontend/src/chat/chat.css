@@ -95,6 +95,11 @@
 .pc-card .input { font-size: 16px; }          /* iOS zooms into fields with smaller text */
 .pc-lead { margin: 0; }
 
+/* Picture on: a chip that says so and is the way back (always labelled, even on the narrowest phones) */
+.picker.pc-mode { background: var(--act-wash); border-color: var(--act); color: var(--act); }
+.picker.pc-mode:hover { background: var(--act-wash); color: var(--act-hover); }
+.picker.pc-select.on { color: var(--act); }
+
 @media (max-width: 360px) {
   .pc-label { display: none; }          /* Picture and Think show their icon only */
 }

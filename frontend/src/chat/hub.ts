@@ -117,6 +117,7 @@ export interface HubModel {
   kind: "chat" | "embedding" | "image";
   vision?: boolean;
   thinking?: boolean;
+  efforts?: string[];         // the model's thinking levels (reasoning_effort), e.g. low, medium, xhigh; none = on/off
   default?: boolean;
   loaded?: boolean;
   abilities?: string[];

@@ -86,7 +86,7 @@ Test from a shell on the LAN:
 
 | Endpoint | Notes |
 |---|---|
-| `GET /v1/models` | Besides the standard fields: `name`, `kind` (`chat`, `embedding`, `image`), and for chat models `vision`, `thinking`, `default` (the Hub's own choice) and `loaded`; for picture models `abilities` and `default`. |
+| `GET /v1/models` | Besides the standard fields: `name`, `kind` (`chat`, `embedding`, `image`), and for chat models `vision`, `thinking`, `efforts` (thinking levels for `reasoning_effort`, e.g. `low`, `medium`, `xhigh`; empty when the model only thinks or not), `default` (the Hub's own choice) and `loaded`; for picture models `abilities` and `default`. |
 | `POST /v1/chat/completions` | Streaming, tools, images (`image_url` with a data URL or an http URL the Hub can fetch), `response_format`, `reasoning_effort` (`low`, `medium`, `high`), `chat_template_kwargs: {"enable_thinking": false}` to answer without thinking. Responses include llama-server's `timings`. |
 | `POST /v1/embeddings` | `model: "embed-text"`. |
 | `POST /v1/images/generations` | Qwen-Image 2.1 through ComfyUI: `prompt`, `size` (`1024x1024`, ...), `n`, `quality` (`low` = the 8-step turbo model), `response_format` (`b64_json` or `url`). |

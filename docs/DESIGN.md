@@ -234,8 +234,10 @@ It is accepted three ways:
   `http://<hub>:11434/k/<key>`, with no code change.
 
 `/v1/models` items carry extra fields - `name`, `kind` (chat, embedding,
-image), `vision`, `thinking`, `default`, `loaded` - for the phone chat page
-(section 10); other clients ignore them.
+image), `vision`, `thinking`, `efforts` (the thinking levels the model's
+template takes, as `reasoning_effort`; empty when it only thinks or not),
+`default`, `loaded` - for the phone chat page (section 10); other clients
+ignore them.
 
 **LAN guard.** API routes answer only to clients in `HUB_LAN_CIDRS` (LAN,
 WireGuard, VPN; set in `/srv/slq-hub/.env`). Behind Nginx Proxy Manager the

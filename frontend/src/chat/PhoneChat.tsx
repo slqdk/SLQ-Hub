@@ -138,7 +138,9 @@ function ChatApp({ apiKey, models: firstModels, onUseKey, onForget }: { apiKey: 
   const canPicture = models.some((m) => m.kind === "image" && (m.abilities ?? ["generate"]).includes("generate"));
   const [modelId, setModelId] = usePref<string>("slq-chat-model", "");
   const model = chatModels.find((m) => m.id === modelId) ?? chatModels.find((m) => m.default) ?? chatModels[0];
-  const [think, setThink] = usePref<boolean>("slq-chat-think", false);
+  // "off", "on" (a model without levels) or the model's level: low, medium, xhigh. Was a yes/no before 0.10.1.
+  const [thinking, setThinking] = usePref<string>("slq-chat-thinking", legacyThink() ? "medium" : "off");
+  const think = levelFor(model, thinking);
   const [size, setSize] = usePref<SizeName>("slq-chat-size", "square");
   const [pictureMode, setPictureMode] = useState(false);
   const [chats, setChats] = useState<ChatMeta[]>([]);
@@ -238,10 +240,10 @@ function ChatApp({ apiKey, models: firstModels, onUseKey, onForget }: { apiKey: 
     const data = {
       exported: { app: "SLQ Chat", at: new Date().toISOString(), format: 1, page: location.origin + location.pathname,
         browser: navigator.userAgent },
-      settings: { model: model?.id ?? null, think, pictureSize: size, keptOnDevice: kept,
+      settings: { model: model?.id ?? null, thinking: think, pictureSize: size, keptOnDevice: kept,
         key: apiKey ? `${apiKey.slice(0, 14)}...` : "signed in to the Hub" },
-      models: models.map(({ id, name, kind, vision, thinking, default: isDefault, loaded }) =>
-        ({ id, name, kind, vision, thinking, default: isDefault, loaded })),
+      models: models.map(({ id, name, kind, vision, thinking: canThink, efforts, default: isDefault, loaded }) =>
+        ({ id, name, kind, vision, thinking: canThink, efforts, default: isDefault, loaded })),
       systemPrompt: systemPrompt(),
       answering: busy?.chatId === chat.meta.id,
       chat: chat.meta,
@@ -284,7 +286,7 @@ function ChatApp({ apiKey, models: firstModels, onUseKey, onForget }: { apiKey: 
         if (!use) throw new HubError("other", "The Hub has no chat model downloaded.");
         let text = "";
         let reasoning = "";
-        await streamChat(apiKey, { model: use.id, messages: toApi(list, !!use.vision), ...thinkFields(use, think) },
+        await streamChat(apiKey, { model: use.id, messages: toApi(list, !!use.vision), ...thinkFields(use, thinking) },
           (d) => {
             if (d.content) text += d.content;
             if (d.reasoning) reasoning += d.reasoning;
@@ -384,7 +386,10 @@ function ChatApp({ apiKey, models: firstModels, onUseKey, onForget }: { apiKey: 
             <div className="welcome pc-welcome">
               <h2>What can I help with?</h2>
               <p>The answers come from the AI on the Hub at home. Your chats stay on this device.</p>
-              {canPicture && <p className="small faint">Turn on <b>Picture</b> below to have the Hub draw something.</p>}
+              {canPicture && (picture
+                ? <p className="small faint">Picture is on: the Hub draws what you write. Tap <b>Picture ×</b> to chat
+                  again.</p>
+                : <p className="small faint">Turn on <b>Picture</b> below to have the Hub draw something.</p>)}
               {!kept && <p className="small faint">This browser keeps nothing: the chat is gone when the page closes.</p>}
             </div>
           ) : (
@@ -430,9 +435,14 @@ function ChatApp({ apiKey, models: firstModels, onUseKey, onForget }: { apiKey: 
                     onChange={(e) => addPhotos(e.target.files)} />
                 </>
               )}
-              {canPicture && (
-                <button className="picker" aria-pressed={picture} onClick={() => setPictureMode(!pictureMode)}
+              {canPicture && !picture && (
+                <button className="picker" aria-pressed={false} onClick={() => setPictureMode(true)}
                   title="Make a picture instead of an answer"><ImageIcon size={15} /> <span className="pc-label">Picture</span></button>
+              )}
+              {picture && (                        /* the way back is on the chip itself */
+                <button className="picker on pc-mode" aria-pressed={true} onClick={() => setPictureMode(false)}
+                  title="Back to chat" aria-label="Picture is on. Back to chat">
+                  <ImageIcon size={15} /> <span>Picture</span> <X size={14} /></button>
               )}
               {picture && (
                 <label className="picker pc-select" title="Shape">
@@ -442,10 +452,19 @@ function ChatApp({ apiKey, models: firstModels, onUseKey, onForget }: { apiKey: 
                   </select>
                 </label>
               )}
-              {!picture && model?.thinking && (
-                <button className="picker" aria-pressed={think} onClick={() => setThink(!think)}
-                  title={think ? "Thinks before answering (slower, better at hard questions)" : "Answers straight away"}>
+              {!picture && model?.thinking && !(model.efforts ?? []).length && (
+                <button className="picker" aria-pressed={think !== "off"} onClick={() => setThinking(think === "off" ? "on" : "off")}
+                  title={think !== "off" ? "Thinks before answering (slower, better at hard questions)" : "Answers straight away"}>
                   <Brain size={15} /> <span className="pc-label">Think</span></button>
+              )}
+              {!picture && model?.thinking && (model.efforts ?? []).length > 0 && (
+                <label className={`picker pc-select${think !== "off" ? " on" : ""}`} title={`Thinking: ${THINK_LABEL[think] ?? think}`}>
+                  <Brain size={15} /> <span className="pc-label">{THINK_LABEL[think] ?? think}</span>
+                  <select value={think} onChange={(e) => setThinking(e.target.value)} aria-label="Thinking">
+                    <option value="off">No thinking</option>
+                    {(model.efforts ?? []).map((e) => <option key={e} value={e}>{THINK_LABEL[e] ?? e}</option>)}
+                  </select>
+                </label>
               )}
               <span className="spacer" />
               {!picture && chatModels.length > 1 && model && (
@@ -685,9 +704,33 @@ function systemPrompt(): string {
     "You cannot look things up on the internet; say so when a question needs current information.";
 }
 
-function thinkFields(m: HubModel, think: boolean): Record<string, unknown> {
+const THINK_LABEL: Record<string, string> = { off: "No thinking", on: "Think", low: "Think a little", medium: "Think",
+  xhigh: "Think hard", high: "Think hard" };
+
+/** The thinking choice as this model can take it: off, on (no levels), or one of its own levels. */
+export function levelFor(m: HubModel | undefined, choice: string): string {
+  if (!m?.thinking || choice === "off") return "off";
+  const levels = m.efforts ?? [];
+  if (!levels.length) return "on";
+  if (levels.includes(choice)) return choice;
+  if (choice === "high" && levels.includes("xhigh")) return "xhigh";
+  return levels.includes("medium") ? "medium" : levels[Math.min(1, levels.length - 1)];
+}
+
+function thinkFields(m: HubModel, choice: string): Record<string, unknown> {
   if (!m.thinking) return {};
-  return think ? { reasoning_effort: "medium" } : { thinking: false };
+  const level = levelFor(m, choice);
+  if (level === "off") return { thinking: false };
+  return { reasoning_effort: level === "on" ? "medium" : level };
+}
+
+/** Before 0.10.1 the page kept only "think: yes/no". */
+function legacyThink(): boolean {
+  try {
+    return localStorage.getItem("slq-chat-think") === "true";
+  } catch {
+    return false;
+  }
 }
 
 /** The conversation as the model API wants it: newest first until the budget is spent. */

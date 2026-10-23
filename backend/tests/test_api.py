@@ -259,6 +259,8 @@ async def test_model_list_says_what_each_model_is(client, api_key):
     big = by_id["qwen3.8-27b"]
     assert big["kind"] == "chat" and big["name"] == "Qwen3.8 27B" and big["vision"] and big["thinking"]
     assert big["default"] is True and by_id["qwen3.6-35b-a3b"]["default"] is False
+    # thinking levels: Qwen3.8's template takes low/medium/xhigh; Qwen3.6's only thinks or not
+    assert big["efforts"] == ["low", "medium", "xhigh"] and by_id["qwen3.6-35b-a3b"]["efforts"] == []
     assert by_id["embed-text"]["kind"] == "embedding"
     pic = by_id["qwen-image-2.1"]
     assert pic["kind"] == "image" and "generate" in pic["abilities"] and pic["default"] is True
