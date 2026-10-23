@@ -1107,6 +1107,7 @@ function AgentTab({ s }: { s: S }) {
   const imageOptions = imageModels.length ? imageModels.map((m) => ({ value: m.id, label: m.name }))
     : [{ value: current, label: "No image model downloaded" }];
   const soundModels = (models?.audio ?? []).filter((m) => m.installed);
+  const hasTurbo = soundModels.some((m) => m.family === "chatterbox-turbo");   // brings the two-step decoder
   const soundOptions = (ability: string, language?: "da" | "other") => {
     const fit = soundModels.filter((m) => (m.abilities ?? []).includes(ability)
       && (language !== "other" || (m.languages ?? []).some((l) => l !== "da")));
@@ -1156,6 +1157,14 @@ function AgentTab({ s }: { s: S }) {
           help: "Røst v3 sounds best; Røst v3 Turbo is about three times faster." },
         { key: "speech_model", label: "Voice model for other languages", type: "select", options: soundOptions("speech", "other"),
           help: "Used when it speaks the language; otherwise a model that does." },
+        { key: "speech_speed", label: "Speech speed", type: "select", options: [
+          { value: "best", label: "Best: each model's own decoder, full weights" },
+          { value: "faster", label: `Faster: Turbo's two-step decoder for Røst v3 and Chatterbox${hasTurbo ? "" : " (needs Røst v3 Turbo)"}` },
+          { value: "fastest", label: "Fastest: also 8-bit weights, every voice model" }],
+          help: "The decoder turns speech tokens into sound; Røst v3's and Chatterbox's takes ten steps, Turbo's two, " +
+            "about a quarter of the work. 8-bit weights make the token part 1.4 (Røst v3) to 2 (Turbo) times faster. " +
+            "The self-test's speech check measures each on this machine and saves the same sentence in each, to " +
+            "listen to before choosing." },
       ]} />}
       <SectionForm s={s} section="images" title="Images" fields={[
         { key: "model", label: "Model for pictures", type: "select", options: imageOptions,
@@ -1490,11 +1499,12 @@ function CloudTab({ s }: { s: S }) {
 interface SystemData { version: string; services: Record<string, any>; gpu: { vram_total?: number; vram_used?: number };
   disk: Record<string, { total?: number; used?: number; free?: number }>; lastLoadError: string | null }
 
-/** The speech service's /health in a line: its CPU threads, the voice models in memory, whether it is speaking. */
-function speechDetail(h?: { threads?: number; loaded?: string[]; busy?: boolean }): string {
+/** The speech service's /health in a line: its CPU threads (and CPU), the voice models in memory, whether it is
+ * speaking. */
+function speechDetail(h?: { threads?: number; cpu?: string; loaded?: string[]; busy?: boolean }): string {
   if (!h) return "answering";
   const loaded = h.loaded?.length ? `loaded: ${h.loaded.join(", ")}` : "no voice model loaded";
-  return `${h.threads ?? "?"} CPU threads, ${loaded}${h.busy ? ", speaking" : ""}`;
+  return `${h.threads ?? "?"} CPU threads${h.cpu ? ` on ${h.cpu}` : ""}, ${loaded}${h.busy ? ", speaking" : ""}`;
 }
 
 function SystemTab() {

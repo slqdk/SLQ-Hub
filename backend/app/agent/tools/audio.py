@@ -216,7 +216,8 @@ def _speech_dynamic(ctx: ToolContext) -> tuple[str, dict]:
     expressive = ("expressiveness (where it works): 0.5 normal, 0.7-1.0 lively or dramatic (an announcer), 0.3 calm. "
                   if any(e.get("expressive") for e in models) else "")
     text = (SPEECH_TEXT + " Punctuation gives the pauses, a new line a longer one; up to 6,000 characters per call. "
-            "A few seconds per sentence, more the first time a model loads.\n" + "\n".join(lines) +
+            "Slower than real time: several seconds of work per second of speech, more the first time a model "
+            "loads.\n" + "\n".join(lines) +
             f"\n{route}\nvoice: one of the model's voices, or the path of a clip in the working folder (5-20 s of one "
             "person speaking clearly, any common format) to speak in that voice - only a voice the user has the "
             f"right to use. {expressive}To mix speech with music or add effects such as reverb, use ffmpeg in bash "

@@ -123,7 +123,7 @@ async def test_a_danish_sentence_is_spoken_and_saved(signed_in, app, fakes):
     run = await finish(app, await say(signed_in, c["id"], "Lav en speaker der siger tredive sekunder tilbage"))
     assert run.status == "done", run.events[-1]
     body = fakes.speech["requests"][0]
-    assert body["model"] == {"key": "roest-v3", "family": "chatterbox-mtl", "files": {
+    assert body["model"] == {"key": "roest-v3", "family": "chatterbox-mtl", "int8": False, "files": {
         "t3": "/models/speech/roest-v3/t3_mtl23ls_v2.safetensors", "s3gen": "/models/speech/chatterbox/s3gen.pt",
         "ve": "/models/speech/chatterbox/ve.pt",
         "tokenizer": "/models/speech/roest-v3/grapheme_mtl_merged_expanded_v1.json"}}
@@ -207,6 +207,45 @@ async def test_rost_turbo_reads_english_with_a_note(signed_in, app, fakes):
     assert (body["top_k"], body["repetition_penalty"]) == (800, 1.2)
     res = tool_result(run)
     assert res["ok"] and "Røst v3 Turbo speaks English with a heavy Danish accent" in res["text"], res
+
+
+async def test_the_speech_speed_setting(signed_in, app, fakes):
+    """Faster: Turbo's two-step decoder (from Røst v3 Turbo) for the 500M models; fastest: also 8-bit T3. Without
+    Røst v3 Turbo the result says why the decoder stayed; Turbo models get neither."""
+    install(app, "roest-v3")
+    c = await new_chat(signed_in)
+
+    async def speak(text: str, speed: str, language: str = "da") -> tuple[dict, dict]:
+        r = await signed_in.put("/hub/api/settings", json={"section": "sound", "values": {"speech_speed": speed}})
+        assert r.status_code == 200, r.text
+        fakes.llama["requests"].clear()
+        fakes.llama["replies"] = [{"tool_calls": [{"name": "speech_generate", "arguments": {
+            "text": text, "language": language}}]}, {"content": "Ok."}]
+        res = tool_result(await finish(app, await say(signed_in, c["id"], "Speak")))
+        return fakes.speech["requests"][-1]["model"], res
+
+    model, res = await speak("Hej.", "best")
+    assert model["int8"] is False and "decoder" not in model["files"] and "Note" not in res["text"]
+    model, res = await speak("Hej.", "faster")                         # no Røst v3 Turbo yet: the ten-step decoder
+    assert "decoder" not in model["files"] and model["int8"] is False
+    assert "The faster speech setting needs Røst v3 Turbo downloaded" in res["text"]
+    install(app, "roest-v3", "roest-v3-turbo")
+    model, res = await speak("Hej.", "faster")
+    assert model["files"]["decoder"] == "/models/speech/roest-v3-turbo/s3gen_meanflow.safetensors"
+    assert model["files"]["s3gen"] == "/models/speech/chatterbox/s3gen.pt" and model["int8"] is False
+    assert "Note" not in res["text"]
+    model, res = await speak("Hej.", "fastest")
+    assert model["int8"] is True and model["files"]["decoder"].endswith("s3gen_meanflow.safetensors")
+    r = await signed_in.put("/hub/api/settings", json={"section": "sound", "values": {"speech_model_da":
+                                                                                      "roest-v3-turbo"}})
+    model, res = await speak("Hej.", "fastest")                        # Turbo has that decoder; 8-bit T3 too
+    assert model["key"] == "roest-v3-turbo" and model["int8"] is True and "decoder" not in model["files"]
+    model, res = await speak("Hej.", "faster")
+    assert model["key"] == "roest-v3-turbo" and model["int8"] is False and "Note" not in res["text"]
+    # a piece that ran to the token ceiling is said so
+    fakes.speech["capped"] = 1
+    model, res = await speak("Hej. Farvel.", "best")
+    assert "did not stop by itself on 1 of 2 piece(s)" in res["text"] and "another seed" in res["text"]
 
 
 async def test_speech_errors_are_reported(signed_in, app, fakes):

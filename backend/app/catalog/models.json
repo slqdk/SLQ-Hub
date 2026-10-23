@@ -248,7 +248,7 @@
       "family": "chatterbox-mtl",
       "abilities": ["speech"],
       "languages": ["ar", "da", "de", "el", "en", "es", "fi", "fr", "he", "hi", "it", "ja", "ko", "ms", "nl", "no", "pl", "pt", "ru", "sv", "sw", "tr", "zh"],
-      "sampling": {"temperature": 0.8, "top_p": 1.0, "min_p": 0.05, "repetition_penalty": 2.0, "cfg_weight": 0.5},
+      "sampling": {"temperature": 0.8, "top_p": 1.0, "min_p": 0.05, "repetition_penalty": 1.2, "cfg_weight": 0.5},
       "expressive": true,
       "files": [
         {"repo": "ResembleAI/chatterbox", "path": "t3_mtl23ls_v3.safetensors", "dest": "speech/chatterbox/t3_mtl23ls_v3.safetensors", "size": 2143989928, "role": "t3"},

@@ -656,16 +656,39 @@ routing), and the system prompt says what each costs.
     and seed + its number, trimmed at -45 dB, and the pieces are joined with
     0.15 s pauses (0.45 s between paragraphs) and encoded once (MP3 96 kb/s,
     Opus 48 kb/s, FLAC or WAV). A ceiling of three speech tokens per character
-    (at most 1000) stops a model that loses its place. Expressiveness sets
-    Chatterbox's exaggeration, with guidance 0.3 from 0.65 up (its own advice).
-    Chatterbox's Perth watermark stays in.
+    (at most 1000) stops a model that loses its place. As upstream does, the
+    500M models' last token is dropped (emitted just before the end with weak
+    attention, it decodes to about 40 ms of noise). Sampling as each model's
+    makers set it: CoRal's for Røst (repetition penalty 2.0), Resemble's for
+    Chatterbox (1.2). Expressiveness sets Chatterbox's exaggeration, with
+    guidance 0.3 from 0.65 up (its own advice). Chatterbox's Perth watermark
+    stays in.
   - **The service.** One request at a time; the progress per piece streams
     back as NDJSON (the tool row shows it), and a Hub that goes away stops the
     work after the piece in hand. At most two models in memory, the least
     recently used dropped first and its memory handed back (`malloc_trim`); all
     dropped after 15 idle minutes. A clip's voice prompt waits for the next
     request only when the Hub asks (`cache_voice`): for the owner, never in a
-    person's chat. 6,000 characters per call.
+    person's chat. 6,000 characters per call. The `done` event says where the
+    time went - T3's tokens and seconds, the decoder's seconds - and how many
+    pieces ran to the token ceiling instead of stopping by themselves; the
+    result then says the end may be noise and another seed usually helps.
+  - **Speed** (0.13.1). On VM 222's CPU (10 threads) Røst v3 took 20.4 s for
+    3.4 s of speech, a real-time factor of 6. Measured with the models'
+    architectures (random weights, 2 threads), the work splits evenly between
+    T3 (one token at a time, about 4 a second) and the decoder (ten flow
+    steps with guidance, then the vocoder). Settings → Assistant → Sound →
+    Speech speed: **best** (each model's own decoder, full weights);
+    **faster** - Turbo's distilled two-step decoder for Røst v3 and Chatterbox,
+    the same speech tokens and voice prompt (it comes with Røst v3 Turbo):
+    the decoder 4x quicker, a sentence about 1.5x; **fastest** - also 8-bit
+    weights for T3 (dynamic quantisation of its linear layers; GPT-2's Conv1D
+    layers become `nn.Linear` first, exactly): T3 1.4x quicker for the 500M
+    models and 2.1x for Turbo's. `selftest --speech` measures every setting on
+    the machine, saves the same sentence in each to listen to, and times T3 on
+    half the threads too (one token at a time is limited by memory more than
+    by cores; a request may ask for `t3_threads`). bf16 was measured slower on
+    a CPU without native bf16 and is not offered.
 - **Music (`music_generate`)**: ACE-Step 1.5 in ComfyUI's native nodes, as in
   the official template: `UNETLoader`, `DualCLIPLoader` (type `ace`: the 0.6B
   encoder and the planner), `TextEncodeAceStepAudio1.5` (style, lyrics with
@@ -867,8 +890,9 @@ the services mount when a new version adds one (owned by uid 1000).
 
 **Self-test.** `python -m app.cli selftest` checks every service, the
 sandbox's isolation and one answer with its tokens/s; `--images` makes a
-picture, and `--speech` speaks a sentence with each downloaded voice model and
-reports the real-time factor.
+picture, and `--speech` speaks the same sentence with each downloaded voice
+model in each speech-speed setting, reports the real-time factor with T3's and
+the decoder's share, and saves each in `data/selftest/` to listen to.
 
 **Logs.** `update.sh compose logs -f <service>`. The Hub keeps an error log
 and per-model llama-server logs, viewable in Settings → System.
@@ -912,10 +936,12 @@ clock times), the tail of llama-server's log and the chat's files (up to
 - **Landlock in the sandbox container** needs the kernel's LSM list to include
   it and Docker's seccomp profile to allow its three system calls. Without
   it people simply get no code (the self-test's "sandbox for people" line).
-- **Speech on the CPU** has not run on the VM: its speed on the VM's cores is
-  unknown (`selftest --speech` reports the real-time factor), and so is how the
-  Røst voices sound through this service. Tested with random-weight models of
-  the real architectures.
+- **Speech on the CPU** runs on the VM (0.13.0 self-test): slower than real
+  time, a factor of about 6 for Røst v3 on 10 threads. The faster settings
+  (0.13.1) were measured only with random weights here; their speed on the
+  VM and how they sound are what `selftest --speech` shows. Real time on
+  the CPU is not expected with these models; on the card it would be, at the
+  price of a model swap per request.
 - **ACE-Step 1.5 and Stable Audio 3 on gfx1100** have not run on the card:
   VRAM (XL is about 20 GB with its planner), speed and quality are unknown, as
   is how well ACE-Step sings Danish. The graphs were validated against a real

@@ -396,7 +396,9 @@ def make_speech(state: dict) -> FastAPI:
             data = wav_tone(seconds) if body.get("format") == "wav" else silent_mp3(seconds)
             yield json.dumps({"event": "done", "format": body.get("format"), "sample_rate": 24000,
                               "seconds": seconds, "compute": 1.5, "seed": body.get("seed"), "pieces": len(pieces),
-                              "threads": 10, "audio": base64.b64encode(data).decode()}) + "\n"
+                              "threads": 10, "tokens": int(seconds * 25), "capped": int(state.get("capped", 0)),
+                              "t3_seconds": 0.9, "decoder_seconds": 0.5,
+                              "audio": base64.b64encode(data).decode()}) + "\n"
 
         return StreamingResponse(gen(), media_type="application/x-ndjson")
 

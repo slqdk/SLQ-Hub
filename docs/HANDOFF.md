@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.13.0, 2026-10-23)
+## State (0.13.1, 2026-10-23)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -28,7 +28,11 @@ CPU in a new `speech` container (Røst v3 for Danish, Chatterbox Multilingual
 V3 for 23 languages), so the chat model stays on the card; music (ACE-Step
 1.5) and sound effects (Stable Audio 3) on the card through ComfyUI and the
 queue. No sound model is downloaded by default (Settings → Models → Sound,
-music and speech), and none has run on the real machine yet.
+music and speech). On VM 222 the speech container builds and runs, and Røst
+v3 and Chatterbox speak - about six times slower than real time on 10
+threads, so 0.13.1 added a speech-speed setting (Turbo's two-step decoder,
+8-bit weights) and a self-test that measures each and saves samples to
+listen to. Music and sound effects have not run on the card yet.
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
 host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU
@@ -128,6 +132,7 @@ the host if the VM ever stops by itself.
 | Chat export | 7 tests (`tests/test_export.py`), one of them the model server's log without the vision models' position warnings: Markdown (thinking, tool calls and results, one section per turn, the turn line), the ZIP (every part; full tool arguments; the model card and safe settings - a cloud API key set in Settings appears nowhere in it; the picture as a file and linked in the transcript; context.json with the system prompt, history, tools and request, the picture left out; the event log with streamed pieces joined; the queue job of the run), 404/400/401, joining events, file names. Both menu items and the phone page's Export this chat clicked through in Chromium (downloads named after the chat, unzipped, the phone file has no whole key). |
 | Settings 0.10.0 | In Chromium against the dev server (12 checks): the hand-over setting (Qwen3.8 27B by default), a model's Settings dialog (sampling prefilled from the card, thinking "Always think first" and a new temperature saved, "Use the model's own sampling" back to the card with thinking kept, the composer of a new chat following the model's thinking), Add from Hugging Face searching "Ornith 1.5 9B" (two repositories listed, a click looks one up, Q8_0 preselected for 9B, BF16 "twice the size of Q8_0"), and a live hand-over (Qwen3.6 35B-A3B repeats a web search, refused twice, Qwen3.8 27B answers; the notice live and after a reload; the footer names both models). |
 | Keys away from home | In Chromium against the dev server started as if behind a proxy (`--proxy 127.0.0.1 --public-url https://hub.example.test --lan-host 192.168.1.10`; uvicorn without its own proxy handling, as in production) (16 checks): the Apps page and dialog text, "Where it works" hiding "Only the home network" when away, the phone link through the public address and the home-only link, the list's per-key choice, switching a home-network key to away removing that limit (and back), the phone page from outside (`X-Forwarded-For: 203.0.113.9`) with a home key ("not through ...", "The Hub sees this phone at 203.0.113.9"), Try again after the key was switched (the key from the link was kept), an answer from outside, an away key connecting straight away. |
+| Real hardware, 0.13.0 self-test (2026-10-23) | `selftest --speech` on VM 222, every line passed: GPU 24.0 GB (11.1 GB in use with Ornith 1.5 9B loaded); the sandbox, its isolation and internet; **Landlock ABI 8** for people's code ("people's code stays in its folder"); web search; ComfyUI (torch 2.14.1+rocm7.14) and its folders; the speech service - the image built, torch 2.11.0+cpu on 10 threads; Røst v3: 3.4 s of speech in 20.4 s, a real-time factor of 5.95 (the first sentence 27 s with loading), with its Mic voice file (a float WAV, read by the new reader); Chatterbox Multilingual V3: 9.0 s of speech in 46.6 s (factor 5.18) for a 51-character Danish sentence - 9.0 s is exactly that sentence's token ceiling, so it most likely did not stop by itself (0.13.1: Resemble's repetition penalty 1.2 instead of Røst's 2.0, and the self-test says when a piece ran to the ceiling); Ornith answering at 60 tokens/s; embeddings. |
 | Real hardware, chat 9 (2026-10-22) | Søren's troubleshooting export: FLUX.2 klein 4B made 3 pictures at 1024² in ~17 s (about 10 s to swap Ornith out and klein in, then ~0.45 s per step, 4 steps), Qwen-Image 2.1 edited one in 76 s (including the swap from klein), the LLM was back in 5-7 s each time. Ornith 1.5 9B (`ornith-1.5-9b-2`, probably Q8_0) generated 63-65 tokens/s, Qwen3.5 9B BF16 41 tokens/s; prompt processing ~2,000-3,250 tokens/s; a 1024² picture costs ~1,026 tokens for these vision models; the prompt cache reused 7,550 of 7,578 tokens between turns (none after a picture: the LLM was unloaded). |
 | Tab rows | In Chromium: the old CSS gave `.tabs` 1px of vertical overflow (scrollHeight 42, clientHeight 41 - a scrollbar with Windows' classic scrollbars, reported by Søren); the inset-shadow rule gives none. |
 | Compose | `docker compose config` (v2.40.3) with a `.env` written the way `install.sh` writes it: renders, and the admin password hash arrives intact. |
@@ -239,11 +244,9 @@ the host if the VM ever stops by itself.
     `sent` record, and every turn a `run_prompts` row (the prompt text itself
     once per distinct text). Expected to stay small; worth a look at
     `data/hub.db` after some weeks.
-21. **Landlock in the real sandbox container**: Ubuntu's 7.0 HWE kernel
-    should have it (ABI 7) and Docker 29's seccomp profile should allow its
-    calls, but neither was seen. The self-test's "sandbox for people" line
-    says: PASS with the ABI, WARN without (people then get no code), FAIL if
-    a confined command read a file next to its folder.
+21. **Landlock in the real sandbox container**: seen on VM 222 (the 0.13.0
+    self-test: ABI 8, and the probe's confined command could not read the
+    file next to its folder). Not yet seen: a person's real chat with code.
 22. **ComfyUI's folders in the Hub**: the update adds two mounts
     (`HUB_ROOT/comfy/input` and `output` at `/comfy`); the self-test's
     "comfyui folders" line checks they are there and writable by uid 1000.
@@ -275,28 +278,23 @@ the host if the VM ever stops by itself.
     Safari and Chrome, an MP3 from the sandbox playing in Safari on an iPhone
     (the player asks for byte ranges), and whether Qwen3.8 now names the
     file and cleans up scratch files as the system prompt asks.
-28. **The speech image** (0.13.0): never built (no Docker daemon where this
-    was made). `python:3.12-slim`, torch and torchaudio 2.11.0 from PyTorch's
-    CPU index (torchaudio's `2.11.0+cpu` wheel for Python 3.12 is listed
-    there; torch's index page was too long to read from here), the pinned
-    requirements (all have wheels; none was compiled in the venv), chatterbox
-    from GitHub's tarball of commit `5de7a54`; the build ends with an import
-    check. A failed build stops the update before anything is stopped (the
-    clone goes back to the old commit); the build's output above "the build
-    failed" says why.
-29. **The real voice models**: Røst v3, Røst v3 Turbo and Chatterbox
-    Multilingual V3 have not been downloaded or loaded here
-    (huggingface.co was out of reach); the service ran only with random
-    weights of the same architectures. The catalog's paths and sizes come
-    from the repositories' file lists. `selftest --speech` is the check: it
-    speaks with Røst's Mic file (a float WAV) and Chatterbox's built-in
-    voice. Also unseen: whether Mic and Nic come out as "male voice" and
-    "female voice" from their pitch, and how Røst sounds through this
-    service's sentence splitting and pauses.
-30. **Speech speed on the VM**: unknown. The service uses all cores but two
-    (10 threads on VM 222). `selftest --speech` reports the real-time factor
-    once the model is loaded; if Røst v3 is slow, Røst v3 Turbo is about three
-    times faster.
+28. **The speech image**: built on VM 222 by the 0.13.0 update and running
+    (torch 2.11.0+cpu). Not seen: Røst v3 Turbo's files downloaded and loaded.
+29. **The real voice models**: Røst v3 and Chatterbox Multilingual V3
+    downloaded and spoke in the 0.13.0 self-test (Røst with its Mic file, a
+    float WAV). Not yet heard: how they sound through this service's
+    sentence splitting and pauses, and whether Mic and Nic come out as "male
+    voice" and "female voice" from their pitch (the tool description shows
+    it).
+30. **Speech speed on the VM**: Røst v3 about 6x slower than real time on 10
+    threads (above). The 0.13.1 settings - Turbo's two-step decoder for the
+    500M models, 8-bit T3 - were measured only with random weights here
+    (decoder 4x quicker; T3 1.4x for the 500M models, 2.1x for Turbo); on
+    the VM `selftest --speech` measures each and saves the samples in
+    `/srv/slq-hub/data/selftest/`. Whether the two-step decoder and 8-bit
+    weights sound worse is for the ear. The self-test also times T3 on half
+    the threads: if that is as fast, the service could give T3 fewer threads
+    by default (not done without that number).
 31. **Memory with sound**: two voice models in the speech container (about
     4 GB each, a 12 GB limit) while ComfyUI reads ACE-Step XL's 20 GB of files
     and the LLM's file is mapped, in a 40 GB VM. Watch `free -h` and the
@@ -313,6 +311,10 @@ the host if the VM ever stops by itself.
     download a table from Hugging Face; the service runs offline), so these
     languages are spoken from the plain text and probably worse - Chinese
     likely badly. Danish, English and the other European languages need none.
+35. **Chatterbox stopping by itself**: in the 0.13.0 self-test it most likely
+    ran to the token ceiling (9.0 s for a short sentence) with Røst's
+    repetition penalty 2.0; 0.13.1 uses Resemble's 1.2. The self-test's speech
+    lines now say WARN when a piece ran to the ceiling.
 
 ## Where things are
 

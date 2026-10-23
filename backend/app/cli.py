@@ -13,11 +13,13 @@ uses the GPU, so it waits in the same queue as everything else.
 from __future__ import annotations
 
 import argparse
+import base64
 import getpass
 import json
 import os
 import sys
 import time
+from pathlib import Path
 
 import httpx
 
@@ -126,46 +128,101 @@ def _speech(rep, c, env, cat, try_it: bool) -> None:
         rep.line("WARN", "speech", f"not answering ({exc.__class__.__name__}) - text to speech is off",
                  "bash update.sh compose logs speech")
         return
-    rep.line("PASS", "speech", f"torch {h.get('torch')} on {h.get('threads')} CPU threads")
+    cpu = f", {h['cpu']}" if h.get("cpu") else ""
+    rep.line("PASS", "speech", f"torch {h.get('torch')} on {h.get('threads')} CPU threads{cpu}")
     models = [e for e in cat.entries("audio") if "speech" in (e.get("abilities") or []) and cat.installed(e)]
     if not try_it:
         rep.line("SKIP", "speech models", "run with --speech to speak one sentence with each downloaded voice model"
                  if models else "none downloaded (Settings -> Models -> Sound, music and speech)")
         return
     from .audio.pipeline import role_files, speech_files
-    sentences = {"da": ("Hej, det her er en prøve fra SLQ Hub.", "Og her kommer en sætning mere, så farten kan måles."),
-                 "en": ("Hello, this is a test from SLQ Hub.", "And here is one more sentence, to measure the speed.")}
+    sentences = {"da": ("Hej.", "Og her kommer en sætning mere, så farten kan måles."),
+                 "en": ("Hello.", "And here is one more sentence, to measure the speed.")}
+    # Turbo's two-step decoder, for the faster settings of the 500M models (it comes with Røst v3 Turbo)
+    decoder = next((f"{env.speech_models}/{role_files(t, 's3gen')[0]['dest']}" for t in models
+                    if t.get("family") == "chatterbox-turbo" and role_files(t, "s3gen")), None)
+    out = Path(env.data_dir) / "selftest"
+    out.mkdir(parents=True, exist_ok=True)
+    saved = []
     for e in models:
         lang = "da" if "da" in (e.get("languages") or []) else "en"
         voice = role_files(e, "voice")                  # Røst: its first voice file; Chatterbox: its built-in voice
-        spoken = []
-        try:
-            for text in sentences[lang]:                # the first one loads the model, the second one is the speed
-                body = {"model": {"key": e["id"], "family": e["family"], "files": speech_files(e, env.speech_models)},
-                        "text": text, "language": lang, "seed": 1, "format": "mp3",
-                        "voice": {"path": f"{env.speech_models}/{voice[0]['dest']}"}
-                        if voice and not role_files(e, "conds") else None, **(e.get("sampling") or {})}
-                done = None
-                with c.stream("POST", env.speech_url + "/speak", json=body, timeout=900) as r:
-                    for line in r.iter_lines():
-                        ev = json.loads(line) if line.strip() else {}
-                        if ev.get("event") in ("done", "error"):
-                            done = ev
-                if not done or done.get("event") != "done":
-                    rep.line("FAIL", f"speech: {e['id']}", (done or {}).get("message") or "no answer",
-                             "bash update.sh compose logs speech")
-                    break
-                spoken.append((float(done["seconds"]), float(done["compute"])))
-        except Exception as exc:  # noqa: BLE001
-            rep.line("FAIL", f"speech: {e['id']}", f"{exc.__class__.__name__}: {exc}",
-                     "bash update.sh compose logs speech")
-            continue
-        if len(spoken) == 2:
-            (_, first), (secs, took) = spoken
+        # (setting, Turbo's decoder, 8-bit T3) - as Settings -> Assistant -> Sound -> Speech speed would send them
+        modes = [("best", False, False)]
+        if e.get("family") == "chatterbox-mtl" and decoder:
+            modes += [("faster", True, False), ("fastest", True, True)]
+        elif e.get("family") == "chatterbox-mtl":
+            rep.line("SKIP", f"speech: {e['id']}", "faster needs Røst v3 Turbo downloaded (its two-step decoder)")
+            modes += [("fastest", False, True)]
+        else:
+            modes += [("fastest", False, True)]           # Turbo: its own two-step decoder either way
+        last: tuple[dict, dict] | None = None
+        for mode, fast_decoder, int8 in modes:
+            files = speech_files(e, env.speech_models)
+            if fast_decoder:
+                files["decoder"] = decoder
+            spoken = []
+            try:
+                for text in sentences[lang]:            # the first loads the model, the second is the speed
+                    body = {"model": {"key": e["id"], "family": e["family"], "files": files, "int8": int8},
+                            "text": text, "language": lang, "seed": 1, "format": "mp3",
+                            "voice": {"path": f"{env.speech_models}/{voice[0]['dest']}"}
+                            if voice and not role_files(e, "conds") else None, **(e.get("sampling") or {})}
+                    spoken.append(_say(c, env, body))
+            except Exception as exc:  # noqa: BLE001
+                rep.line("FAIL", f"speech: {e['id']}", f"{mode}: {exc}", "bash update.sh compose logs speech")
+                continue
+            first, done = spoken
+            secs, took = float(done["seconds"]), float(done["compute"])
+            t3, dec, tokens = done.get("t3_seconds"), done.get("decoder_seconds"), done.get("tokens")
             factor = took / max(secs, 0.01)
-            rep.line("PASS", f"speech: {e['id']}", f"{secs:.1f} s of speech took {took:.1f} s: real-time factor "
-                     f"{factor:.2f} ({'faster' if factor < 1 else 'slower'} than real time; the first sentence "
-                     f"took {first:.0f} s with loading the model)")
+            where = f"; T3 {tokens} tokens in {t3:.1f} s ({tokens / max(t3, 0.01):.1f}/s), decoder {dec:.1f} s" \
+                if t3 is not None and dec is not None and tokens else ""
+            name = f"speech-{e['id']}-{mode}.mp3"
+            (out / name).write_bytes(base64.b64decode(done["audio"]))
+            saved.append(name)
+            line = (f"{mode}: {secs:.1f} s of speech in {took:.1f} s, real-time factor {factor:.2f}{where} "
+                    f"(loading {float(first['compute']):.0f} s)")
+            if done.get("capped"):
+                rep.line("WARN", f"speech: {e['id']}", line + " - it did not stop by itself (ran to its length "
+                         "limit): the end is probably noise", f"listen to {name}")
+            else:
+                rep.line("PASS", f"speech: {e['id']}", line)
+            last = (body, done)
+        threads = int(h.get("threads") or 0)
+        if last and threads >= 4:
+            # one token at a time is limited by memory more than by cores: the last setting again, T3 on half
+            body, done = last
+            try:
+                half = _say(c, env, {**body, "t3_threads": threads // 2})
+                rep.line("PASS", f"speech: {e['id']}", f"T3 on {threads // 2} threads: {_rate(half):.1f} tokens/s "
+                         f"(on {threads}: {_rate(done):.1f})")
+            except Exception as exc:  # noqa: BLE001
+                rep.line("WARN", f"speech: {e['id']}", f"T3 on {threads // 2} threads: {exc}")
+    if saved:
+        host = os.environ.get("HUB_ROOT", "/srv/slq-hub")
+        rep.line("PASS", "speech files", f"{len(saved)} saved to listen to: {host}/data/selftest/ on the VM "
+                 "(the same sentence and seed in each setting)")
+
+
+def _rate(done: dict) -> float:
+    """T3's tokens a second in a /speak "done" event."""
+    return float(done.get("tokens") or 0) / max(float(done.get("t3_seconds") or 0), 0.01)
+
+
+def _say(c, env, body: dict) -> dict:
+    """One /speak request to the speech service; its "done" event (or an error with the service's words)."""
+    done = None
+    with c.stream("POST", env.speech_url + "/speak", json=body, timeout=900) as r:
+        if r.status_code != 200:
+            raise RuntimeError((r.read().decode(errors="replace") or f"HTTP {r.status_code}")[:300])
+        for line in r.iter_lines():
+            ev = json.loads(line) if line.strip() else {}
+            if ev.get("event") in ("done", "error"):
+                done = ev
+    if not done or done.get("event") != "done":
+        raise RuntimeError((done or {}).get("message") or "no answer")
+    return done
 
 
 def selftest(images: bool = False, speech: bool = False) -> int:

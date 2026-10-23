@@ -22,6 +22,7 @@ class AudioError(RuntimeError):
 ABILITIES = ("music", "sound", "speech")
 COMFY_FORMATS = ("mp3", "flac", "ogg")
 SPEECH_FORMATS = ("mp3", "wav", "flac", "ogg")
+SPEEDS = ("best", "faster", "fastest")
 MAX_VOICE_BYTES = 25 * 1024 * 1024
 # What a model does with a language it was not made for.
 ACCENT_NOTE = ("{model} speaks {language} with a heavy Danish accent; Chatterbox Multilingual V3 (Settings -> "
@@ -214,6 +215,31 @@ class AudioPipeline:
     def _speech_files(self, entry: dict) -> dict:
         return speech_files(entry, self.hub.env.speech_models)
 
+    def fast_decoder(self) -> str | None:
+        """Turbo's two-step decoder, from a downloaded Turbo model (Røst v3 Turbo), as the service sees it."""
+        for e in self.installed("speech"):
+            if e.get("family") == "chatterbox-turbo" and role_files(e, "s3gen"):
+                return f"{self.hub.env.speech_models}/{role_files(e, 's3gen')[0]['dest']}"
+        return None
+
+    def speed(self, entry: dict, speed: str | None = None) -> tuple[dict, list[str]]:
+        """What Settings -> Assistant -> Sound -> speech speed changes in a model's request, and notes for the result.
+        faster: Turbo's two-step decoder for the 500M models (Røst v3, Chatterbox) - about a quarter of the
+        decoder's work; Turbo models have it already. fastest: also 8-bit weights for T3, every model (measured
+        1.4x for the 500M models' T3 and 2.1x for Turbo's)."""
+        speed = speed or str(self.hub.settings.get("sound", "speech_speed") or "best")
+        if speed not in SPEEDS or speed == "best":
+            return {}, []
+        extra: dict = {"int8": speed == "fastest"}
+        if entry.get("family") != "chatterbox-mtl":
+            return extra, []
+        decoder = self.fast_decoder()
+        if decoder:
+            extra["decoder"] = decoder
+            return extra, []
+        return extra, ["The faster speech setting needs Røst v3 Turbo downloaded (it brings the two-step decoder), "
+                       "so this used the ten-step decoder."]
+
     def _voice(self, entry: dict, voice: str | bytes | None) -> tuple[dict | None, str]:
         """(the request's voice, its name for the result). Bytes are a clip the caller read; a name is one of the
         model's voices; nothing is the model's default (its built-in voice, else its first voice)."""
@@ -235,7 +261,7 @@ class AudioPipeline:
 
     async def speak(self, *, text: str, language: str, voice: str | bytes | None = None,
                     expressiveness: float | None = None, seed: int | None = None, model: str | None = None,
-                    fmt: str = "mp3", on_progress=None) -> dict:
+                    fmt: str = "mp3", speed: str | None = None, on_progress=None) -> dict:
         if fmt not in SPEECH_FORMATS:
             raise AudioError(f"speech can be saved as {', '.join(SPEECH_FORMATS)}")
         entry, note = self.speech_model(language, model)
@@ -247,7 +273,12 @@ class AudioPipeline:
             if ex >= 0.65:                    # Chatterbox's own advice: more emotion, slower guidance
                 p["cfg_weight"] = min(float(p.get("cfg_weight", 0.5)), 0.3)
         sd = int(seed) if seed is not None else random.randint(1, 2**31 - 1)
-        body = {"model": {"key": entry["id"], "family": entry["family"], "files": self._speech_files(entry)},
+        extra, notes = self.speed(entry, speed)
+        files = self._speech_files(entry)
+        if extra.get("decoder"):
+            files["decoder"] = extra["decoder"]
+        body = {"model": {"key": entry["id"], "family": entry["family"], "files": files,
+                          "int8": bool(extra.get("int8"))},
                 "text": text, "language": (language or "da").lower(), "voice": voice_spec, "seed": sd,
                 "format": fmt, **p,
                 # a clip's voice prompt may wait in the service for the next request - not in a person's chat
@@ -256,6 +287,14 @@ class AudioPipeline:
             done = await self.speech.speak(body, on_progress=on_progress)
         except SpeechError as exc:
             raise AudioError(str(exc))
+        pieces, capped = int(done.get("pieces") or 1), int(done.get("capped") or 0)
+        if capped:
+            notes.append(f"The model did not stop by itself on {capped} of {pieces} piece(s): it ran to its length "
+                         "limit, so the end of that piece may be noise - another seed usually fixes it.")
         return {"data": done["audio"], "seconds": float(done.get("seconds") or 0), "compute":
                 float(done.get("compute") or 0), "model": entry, "voice": voice_name, "seed": sd, "format": fmt,
-                "note": note, "pieces": int(done.get("pieces") or 1), "threads": done.get("threads")}
+                "note": " ".join(x for x in (note, *notes) if x), "pieces": pieces, "capped": capped,
+                "threads": done.get("threads"), "tokens": done.get("tokens"), "t3_seconds": done.get("t3_seconds"),
+                "decoder_seconds": done.get("decoder_seconds"),
+                "decoder": "ten-step" if entry.get("family") == "chatterbox-mtl" and not extra.get("decoder")
+                else "two-step", "int8": bool(extra.get("int8"))}

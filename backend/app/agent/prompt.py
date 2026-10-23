@@ -77,7 +77,7 @@ def sound_text(abilities: list[str]) -> str:
         return ""
     how = []
     if "speech" in abilities:
-        how.append("Speech runs on the CPU: a few seconds per sentence.")
+        how.append("Speech runs on the CPU, slower than real time: several seconds of work per second of speech.")
     if "music" in abilities or "sound" in abilities:
         how.append("Music and sound effects run on the GPU: seconds for an effect, a few minutes for a song.")
     names = tools[0] if len(tools) == 1 else ", ".join(tools[:-1]) + " and " + tools[-1]

@@ -295,6 +295,16 @@ machine:
 
     sudo bash /opt/slq-hub/update.sh compose exec hub python -m app.cli selftest --speech
 
+It speaks the same sentence with each voice model in each **Speech speed**
+setting (Settings → Assistant → Sound: Best, Faster, Fastest - Faster needs
+Røst v3 Turbo downloaded, for its decoder), shows how long each took, and
+saves every sample in `/srv/slq-hub/data/selftest/`. To listen on your PC
+(PowerShell):
+
+    scp "adminsorenlyder@30.11.0.222:/srv/slq-hub/data/selftest/*.mp3" .
+
+Then choose the fastest setting that still sounds right.
+
 The speech container uses all CPU cores but two. `SPEECH_THREADS` and
 `SPEECH_MEM` in `.env` change that (then `sudo bash /opt/slq-hub/update.sh
 compose up -d`).

@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.13.1 - 2026-10-23
+
+- **Faster speech, your choice.** The first self-test on the VM measured Røst
+  v3 at about six times slower than real time (3.4 s of speech in 20 s).
+  Settings → Assistant → Sound → **Speech speed**:
+  - **Best**: as before.
+  - **Faster**: Røst v3 and Chatterbox use Turbo's two-step decoder (it comes
+    with Røst v3 Turbo) - the part that turns speech tokens into sound, a
+    quarter of the work.
+  - **Fastest**: also 8-bit weights for the token part, every voice model.
+
+  `selftest --speech` now speaks the same sentence in every setting, shows
+  where the time goes (the tokens and the decoder), times the token part on
+  half the threads too, and saves each sample in `/srv/slq-hub/data/selftest/`
+  so you can listen before you choose.
+- Chatterbox Multilingual V3 uses Resemble's own repetition penalty (1.2, not
+  Røst's 2.0): in the self-test it most likely talked on to its length limit.
+  When a piece runs to the limit, the result and the self-test now say so.
+- Like upstream, the Røst v3 and Chatterbox output no longer ends in the last
+  token's 40 ms of noise.
+- Settings → System shows the speech service's CPU.
+
 ## 0.13.0 - 2026-10-23
 
 - **Speech, music and sound effects.** The assistant makes sound itself: an
