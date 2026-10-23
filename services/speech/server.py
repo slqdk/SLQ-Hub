@@ -14,7 +14,7 @@ A /speak body:
                "files": {"t3": path, "s3gen": path, "ve": path, "tokenizer": path (mtl: a .json file,
                          turbo: a folder), "conds": path (optional),
                          "decoder": path (optional, mtl: Turbo's two-step S3Gen instead of the ten-step one)},
-               "int8": false (8-bit weights for T3's linear layers)},
+               "int8": false | "mlp" | "all" (8-bit weights for T3: its MLP layers, or every linear layer)},
      "text": "...", "language": "da",
      "voice": {"path": "/models/speech/.../mic.wav"} | {"audio": "<base64 of a WAV>"} | null,
      "cache_voice": false,
@@ -286,11 +286,13 @@ def t3_threads(p: dict):
         torch.set_num_threads(before)
 
 
-def int8_weights(module) -> int:
+def int8_weights(module, mlp_only: bool = False) -> int:
     """A transformer's linear layers with 8-bit weights (dynamic quantization, a scale per output channel): T3
     reads a quarter of the bytes per token - 2.3-2.5x faster on VM 222's Ryzen 9 5950X. Per channel costs the
-    same time as one scale per layer and keeps closer to the full weights. GPT-2's Conv1D layers (Turbo) are
-    linear layers with the weight transposed; they become nn.Linear first. Returns how many layers changed."""
+    same time as one scale per layer and keeps closer to the full weights. With mlp_only the attention layers -
+    which keep the speech aligned with the text - stay full: with every layer in 8 bits, a listening test found
+    a skipped word and slurred first words. GPT-2's Conv1D layers (Turbo) are linear layers with the weight
+    transposed; they become nn.Linear first. Returns how many layers changed."""
     import torch
     from transformers.pytorch_utils import Conv1D
     for parent in list(module.modules()):
@@ -302,10 +304,14 @@ def int8_weights(module) -> int:
                     lin.weight.copy_(child.weight.t())
                     lin.bias.copy_(child.bias)
                 setattr(parent, name, lin)
-    before = sum(isinstance(m, torch.nn.Linear) for m in module.modules())
-    torch.ao.quantization.quantize_dynamic(
-        module, {torch.nn.Linear: torch.ao.quantization.per_channel_dynamic_qconfig}, dtype=torch.qint8, inplace=True)
-    return before - sum(isinstance(m, torch.nn.Linear) for m in module.modules())
+    qconfig = torch.ao.quantization.per_channel_dynamic_qconfig
+    linear = [n for n, m in module.named_modules() if isinstance(m, torch.nn.Linear)]
+    if mlp_only:        # Llama: layers.N.mlp.{gate,up,down}_proj; GPT-2: h.N.mlp.{c_fc,c_proj}
+        spec = {n: qconfig for n in linear if ".mlp." in f".{n}."}
+    else:
+        spec = {torch.nn.Linear: qconfig}
+    torch.ao.quantization.quantize_dynamic(module, spec, dtype=torch.qint8, inplace=True)
+    return len(linear) - sum(isinstance(m, torch.nn.Linear) for m in module.modules())
 
 
 def inside_models(path: str) -> Path:
@@ -332,7 +338,7 @@ class Model:
 
     family = ""
 
-    def __init__(self, files: dict, int8: bool = False):
+    def __init__(self, files: dict, int8: str = ""):
         import perth
         import torch
         from chatterbox.models.voice_encoder import VoiceEncoder
@@ -413,7 +419,7 @@ class Multilingual(Model):
 
     family = "chatterbox-mtl"
 
-    def __init__(self, files: dict, int8: bool = False):
+    def __init__(self, files: dict, int8: str = ""):
         super().__init__(files, int8)
         from safetensors.torch import load_file
         from chatterbox.models.s3gen import S3Gen
@@ -426,7 +432,7 @@ class Multilingual(Model):
             state = state["model"][0]
         t3.load_state_dict(state)
         if int8:
-            int8_weights(t3.tfmr)
+            int8_weights(t3.tfmr, mlp_only=int8 == "mlp")
         self.t3 = t3.eval()
         if files.get("decoder"):
             # Turbo's distilled decoder: two steps without guidance instead of ten with it, the same speech tokens
@@ -496,7 +502,7 @@ class Turbo(Model):
 
     family = "chatterbox-turbo"
 
-    def __init__(self, files: dict, int8: bool = False):
+    def __init__(self, files: dict, int8: str = ""):
         super().__init__(files, int8)
         from safetensors.torch import load_file
         from transformers import AutoTokenizer
@@ -517,7 +523,7 @@ class Turbo(Model):
         t3.load_state_dict(state)
         del t3.tfmr.wte
         if int8:
-            int8_weights(t3.tfmr)
+            int8_weights(t3.tfmr, mlp_only=int8 == "mlp")
         self.t3 = t3.eval()
         s3gen = S3Gen(meanflow=True)
         s3gen.load_state_dict(load_file(inside_models(files["s3gen"])), strict=True)
@@ -594,7 +600,7 @@ class Speaker:
                 raise ValueError(f"the model's {role} file is not given")
         for path in files.values():              # every file there and inside the models, before anything is built
             inside_models(str(path))
-        int8 = spec.get("int8") is True
+        int8 = {True: "all", "all": "all", "mlp": "mlp"}.get(spec.get("int8"), "")   # true: every layer
         key = str(spec.get("key") or "") + "|" + "|".join(f"{k}={files[k]}" for k in sorted(files)) + f"|int8={int8}"
         with self._mutex:
             if key in self.models:
@@ -607,7 +613,7 @@ class Speaker:
         t0 = time.time()
         m = FAMILIES[family](files, int8)
         extras = [x for x, on in (("Turbo's decoder", family == "chatterbox-mtl" and bool(files.get("decoder"))),
-                                  ("8-bit T3", int8)) if on]
+                                  ("8-bit T3" if int8 == "all" else "8-bit MLP", bool(int8))) if on]
         m.label = str(spec.get("key") or family) + (f" ({', '.join(extras)})" if extras else "")
         log.info("loaded %s in %.1f s", m.label, time.time() - t0)
         with self._mutex:
@@ -756,6 +762,9 @@ def make_app(speaker: Speaker):
                     wav = np.concatenate(parts) if parts else np.zeros(0, np.float32)
                     if wav.size == 0:
                         raise ValueError("the model produced no sound for this text")
+                    peak = float(np.max(np.abs(wav)))
+                    if peak > 0.98:              # quieter as a whole rather than clipped by the encoder
+                        wav = (wav * (0.98 / peak)).astype(np.float32)
                     data = await speaker.run(encode, wav, fmt)
                 finally:
                     speaker.busy = False

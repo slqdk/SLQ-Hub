@@ -673,23 +673,27 @@ routing), and the system prompt says what each costs.
     time went - T3's tokens and seconds, the decoder's seconds - and how many
     pieces ran to the token ceiling instead of stopping by themselves; the
     result then says the end may be noise and another seed usually helps.
-  - **Speed** (0.13.1, ordered by measurement in 0.13.2). On VM 222 (Ryzen 9
-    5950X, AVX2, 10 threads) Røst v3 takes about 20 s for 3.4 s of speech, a
-    real-time factor of 6: T3 (one token at a time, 6.4 a second) 14 s, the
-    ten-step decoder 5 s. Settings → Assistant → Sound → Speech speed:
-    **best** - full weights, each model's own decoder; **faster** - 8-bit
-    weights for T3 (dynamic quantisation of its linear layers with a scale per
-    output channel; GPT-2's Conv1D layers become `nn.Linear` first, exactly):
-    T3 2.3-2.5x quicker on that CPU (Røst v3 15.7 tokens a second, Turbo 26 -
-    faster than real time); **fastest** - also Turbo's distilled two-step
+  - **Speed** (0.13.1-0.13.3). On VM 222 (Ryzen 9 5950X, AVX2, 10 threads)
+    Røst v3 takes about 20 s for 3.4 s of speech, a real-time factor of 6:
+    T3 (one token at a time, 6.4 a second) 14 s, the ten-step decoder 5 s;
+    Røst v3 Turbo about 3.9. 8-bit weights for T3 (dynamic quantisation of
+    its linear layers, a scale per output channel; GPT-2's Conv1D layers
+    become `nn.Linear` first, exactly) make it 2.3-2.5x quicker on that CPU -
+    but in the first listening test, with every layer in 8 bits, Turbo
+    skipped a word and Røst v3 slurred its first word. Settings → Assistant →
+    Sound → Speech speed: **best** - full weights, each model's own decoder
+    (Røst v3 Turbo at best sounded best of all); **faster** - 8-bit weights
+    for the MLP layers only, the attention layers (which keep the speech
+    aligned with the text) full: T3 1.4-1.5x quicker here, not yet heard;
+    **fastest** - every layer in 8 bits, and Turbo's distilled two-step
     decoder for Røst v3 and Chatterbox (the same speech tokens and voice
-    prompt; it comes with Røst v3 Turbo): their decoder 4x quicker. Measured
-    for one sentence: Røst v3 5.75 / 2.28 (fastest), Røst v3 Turbo 3.75 / 1.82
-    (8-bit), Chatterbox 7.46 / 2.35. `selftest --speech` speaks the same
-    sentence and seed in every setting, and Settings → Assistant → Sound plays
-    the samples with what each cost, to choose by ear. T3 measured as fast on
-    5 threads as on 10 (it is limited by memory, not cores; a request may ask
-    for `t3_threads`). bf16 was slower on a CPU without native bf16.
+    prompt; it comes with Røst v3 Turbo; their decoder 4x quicker) - Røst v3
+    at 1.95. `selftest --speech` speaks the same sentence and seed in every
+    setting, and Settings → Assistant → Sound plays the samples with what each
+    cost, to choose by ear. T3 is as fast on 5 threads as on 10 (memory, not
+    cores, limits it; a request may ask for `t3_threads`). bf16 was slower on
+    a CPU without native bf16, and torch's int8 weight-only matmul 4x slower
+    than float on the CPU. Speech that would clip is turned down as a whole.
 - **Music (`music_generate`)**: ACE-Step 1.5 in ComfyUI's native nodes, as in
   the official template: `UNETLoader`, `DualCLIPLoader` (type `ace`: the 0.6B
   encoder and the planner), `TextEncodeAceStepAudio1.5` (style, lyrics with

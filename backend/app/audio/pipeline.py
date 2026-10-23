@@ -224,14 +224,15 @@ class AudioPipeline:
 
     def speed(self, entry: dict, speed: str | None = None) -> tuple[dict, list[str]]:
         """What Settings -> Assistant -> Sound -> speech speed changes in a model's request, and notes for the result.
-        Ordered by what VM 222's self-test measured (Ryzen 9 5950X, 10 threads), where T3 is two thirds of the time:
-        faster - 8-bit weights for T3, every model (T3 2.3-2.5x quicker); fastest - also Turbo's two-step decoder
-        for the 500M models (Røst v3, Chatterbox: their decoder about 4x quicker). Turbo models have that decoder
-        already, so for them fastest is faster."""
+        On VM 222 (Ryzen 9 5950X) T3 is two thirds of the time, and 8-bit weights make it 2.3-2.5x quicker - but
+        with every layer in 8 bits a listening test found a skipped word and slurred first words. So: faster -
+        8-bit weights for T3's MLP layers only, the attention that keeps the speech aligned with the text stays
+        full; fastest - every layer in 8 bits, and Turbo's two-step decoder for the 500M models (Røst v3,
+        Chatterbox: their decoder about 4x quicker; Turbo models have it already)."""
         speed = speed or str(self.hub.settings.get("sound", "speech_speed") or "best")
         if speed not in SPEEDS or speed == "best":
             return {}, []
-        extra: dict = {"int8": True}
+        extra: dict = {"int8": "mlp" if speed == "faster" else "all"}
         if speed != "fastest" or entry.get("family") != "chatterbox-mtl":
             return extra, []
         decoder = self.fast_decoder()
@@ -279,7 +280,7 @@ class AudioPipeline:
         if extra.get("decoder"):
             files["decoder"] = extra["decoder"]
         body = {"model": {"key": entry["id"], "family": entry["family"], "files": files,
-                          "int8": bool(extra.get("int8"))},
+                          "int8": extra.get("int8") or False},
                 "text": text, "language": (language or "da").lower(), "voice": voice_spec, "seed": sd,
                 "format": fmt, **p,
                 # a clip's voice prompt may wait in the service for the next request - not in a person's chat
@@ -298,4 +299,4 @@ class AudioPipeline:
                 "threads": done.get("threads"), "tokens": done.get("tokens"), "t3_seconds": done.get("t3_seconds"),
                 "decoder_seconds": done.get("decoder_seconds"),
                 "decoder": "ten-step" if entry.get("family") == "chatterbox-mtl" and not extra.get("decoder")
-                else "two-step", "int8": bool(extra.get("int8"))}
+                else "two-step", "int8": extra.get("int8") or False}

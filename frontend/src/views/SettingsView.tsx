@@ -1154,16 +1154,16 @@ function AgentTab({ s }: { s: S }) {
           help: "Songs and instrumentals (music_generate). The assistant can still use another downloaded model if you name it." },
         { key: "sound_model", label: "Model for sound effects", type: "select", options: soundOptions("sound") },
         { key: "speech_model_da", label: "Voice model for Danish", type: "select", options: soundOptions("speech", "da"),
-          help: "Røst v3 sounds best; Røst v3 Turbo is about three times faster." },
+          help: "Røst v3 Turbo is faster; listen to both under Speech samples. Chatterbox speaks Danish with an English accent." },
         { key: "speech_model", label: "Voice model for other languages", type: "select", options: soundOptions("speech", "other"),
           help: "Used when it speaks the language; otherwise a model that does." },
         { key: "speech_speed", label: "Speech speed", type: "select", options: [
           { value: "best", label: "Best: full weights, each model's own decoder" },
-          { value: "faster", label: "Faster: 8-bit weights" },
-          { value: "fastest", label: `Fastest: 8-bit, and Turbo's decoder for Røst v3 and Chatterbox${hasTurbo ? "" : " (needs Røst v3 Turbo)"}` }],
-          help: "Faster gives the token part (two thirds of the time here) 8-bit weights: 2.3-2.5 times quicker on this " +
-            "machine. Fastest also decodes Røst v3 and Chatterbox with Turbo's two-step decoder instead of their " +
-            "ten-step one. Listen to the samples below before choosing." },
+          { value: "faster", label: "Faster: 8-bit weights for the MLP layers, attention stays full" },
+          { value: "fastest", label: `Fastest: every layer 8-bit, Turbo's decoder for Røst v3 and Chatterbox${hasTurbo ? "" : " (needs Røst v3 Turbo)"}` }],
+          help: "The token part is two thirds of the time here. With every layer in 8 bits it is 2.3-2.5 times quicker, " +
+            "but a listening test found a skipped word and slurred first words; Faster keeps the attention layers - " +
+            "which keep the speech in step with the text - at full weights. Listen to the samples below before choosing." },
       ]} />}
       {soundModels.some((m) => (m.abilities ?? []).includes("speech")) && <SpeechSamples />}
       <SectionForm s={s} section="images" title="Images" fields={[
@@ -1501,7 +1501,8 @@ interface SystemData { version: string; services: Record<string, any>; gpu: { vr
 
 interface SpeechSample { file: string; model?: string; name?: string; setting?: string; text?: string; seconds?: number;
   compute?: number; factor?: number; capped?: boolean }
-const SPEED_NAMES: Record<string, string> = { best: "Best", faster: "Faster (8-bit)", fastest: "Fastest (8-bit, Turbo's decoder)" };
+const SPEED_NAMES: Record<string, string> = { best: "Best", faster: "Faster (8-bit MLP)",
+  fastest: "Fastest (8-bit everywhere, Turbo's decoder)" };
 
 /** The last speech self-test's samples: the same sentence and seed with each voice model in each speed setting,
  * what each cost, and a player - to choose Settings -> Assistant -> Sound -> Speech speed by ear. */

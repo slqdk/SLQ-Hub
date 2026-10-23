@@ -219,7 +219,7 @@
     {
       "id": "roest-v3-turbo",
       "name": "Røst v3 Turbo",
-      "description": "The faster Danish voice from the same project (Chatterbox Turbo, 350M): about three times quicker on the CPU and a little less natural (4.01 of 5). The same voices, Mic and Nic. For long texts. OpenRAIL licence.",
+      "description": "The faster Danish voice from the same project (Chatterbox Turbo, 350M): about 1.5 times quicker than Røst v3 on this Hub's CPU, rated a little less natural by CoRal's listeners (4.01 of 5) - in this Hub's first listening test it sounded best. The same voices, Mic and Nic. OpenRAIL licence.",
       "default": false,
       "engine": "speech",
       "family": "chatterbox-turbo",
@@ -242,7 +242,7 @@
     {
       "id": "chatterbox-multilingual-v3",
       "name": "Chatterbox Multilingual V3",
-      "description": "Resemble AI's speech model for 23 languages (English, German, Swedish, Norwegian, French, Spanish ... and Danish): a default voice, Røst's two Danish voices (they keep their accent in other languages), or any voice from a 10-20 s clip, and expressiveness that can be turned up. MIT licence. Shares 1 GB of files with Røst v3.",
+      "description": "Resemble AI's speech model for 23 languages (English, German, Swedish, Norwegian, French, Spanish ...; its Danish has an English accent, so Danish goes to Røst): a default voice, Røst's two Danish voices (they keep their accent in other languages), or any voice from a 10-20 s clip, and expressiveness that can be turned up. MIT licence. Shares 1 GB of files with Røst v3.",
       "default": false,
       "engine": "speech",
       "family": "chatterbox-mtl",

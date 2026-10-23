@@ -203,10 +203,10 @@ def _speech_dynamic(ctx: ToolContext) -> tuple[str, dict]:
         languages += [x for x in langs if x not in languages]
         voices = ", ".join(f"{n} ({d})" if d else n for n, d in pipe.voices(e).items())
         speaks = "Danish (English only with a heavy Danish accent)" if langs == ["da"] else \
-            f"{len(langs)} languages: {', '.join(langs)}"
+            f"{len(langs)} languages: {', '.join(langs)}" + (" (its Danish has an English accent)" if "da" in langs
+                                                             else "")
         extra = " Expressiveness works." if e.get("expressive") else ""
-        faster = " About three times faster, a little less natural: for long texts." if \
-            e.get("family") == "chatterbox-turbo" else ""
+        faster = " About 1.5 times faster than Røst v3." if e.get("family") == "chatterbox-turbo" else ""
         lines.append(f"- {e['id']}: {e['name']}, {speaks}. Voices: {voices}.{faster}{extra}")
     if "en" not in languages and any(e.get("family") == "chatterbox-mtl" for e in models):
         languages.append("en")                          # Røst reads English too, with its accent

@@ -149,13 +149,16 @@ def _speech(rep, c, env, cat, try_it: bool) -> None:
     for e in models:
         lang = "da" if "da" in (e.get("languages") or []) else "en"
         voice = role_files(e, "voice")                  # Røst: its first voice file; Chatterbox: its built-in voice
-        # (setting, Turbo's decoder, 8-bit T3) - as Settings -> Assistant -> Sound -> Speech speed would send them
-        modes = [("best", False, False), ("faster", False, True)]
+        # (setting, Turbo's decoder, 8-bit T3) - as Settings -> Assistant -> Sound -> Speech speed would send them:
+        # faster = the MLP layers in 8 bits, fastest = every layer (and Turbo's decoder for the 500M models)
+        modes = [("best", False, False), ("faster", False, "mlp")]
         if e.get("family") == "chatterbox-mtl" and decoder:
-            modes += [("fastest", True, True)]
+            modes += [("fastest", True, "all")]
         elif e.get("family") == "chatterbox-mtl":
             rep.line("SKIP", f"speech: {e['id']}", "fastest needs Røst v3 Turbo downloaded (its two-step decoder)")
-        for mode, fast_decoder, int8 in modes:              # (a Turbo model's fastest is its faster)
+        else:
+            modes += [("fastest", False, "all")]          # Turbo: its own two-step decoder either way
+        for mode, fast_decoder, int8 in modes:
             files = speech_files(e, env.speech_models)
             if fast_decoder:
                 files["decoder"] = decoder

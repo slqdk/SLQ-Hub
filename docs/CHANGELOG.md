@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.13.3 - 2026-10-23
+
+- **After the first listening test.** Røst v3 Turbo at Best sounded best (and
+  is 1.5 times faster than Røst v3); every Chatterbox sample sounded like an
+  English speaker trying Danish; with every layer in 8 bits Røst v3 Turbo
+  skipped a word and Røst v3 slurred its first word. So:
+  - **Faster** now puts only the MLP layers in 8 bits. The attention layers,
+    which keep the speech in step with the text, stay full - to be heard.
+  - **Fastest** is every layer in 8 bits (and Turbo's decoder for Røst v3 and
+    Chatterbox), and Settings says what the test heard.
+  - The texts no longer say Røst v3 sounds best or that Turbo is three times
+    faster, and they say Chatterbox's Danish has an English accent (Danish
+    goes to Røst).
+- Speech that would clip is turned down as a whole before it is encoded.
+
 ## 0.13.2 - 2026-10-23
 
 - **Listen to the speech samples in Settings.** Settings → Assistant → Sound
