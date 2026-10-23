@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.11.2 - 2026-10-23
+
+- **Long chats keep their place on the card.** llama-server is started with
+  `--no-cache-idle-slots`. By default it moves every idle conversation into
+  its RAM cache, and clears it from the card, whenever another request
+  starts. A conversation too big for that cache (4 GB for Qwen3.8 27B,
+  reached at about 20K tokens) was simply dropped. In chat 11 the new chat's
+  title, made on the other slot, threw away a 30K-token conversation, so its
+  next message would have read it all again: about half a minute. Idle
+  conversations now stay on the card until the room is needed. A model's own
+  extra flags can still say `--cache-idle-slots`.
+
 ## 0.11.1 - 2026-10-23
 
 - **The assistant knows the time of day.** Each of your messages reaches the

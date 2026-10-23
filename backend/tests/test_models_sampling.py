@@ -64,3 +64,14 @@ def test_a_qwen_fine_tune_gets_its_familys_sampling(tmp_path):
     flagged = {**orn, "server": {**orn["server"], "extra": ["--temp", "0.6", "--presence-penalty=0"]}}
     body = P.build(flagged, [{"role": "user", "content": "hej"}], thinking=False)
     assert "temperature" not in body and "presence_penalty" not in body and body["top_k"] == 20
+
+
+def test_idle_slots_stay_on_the_card_unless_a_model_asks_otherwise(app):
+    """llama-server's default moves idle slots to its RAM cache and clears them whenever another request starts;
+    a conversation too big for that cache was lost (chat 11). The Hub turns that off, unless a model's own extra
+    flags say otherwise."""
+    cat = app.state.hub.catalog
+    assert "--no-cache-idle-slots" in cat.server_args("qwen3.8-27b")
+    cat.save_override("qwen3.8-27b", server={"extra": ["--cache-idle-slots", "--cache-ram", "16384"]})
+    args = cat.server_args("qwen3.8-27b")
+    assert "--no-cache-idle-slots" not in args and args[-3:] == ["--cache-idle-slots", "--cache-ram", "16384"]

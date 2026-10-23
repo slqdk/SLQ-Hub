@@ -123,6 +123,7 @@ async def test_lookup_add_download_and_remove(signed_in, app, fakes, api_key):
     assert args[:4] == ["-m", "/models/llm/hf/acme--Tiny-Coder-GGUF/Tiny-Coder-Q4_K_M.gguf",
                         "--mmproj", "/models/llm/hf/acme--Tiny-Coder-GGUF/mmproj-F16.gguf"]
     assert args[args.index("-c") + 1] == "40960" and args[args.index("-np") + 1] == "2" and "-kvu" in args
+    assert "--no-cache-idle-slots" in args              # a title on the other slot must not drop the conversation
     assert "--kv-unified-per-slot" not in args                     # one request may use the whole pool
 
     # It survives a restart, apps see it, and the name is now taken.

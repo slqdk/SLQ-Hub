@@ -285,8 +285,14 @@ class Catalog:
                  "--alias", model_id]
         if s.get("cache_ram_mib") is not None:
             args += ["--cache-ram", str(int(s["cache_ram_mib"]))]
-        args += [str(a) for a in s.get("extra", [])]
-        return args
+        extra = [str(a) for a in s.get("extra", [])]
+        if not {"--cache-idle-slots", "--no-cache-idle-slots"} & set(extra):
+            # llama-server's default: every new request moves the idle slots into the RAM prompt cache and clears
+            # them from the shared KV cache, and a conversation too big for that cache is simply lost - a chat's
+            # title on the other slot made its next message read 30K tokens again (chat 11). Idle slots stay on
+            # the card instead, until the room is needed.
+            args.append("--no-cache-idle-slots")
+        return args + extra
 
     def aux_args(self, aux_id: str, container_models_dir: str = "/models") -> list[str]:
         a = self.get("aux", aux_id)
