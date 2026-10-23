@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import time
 
+from app import db
 from app.chats import store as chats
 
 from .mocks import _png
@@ -29,11 +31,19 @@ def texts(run) -> str:
     return "".join(e["data"]["text"] for e in run.events if e["type"] == "text" and not e["data"].get("depth"))
 
 
+STAMP = re.compile(r"^\[(Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d{1,2} [A-Z][a-z]{2} \d{4} \d{2}:\d{2}\]\n?")
+
+
+def unstamp(text: str) -> str:
+    """A user message as the model gets it, without the time it was sent ("[Fri 23 Oct 2026 06:57]")."""
+    return STAMP.sub("", text, count=1)
+
+
 def last_user(body: dict) -> str:
     for m in reversed(body["messages"]):
         if m["role"] == "user":
             c = m["content"]
-            return c if isinstance(c, str) else " ".join(p.get("text", "") for p in c)
+            return unstamp(c if isinstance(c, str) else " ".join(p.get("text", "") for p in c))
     return ""
 
 
@@ -177,7 +187,7 @@ async def test_a_message_sent_while_it_works_reaches_the_model(signed_in, app, f
     # After the tool's result, before its next step, the model reads the note.
     second = [b for b in fakes.llama["requests"] if b.get("tools")][1]["messages"]
     assert [m["role"] for m in second[1:]] == ["user", "assistant", "tool", "user"]
-    assert second[-1]["content"].startswith("(The user wrote this while you were working")
+    assert unstamp(second[-1]["content"]).startswith("(The user wrote this while you were working")
     assert second[-1]["content"].endswith("I can't see Mario for the popup")
     rows = chats.messages(c["id"])
     assert [m["role"] for m in rows] == ["user", "assistant", "tool", "user", "assistant"]
@@ -248,6 +258,37 @@ async def test_errors_are_reported(signed_in, app, fakes):
     assert run.status == "error" and "model exploded" in run.events[-1]["data"]["message"]
 
 
+def test_the_time_a_message_was_sent(monkeypatch):
+    from app.agent.prompt import sent_stamp
+    monkeypatch.delenv("TZ", raising=False)
+    assert sent_stamp("2026-10-23T04:57:43+00:00") == "[Fri 23 Oct 2026 06:57]"        # summer time
+    assert sent_stamp("2026-12-01T12:00:00Z") == "[Tue 1 Dec 2026 13:00]"              # winter time, a browser's Z
+    assert sent_stamp("2026-12-01T12:00:00") == "[Tue 1 Dec 2026 13:00]"               # naive = UTC
+    assert sent_stamp("") == sent_stamp(None) == sent_stamp("yesterday") == ""
+    monkeypatch.setenv("TZ", "America/New_York")
+    assert sent_stamp("2026-10-23T04:57:43+00:00") == "[Fri 23 Oct 2026 00:57]"
+    monkeypatch.setenv("TZ", "CET-1CEST")                                            # not a zone name: Copenhagen
+    assert sent_stamp("2026-10-23T04:57:43+00:00") == "[Fri 23 Oct 2026 06:57]"
+
+
+async def test_the_model_knows_when_each_message_was_sent(signed_in, app, fakes):
+    """The time goes with each user message, not into the system prompt: earlier messages read the same in every
+    later turn, so llama-server's cached prompt stays valid."""
+    fakes.llama["replies"] = [{"content": "Prices for the rest of today."}, {"content": "Elpriser"},
+                              {"content": "Tonight it is cheapest at 23."}]
+    c = await new_chat(signed_in)
+    await finish(app, await say(signed_in, c["id"], "Hvad koster strømmen det næste døgn?"))
+    first = fakes.llama["requests"][0]["messages"]
+    assert "starts with the local date and time it was sent" in first[0]["content"]
+    with db.connect() as con:
+        con.execute("UPDATE messages SET created_at='2026-10-23T04:57:43+00:00' WHERE chat_id=? AND role='user'",
+                    (c["id"],))
+    await finish(app, await say(signed_in, c["id"], "Og i aften?"))
+    second = [m for m in fakes.llama["requests"][-1]["messages"] if m["role"] == "user"]
+    assert second[0]["content"] == "[Fri 23 Oct 2026 06:57]\nHvad koster strømmen det næste døgn?"
+    assert STAMP.match(second[1]["content"]) and unstamp(second[1]["content"]) == "Og i aften?"
+
+
 async def test_retry_and_edit(signed_in, app, fakes):
     fakes.llama["replies"] = [{"content": "answer one"}, {"content": "Title"}]
     c = await new_chat(signed_in)
@@ -289,7 +330,7 @@ async def test_an_attached_image_reaches_the_model_and_the_folder(signed_in, app
     run = await finish(app, await say(signed_in, c["id"], "What is this?", attachments=[up["sha"]]))
     assert run.status == "done"
     parts = fakes.llama["requests"][0]["messages"][-1]["content"]
-    assert parts[0] == {"type": "text", "text": "What is this?"}
+    assert parts[0]["type"] == "text" and STAMP.match(parts[0]["text"]) and unstamp(parts[0]["text"]) == "What is this?"
     assert parts[1]["type"] == "image_url" and parts[1]["image_url"]["url"].startswith("data:image/")
     assert ".hub/attachments/photo.png" in parts[2]["text"]
     folder = app.state.hub.env.workspace_dir / "chats" / str(c["id"])
@@ -315,7 +356,7 @@ async def test_project_files_can_be_put_in_a_message(signed_in, app, fakes):
     assert run.status == "done"
     parts = fakes.llama["requests"][0]["messages"][-1]["content"]
     # The files' text comes first, as it was when the message was sent; then what the user wrote.
-    assert parts[0]["text"].startswith("[File from the working folder: src/main.py (2 lines), as it was")
+    assert unstamp(parts[0]["text"]).startswith("[File from the working folder: src/main.py (2 lines), as it was")
     assert "\n````\nprint('hi')\n# ```not the end```\n````" in parts[0]["text"]
     assert "big.log (300.0 KB) - read it with read_file" in parts[1]["text"]
     assert "blob.bin (200 bytes) - read it with read_file" in parts[2]["text"]

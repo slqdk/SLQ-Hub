@@ -8,6 +8,7 @@ import re
 from ..chats import store as chats
 from ..llm.messages import image_part
 from ..projects import blobs
+from .prompt import sent_stamp
 
 IMAGE_TOKENS = 1000
 CHARS_PER_TOKEN = 3.2
@@ -116,6 +117,12 @@ def to_model_messages(rows: list[dict], current_run: str | None = None, keep_ima
             parts = docs + parts
             if not parts:
                 continue
+            stamp = sent_stamp(r.get("created_at"))          # when it was sent: the model has no clock
+            if stamp:
+                if parts[0]["type"] == "text":
+                    parts[0] = {"type": "text", "text": f"{stamp}\n{parts[0]['text']}"}
+                else:
+                    parts.insert(0, {"type": "text", "text": stamp})
             if all(p["type"] == "text" for p in parts):
                 out.append({"role": "user", "content": "\n\n".join(p["text"] for p in parts)})
             else:

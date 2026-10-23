@@ -58,7 +58,7 @@ export async function request(meta: S.ChatMeta, data: S.ChatData): Promise<Recor
   const artifacts = Object.values(data.artifacts).map((versions) => versions[versions.length - 1])
     .map(({ id, title, type, version, content }) => ({ id, title, type, version, content }));
   return { title: meta.title, settings: meta.settings, files, blobs, artifacts,
-    messages: data.messages.map((m) => ({ role: m.role, content: m.content })) };
+    messages: data.messages.map((m) => ({ role: m.role, content: m.content, created_at: m.created_at })) };
 }
 
 export async function start(body: Record<string, unknown>): Promise<string> {

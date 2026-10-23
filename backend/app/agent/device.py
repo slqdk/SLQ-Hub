@@ -344,7 +344,10 @@ def prepare(turn: DeviceTurn, body: dict, wd: projects.Workdir) -> list[dict]:
             elif b["type"] == "file":
                 b = {k: v for k, v in b.items() if k != "data"}
             blocks.append(b)
-        rows.append({"id": len(rows) + 1, "role": m["role"], "content": blocks})
+        row = {"id": len(rows) + 1, "role": m["role"], "content": blocks}
+        if isinstance(m.get("created_at"), str):
+            row["created_at"] = m["created_at"][:40]             # when it was sent (the model sees it)
+        rows.append(row)
     last = rows[-1]
     if last["role"] != "user" or not last["content"]:
         raise HTTPException(400, "the last message must be the user's, and not empty")

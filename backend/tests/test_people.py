@@ -233,6 +233,19 @@ async def test_pictures_files_and_artifacts_go_back_to_the_device(signed_in, app
         assert not blobs.exists(pic)
 
 
+async def test_the_device_says_when_each_message_was_sent(signed_in, app, fakes):
+    await add_person(signed_in)
+    fakes.llama["replies"] = [{"content": "Hi again."}]
+    async with client_from(app) as phone:
+        await sign_in(phone)
+        await turn(app, phone, {"title": "Hi", "messages": [
+            {**user_msg("Hi"), "created_at": "2026-10-23T04:57:43.120Z"},
+            {"role": "assistant", "content": [{"type": "text", "text": "Hello."}], "created_at": "2026-10-23T04:58:00Z"},
+            user_msg("And now?")]})
+    users = [m["content"] for m in fakes.llama["requests"][0]["messages"] if m["role"] == "user"]
+    assert users == ["[Fri 23 Oct 2026 06:57]\nHi", "And now?"]                  # (an old device sends no time)
+
+
 async def test_the_artifact_can_be_changed_in_the_next_turn(signed_in, app, fakes):
     await add_person(signed_in)
     fakes.llama["replies"] = [

@@ -1,16 +1,20 @@
 """The system prompt for an agent turn. It stays the same for every step of
 a turn (no clock in it beyond the date), so llama-server can reuse the
-cached prompt."""
+cached prompt. The time of day goes with each user message instead
+(sent_stamp), where it never changes afterwards."""
 from __future__ import annotations
 
-from datetime import datetime
+import os
+from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 BASE = """You are the assistant in SLQ Hub, a self-hosted AI workspace. You run as {model} on the user's own \
-server. The user is {user}. Today is {date}.
+server. The user is {user}. Today is {date}. Each message from the user starts with the local date and time it \
+was sent, in square brackets: use it whenever the time of day matters, and never write such a stamp yourself.
 
 # How to work
-- Answer in the language of the user's latest message. Be direct and concise - no filler, no flattery.
+- Write in the language of the user's latest message - the answer and every short note between tool calls. Be \
+direct and concise - no filler, no flattery.
 - Simple questions get a direct answer without tools. Use tools when they make the answer better: look things \
 up instead of guessing, read files before changing them, run code to check a result.
 - Never invent file contents, URLs, numbers, quotes or facts. If you are unsure, say so or find out.
@@ -55,12 +59,36 @@ Use them when the user wants an image made or changed, and write the prompt the 
 wants it."""
 
 
+WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+
+def local_tz() -> ZoneInfo:
+    """The household's time zone: TZ from the environment (.env), else Copenhagen."""
+    try:
+        return ZoneInfo(os.environ.get("TZ") or "Europe/Copenhagen")
+    except (KeyError, ValueError):          # ZoneInfoNotFoundError is a KeyError; a POSIX TZ string is not a name
+        return ZoneInfo("Europe/Copenhagen")
+
+
+def sent_stamp(created_at) -> str:
+    """"[Fri 23 Oct 2026 06:57]": when a user message was sent, in local time ("" when unknown)."""
+    if not isinstance(created_at, str) or not created_at:
+        return ""
+    try:
+        t = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+    except ValueError:
+        return ""
+    t = (t if t.tzinfo else t.replace(tzinfo=timezone.utc)).astimezone(local_tz())
+    return f"[{WEEKDAYS[t.weekday()]} {t.day} {MONTHS[t.month - 1]} {t.year} {t:%H:%M}]"
+
+
 def system_prompt(*, user: str, model_name: str, folder_text: str, sandbox_path: str, memory_index: list,
                   skills: list[dict], project: dict | None, summary: str = "", images_available: bool = True,
-                  tz: str = "Europe/Copenhagen", handover_to: str = "", subagent: bool = False,
+                  tz: str | None = None, handover_to: str = "", subagent: bool = False,
                   cloud_model: str = "", taken_over_from: str = "", memory: bool = True, code: bool = True,
                   dropped: int = 0) -> str:
-    now = datetime.now(ZoneInfo(tz))
+    now = datetime.now(ZoneInfo(tz) if tz else local_tz())
     tools_line = TOOLS_LINE.format(sandbox_path=sandbox_path) if code else NO_CODE_LINE
     text = BASE.format(user=user, model=model_name, date=now.strftime("%A %d %B %Y"), folder=folder_text,
                        tools_line=tools_line, image_gen=IMAGE_GEN if images_available else "")

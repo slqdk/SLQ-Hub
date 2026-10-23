@@ -322,7 +322,12 @@ stopped or crashed turn keeps what it did.
 7. Then the history; tool schemas go in the request's `tools`.
 
 The system prompt holds no clock beyond the date, so llama-server reuses its
-cached prefix from step to step.
+cached prefix from step to step. The time of day goes with each user message
+instead: the history gives every user message the local time it was sent
+(`[Fri 23 Oct 2026 06:57]`, from its `created_at`, in `TZ` or Copenhagen
+time), and an earlier message reads the same in every later turn, so the
+cache stays valid from turn to turn too. People's devices send each
+message's time with the conversation.
 
 **Tools**
 

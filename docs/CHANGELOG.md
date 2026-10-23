@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.11.1 - 2026-10-23
+
+- **The assistant knows the time of day.** Each of your messages reaches the
+  model with the local time it was sent (`[Fri 23 Oct 2026 06:57]`). It goes
+  in the message, not the system prompt, so the cached prompt still works
+  from turn to turn. From chat 10: asked about electricity prices "for the
+  next 24 hours" at 06:57, the model only knew the date and had to read the
+  time off a web page.
+- The short notes between tool calls are in your language too (chat 10 had
+  one in English).
+
 ## 0.11.0 - 2026-10-23
 
 - **People: others in the household get the Hub's chat with their own
