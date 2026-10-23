@@ -220,6 +220,8 @@ async def test_pictures_files_and_artifacts_go_back_to_the_device(signed_in, app
         pic = tool["images"][0]["sha"]
         assert (await phone.get(f"/hub/api/device/turns/{res['id']}/blob/{pic}")).content.startswith(b"\x89PNG")
         assert {f["path"] for f in res["files"]} >= {"notes.md"} and "old.txt" not in {f["path"] for f in res["files"]}
+        card = next(s for s in res["steps"] if s["type"] == "files")["files"]          # the card under the answer
+        assert {(f["path"], f["new"]) for f in card} == {("notes.md", True)}
         r = await phone.get(f"/hub/api/device/turns/{res['id']}/file", params={"path": "notes.md"})
         assert r.text == "# Fox\n"
         assert (await phone.get(f"/hub/api/device/turns/{res['id']}/file", params={"path": "old.txt"})).status_code == 404

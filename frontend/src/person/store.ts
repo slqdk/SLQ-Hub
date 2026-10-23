@@ -140,6 +140,11 @@ export async function listFiles(chat: string): Promise<LocalFile[]> {
   return all.sort((a, b) => a.path.localeCompare(b.path));
 }
 
+export async function getFile(chat: string, path: string): Promise<LocalFile | undefined> {
+  const db = await open();
+  return result(db.transaction("files").objectStore("files").get([chat, path]) as IDBRequest<LocalFile | undefined>);
+}
+
 export async function putFile(f: LocalFile): Promise<void> {
   const db = await open();
   const tx = db.transaction("files", "readwrite");

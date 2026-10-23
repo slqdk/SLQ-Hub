@@ -112,6 +112,70 @@ async def test_tools_work_in_the_chat_folder(signed_in, app, fakes):
     assert kinds.count("tool_call") == 2 and kinds.count("tool_result") == 2
 
 
+async def test_the_files_an_answer_made_are_listed_under_it(signed_in, app, fakes):
+    """What a turn made or changed in its folder - by a tool or by a command - is a step of the run, for the card
+    under the answer; scratch files it removed again, .hub and untouched files are not."""
+    c = await new_chat(signed_in)
+    folder = app.state.hub.env.workspace_dir / "chats" / str(c["id"])
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "notes.md").write_text("old\n")
+    (folder / "untouched.txt").write_text("same\n")
+
+    def ffmpeg(body):                                  # what a command in the sandbox leaves behind
+        (folder / "30-seconds.mp3").write_bytes(b"ID3" + bytes(200))
+        (folder / ".hub").mkdir(exist_ok=True)
+        (folder / ".hub" / "tmp.wav").write_bytes(b"RIFF")
+        return {"exit_code": 0, "stdout": "done\n", "stderr": "", "timed_out": False, "duration_ms": 5,
+                "truncated": False}
+
+    fakes.sandbox["handler"] = ffmpeg
+    fakes.llama["replies"] = [
+        {"tool_calls": [{"name": "bash", "arguments": {"command": "ffmpeg -i voice.mp3 30-seconds.mp3"}}]},
+        {"tool_calls": [{"name": "write_file", "arguments": {"path": "scratch.txt", "content": "x"}}]},
+        {"tool_calls": [{"name": "delete_file", "arguments": {"path": "scratch.txt"}}]},
+        {"tool_calls": [{"name": "edit_file", "arguments": {"path": "notes.md", "old_string": "old",
+                                                            "new_string": "new"}}]},
+        {"content": "Saved as 30-seconds.mp3."}, {"content": "Jingle"}]
+    run = await finish(app, await say(signed_in, c["id"], "Make the jingle"))
+    assert run.status == "done"
+    data = (await signed_in.get(f"/hub/api/chats/{c['id']}")).json()
+    files = next(s for s in data["runs"][-1]["steps"] if s["type"] == "files")["files"]
+    assert [(f["path"], f["new"]) for f in files] == [("notes.md", False), ("30-seconds.mp3", True)]  # newest first
+    assert files[1] == {"path": "30-seconds.mp3", "size": 203, "mime": "audio/mpeg", "new": True}
+    assert any(e["type"] == "files" for e in run.events)
+    md = (await signed_in.get(f"/hub/api/chats/{c['id']}/export", params={"format": "md"})).text
+    assert "*Files from this turn: `notes.md` (changed, 4 bytes), `30-seconds.mp3` (new, 203 bytes).*" in md
+    system = fakes.llama["requests"][0]["messages"][0]["content"]
+    assert "shown to the user under your answer" in system
+    # the card plays it (a range, for the player) and downloads it; a page from the folder stays sandboxed
+    raw = f"/hub/api/folders/chat/{c['id']}/raw"
+    r = await signed_in.get(raw, params={"path": "30-seconds.mp3"}, headers={"Range": "bytes=0-2"})
+    assert r.status_code == 206 and r.content == b"ID3" and r.headers["content-type"] == "audio/mpeg"
+    assert r.headers["content-security-policy"] == "sandbox"
+    r = await signed_in.get(raw, params={"path": "30-seconds.mp3", "download": "true"})
+    assert "attachment" in r.headers["content-disposition"]
+    # a PDF opens in the browser's viewer, which a sandboxed response would not allow
+    (folder / "guide.pdf").write_bytes(b"%PDF-1.4\n%%EOF\n")
+    r = await signed_in.get(raw, params={"path": "guide.pdf"})
+    assert r.headers["content-type"] == "application/pdf" and "content-security-policy" not in r.headers
+    assert r.headers["x-content-type-options"] == "nosniff"
+
+
+def test_a_folder_snapshot_skips_what_sync_ignores(tmp_path):
+    from app.projects import store as projects
+    (tmp_path / "node_modules" / "x").mkdir(parents=True)
+    (tmp_path / "node_modules" / "x" / "index.js").write_text("x")
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "app.py").write_text("print(1)")
+    (tmp_path / "app.pyc").write_bytes(b"\0")
+    (tmp_path / "link.py").symlink_to(tmp_path / "src" / "app.py")
+    snap = projects.snapshot(tmp_path)
+    assert set(snap) == {"src/app.py"}
+    assert projects.snapshot(tmp_path, limit=0) is None                         # too many to compare
+    later = {**snap, "out.mp3": (10, snap["src/app.py"][1] + 5)}
+    assert projects.produced(snap, later) == [{"path": "out.mp3", "size": 10, "mime": "audio/mpeg", "new": True}]
+
+
 async def test_project_turns_think_and_files_become_revisions(signed_in, app, fakes):
     p = (await signed_in.post("/hub/api/projects", json={"name": "Demo", "instructions": "Answer in English."})).json()
     c = await new_chat(signed_in, project_id=p["id"])

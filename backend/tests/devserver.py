@@ -3,7 +3,8 @@
     cd backend && python -m tests.devserver [--port 8080] [--data /tmp/hub-dev]
 
 Signs in as soren / "correct horse battery". The fake model answers by
-keyword: "files" (writes and runs a script), "game" (slow steps, to try
+keyword: "files" (writes and runs a script), "jingle" (a command makes a
+sound, a PDF and notes: the card under the answer), "game" (slow steps, to try
 sending a message while it works), "page" (makes an artifact),
 "think" (reasons first), "search" (web search), "picture" (an image),
 "loop" (repeats the same searches until the Hub makes it answer), or
@@ -13,8 +14,13 @@ served when it exists; otherwise use `npm run dev` in frontend/.
 from __future__ import annotations
 
 import argparse
+import io
 import json
+import math
+import re
+import struct
 import tempfile
+import wave
 from pathlib import Path
 
 import uvicorn
@@ -66,6 +72,7 @@ def responder(body: dict) -> dict:
     last_user = next((m for m in reversed(msgs) if m["role"] == "user"), {"content": ""})
     text = last_user["content"] if isinstance(last_user["content"], str) else " ".join(
         p.get("text", "") for p in last_user["content"])
+    text = re.sub(r"^\[[^\]\n]{8,40}\]\n", "", text)          # the time it was sent
     after_tool = msgs[-1]["role"] == "tool" or (msgs[-1]["role"] == "user" and isinstance(msgs[-1]["content"], list)
                                                 and "Images returned" in json.dumps(msgs[-1]["content"]))
     tools_done = sum(1 for m in msgs if m["role"] == "tool")
@@ -82,6 +89,14 @@ def responder(body: dict) -> dict:
         if tools_done == 1:
             return {"tool_calls": [{"name": "bash", "arguments": {"command": "python fib.py"}}]}
         return {"content": "The script `fib.py` is in the chat's folder and prints the first ten Fibonacci numbers."}
+    if "jingle" in low:
+        if tools_done == 0:
+            return {"content": "Making the sound with ffmpeg.", "tool_calls": [{"name": "bash", "arguments": {
+                "command": "ffmpeg -f lavfi -i sine=440:d=1.2 jingle.wav && make-guide guide.pdf"}}]}
+        if tools_done == 1:
+            return {"tool_calls": [{"name": "write_file", "arguments": {
+                "path": "notes/jingle.md", "content": "# Jingle\n\nA 440 Hz tone, 1.2 s.\n"}}]}
+        return {"content": "Done: **jingle.wav** (1.2 s), a one-page **guide.pdf** and notes in `notes/jingle.md`."}
     if "page" in low:
         if tools_done == 0:
             return {"tool_calls": [{"name": "todo_write", "arguments": {"todos": [
@@ -210,6 +225,36 @@ CIVITAI_DEMO = {"models": {257749: {"id": 257749, "name": "Pony Diffusion V6 XL"
                                                       _civitai_version(290641, "Flux port", "Flux.1 D")]}}}
 
 
+def _tone(seconds: float = 1.2, hz: float = 440.0, rate: int = 22050) -> bytes:
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(b"".join(struct.pack("<h", int(9000 * math.sin(2 * math.pi * hz * i / rate)))
+                               for i in range(int(seconds * rate))))
+    return buf.getvalue()
+
+
+PDF = (b"%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n"
+       b"3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 300 144]/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>"
+       b"endobj\n4 0 obj<</Length 44>>stream\nBT /F1 24 Tf 40 70 Td (Jingle guide) Tj ET\nendstream endobj\n"
+       b"5 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n")
+
+
+def sandbox_handler(workspace: Path):
+    """The fake sandbox's commands: "jingle" makes real files in the folder, like ffmpeg would."""
+    def handle(body: dict) -> dict:
+        cmd = body.get("cmd") or ""
+        folder = workspace / str(body.get("cwd") or "/workspace").removeprefix("/workspace").lstrip("/")
+        if "jingle.wav" in cmd:
+            (folder / "jingle.wav").write_bytes(_tone())
+            (folder / "guide.pdf").write_bytes(PDF)
+        return {"exit_code": 0, "stdout": f"ran: {cmd}\n", "stderr": "", "timed_out": False, "duration_ms": 5,
+                "truncated": False}
+    return handle
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=8080)
@@ -230,7 +275,8 @@ def main() -> None:
               lan_networks=tuple(_networks(["127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"])),
               admin_user="soren", admin_password_hash=auth.hash_password("correct horse battery", n=2**10),
               static_dir=dist if (dist / "index.html").is_file() else None)
-    fakes = {"sup": {}, "llama": {"responder": responder}, "comfy": {}, "sandbox": {}, "mcp": {}}
+    fakes = {"sup": {}, "llama": {"responder": responder}, "comfy": {},
+             "sandbox": {"handler": sandbox_handler(data / "workspace")}, "mcp": {}}
     router = HostRouter({"supervisor": make_supervisor(fakes["sup"]), "llm": make_llama(fakes["llama"]),
                          "comfy": make_comfy(fakes["comfy"]), "sandbox:7000": make_sandbox(fakes["sandbox"]),
                          "searxng": make_searxng(), "mcp.test": make_mcp_http(fakes["mcp"]),

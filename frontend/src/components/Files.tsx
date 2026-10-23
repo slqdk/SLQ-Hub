@@ -264,6 +264,10 @@ function FileView({ folder, entry, projectId, picked, onPick, onChanged, onGone,
   const raw = `${base(folder)}/raw?path=${encodeURIComponent(entry.path)}`;
   const cut = entry.path.lastIndexOf("/");
   const isImage = /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(entry.path);
+  const isAudio = /\.(mp3|wav|ogg|oga|opus|m4a|aac|flac|weba)$/i.test(entry.path);
+  const isVideo = /\.(mp4|webm|mov|m4v|ogv)$/i.test(entry.path);
+  const isPdf = /\.pdf$/i.test(entry.path);
+  const media = isImage || isAudio || isVideo || isPdf;          // shown from the file itself, not read as text
 
   const save = useCallback(async () => {
     try {
@@ -280,13 +284,13 @@ function FileView({ folder, entry, projectId, picked, onPick, onChanged, onGone,
 
   useEffect(() => {
     let alive = true;
-    if (isImage) return;
+    if (media) return;
     api<FileData>(`${base(folder)}/file`, { query: { path: entry.path } }).then((f) => alive && setFile(f),
       (e) => toast((e as Error).message, "fault"));
     return () => {
       alive = false;
     };
-  }, [folder, entry.path, isImage, toast]);
+  }, [folder, entry.path, media, toast]);
 
   useEffect(() => {
     if (!file || file.text == null || !host.current) return;
@@ -341,6 +345,14 @@ function FileView({ folder, entry, projectId, picked, onPick, onChanged, onGone,
       </div>
       {isImage ? (
         <div className="editor"><img className="preview-img" src={raw} alt={entry.path} /></div>
+      ) : isAudio ? (
+        <div className="editor media-view"><audio controls preload="metadata" src={raw} aria-label={`Play ${entry.path}`} /></div>
+      ) : isVideo ? (
+        <div className="editor media-view"><video className="preview-img" controls preload="metadata" src={raw} /></div>
+      ) : isPdf ? (
+        <div className="editor media-view pdf-view">
+          <iframe className="preview-pdf" src={raw} title={entry.path} />
+          <a className="btn small" href={raw} target="_blank" rel="noreferrer">Open in a new tab</a></div>
       ) : !file ? (
         <div className="page faint">Loading</div>
       ) : file.text == null ? (

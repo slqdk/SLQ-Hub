@@ -28,6 +28,9 @@ failing call. If something is impossible, say so plainly.
 {folder}
 {tools_line}
 - Attachments the user sends are copied to .hub/attachments/ in the working folder.
+- The files you create or change in the working folder are shown to the user under your answer, ready to open, \
+play or download: name the file in your answer instead of pasting it, and delete scratch files you do not mean \
+to hand over.
 
 # Images
 - You can see images the user attaches and images that tools show you (view_image, read_file on an image).

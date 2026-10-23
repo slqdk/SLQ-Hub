@@ -5,13 +5,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Download, FileText, FolderOpen, KeyRound, LogOut, Menu, MessageSquarePlus, MoreHorizontal, Pencil, Search,
   Trash2, Upload as UploadIcon, User as UserIcon, X } from "lucide-react";
 import { api, setLocalMedia, type Artifact, type ArtifactRef, type Block, type ChatSettings, type Message, type ModelEntry,
-  type Settings, type Skill, type Upload } from "../lib/api";
+  type ProducedFile, type Settings, type Skill, type Upload } from "../lib/api";
 import { bytes, dateGroup } from "../lib/format";
 import { saveText } from "../lib/download";
 import { buildTurns, liveSegments, newLive, reduceLive, type AssistantTurn, type LiveRun } from "../lib/turns";
 import { useApp } from "../state";
 import { ArtifactPanel } from "../components/ArtifactPanel";
 import { Composer, type ComposerSettings } from "../components/Composer";
+import { FilesCard, producedFiles, type FileHandlers } from "../components/FilesCard";
 import { GpuPlate } from "../components/Queue";
 import { Items } from "../components/Turn";
 import { Lamp, Logo, MenuButton, Modal, Toasts } from "../components/ui";
@@ -29,6 +30,13 @@ type Panel = { kind: "artifact"; id: string; version?: number } | { kind: "files
 function chatFromHash(): string | null {
   const m = location.hash.match(/^#c=([\w-]+)$/);
   return m ? m[1] : null;
+}
+
+function saveUrl(url: string, name: string): void {
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  a.click();
 }
 
 function dataUrlToBlob(url: string): Blob {
@@ -58,6 +66,7 @@ export function PersonApp() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [skills, setSkills] = useState<Skill[]>([]);
   const urls = useRef(new Map<string, string>());
+  const fileUrls = useRef(new Map<string, string>());            // the chat's files, for the cards under answers
   const [, setMediaTick] = useState(0);
   const scroller = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
@@ -72,7 +81,12 @@ export function PersonApp() {
     S.selectDatabase(user.username);
     S.usable().then(setOk);
     setLocalMedia((sha) => urls.current.get(sha));
-    return () => setLocalMedia(null);
+    const made = fileUrls.current;
+    return () => {
+      setLocalMedia(null);
+      for (const u of made.values()) URL.revokeObjectURL(u);
+      made.clear();
+    };
   }, [user.username]);
 
   const loadMedia = useCallback(async (data: S.ChatData) => {
@@ -385,6 +399,29 @@ export function PersonApp() {
     refreshChats();
   };
 
+  // ---- the files an answer made: from this device's store
+  const chatKey = chat?.meta.id ?? "";
+  const fileSrc = useCallback(async (f: ProducedFile): Promise<string | null> => {
+    if (!chatKey) return null;
+    const key = `${chatKey}\n${f.path}\n${f.size}`;
+    const have = fileUrls.current.get(key);
+    if (have) return have;
+    const local = await S.getFile(chatKey, f.path);
+    if (!local) return null;
+    const u = URL.createObjectURL(local.blob);
+    fileUrls.current.set(key, u);
+    return u;
+  }, [chatKey]);
+  const fileHandlers: FileHandlers = {
+    src: fileSrc,
+    download: async (f) => {
+      const u = await fileSrc(f);
+      if (u) saveUrl(u, f.path.split("/").pop() || "file");
+      else toast(`${f.path} is not on this device any more.`, "fault");
+    },
+    open: () => setPanel({ kind: "files" }),
+  };
+
   const loadArtifact = useCallback(async (id: string, version?: number): Promise<Artifact> => {
     const liveOne = liveArtifacts.current.get(id);
     const versions = chat?.data.artifacts[id] ?? [];
@@ -552,6 +589,7 @@ export function PersonApp() {
               ) : (
                 <div className="msg-assistant" key={t.key}>
                   <Items items={t.items} actions={{ openArtifact }} />
+                  {(!t.runId || lastPart.get(t.runId) === i) && <FilesCard files={producedFiles(t.run)} handlers={fileHandlers} />}
                   <TurnFoot turn={t} names={modelNames} canRetry={!busy && t === lastAssistant}
                     stats={!t.runId || lastPart.get(t.runId) === i} onRetry={retry} />
                 </div>

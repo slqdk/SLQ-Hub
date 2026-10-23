@@ -14,6 +14,7 @@ import json
 import mimetypes
 import os
 import shutil
+import stat
 import tempfile
 import time
 from dataclasses import dataclass
@@ -230,6 +231,46 @@ def safe_write(root: Path, p: Path, data: bytes) -> None:
 
 def mime_of(path: str) -> str:
     return mimetypes.guess_type(path)[0] or "application/octet-stream"
+
+
+# ---------------------------------------------------------------- what a turn made
+
+SNAPSHOT_LIMIT = 20_000                  # files; a bigger folder is not compared
+PRODUCED_LIMIT = 50                      # files listed for one answer
+
+
+def snapshot(root: Path, limit: int = SNAPSHOT_LIMIT) -> dict[str, tuple[int, int]] | None:
+    """path -> (size, mtime_ns) of the folder's files, without what sync ignores (.hub, .git, node_modules, ...).
+    None when it has more than `limit` files."""
+    out: dict[str, tuple[int, int]] = {}
+    if not root.is_dir():
+        return out
+    for dirpath, dirs, files in os.walk(root):
+        dirs[:] = [d for d in dirs if d.lower() not in syncstore.IGNORE_DIRS]
+        for name in files:
+            p = Path(dirpath) / name
+            rel = p.relative_to(root).as_posix()
+            if syncstore.ignored(rel):
+                continue
+            try:
+                st = p.lstat()
+            except OSError:
+                continue
+            if not stat.S_ISREG(st.st_mode):              # not a link, a pipe or a socket
+                continue
+            out[rel] = (st.st_size, st.st_mtime_ns)
+            if len(out) > limit:
+                return None
+    return out
+
+
+def produced(before: dict[str, tuple[int, int]], after: dict[str, tuple[int, int]],
+             limit: int = PRODUCED_LIMIT) -> list[dict]:
+    """The files that are new or changed from one snapshot to the next, the last written first."""
+    changed = [(rel, size, mtime, rel not in before) for rel, (size, mtime) in after.items()
+               if before.get(rel) != (size, mtime)]
+    changed.sort(key=lambda c: (-c[2], c[0]))
+    return [{"path": rel, "size": size, "mime": mime_of(rel), "new": new} for rel, size, _, new in changed[:limit]]
 
 
 def is_text(data: bytes) -> bool:

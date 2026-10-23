@@ -2,12 +2,13 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { Copy, Download, FileText, FolderOpen, Menu, MoreHorizontal, Pencil, RotateCcw, Trash2 } from "lucide-react";
 import { api, mediaUrl, type ArtifactRef, type Block, type ChatData, type ChatSettings, type Library, type Message,
-  type RunEvent, type RunRecord, type Settings, type Skill, type Upload } from "../lib/api";
+  type ProducedFile, type RunEvent, type RunRecord, type Settings, type Skill, type Upload } from "../lib/api";
 import { seconds, tokens } from "../lib/format";
 import { linkProps, navigate } from "../lib/router";
 import { buildTurns, liveSegments, newLive, reduceLive, type AssistantTurn, type LiveRun } from "../lib/turns";
 import { useApp } from "../state";
 import { Composer, type ComposerSettings } from "../components/Composer";
+import { FilesCard, producedFiles, type FileHandlers } from "../components/FilesCard";
 import { Items } from "../components/Turn";
 import { copyText, Lamp, MenuButton } from "../components/ui";
 import { download } from "../lib/download";
@@ -46,6 +47,11 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
   const seenArtifacts = useRef(0);
 
   const project = data?.project ?? (projectId ? projects.find((p) => p.id === projectId) ?? null : null);
+  // The folder the assistant works in: the project's, or this chat's own (once the chat exists).
+  const folder: Folder | null = project ? { kind: "project", id: project.id } : chatId ? { kind: "chat", id: chatId } : null;
+  const folderKey = folder ? `${folder.kind}/${folder.id}` : "";
+  const fileSrc = useCallback((f: ProducedFile) => (folderKey ? `/hub/api/folders/${folderKey}/raw?path=${encodeURIComponent(f.path)}`
+    : null), [folderKey]);
 
   useEffect(() => {
     loadSettings().then(setSettings, () => undefined);
@@ -284,9 +290,14 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
   }
 
   const title = data?.chat.title ?? (project ? `New chat in ${project.name}` : "New chat");
-  // The folder the assistant works in: the project's, or this chat's own (once the chat exists).
-  const folder: Folder | null = project ? { kind: "project", id: project.id } : chatId ? { kind: "chat", id: chatId } : null;
   const showFiles = (select?: string) => folder && openPanel({ kind: "files", folder, select, at: Date.now() });
+  const fileHandlers: FileHandlers = {
+    src: fileSrc,
+    download: (f) => download(`${fileSrc(f)}&download=true`, f.path.split("/").pop()),
+    open: (f) => showFiles(f.path),
+    add: (f) => onRefs((r) => (r.includes(f.path) ? r.filter((x) => x !== f.path) : [...r, f.path])),
+    added: (f) => refs.includes(f.path),
+  };
 
   return (
     <div className="main">
@@ -347,6 +358,8 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
             ) : (
               <div className="msg-assistant" key={t.key}>
                 <Items items={t.items} actions={{ openArtifact }} />
+                {folder && (!t.runId || lastPart.get(t.runId) === i) && <FilesCard files={producedFiles(t.run)}
+                  handlers={fileHandlers} />}
                 <TurnFoot turn={t} names={modelNames} canRetry={!running && t === lastAssistant}
                   stats={!t.runId || lastPart.get(t.runId) === i} onRetry={() => retry()} />
               </div>

@@ -110,9 +110,11 @@ export interface Chat { id: number; project_id: number | null; title: string; se
 export interface ChatListItem { id: number; project_id: number | null; title: string; updated_at: string;
   created_at: string; project_name: string | null; running: boolean }
 
+/** A file an answer made or changed in the working folder (a person's: on the device). */
+export interface ProducedFile { path: string; size: number; mime: string; new?: boolean; skipped?: string }
 export interface Step { type: string; step?: number; depth?: number; model?: string; name?: string; ok?: boolean;
   seconds?: number; prompt_tokens?: number | null; completion_tokens?: number | null; cached_tokens?: number | null;
-  tps?: number | null; prompt_tps?: number | null; reason?: string }
+  tps?: number | null; prompt_tps?: number | null; reason?: string; files?: ProducedFile[] }
 export interface RunRecord { id: string; chat_id: number; status: string; model: string; started_at: string;
   ended_at: string | null; steps: Step[]; usage: { prompt_tokens?: number; completion_tokens?: number; cached_tokens?: number };
   error: string | null }

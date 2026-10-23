@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.12.0 - 2026-10-23
+
+- **The files an answer made, in a card under it.** Whatever the assistant
+  made or changed in the working folder - with a tool or a command such as
+  ffmpeg - is listed under its answer: name, folder, size, new or changed.
+  Sounds and videos play right in the card, and pictures show. Open shows the
+  file in the side panel (a PDF opens in the browser's viewer), Download
+  saves it, and Add to chat puts it in your next message. People get the same
+  card, read from their device. From chat 12, where an MP3 was only "in this
+  chat's folder".
+- The Files panel plays sound and video and shows PDFs.
+- The model is told about the card: it names the file instead of pasting it,
+  and removes scratch files it does not mean to hand over.
+
 ## 0.11.2 - 2026-10-23
 
 - **Long chats keep their place on the card.** llama-server is started with

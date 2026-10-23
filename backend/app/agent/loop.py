@@ -700,6 +700,18 @@ class Agent:
         return self.build_messages(chat, engine.project, engine.workdir, engine.model, run, engine.handover_label(),
                                    engine.handed_over_from)
 
+    async def _note_files(self, engine: Engine, wd: projects.Workdir, before: dict) -> None:
+        """The files this turn made or changed in the working folder: a step of the run, shown under the answer."""
+        try:
+            after = await asyncio.to_thread(projects.snapshot, wd.root)
+        except Exception:  # noqa: BLE001
+            log.exception("could not list the folder after the turn")
+            return
+        files = projects.produced(before, after) if after is not None else []
+        if files:
+            engine.steps.append({"type": "files", "files": files})
+            engine.run.emit("files", files=files)
+
     async def _report_position(self, run: Run, holder: dict) -> None:
         last = None
         while True:
@@ -741,12 +753,14 @@ class Agent:
         chat = chats.get_chat(run.chat_id)
         project = projects.get_project(chat["project_id"]) if chat and chat.get("project_id") else None
         status, error, engine, ticket, pos_task = "done", None, None, None, None
+        wd, before = None, None
         try:
             if chat is None:
                 raise RuntimeError("the chat was deleted")
             entry, thinking, effort = self.resolve(chat, project, options)
             chats.run_started(run.id, chat["id"], entry["id"])
             wd = self.workdir(chat)
+            before = await asyncio.to_thread(projects.snapshot, wd.root)     # what the turn makes is shown after it
             escalation = bool(project and project["settings"].get("cloud_escalation")
                               and cloudmod.configured(self.hub.settings))
             mcp = self.hub.extras.get("mcp")
@@ -797,6 +811,8 @@ class Agent:
                     projects.touch_project(project["id"])
                 except Exception:  # noqa: BLE001
                     pass
+            if engine is not None and wd is not None and before is not None:
+                await self._note_files(engine, wd, before)
             try:
                 chats.run_finished(run.id, status, engine.steps if engine else [], engine.usage if engine else {},
                                    error)

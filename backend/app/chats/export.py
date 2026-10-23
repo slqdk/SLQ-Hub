@@ -170,6 +170,11 @@ def transcript(chat: dict, project: dict | None, rows: list[dict], runs: list[di
                     f"tokens {u.get('prompt_tokens', 0)} in ({u.get('cached_tokens', 0)} cached), "
                     f"{u.get('completion_tokens', 0)} out.*")
             out.extend(["", line])
+            made = [f for s in steps if s.get("type") == "files" for f in s.get("files") or []]
+            if made:
+                out.extend(["", "*Files from this turn: " + ", ".join(
+                    f"`{f['path']}` ({'new' if f.get('new', True) else 'changed'}, {f.get('size', 0)} bytes)"
+                    for f in made) + ".*"])
             if r.get("error"):
                 out.extend(["", f"**Error:** {r['error']}"])
         section = None

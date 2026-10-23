@@ -456,6 +456,9 @@ async def run_turn(hub, turn: DeviceTurn, body: dict, rows: list[dict], wd: proj
         except Exception:  # noqa: BLE001
             log.exception("could not list the turn's files")
             turn.outputs = []
+        if engine is not None and turn.outputs:                  # shown under the answer, like the owner's
+            engine.steps.append({"type": "files", "files": [
+                {**f, "new": f["path"] not in turn.inputs} for f in turn.outputs][:projects.PRODUCED_LIMIT]})
         turn.result = {
             "status": status, "error": error, "title": turn.title,
             "messages": [{"role": r["role"], "content": r["content"]} for r in turn.collected],

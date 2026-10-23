@@ -113,8 +113,11 @@ async def raw_file(kind: str, fid: int, path: str, request: Request, download: b
     p = _safe(wd.resolve, path)
     if not p.is_file():
         raise HTTPException(404, "No such file.")
-    return FileResponse(p, media_type=store.mime_of(path), filename=p.name if download else None,
-                        headers={"Content-Security-Policy": "sandbox", "X-Content-Type-Options": "nosniff"})
+    mime = store.mime_of(path)
+    headers = {"X-Content-Type-Options": "nosniff"}
+    if mime != "application/pdf":       # a page made in the folder must not run as the Hub; the PDF viewer needs it off
+        headers["Content-Security-Policy"] = "sandbox"
+    return FileResponse(p, media_type=mime, filename=p.name if download else None, headers=headers)
 
 
 class FileWrite(BaseModel):

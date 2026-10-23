@@ -321,6 +321,14 @@ stopped or crashed turn keeps what it did.
 6. The summary of the condensed part of the chat, if any.
 7. Then the history; tool schemas go in the request's `tools`.
 
+**What a turn leaves behind.** The working folder is listed before and
+after each turn (`projects.snapshot`: size and modification time of every
+file the sync rules do not ignore; folders over 20,000 files are skipped).
+The new and changed files become a `files` step of the run (at most 50), the
+card under the answer; a person's turn records the files it sends to the
+device. The system prompt tells the model about the card, so it names the
+file instead of pasting it and deletes scratch files.
+
 The system prompt holds no clock beyond the date, so llama-server reuses its
 cached prefix from step to step. The time of day goes with each user message
 instead: the history gives every user message the local time it was sent
@@ -626,12 +634,21 @@ running, amber waiting, blue your action is needed (a tool asks), red fault.
   thinking, tool calls as a terminal strip (one row per call, expandable to
   input and output), approvals inline, artifact cards, task lists, a summary
   line per answer, retry and edit-and-resend.
+- **Files from an answer** (0.12.0). A card under the answer lists the files
+  it made or changed in the working folder, newest first, whatever made them
+  (a tool or a command such as ffmpeg). Each file gets its kind, folder, size
+  and "new" or "changed"; sounds and videos play in the card and pictures
+  show. Open puts it in the side panel (a PDF opens in a new tab), Download
+  saves it, and Add to chat puts it in the next message. Over six files, the
+  rest folds away. A person's card reads the files from the device.
 - **Composer.** Attach, paste or drop files, files of the project (or the
   chat's folder) to put in the message, the model, the picture model,
   thinking (off, a little, normal, hard), libraries and extra skills.
 - **Side panel.** Artifacts (sandboxed iframe, versions, source, save to the
   folder) or the folder's files, with a search and a + on each file that
-  puts it in the next message.
+  puts it in the next message. It shows pictures, plays sound and video, and
+  shows PDFs (served without the `sandbox` CSP the other files get, which
+  the browser's PDF viewer cannot run under).
 - **Project page.** Chats, files (tree, CodeMirror editor, upload, history and
   restore per file), settings, revisions, sync devices.
 - **Libraries.** Documents with indexing progress and a search to try.
