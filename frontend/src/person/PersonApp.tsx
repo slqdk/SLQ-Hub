@@ -2,17 +2,20 @@
 // the owner's - models, pictures, thinking, tools, artifacts - with the chats
 // and their files kept on this device. The Hub only answers.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Download, FileText, FolderOpen, KeyRound, LogOut, Menu, MessageSquarePlus, MoreHorizontal, Pencil, Search,
-  Trash2, Upload as UploadIcon, User as UserIcon, X } from "lucide-react";
+import { CircleHelp, Download, FileText, FolderOpen, KeyRound, LogOut, Menu, MessageSquarePlus, MoreHorizontal, Pencil,
+  Search, Trash2, Upload as UploadIcon, User as UserIcon, X } from "lucide-react";
 import { api, setLocalMedia, type Artifact, type ArtifactRef, type Block, type ChatSettings, type Message, type ModelEntry,
   type ProducedFile, type Settings, type Skill, type Upload } from "../lib/api";
 import { bytes, dateGroup } from "../lib/format";
 import { saveText } from "../lib/download";
 import { buildTurns, liveSegments, newLive, reduceLive, type AssistantTurn, type LiveRun } from "../lib/turns";
+import { setDraft as setMessageDraft } from "../lib/draft";
+import type { Example } from "../lib/help";
 import { useApp } from "../state";
 import { ArtifactPanel } from "../components/ArtifactPanel";
 import { Composer, type ComposerSettings } from "../components/Composer";
 import { FilesCard, producedFiles, type FileHandlers } from "../components/FilesCard";
+import { HelpContent } from "../components/Help";
 import { GpuPlate } from "../components/Queue";
 import { Items } from "../components/Turn";
 import { Lamp, Logo, MenuButton, Modal, Toasts } from "../components/ui";
@@ -62,6 +65,7 @@ export function PersonApp() {
   const [saving, setSaving] = useState(false);          // the answer is done; its pictures and files come home
   const liveArtifacts = useRef(new Map<string, Artifact>());
   const [panel, setPanel] = useState<Panel>(null);
+  const [help, setHelp] = useState<string | null>(null);   // the help page's section, instead of the chat
   const [draft, setDraft] = useState<Partial<ChatSettings>>({});
   const [settings, setSettings] = useState<Settings | null>(null);
   const [skills, setSkills] = useState<Skill[]>([]);
@@ -127,6 +131,7 @@ export function PersonApp() {
   }, []);
   const openChat = (id: string | null) => {
     setSidebarOpen(false);
+    setHelp(null);
     setPanel(null);
     setEditing(null);
     if (id) location.hash = `c=${id}`;
@@ -532,6 +537,8 @@ export function PersonApp() {
                 </>
               )}
             </MenuButton>
+            <button className="side-item" onClick={() => { setSidebarOpen(false); setPanel(null); setHelp("chat"); }}
+              aria-current={help !== null ? "page" : undefined}><CircleHelp size={15} /> Help</button>
             <input ref={importInput} type="file" accept="application/json,.json" hidden
               onChange={(e) => { importAll(e.target.files?.[0]); e.target.value = ""; }} />
           </div>
@@ -539,6 +546,25 @@ export function PersonApp() {
         </div>
       </nav>
 
+      {help !== null ? (
+        <div className="main">
+          <div className="topbar">
+            <button className="icon-btn menu-btn" onClick={() => setSidebarOpen(true)} aria-label="Open the menu"><Menu size={18} /></button>
+            <h1>Help</h1>
+            <span className="grow" />
+            <button className="btn quiet small" onClick={() => setHelp(null)}><X size={15} /> Back to the chat</button>
+          </div>
+          <div className="scroll">
+            <div className="page">
+              <HelpContent section={help} onSection={setHelp} onTry={(e: Example) => {
+                setMessageDraft(e.text);
+                openChat(null);
+                if (e.attach) toast(`Attach ${e.attach} with the + under the message box, then send.`, "run");
+              }} />
+            </div>
+          </div>
+        </div>
+      ) : (
       <div className="main">
         <div className="topbar">
           <button className="icon-btn menu-btn" onClick={() => setSidebarOpen(true)} aria-label="Open the menu"><Menu size={18} /></button>
@@ -578,7 +604,8 @@ export function PersonApp() {
               <div className="welcome">
                 <h2>What are we working on?</h2>
                 <p>Ask, attach files or pictures, ask for a picture, or have it build something. Your chats are kept on this
-                  device; the Hub only answers.</p>
+                  device; the Hub only answers.{" "}
+                  <a href="#help" onClick={(e) => { e.preventDefault(); setHelp("chat"); }}>What you can ask for</a></p>
               </div>
             )}
             <div className="messages">
@@ -626,6 +653,7 @@ export function PersonApp() {
           </div>
         </div>
       </div>
+      )}
 
       {panel?.kind === "artifact" && (
         <ArtifactPanel chatId={0} id={panel.id} version={panel.version} loader={loadArtifact} onClose={() => setPanel(null)} />

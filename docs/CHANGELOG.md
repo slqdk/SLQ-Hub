@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.20.0 - 2026-10-25
+
+- **Help.** A new page - Help in the sidebar, or "What you can ask for" on a
+  new chat - with everything you can ask the assistant for, in sections:
+  Chat, Documents and files, Images, Sound and music, Video, Code and
+  programs, Memory and skills, and The Hub. Each part has examples: **Try**
+  puts one in a new chat for you to change and send, and Copy copies it.
+  Search finds anything on the page ("karaoke", "PDF", "video").
+- It shows what works on your Hub right now: a part whose model is not
+  downloaded says which one it needs and where to get it (Open Settings), and
+  its examples wait until it is there. People you have added get the same
+  help in their chats, with what applies to them.
+
 ## 0.19.0 - 2026-10-24
 
 - **Video.** Ask for a video in any chat: from a description ("a red fox runs

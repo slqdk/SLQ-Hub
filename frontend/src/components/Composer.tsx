@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { ArrowUp, BookOpen, Brain, Check, Cpu, FileText, FolderOpen, Image as ImageIcon, Paperclip, Plus, Sparkles, Square,
   X } from "lucide-react";
 import { upload, type ModelEntry, type Skill, type Upload } from "../lib/api";
+import { clearDraft, peekDraft } from "../lib/draft";
 import { bytes } from "../lib/format";
 import { Lamp, MenuButton } from "./ui";
 
@@ -48,7 +49,7 @@ export function Composer({ running, onSend, onStop, settings, onSettings, models
   uploader?: (file: File, name: string) => Promise<Upload>;   // a person's chat keeps attachments on the device
   showLibraries?: boolean;
 }) {
-  const [text, setText] = useState("");
+  const [text, setText] = useState(peekDraft);      // an example from the help page, to change and send
   const [pending, setPending] = useState<Pending[]>([]);
   const [drag, setDrag] = useState(false);
   const [sending, setSending] = useState(false);
@@ -66,6 +67,16 @@ export function Composer({ running, onSend, onStop, settings, onSettings, models
   useEffect(() => {
     if (autoFocus && window.matchMedia("(pointer: fine)").matches) ta.current?.focus();
   }, [autoFocus]);
+
+  useEffect(() => {                                   // the help page's example is here now: put the cursor after it
+    if (!peekDraft()) return;
+    clearDraft();
+    const el = ta.current;
+    if (el) {
+      el.focus();
+      el.setSelectionRange(el.value.length, el.value.length);
+    }
+  }, []);
 
   const add = (files: FileList | File[]) => {
     for (const f of Array.from(files)) {

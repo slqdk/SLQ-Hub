@@ -13,8 +13,8 @@ straight through).
 * everything else - the web app's files.
 
 People (accounts the owner added, role "member") reach only what their chat
-needs (MEMBER_ROUTES): the models, a few settings, the queue, their own
-device turns - not the model API (apps use keys). A person limited to the
+needs (MEMBER_ROUTES): the models, a few settings, the queue, the help page's
+facts, their own device turns - not the model API (apps use keys). A person limited to the
 home network is not signed in at all when the request comes from elsewhere.
 """
 from __future__ import annotations
@@ -30,7 +30,7 @@ from .api.common import Caller
 PATH_KEY = re.compile(r"^/k/(slqhub_[A-Za-z0-9_\-]{10,})(/.*)?$")
 # What a person (role member) may use of the UI API; everything else is the owner's.
 MEMBER_ROUTES = [
-    ({"GET"}, re.compile(r"^/hub/api/(models|settings|skills|events|queue)$")),
+    ({"GET"}, re.compile(r"^/hub/api/(models|settings|skills|events|queue|help)$")),
     ({"POST"}, re.compile(r"^/hub/api/queue/\d+/cancel$")),
     ({"POST"}, re.compile(r"^/hub/api/auth/password$")),
     ({"POST"}, re.compile(r"^/hub/api/device/turns$")),

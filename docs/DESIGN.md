@@ -1285,8 +1285,8 @@ Condensed), and indicator lamps with their IEC 60073 meanings - green
 running, amber waiting, blue your action is needed (a tool asks), red fault.
 
 - **Sidebar.** New chat, search (titles and messages), projects, recent chats
-  by date, libraries, settings, and the GPU plate (what is loaded, slot lamps,
-  queue; it opens the queue).
+  by date, libraries, settings, help, and the GPU plate (what is loaded, slot
+  lamps, queue; it opens the queue).
 - **Chat.** Streaming markdown with code, tables and KaTeX maths, collapsible
   thinking, tool calls as a terminal strip (one row per call, expandable to
   input and output), approvals inline, artifact cards, task lists, a summary
@@ -1343,6 +1343,25 @@ turn - and without a connection it keeps what streamed in and tries again when
 the network is back, when the page is in view again, or after 2-30 s, instead
 of showing the chat as it was before the turn. If the turn is still at work,
 it follows it again from the start of its events.
+
+**Help (0.20.0).** Søren asked for a help section with everything one can ask
+for, with examples, in sections. `/help/<section>` (Help in the sidebar, and
+"What you can ask for" on a new chat): Chat, Documents and files, Images, Sound
+and music, Video, Code and programs, Memory and skills, The Hub. Each item says
+what it is, has example requests - Try puts one in a new chat's message box
+(not sent: the user changes it, attaches what it says, and sends), Copy copies
+it - and the steps or tips that go with it; a search runs over all of it. The
+text is in `frontend/src/lib/help.ts`, each item naming the tools it is about
+(a test fails when a tool is in no item, or an item names a tool that does not
+exist). Whether an item works on this Hub now comes from `GET /hub/api/help`
+(`backend/app/ui/help_routes.py`), with the same checks that decide which tools
+a turn gets: the downloaded picture, sound and video models, the sandbox's
+Windows support, the hand-over model, libraries, MCP servers, the internet
+setting, and for a person her code permission. An item that cannot work says
+what is missing - to the owner where to get it (Open Settings), to a person to
+ask the owner - and its Try is off. A person gets the same page from her
+sidebar, without the owner's items (projects, memory, libraries, Windows
+programs, export) and with hers (chats kept on the device).
 
 **The phone chat page (`/chat`)** is a second, small page for the rest of the
 household: one column, a drawer of chats, and a composer with Picture (the

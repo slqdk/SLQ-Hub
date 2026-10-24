@@ -721,6 +721,35 @@ button.hf-hit:hover:not(:disabled) { background: var(--paper); }
 .job-label { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .job-meta { grid-column: 2 / 3; font-size: 13px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
 
+/* help (0.20.0): sections of things to ask for, each with examples to try */
+.help .lead { margin: 0 0 14px; color: var(--ink-2); max-width: 68ch; }
+.help-search { display: flex; align-items: center; gap: 8px; max-width: 520px; margin: 0 0 18px; }
+.help-search .input { flex: 1; min-width: 0; }
+.help-intro { color: var(--ink-2); margin: 0 0 16px; max-width: 72ch; }
+.help-section-title { font-family: var(--font-plate); font-weight: 600; font-size: 19px; margin: 24px 0 10px; }
+.help-item { border: 1px solid var(--rule); border-radius: 8px; background: var(--sheet); padding: 14px 16px 12px; margin: 0 0 14px; }
+.help-item-head { display: flex; align-items: center; gap: 6px 10px; flex-wrap: wrap; }
+.help-item-head h3 { margin: 0; flex: 1 1 auto; font-family: var(--font-plate); font-weight: 600; font-size: 17px; }
+.help-what { margin: 6px 0 8px; color: var(--ink-2); max-width: 74ch; }
+.help-missing { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 12px; margin: 8px 0 10px; }
+.help-how { margin: 6px 0 6px; padding-left: 20px; font-size: 14.5px; }
+.help-how li { margin: 3px 0; }
+.help-examples { list-style: none; margin: 8px 0 6px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.help-example { display: flex; align-items: center; gap: 10px; padding: 6px 8px 6px 12px; border-radius: 6px; background: var(--paper); border: 1px solid var(--rule-2); }
+.help-example-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.help-prompt { font-size: 14.5px; overflow-wrap: anywhere; }
+.help-prompt::before { content: "\201C"; color: var(--ink-3); }
+.help-prompt::after { content: "\201D"; color: var(--ink-3); }
+.help-attach { display: inline-flex; align-items: center; gap: 4px; font-size: 12.5px; color: var(--ink-3); }
+.help-example-actions { display: flex; align-items: center; gap: 4px; flex: none; }
+.help-tips { list-style: none; margin: 6px 0 2px; padding: 0; font-size: 13.5px; color: var(--ink-2); }
+.help-tips li { margin: 3px 0; max-width: 78ch; }
+.help-tips li::before { content: "Tip: "; font-weight: 600; color: var(--ink); }
+@media (max-width: 640px) {
+  .help-example { flex-direction: column; align-items: stretch; gap: 4px; }
+  .help-example-actions { justify-content: flex-end; }
+}
+
 /* ------------------------------------------------------------ narrow screens */
 @media (max-width: 1100px) {
   .app.with-panel { grid-template-columns: var(--sidebar-w) minmax(0, 1fr); }

@@ -396,7 +396,8 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
               <h2>{project ? project.name : "What are we working on?"}</h2>
               <p>{project
                 ? "This chat works in the project's files. Everything the assistant changes is kept in the project's history."
-                : "Ask, attach files or pictures, ask for a picture, or have it build something. It runs on your own card."}</p>
+                : "Ask, attach files or pictures, ask for a picture, or have it build something. It runs on your own card."}
+                {" "}<a {...linkProps("/help")}>What you can ask for</a></p>
             </div>
           )}
           <div className="messages">

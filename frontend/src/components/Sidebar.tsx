@@ -1,6 +1,6 @@
 // The cabinet-grey rail: new chat, search, projects, recent chats, and the GPU plate.
 import { useEffect, useMemo, useState } from "react";
-import { BookOpen, FolderClosed, MessageSquarePlus, Plus, Search, Settings, X } from "lucide-react";
+import { BookOpen, CircleHelp, FolderClosed, MessageSquarePlus, Plus, Search, Settings, X } from "lucide-react";
 import { api, type ChatListItem } from "../lib/api";
 import { dateGroup } from "../lib/format";
 import { linkProps, navigate, type Route } from "../lib/router";
@@ -117,6 +117,8 @@ export function Sidebar({ route }: { route: Route }) {
               aria-current={route.name === "libraries" ? "page" : undefined}><BookOpen size={15} /> Libraries</a>
             <a className="side-item" {...linkProps("/settings/models")} onClickCapture={close}
               aria-current={route.name === "settings" ? "page" : undefined}><Settings size={15} /> Settings</a>
+            <a className="side-item" {...linkProps("/help")} onClickCapture={close}
+              aria-current={route.name === "help" ? "page" : undefined}><CircleHelp size={15} /> Help</a>
           </div>
           <GpuPlate />
         </div>

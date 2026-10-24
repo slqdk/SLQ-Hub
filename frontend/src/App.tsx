@@ -8,6 +8,7 @@ import { useRoute } from "./lib/router";
 import { useApp } from "./state";
 import { PersonApp } from "./person/PersonApp";
 import { ChatView } from "./views/ChatView";
+import { HelpView } from "./views/HelpView";
 import { LibrariesView } from "./views/LibrariesView";
 import { Login } from "./views/Login";
 import { ProjectView } from "./views/ProjectView";
@@ -63,6 +64,9 @@ export function App() {
       break;
     case "settings":
       main = <SettingsView tab={route.tab} />;
+      break;
+    case "help":
+      main = <HelpView section={route.section} />;
       break;
     default:
       main = <ChatView key="home" {...chat} />;
