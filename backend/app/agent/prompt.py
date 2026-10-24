@@ -102,22 +102,37 @@ duration=longest[out]" -map "[out]" mix.mp3"""
 ONE_PIECE = """
 - One music_generate call makes the whole piece: put every instrument, any solo and the mood in its prompt. \
 Pieces of music made separately do not fit together (their key, tempo and beat differ), so never mix two of them."""
-SOUND_TOOLS = {"speech": "speech_generate", "music": "music_generate", "sound": "sound_generate"}
+# 0.18.0: a song in someone's voice is two steps - ACE-Step's reference clip steers the sound, Seed-VC gives the
+# voice.
+VOICE = """
+- voice_convert gives a recording another voice (from a clip of it): the words, timing and melody stay. For a song \
+sung in a particular person's voice, make the song with music_generate, then convert its singing. Only a voice the \
+user has the right to use."""
+REMAKE = """
+- music_remake re-performs an existing song with another sound - described in its prompt and/or taken from a \
+reference clip (another song, a live recording with its audience and room)."""
+SOUND_TOOLS = {"speech": ("speech_generate",), "music": ("music_generate", "music_remake"),
+               "sound": ("sound_generate",), "voice": ("voice_convert",), "separate": ("audio_separate",)}
 
 
 def sound_text(abilities: list[str]) -> str:
     """The system prompt's sound section for the downloaded sound models ('' when there are none)."""
-    tools = [SOUND_TOOLS[a] for a in abilities if a in SOUND_TOOLS]
+    tools = [t for a in ("speech", "music", "sound", "voice", "separate") if a in abilities for t in SOUND_TOOLS[a]]
     if not tools:
         return ""
     how = []
     if "speech" in abilities:
         how.append("Speech runs on the CPU, slower than real time: several seconds of work per second of speech.")
-    if "music" in abilities or "sound" in abilities:
-        how.append("Music and sound effects run on the GPU: seconds for an effect, a few minutes for a song.")
+    gpu = [w for a, w in (("music", "music"), ("sound", "sound effects"), ("separate", "stems"),
+                          ("voice", "voice conversion")) if a in abilities]
+    if gpu:
+        what = gpu[0] if len(gpu) == 1 else ", ".join(gpu[:-1]) + " and " + gpu[-1]
+        how.append(f"{what[0].upper() + what[1:]} run{'s' if len(gpu) == 1 else ''} on the GPU: seconds for an "
+                   "effect, a few minutes for a song.")
     names = tools[0] if len(tools) == 1 else ", ".join(tools[:-1]) + " and " + tools[-1]
-    return SOUND.format(tools=names, make="makes" if len(tools) == 1 else "make", how=" ".join(how),
-                        music=ONE_PIECE if "music" in abilities else "")
+    extra = (ONE_PIECE if "music" in abilities else "") + (REMAKE if "music" in abilities else "") + \
+        (VOICE if "voice" in abilities else "")
+    return SOUND.format(tools=names, make="makes" if len(tools) == 1 else "make", how=" ".join(how), music=extra)
 
 
 WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")

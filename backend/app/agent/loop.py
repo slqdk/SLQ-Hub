@@ -765,7 +765,8 @@ class Agent:
         skills = self.hub.extras["skills"].chosen(chat, project)
         images = self.hub.extras.get("images")
         audio = self.hub.extras.get("audio")
-        sound = [a for a in ("speech", "music", "sound") if audio and audio.available(a)] if not subagent else []
+        sound = [a for a in ("speech", "music", "sound", "voice", "separate") if audio and audio.available(a)] \
+            if not subagent else []
         if device is not None:                   # a person's chat: their name, no memory, code if allowed
             return system_prompt(user=device.name, model_name=Catalog.label(entry),
                                  folder_text=device_folder_text(wd.sandbox_path, device.code),

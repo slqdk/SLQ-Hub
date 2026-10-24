@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "notes": "Model catalog. File paths are verified against Hugging Face (2026-10-21). 'dest' is relative to the models root (/srv/slq-hub/models on the VM, /models in the containers). Sizes are decimal bytes, used for progress only.",
+  "notes": "Model catalog. File paths are verified against Hugging Face (2026-10-21) - except mel-band-roformer-vocals and seed-vc (0.18.0): their paths come from the projects' own code and their sizes are estimates. 'dest' is relative to the models root (/srv/slq-hub/models on the VM, /models in the containers). Sizes are decimal bytes, used for progress only.",
   "llm": [
     {
       "id": "qwen3.8-27b",
@@ -304,6 +304,41 @@
       "files": [
         {"repo": "Comfy-Org/stable-audio-3", "path": "checkpoints/stable_audio_3_medium.safetensors", "dest": "comfy/checkpoints/stable_audio_3_medium.safetensors", "size": 9222116660, "role": "checkpoint"},
         {"repo": "Comfy-Org/stable-audio-3", "path": "text_encoders/t5gemma_b_b_ul2.safetensors", "dest": "comfy/text_encoders/t5gemma_b_b_ul2.safetensors", "size": 1187264003, "role": "text_encoder"}
+      ]
+    },
+    {
+      "id": "mel-band-roformer-vocals",
+      "name": "Mel-Band RoFormer vocals",
+      "description": "Takes a song apart into its vocals and the accompaniment (stems, karaoke), and lets voice conversion change only the singing. Kimberley Jensen's vocal model, run with ZFTurbo's MIT code; the weights state no licence.",
+      "default": false,
+      "engine": "comfy",
+      "family": "mel-band-roformer",
+      "abilities": ["separate"],
+      "settings": {"config": "configs/KimberleyJensen/config_vocals_mel_band_roformer_kj.yaml"},
+      "files": [
+        {"repo": "KimberleyJSN/melbandroformer", "path": "MelBandRoformer.ckpt", "dest": "comfy/separation/MelBandRoformer.ckpt", "size": 913000000, "role": "separator"}
+      ]
+    },
+    {
+      "id": "seed-vc",
+      "name": "Seed-VC",
+      "description": "Voice conversion: speech or singing in the voice of a 5-30 s clip, keeping the words, the timing and (for singing) the melody - no training. Songs with music also need Mel-Band RoFormer. Seed-VC v1 (GPL-3.0) with whisper-small, NVIDIA BigVGAN and RMVPE.",
+      "default": false,
+      "engine": "comfy",
+      "family": "seed-vc",
+      "abilities": ["voice"],
+      "settings": {"config_singing": "configs/presets/config_dit_mel_seed_uvit_whisper_base_f0_44k.yml", "config_speech": "configs/presets/config_dit_mel_seed_uvit_whisper_small_wavenet.yml", "steps_singing": 40, "steps_speech": 25, "cfg": 0.7},
+      "files": [
+        {"repo": "Plachta/Seed-VC", "path": "DiT_seed_v2_uvit_whisper_base_f0_44k_bigvgan_pruned_ft_ema_v2.pth", "dest": "comfy/seed-vc/DiT_seed_v2_uvit_whisper_base_f0_44k_bigvgan_pruned_ft_ema_v2.pth", "size": 786000000, "role": "dit_singing"},
+        {"repo": "Plachta/Seed-VC", "path": "DiT_seed_v2_uvit_whisper_small_wavenet_bigvgan_pruned.pth", "dest": "comfy/seed-vc/DiT_seed_v2_uvit_whisper_small_wavenet_bigvgan_pruned.pth", "size": 412000000, "role": "dit_speech"},
+        {"repo": "openai/whisper-small", "path": "config.json", "dest": "comfy/seed-vc/whisper-small/config.json", "size": 2000, "role": "whisper"},
+        {"repo": "openai/whisper-small", "path": "preprocessor_config.json", "dest": "comfy/seed-vc/whisper-small/preprocessor_config.json", "size": 185000, "role": "whisper"},
+        {"repo": "openai/whisper-small", "path": "model.safetensors", "dest": "comfy/seed-vc/whisper-small/model.safetensors", "size": 967000000, "role": "whisper"},
+        {"repo": "nvidia/bigvgan_v2_44khz_128band_512x", "path": "config.json", "dest": "comfy/seed-vc/bigvgan_v2_44khz_128band_512x/config.json", "size": 1500, "role": "vocoder_singing"},
+        {"repo": "nvidia/bigvgan_v2_44khz_128band_512x", "path": "bigvgan_generator.pt", "dest": "comfy/seed-vc/bigvgan_v2_44khz_128band_512x/bigvgan_generator.pt", "size": 489000000, "role": "vocoder_singing"},
+        {"repo": "nvidia/bigvgan_v2_22khz_80band_256x", "path": "config.json", "dest": "comfy/seed-vc/bigvgan_v2_22khz_80band_256x/config.json", "size": 1500, "role": "vocoder_speech"},
+        {"repo": "nvidia/bigvgan_v2_22khz_80band_256x", "path": "bigvgan_generator.pt", "dest": "comfy/seed-vc/bigvgan_v2_22khz_80band_256x/bigvgan_generator.pt", "size": 450000000, "role": "vocoder_speech"},
+        {"repo": "lj1995/VoiceConversionWebUI", "path": "rmvpe.pt", "dest": "comfy/seed-vc/rmvpe.pt", "size": 181184272, "role": "rmvpe"}
       ]
     }
   ]

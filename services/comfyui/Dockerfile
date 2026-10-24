@@ -9,6 +9,10 @@ ARG COMFYUI_REF=v0.42.3
 ARG TORCH_INDEX=https://download.pytorch.org/whl/rocm7.14
 ARG TORCH_VERSION=2.14.1
 ARG TORCHVISION_VERSION=0.29.1
+# The code SLQ Hub's own nodes (nodes/slq_audio) load: Seed-VC (voice conversion, GPL-3.0) and ZFTurbo's
+# Music-Source-Separation-Training (its Mel-Band RoFormer, MIT), each at a commit the nodes were written for.
+ARG SEEDVC_REF=51383efd921027683c89e5348211d93ff12ac2a8
+ARG MSST_REF=6fdad13686bb7e84d029ec66f9dbe76e65c93ebf
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
@@ -37,6 +41,26 @@ RUN cd /opt/ComfyUI \
     && grep -viE '^(torch|torchvision|torchaudio)([<>=~! ;]|$)' requirements.txt > /tmp/requirements.txt \
     && pip install -r /tmp/requirements.txt \
     && python -c "import torch; print('torch', torch.__version__, 'hip', torch.version.hip)"
+
+# What the nodes import beyond ComfyUI's own requirements, at the versions they were tested with (librosa: mel
+# filters for both; munch and matplotlib: Seed-VC's modules; beartype and rotary-embedding-torch: the RoFormer).
+RUN pip install "librosa==1.0.0" "munch==4.0.0" "matplotlib==3.11.2" "beartype==0.23.1" \
+        "rotary-embedding-torch==0.9.1"
+
+# Fetched by commit, without history; Seed-VC's examples are not needed (its speaker encoder weights,
+# campplus_cn_common.bin, are, and stay).
+RUN git init -q /opt/seed-vc \
+    && git -C /opt/seed-vc fetch -q --depth 1 https://github.com/Plachtaa/seed-vc "${SEEDVC_REF}" \
+    && git -C /opt/seed-vc checkout -q FETCH_HEAD \
+    && rm -rf /opt/seed-vc/.git /opt/seed-vc/examples /opt/seed-vc/assets \
+    && test -f /opt/seed-vc/campplus_cn_common.bin \
+    && git init -q /opt/msst \
+    && git -C /opt/msst fetch -q --depth 1 https://github.com/ZFTurbo/Music-Source-Separation-Training "${MSST_REF}" \
+    && git -C /opt/msst checkout -q FETCH_HEAD \
+    && rm -rf /opt/msst/.git \
+    && test -f /opt/msst/models/bs_roformer/mel_band_roformer.py
+
+COPY nodes/slq_audio /opt/ComfyUI/custom_nodes/slq_audio
 
 # The image's default "ubuntu" user is uid 1000 - the same uid owns the
 # mounted folders on the VM.

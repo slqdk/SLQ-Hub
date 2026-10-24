@@ -74,7 +74,7 @@ async def test_the_sound_models_are_in_the_catalog_and_download(signed_in, app):
     r = await signed_in.get("/hub/api/models")
     audio = {m["id"]: m for m in r.json()["audio"]}
     assert list(audio) == ["roest-v3-turbo", "roest-v3", "chatterbox-multilingual-v3", "ace-step-1.5-xl-turbo",
-                           "ace-step-1.5-turbo", "stable-audio-3-medium"]
+                           "ace-step-1.5-turbo", "stable-audio-3-medium", "mel-band-roformer-vocals", "seed-vc"]
     assert not any(m["installed"] for m in audio.values())
     assert {m["engine"] for m in audio.values()} == {"speech", "comfy"}
     r = await signed_in.post("/hub/api/models/roest-v3/download")
@@ -131,8 +131,15 @@ def test_the_sound_section_of_the_system_prompt():
     assert ('ffmpeg -i music.mp3 -i voice.mp3 -filter_complex "[0:a]volume=0.3[bg];[bg][1:a]amix=inputs=2:'
             'duration=longest[out]" -map "[out]" mix.mp3') in one
     every = sound_text(["speech", "music", "sound"])
-    assert "speech_generate, music_generate and sound_generate make audio files" in every
+    assert "speech_generate, music_generate, music_remake and sound_generate make audio files" in every
     assert "never mix two of them" in every and "a few minutes for a song" in every
+    assert "music_remake re-performs an existing song" in every and "voice_convert" not in every
+    # 0.18.0: stems and other voices, with the two steps to a song in someone's voice
+    full = sound_text(["speech", "music", "sound", "voice", "separate"])
+    assert "music_generate, music_remake, sound_generate, voice_convert and audio_separate make" in full
+    assert "Music, sound effects, stems and voice conversion run on the GPU" in full
+    assert "make the song with music_generate, then convert its singing" in full
+    assert "Only a voice the user has the right to use" in full
 
 
 # ---------------------------------------------------------------- speech

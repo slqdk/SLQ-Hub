@@ -1,0 +1,3 @@
+# Build context of the ComfyUI image: no Python caches from a checkout that ran the nodes.
+**/__pycache__
+**/*.pyc

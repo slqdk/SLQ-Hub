@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.18.0 - 2026-10-24
+
+- **Another voice on a recording.** Attach a song or a recording and a 5-30 s
+  clip of a voice, and the assistant makes it sound as if that person sang or
+  spoke it (`voice_convert`, Seed-VC): the words, timing and melody stay. In
+  a song the vocals are separated from the music, converted and mixed back;
+  a clip cut from another song works as the voice. The melody moves by whole
+  octaves to fit the voice (a man's song in a woman's voice goes up an octave
+  and stays in key), or by the semitones you ask for.
+- **Re-make a song in another sound.** `music_remake` re-performs a song with
+  its melody, rhythm and structure - in a style you describe and/or the sound
+  of a clip from another song: a live recording's audience, room, reverb and
+  feel. Give the lyrics to keep the words; `keep` stays closer to the
+  original recording.
+- **Songs that take on a clip's sound.** `music_generate` takes a reference
+  clip - a singer, another song's sound. It steers the sound; for a song in a
+  particular person's voice, make the song and then convert its singing.
+- **Stems.** `audio_separate` gives a song's vocals and its accompaniment
+  (karaoke, remixes, an a cappella).
+- Two new models under Settings → Models → Sound, music and speech: Mel-Band
+  RoFormer vocals and Seed-VC (not downloaded by default). The ComfyUI image
+  gets the Hub's own nodes for this, so the update rebuilds it (a few minutes
+  longer than usual).
+
 ## 0.17.0 - 2026-10-24
 
 - **Models in your own order.** Settings → Models has arrows on each language

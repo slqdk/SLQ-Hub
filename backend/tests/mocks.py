@@ -246,6 +246,14 @@ def silent_mp3(seconds: float = 1.0) -> bytes:
     return frame * max(1, round(seconds * 44100 / 1152))
 
 
+def fake_flac(seconds: float, rate: int = 44100, channels: int = 2) -> bytes:
+    """The start of a FLAC file - its marker and STREAMINFO block - for so many seconds: all the Hub reads of the
+    files ffmpeg makes for ComfyUI (ComfyUI decodes them, the Hub never does)."""
+    info = (rate << 44) | ((channels - 1) << 41) | (15 << 36) | int(seconds * rate)
+    streaminfo = (4096).to_bytes(2, "big") * 2 + bytes(6) + info.to_bytes(8, "big") + bytes(16)
+    return b"fLaC" + b"\x80" + len(streaminfo).to_bytes(3, "big") + streaminfo
+
+
 def wav_tone(seconds: float = 1.0, hz: float = 330.0, rate: int = 24000) -> bytes:
     import io
     import math
@@ -281,12 +289,22 @@ AUDIO_SAVERS = ("SaveAudio", "SaveAudioMP3", "SaveAudioOpus", "SaveAudioAdvanced
 
 
 def _saved_audio(graph: dict, pid: str) -> tuple[str, str] | None:
-    """(node id, file name) when a graph saves sound, as ComfyUI names it under output/audio/."""
+    """(node id, file name) of the first node that saves sound."""
+    every = _saved_audios(graph, pid)
+    return every[0] if every else None
+
+
+def _saved_audios(graph: dict, pid: str) -> list[tuple[str, str]]:
+    """(node id, file name) for each node that saves sound, named as ComfyUI names them under output/audio/: the
+    filename_prefix's last part, a counter, the format (hub-vocals_00001.mp3)."""
+    out = []
     for node_id, node in graph.items():
         if node.get("class_type") in AUDIO_SAVERS:
-            fmt = (node.get("inputs") or {}).get("format") or "flac"
-            return node_id, f"{pid}_00001_.{fmt}"
-    return None
+            inputs = node.get("inputs") or {}
+            fmt = inputs.get("format") or "flac"
+            stem = str(inputs.get("filename_prefix") or pid).rsplit("/", 1)[-1]
+            out.append((node_id, f"{stem}_{int(pid[1:]) if pid[1:].isdigit() else 1:05}.{fmt}"))
+    return out
 
 
 def make_comfy(state: dict) -> FastAPI:
@@ -310,7 +328,9 @@ def make_comfy(state: dict) -> FastAPI:
                  "ImageScaleToTotalPixels", "VAEEncode", "ReferenceLatent", "GetImageSize", "TextGenerate",
                  "PreviewAny", "ModelSamplingAuraFlow", "EmptySD3LatentImage", "T5TokenizerOptions", "BasicScheduler",
                  "CheckpointLoaderSimple", "CLIPSetLastLayer", "DualCLIPLoader", "TextEncodeAceStepAudio1.5",
-                 "EmptyAceStep1.5LatentAudio", "VAEDecodeAudio", "SaveAudioAdvanced", "EmptyLatentAudio", "LoadAudio"]
+                 "EmptyAceStep1.5LatentAudio", "VAEDecodeAudio", "SaveAudioAdvanced", "EmptyLatentAudio", "LoadAudio",
+                 "VAEEncodeAudio", "AudioMerge", "SLQAceStepReference", "SLQAceStepEncode", "SLQSeparateVocals",
+                 "SLQSeedVC"]
         names = [n for n in names if n not in state.get("missing_nodes", ())]
         return {n: {"input": {}, "output": []} for n in names}
 
@@ -338,11 +358,14 @@ def make_comfy(state: dict) -> FastAPI:
         body = await request.json()
         state["prompts"].append(body["prompt"])
         pid = f"p{len(state['prompts'])}"
-        sound = _saved_audio(body["prompt"], pid)
-        if state.get("files"):                                # and the picture (or sound) into its output folder
-            out = state["files"] / "output" / ("audio" if sound else "")
+        sounds = _saved_audios(body["prompt"], pid)
+        if state.get("files"):                                # and the pictures (or sounds) into its output folder
+            out = state["files"] / "output" / ("audio" if sounds else "")
             out.mkdir(parents=True, exist_ok=True)
-            (out / (sound[1] if sound else f"{pid}.png")).write_bytes(silent_mp3(1) if sound else PNG_1x1)
+            for _, name in sounds:
+                (out / name).write_bytes(silent_mp3(1))
+            if not sounds:
+                (out / f"{pid}.png").write_bytes(PNG_1x1)
         return {"prompt_id": pid, "number": len(state["prompts"]), "node_errors": {}}
 
     @app.post("/history")
@@ -353,12 +376,20 @@ def make_comfy(state: dict) -> FastAPI:
     @app.get("/history/{pid}")
     async def history(pid: str):
         graph = state["prompts"][int(pid[1:]) - 1] if pid[1:].isdigit() and int(pid[1:]) <= len(state["prompts"]) else {}
-        sound = _saved_audio(graph, pid)
-        outputs = {sound[0]: {"audio": [{"filename": sound[1], "subfolder": "audio", "type": "output"}]}} if sound \
-            else {"9": {"images": [{"filename": f"{pid}.png", "subfolder": "", "type": "output"}]}}
+        sounds = _saved_audios(graph, pid)
+        outputs = {node: {"audio": [{"filename": name, "subfolder": "audio", "type": "output"}]}
+                   for node, name in sounds} if sounds else \
+            {"9": {"images": [{"filename": f"{pid}.png", "subfolder": "", "type": "output"}]}}
         for node_id, node in graph.items():                   # PreviewAny shows the text it was given
             if node.get("class_type") == "PreviewAny":
                 outputs[node_id] = {"text": [state.get("preview_text", "An enhanced, detailed prompt.")]}
+            if node.get("class_type") == "SLQSeedVC":         # what the conversion did, as the node reports it
+                outputs[node_id] = {"text": [state.get("vc_text", json.dumps(
+                    {"semitones": 12, "reference_seconds": 18.5, "seconds": 61.0, "rate": 44100}))]}
+        if state.get("fail_with"):
+            return {pid: {"status": {"status_str": "error", "completed": False, "messages": [
+                ["execution_error", {"node_type": "SLQSeedVC", "exception_message": state["fail_with"]}]]},
+                "outputs": {}}}
         return {pid: {"status": {"status_str": "success", "completed": True, "messages": []}, "outputs": outputs}}
 
     @app.get("/view")

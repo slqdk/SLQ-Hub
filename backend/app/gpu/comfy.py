@@ -93,8 +93,10 @@ class Comfy:
             pass
 
     async def upload_image(self, data: bytes, filename: str, mime: str = "image/png") -> str:
+        """A file into ComfyUI's input folder - a picture, or sound for LoadAudio (ComfyUI takes both at
+        /upload/image)."""
         try:
-            async with self.client(60) as c:
+            async with self.client(300) as c:
                 r = await c.post(self.url + "/upload/image", files={"image": (filename, data, mime)},
                                  data={"overwrite": "true", "type": "input"})
         except httpx.HTTPError as exc:

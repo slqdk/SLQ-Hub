@@ -941,8 +941,10 @@ restore, and the sync devices.
 
 ### Sound (0.13.0)
 
-Three tools make one audio file each in the working folder, and the card under
-the answer plays it (`backend/app/audio/`, `backend/app/agent/tools/audio.py`).
+The sound tools make audio files in the working folder, and the card under the
+answer plays them (`backend/app/audio/`, `backend/app/agent/tools/audio.py`):
+speech, music and sound effects below, and since 0.18.0 remakes, stems and
+other voices ("Voices and remakes").
 A tool is offered only when a model for it is downloaded, never in subagents;
 its description is built per turn from the downloaded models (voices, languages,
 routing), and the system prompt says what each costs.
@@ -1057,6 +1059,115 @@ routing), and the system prompt says what each costs.
   in the folder or a sandbox path) or a folder. In a person's chat a file must
   fit the 25 MB a device turn sends back: a FLAC over 120 s is refused before
   the card works on it, and a result too big says so.
+
+### Voices and remakes (0.18.0)
+
+Søren asked for a voice from a short clip of someone talking or singing - in
+a song or a clip - and for a song made to sound like a clip of another song
+(its audience if live, feel, reverb), re-made in its style. Three tools and one
+option, all on the card through ComfyUI and the queue, with four nodes of the
+Hub's own (`services/comfyui/nodes/slq_audio`, installed by the ComfyUI image):
+
+- **A song with a clip's sound** (`music_generate` with `reference`).
+  ACE-Step 1.5 has a timbre encoder for a reference recording, apart from the
+  source it covers. ComfyUI v0.42.3's `ReferenceTimbreAudio` gives the model
+  one latent for both: the reference is heard and also becomes the structure
+  (cover mode) - for a short clip under a new song, the song would follow the
+  clip for its length and silence after it. `SLQAceStepReference` patches the
+  model (a `model_function_wrapper`, per graph): the clip, VAE-encoded and cut
+  to 750 frames (30 s), reaches only the timbre encoder (`refer_audio`), while
+  the planner's audio codes stay the structure. Honest limit: ACE-Step learnt
+  the reference from other parts of the same song, so a clip steers the sound
+  - instruments, production, a singer's timbre - and does not clone a
+  person's voice; the tool says so and points to `voice_convert`.
+- **A remake** (`music_remake`). The song (at most 5 minutes) is VAE-encoded
+  once and used twice: `SLQAceStepReference` turns it into ACE-Step's own
+  semantic codes (5 a second, the model's tokenizer) - the melody, rhythm and
+  structure - with `is_covers`, and a style clip as the timbre; the sampler
+  starts from noise (`keep` 0) or from the song itself (`keep` up to 0.9,
+  denoise 1 − keep: more of the recording survives, less of the new style).
+  `SLQAceStepEncode` is the text encoder without the planner (the codes come
+  from the song) and leaves an unknown bpm, key or time signature as `N/A`
+  instead of guessing. The model hears the clip, the assistant does not: the
+  prompt describes what the user says it sounds like. Without lyrics the
+  words are not kept, and the result says so. The codes: the tokenizer's FSQ
+  index is a sum of digits times up to 12,800, and in bfloat16 (8 significant
+  bits) it lands on the wrong code or past the codebook's end - measured with
+  the real tokenizer code: 0 % of bf16 indices matched float32, the largest
+  past 64,000. ComfyUI's own cover mode uses the quantized values, never the
+  index, so it does not meet this; the node runs the FSQ step in float32
+  (100 % equal to the tokenizer's float32 output).
+- **Stems** (`audio_separate`): vocals and accompaniment, for karaoke,
+  remixes, or one part alone. `SLQSeparateVocals` runs Kimberley Jensen's
+  Mel-Band RoFormer vocal model (SDR 10.98 on MVSEP's multisong set, the one
+  UVR and ComfyUI users use) with ZFTurbo's MSST code at a pinned commit:
+  8-s chunks at 44.1 kHz stereo, overlap 2, linear fades, summed and divided
+  by the windows (MSST's `demix`; with an identity model it gives back its
+  input exactly at every length); the accompaniment is the mix minus the
+  vocals. MSST's class has the same 684 tensors as Kim's original code, and
+  gives the same output within 2·10⁻⁴ (MSST zeroes the DC bin). Up to 10
+  minutes. MSST imports the model as `models.bs_roformer`, and ComfyUI's
+  models folder would answer to `models`, so the node loads the two files under
+  private module names (the one import line rewritten when loaded, checked to
+  be there).
+- **Another voice** (`voice_convert`): Seed-VC v1 - zero-shot, no training -
+  in `SLQSeedVC`, a port of its `inference.py`. Singing uses the F0 model
+  (44.1 kHz, `seed-uvit-whisper-base`, RMVPE for the melody), speech the
+  22.05 kHz `whisper-small-wavenet` model; whisper-small hears the content,
+  CAMPPlus (the weights in Seed-VC's repository) the speaker's style, BigVGAN
+  makes the sound; chunks of 30 s of context with the reference as prompt,
+  crossfaded over 16 frames, as upstream. Changes: no torchaudio (ComfyUI's
+  image has none and no torchaudio exists for torch 2.14): ComfyUI's
+  resampler and a port of TorchAudio's Kaldi filterbank (identical output on
+  three lengths); the reference trimmed to its voiced parts, then 25 s (a
+  clip of a song's separated vocals is half silence); an automatic pitch
+  shift by whole octaves only (`auto_octave`: a man's song in a woman's voice
+  goes up an octave and stays in the key of the music it goes back into),
+  plus `pitch` in semitones; the output as loud as the source's vocals.
+  With music (default for singing) the song and the voice clip are both
+  separated first, the converted vocals added back onto the accompaniment
+  (`AudioMerge`, normalised only if it would clip), and `vocals_only` saves
+  them alone too. The node reports the shift and the voiced seconds it heard
+  (JSON text in the job's history) and the result says them. A song in
+  someone's voice is two steps: `music_generate`, then `voice_convert` -
+  the system prompt says so. Only a voice the user has the right to use.
+- **Inputs.** ffmpeg in the sandbox (confined in a person's chat; local files
+  only) converts the user's file to 44.1 kHz stereo FLAC - the first 30 s of a
+  clip, 5 minutes of a song to remake, 10 minutes to separate or convert -
+  and ffprobe's length lets the result say "only the first 5:00 of the song
+  (6:40) were used". The Hub reads only the FLAC's STREAMINFO block (its
+  length); ComfyUI decodes it. The copies go to ComfyUI's input folder and
+  are deleted after the job in every chat, the owner's too (a song is tens of
+  MB); in a person's chat the outputs and history go as before.
+- **Models.** `mel-band-roformer-vocals` (ability `separate`) and `seed-vc`
+  (ability `voice`: both Seed-VC models, whisper-small's folder, the two
+  BigVGAN folders, RMVPE) in the catalog, under ComfyUI's models folder; the
+  configs come from the checkouts in the image (catalog `settings`). Their
+  paths are the ones the projects' own code downloads; this session could not
+  reach Hugging Face, so the sizes are estimates (progress only). The nodes
+  take paths inside the models folder itself (`separation/...`, never outside
+  it), not a loader's folder type.
+- **The image.** `services/comfyui/Dockerfile` fetches Seed-VC
+  (`SEEDVC_REF`) and MSST (`MSST_REF`) by commit, without history, installs
+  librosa, munch, matplotlib, beartype and rotary-embedding-torch at the
+  versions tested, and copies the node package. The heavy imports happen when
+  a node runs, so a problem there fails that job with its reason instead of
+  keeping ComfyUI from starting; a ComfyUI image older than the Hub is named
+  as such ("update.sh rebuilds it"). The nodes load their models per job and
+  hand the card back at the end (ComfyUI's own models are unloaded first).
+- **Licences.** Seed-VC and ComfyUI are GPL-3.0, so the node package is
+  GPL-3.0; it runs only inside the ComfyUI container, and the Hub talks to
+  ComfyUI over HTTP. MSST is MIT; Kim's weights state no licence; ACE-Step is
+  MIT; whisper-small and BigVGAN v2 are MIT; RMVPE is the file RVC's project distributes.
+- **Checked here** (DESIGN §13, HANDOFF): ComfyUI v0.42.3 on CPU with torch
+  2.14.1 (conda-forge) and random-weight stand-ins built from the real
+  architectures (a small ACE-Step 1.5 DiT, a full-size ACE 1.5 VAE, small
+  RoFormer and Seed-VC parts, a random RMVPE): every new graph ran end to end
+  with the files and durations it should, a 75-s conversion in four chunks
+  included; and what reaches ACE-Step's forward in each mode (timbre only:
+  the clip and the planner's codes; cover: the song's codes, `is_covers`, the
+  clip). Not checked: anything with the real weights - the sound, the time
+  and memory on the card.
 
 ---
 
@@ -1391,6 +1502,18 @@ has them now - a song, a mix, a script that failed - newest turn first, up to
   after seven days of use without a visit to it - except for a page added to
   the home screen, which is what to do on an iPhone. Export all chats is the
   backup.
+- **Voices and remakes** (0.18.0, §8) ran only on a CPU ComfyUI with
+  random-weight stand-ins. With the real weights nobody has heard them: how
+  much of a voice a reference clip gives a song (ACE-Step learnt references
+  from other parts of the same song - a speech clip is outside that), how
+  well a remake keeps the song with a style clip, how clean Mel-Band RoFormer
+  vocals are on the household's music, whether Seed-VC keeps the words and the
+  tune, and the time and VRAM of each on the 7900 XTX. The Seed-VC and Kim
+  checkpoints load with `weights_only` (tensors only): if one needs more, it
+  fails with its name and the reason. The catalog's paths for them were not
+  checked against Hugging Face from here. Seed-VC (April 2025) and its
+  dependencies are pinned; MSST is pinned to the commit the node was written
+  against (its import line is checked when loaded).
 
 ---
 

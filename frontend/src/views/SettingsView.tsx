@@ -205,7 +205,7 @@ function ModelsTab({ s }: { s: S }) {
         </>} />
       {!!models.audio?.length && <ModelGroup title="Sound, music and speech" items={models.audio} busy={busy}
         onDownload={download} onCancel={cancel}
-        note="Speech runs on the CPU, so the chat model stays loaded; music and sound effects run on the card through ComfyUI. Once one is downloaded, ask for it in any chat."
+        note="Speech runs on the CPU, so the chat model stays loaded; music, sound effects, stems and other voices run on the card through ComfyUI. Once one is downloaded, ask for it in any chat - with a sound file attached for a remake, stems or another voice."
         extra={(m) => <span className="tag">{m.engine === "speech" ? "CPU" : "GPU"}</span>} />}
       {advanced && <ModelSettings model={advanced} thinkingInChats={!!s.data?.settings.agent?.thinking_in_chats}
         onClose={() => setAdvanced(null)} onSaved={() => { setAdvanced(null); refreshModels(); }} />}
@@ -1206,7 +1206,7 @@ function AgentTab({ s }: { s: S }) {
       ]} />
       {soundModels.length > 0 && <SectionForm s={s} section="sound" title="Sound" fields={[
         { key: "music_model", label: "Model for music", type: "select", options: soundOptions("music"),
-          help: "Songs and instrumentals (music_generate). The assistant can still use another downloaded model if you name it." },
+          help: "Songs, instrumentals and remakes (music_generate, music_remake). The assistant can still use another downloaded model if you name it." },
         { key: "sound_model", label: "Model for sound effects", type: "select", options: soundOptions("sound") },
         { key: "speech_model_da", label: "Voice model for Danish", type: "select", options: soundOptions("speech", "da"),
           help: "Røst v3 Turbo is the faster; in this Hub's listening test it also sounded best. Chatterbox speaks Danish " +
