@@ -61,6 +61,7 @@ def family_sampling(architecture: str | None) -> dict | None:
 # (ComfyUI) and speech (the speech service).
 GROUPS = ("llm", "aux", "comfy", "audio")
 RENAMABLE = ("llm", "comfy")             # what chats show by name: the chat models and the picture models
+ORDERABLE = RENAMABLE                    # ... and in the owner's order (0.17.0)
 MAX_NAME = 60
 EDITABLE_SERVER_KEYS = {"ctx", "parallel", "kv_unified", "cache_type", "gpu_layers", "flash_attn",
                         "cache_ram_mib", "extra"}
@@ -134,6 +135,12 @@ class Catalog:
                 if isinstance(name, str) and name.strip() and not entry.get("custom"):
                     entry["name_card"] = entry["name"]
                     entry["name"] = name.strip()[:MAX_NAME]
+        order = over.get("order") if isinstance(over.get("order"), dict) else {}
+        for group in ORDERABLE:                                   # the owner's order; the rest after, as before
+            rank = {mid: n for n, mid in enumerate(i for i in order.get(group) or [] if isinstance(i, str))}
+            if rank:
+                items = list(enumerate(data.get(group, [])))
+                data[group] = [e for _, e in sorted(items, key=lambda p: (rank.get(p[1]["id"], len(rank)), p[0]))]
         return data
 
     def _architecture(self, entry: dict) -> str | None:
@@ -219,6 +226,29 @@ class Catalog:
         self.reload()
         return self.get(group, model_id) or {}
 
+    def set_order(self, group: str, ids: list) -> list[dict]:
+        """The owner's order for the chat models (llm) or the picture models (comfy), from Settings -> Models: the
+        chat's model choices, Settings and the phone page list them so. Models it does not name come after the
+        ones it does, in the catalog's order - a model added later goes last."""
+        if group not in ORDERABLE:
+            raise ValueError(f"only {' and '.join(ORDERABLE)} models have an order")
+        if not isinstance(ids, list) or not all(isinstance(i, str) for i in ids):
+            raise ValueError("ids must be a list of model ids")
+        if len(set(ids)) != len(ids):
+            raise ValueError("a model is named twice")
+        with self._lock:
+            known = {e["id"] for e in self._data.get(group, [])}
+            unknown = next((i for i in ids if i not in known), None)
+            if unknown is not None:
+                raise KeyError(unknown)
+            over = self._read(self.override_path)
+            order = over.get("order") if isinstance(over.get("order"), dict) else {}
+            order[group] = ids
+            over["order"] = order
+            self._write(self.override_path, over)
+        self.reload()
+        return self.entries(group)
+
     def add_custom(self, entry: dict, group: str = "llm") -> dict:
         """Add a language model from Hugging Face (hf.make_entry) or, with
         group "comfy", an SDXL picture model from a link (sources.make_entry)."""
@@ -259,8 +289,14 @@ class Catalog:
                 raise KeyError(model_id)
             self._write(self.custom_path, data)
             over = self._read(self.override_path)
-            if model_id in (over.get("llm") or {}):
+            changed = model_id in (over.get("llm") or {})
+            if changed:
                 del over["llm"][model_id]
+            for ids in (over.get("order") or {}).values() if isinstance(over.get("order"), dict) else ():
+                if isinstance(ids, list) and model_id in ids:
+                    ids.remove(model_id)
+                    changed = True
+            if changed:
                 self._write(self.override_path, over)
         self.reload()
         return gone

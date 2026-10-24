@@ -260,6 +260,16 @@ prompt, who takes over, the image tools' model lists) say both,
 about the model still applies. Sound and helper models keep their names (texts
 and descriptions refer to Røst and Chatterbox by name).
 
+**Order (0.17.0).** Settings → Models has arrows on each chat and picture model;
+the owner's order is stored in `data/models.override.json` (`order`: `llm`,
+`comfy`, lists of ids) and applied when the catalog loads, so everything that
+lists models follows it - the composer's model and picture menus, Settings,
+people's chats, and `/v1/models` and `/api/tags` (the phone page's list).
+Models the order does not name come after the ones it does, in the catalog's
+order (bundled, then added), so one added later goes last; a removed one
+leaves the order. `PUT /hub/api/models/order` (`group`, `ids`), the owner's
+only.
+
 Sampling comes from the model cards. Qwen3.8 with thinking: temperature 1.0,
 top_p 0.95, top_k 20. Without thinking: 0.7 / 0.8 / 20, presence penalty 1.5.
 Models added from Hugging Face have no card values; those of the Qwen3 family
@@ -1104,8 +1114,8 @@ running, amber waiting, blue your action is needed (a tool asks), red fault.
   restore per file), settings, revisions, sync devices.
 - **Libraries.** Documents with indexing progress and a search to try.
 
-Settings: models (download with progress, load, free the GPU, rename, server
-parameters; the sound models in their own group, each marked CPU or GPU),
+Settings: models (download with progress, load, free the GPU, rename, order,
+server parameters; the sound models in their own group, each marked CPU or GPU),
 queue, apps and keys (with connection examples and CORS), assistant (agent,
 libraries, web, sandbox, images, sound: the model for music, for sound effects,
 the voice models for Danish and for other languages, and the last speech

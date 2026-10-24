@@ -207,6 +207,8 @@ a { color: var(--act); text-decoration-thickness: 1px; text-underline-offset: 2p
 }
 .icon-btn:hover { background: var(--rule-2); color: var(--ink); }
 .icon-btn.small { width: 26px; height: 26px; }
+.model-order { gap: 0; }
+.model-order .icon-btn:disabled { opacity: .35; cursor: default; background: transparent; }
 .icon-btn[aria-pressed="true"] { color: var(--act); background: var(--act-wash); }
 /* An icon button asking "Delete?" grows to fit the question. */
 .icon-btn.armed { width: auto; padding: 0 9px; white-space: nowrap; font-size: 13px; font-weight: 600; color: var(--fault); background: var(--fault-wash); }

@@ -392,6 +392,22 @@ class ModelPatch(BaseModel):
     thinking_mode: str | None = None     # follow | on | off
 
 
+class ModelOrder(BaseModel):
+    group: str = "llm"                   # llm: the chat models; comfy: the picture models
+    ids: list[str]
+
+
+@router.put("/hub/api/models/order")    # before /hub/api/models/{model_id}, which would take "order" for an id
+async def order_models(body: ModelOrder, request: Request):
+    """The owner's order for a group of models: Settings, the chat's model choices and the phone page follow it."""
+    try:
+        return {body.group: get_hub(request).catalog.set_order(body.group, body.ids)}
+    except KeyError as exc:
+        raise HTTPException(404, f"No such model: {exc.args[0]}")
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
 @router.put("/hub/api/models/{model_id}")
 async def update_model(model_id: str, body: ModelPatch, request: Request):
     hub = get_hub(request)

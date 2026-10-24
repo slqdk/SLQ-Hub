@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.17.0 - 2026-10-24
+
+- **Models in your own order.** Settings → Models has arrows on each language
+  and picture model: move them up or down, and the chat's model menu (and
+  the picture menu, people's chats and the phone page) lists them in that
+  order. A model added later goes last.
+
 ## 0.16.2 - 2026-10-24
 
 - **A tool call cut off at the end of the context no longer breaks the chat.**

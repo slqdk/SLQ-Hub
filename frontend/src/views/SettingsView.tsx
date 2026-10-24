@@ -1,6 +1,6 @@
 // Settings: models, the queue, apps and keys, the agent, skills, memory, MCP, cloud, system.
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Copy, Download, Menu, Plus, RefreshCw, Upload as UploadIcon, X } from "lucide-react";
+import { ChevronDown, ChevronUp, Copy, Download, Menu, Plus, RefreshCw, Upload as UploadIcon, X } from "lucide-react";
 import { api, type ApiKey, type Person, type HFLookup, type HFSearchHit, type ImageLookup, type McpServerConfig, type McpStatus,
   type MemoryFile, type ModelEntry, type Sampling, type SdxlChoices, type SdxlSettings, type Settings, type Skill } from "../lib/api";
 import { ago, bytes, residencyName } from "../lib/format";
@@ -151,6 +151,12 @@ function ModelsTab({ s }: { s: S }) {
     await api(`/hub/api/models/${m.id}`, { method: "DELETE" });
     toast(`Removed ${m.name} and its files`, "run");
   });
+  // The owner's order (0.17.0): the chat's model choices, people's chats and the phone page list them so.
+  const move = (group: "llm" | "comfy", items: ModelEntry[], i: number, by: -1 | 1) => act(`move-${group}`, async () => {
+    const ids = items.map((m) => m.id);
+    [ids[i], ids[i + by]] = [ids[i + by], ids[i]];
+    await api("/hub/api/models/order", { method: "PUT", body: { group, ids } });
+  });
   const [addingHF, setAddingHF] = useState(false);
   const [addingImage, setAddingImage] = useState(false);
   const [imageSettings, setImageSettings] = useState<ModelEntry | null>(null);
@@ -175,6 +181,8 @@ function ModelsTab({ s }: { s: S }) {
         { key: "preload", label: "Load the chat model when the Hub starts", type: "bool" },
       ]} />
       <ModelGroup title="Language models" items={models.llm} busy={busy} onDownload={download} onCancel={cancel}
+        onMove={(i, by) => move("llm", models.llm, i, by)}
+        note="In this order in the chat's model choices. Move them with the arrows."
         action={<button className="btn small" onClick={() => setAddingHF(true)}><Plus size={14} /> Add from Hugging Face</button>}
         extra={(m) => <>
           {m.installed && (m.loaded ? <span className="tag"><Lamp state="run" size="sm" /> Loaded</span>
@@ -187,6 +195,7 @@ function ModelsTab({ s }: { s: S }) {
       <ModelGroup title="Helpers for libraries" items={models.aux} busy={busy} onDownload={download} onCancel={cancel}
         note="Run on the CPU (the image embedder can use the GPU, see Assistant, Libraries)." />
       <ModelGroup title="Image models (ComfyUI)" items={models.comfy} busy={busy} onDownload={download} onCancel={cancel}
+        onMove={(i, by) => move("comfy", models.comfy, i, by)}
         action={models.sdxl && <button className="btn small" onClick={() => setAddingImage(true)}><Plus size={14} /> Add image model</button>}
         extra={(m) => <>
           {renameButton(m)}
@@ -211,15 +220,15 @@ function ModelsTab({ s }: { s: S }) {
   );
 }
 
-function ModelGroup({ title, items, busy, onDownload, onCancel, extra, note, action }: { title: string; items: ModelEntry[];
-  busy: string | null; onDownload: (id: string) => void; onCancel: (id: string) => void;
-  extra?: (m: ModelEntry) => ReactNode; note?: string; action?: ReactNode }) {
+function ModelGroup({ title, items, busy, onDownload, onCancel, extra, note, action, onMove }: { title: string;
+  items: ModelEntry[]; busy: string | null; onDownload: (id: string) => void; onCancel: (id: string) => void;
+  extra?: (m: ModelEntry) => ReactNode; note?: string; action?: ReactNode; onMove?: (index: number, by: -1 | 1) => void }) {
   return (
     <section style={{ marginBottom: 26 }}>
       <div className="row" style={{ marginBottom: 8 }}><h3 className="grow" style={{ margin: 0 }}>{title}</h3>{action}</div>
       {note && <p className="muted small" style={{ marginTop: -4 }}>{note}</p>}
       <div className="list">
-        {items.map((m) => {
+        {items.map((m, i) => {
           const size = m.files.reduce((a, f) => a + (f.size ?? 0), 0);
           const active = m.downloads.filter((d) => d.status === "downloading" || d.status === "queued");
           const failed = m.downloads.find((d) => d.status === "failed");
@@ -242,6 +251,12 @@ function ModelGroup({ title, items, busy, onDownload, onCancel, extra, note, act
                 {failed && !active.length && <div className="meta" style={{ color: "var(--fault)" }}>Download failed: {failed.error}</div>}
               </div>
               <div className="row">
+                {onMove && items.length > 1 && <span className="row model-order">
+                  <button className="icon-btn small" disabled={!!busy || i === 0} onClick={() => onMove(i, -1)}
+                    aria-label={`Move ${m.name} up`} title="Move up"><ChevronUp size={16} /></button>
+                  <button className="icon-btn small" disabled={!!busy || i === items.length - 1} onClick={() => onMove(i, 1)}
+                    aria-label={`Move ${m.name} down`} title="Move down"><ChevronDown size={16} /></button>
+                </span>}
                 {extra?.(m)}
                 {!m.installed && (active.length
                   ? <button className="btn small" onClick={() => onCancel(m.id)}>Stop download</button>
