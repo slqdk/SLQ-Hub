@@ -219,7 +219,8 @@ function applyStream(items: Item[], ev: RunEvent): void {
       break;
     }
     case "image_progress":
-    case "audio_progress": {
+    case "audio_progress":
+    case "video_progress": {
       const t = findTool(items, d.id);
       if (t && Number(d.max) > 0) t.progress = { value: Number(d.value) || 0, max: Number(d.max) };
       break;
@@ -329,6 +330,7 @@ export function toolSummary(t: ToolView): string {
     case "web_fetch": return s("url");
     case "library_search": return s("query");
     case "image_generate": case "image_edit": case "music_generate": case "sound_generate": return s("prompt");
+    case "video_generate": return (s("image") ? `${s("image")}: ` : "") + s("prompt");
     case "speech_generate": return s("text");
     case "image_transform": case "image_ocr": case "image_remove_background": return s("path") || s("image");
     case "memory": return `${s("command")} ${s("path")}`.trim();

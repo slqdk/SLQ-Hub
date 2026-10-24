@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.19.0 - 2026-10-24
+
+- **Video.** Ask for a video in any chat: from a description ("a red fox runs
+  through fresh snow at dawn, low tracking shot"), from a picture you attach
+  or one the assistant just made ("make this picture move - the camera slowly
+  pushes in"), or from a first to a last picture. It is saved as an MP4 in the
+  chat's folder (in a project under `video/`) and plays under the answer.
+  Clips are 5 s by default (up to 10), without sound - the assistant can put
+  music or sound effects under them with ffmpeg. It takes minutes on the card.
+- Three models under Settings → Models → Video models, none downloaded by
+  default: **Wan 2.2 5B** (description and picture, 720p, 24 fps; 16.9 GB)
+  and the larger **Wan 2.2 14B** pair - one for pictures (and first-to-last
+  pictures), one for descriptions (480p by default, 16 fps; 35.4 GB each,
+  6.5 GB of it shared). The 14B models run fast with 4-step LoRAs, or at full
+  quality when asked. Settings → Assistant → Video chooses which model is
+  used for a description and for a picture.
+- **Add from Hugging Face** now says when a search matches a model in the
+  Hub's own list, such as Seed-VC or Wan, and where to download it - that
+  dialog adds chat models (GGUF files) only.
+
 ## 0.18.0 - 2026-10-24
 
 - **Another voice on a recording.** Attach a song or a recording and a 5-30 s

@@ -128,7 +128,8 @@ function ModelsTab({ s }: { s: S }) {
   const { models, refreshModels, toast, queue, modelNames } = useApp();
   const [busy, setBusy] = useState<string | null>(null);
   const [advanced, setAdvanced] = useState<ModelEntry | null>(null);
-  const downloading = !!models && [...models.llm, ...models.aux, ...models.comfy, ...(models.audio ?? [])]
+  const downloading = !!models && [...models.llm, ...models.aux, ...models.comfy, ...(models.audio ?? []),
+    ...(models.video ?? [])]
     .some((m) => m.downloads.some((d) => d.status === "downloading" || d.status === "queued"));
   useInterval(refreshModels, downloading ? 2000 : 15000);
 
@@ -207,6 +208,10 @@ function ModelsTab({ s }: { s: S }) {
         onDownload={download} onCancel={cancel}
         note="Speech runs on the CPU, so the chat model stays loaded; music, sound effects, stems and other voices run on the card through ComfyUI. Once one is downloaded, ask for it in any chat - with a sound file attached for a remake, stems or another voice."
         extra={(m) => <span className="tag">{m.engine === "speech" ? "CPU" : "GPU"}</span>} />}
+      {!!models.video?.length && <ModelGroup title="Video models" items={models.video} busy={busy}
+        onDownload={download} onCancel={cancel}
+        note="Run on the card through ComfyUI and take minutes per clip. Once one is downloaded, ask for a video in any chat - from a description, or with a picture attached to start from. Choose which one is used in Assistant, Video."
+        extra={() => <span className="tag">GPU</span>} />}
       {advanced && <ModelSettings model={advanced} thinkingInChats={!!s.data?.settings.agent?.thinking_in_chats}
         onClose={() => setAdvanced(null)} onSaved={() => { setAdvanced(null); refreshModels(); }} />}
       {addingHF && <AddFromHF onClose={() => setAddingHF(false)} onAdded={() => { setAddingHF(false); refreshModels(); }} />}
@@ -439,6 +444,9 @@ function looksLikeRepo(text: string): boolean {
   return /^[A-Za-z0-9][\w.-]*\/[A-Za-z0-9][\w.-]*(\/.*)?$/.test(t) && !/\s/.test(text.trim());
 }
 
+// A model in the Hub's own list that matches the search: downloaded from its section, not from here.
+interface InHub { id: string; name: string; group: string; section: string; installed: boolean }
+
 function AddFromHF({ onClose, onAdded }: { onClose: () => void; onAdded: () => void }) {
   const { toast } = useApp();
   const [repo, setRepo] = useState("");
@@ -446,6 +454,7 @@ function AddFromHF({ onClose, onAdded }: { onClose: () => void; onAdded: () => v
   const [error, setError] = useState("");
   const [found, setFound] = useState<HFLookup | null>(null);
   const [hits, setHits] = useState<HFSearchHit[] | null>(null);
+  const [inHub, setInHub] = useState<InHub[]>([]);
   const [file, setFile] = useState("");
   const [mmproj, setMmproj] = useState("");
   const [name, setName] = useState("");
@@ -460,9 +469,10 @@ function AddFromHF({ onClose, onAdded }: { onClose: () => void; onAdded: () => v
     setError("");
     setFound(null);
     try {
-      const r = await api<{ results: HFSearchHit[] }>("/hub/api/models/hf/search", { query: { q: repo.trim() } });
+      const r = await api<{ results: HFSearchHit[]; in_hub?: InHub[] }>("/hub/api/models/hf/search", { query: { q: repo.trim() } });
       setHits(r.results);
-      if (!r.results.length) setError(`No GGUF model on Hugging Face matches "${repo.trim()}". Try fewer words.`);
+      setInHub(r.in_hub ?? []);
+      if (!r.results.length && !(r.in_hub ?? []).length) setError(`No GGUF model on Hugging Face matches "${repo.trim()}". Try fewer words.`);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -480,6 +490,7 @@ function AddFromHF({ onClose, onAdded }: { onClose: () => void; onAdded: () => v
     setLooking(true);
     setError("");
     setFound(null);
+    setInHub([]);
     try {
       const r = await api<HFLookup>("/hub/api/models/hf", { query: { repo: which.trim() } });
       setHits(null);
@@ -541,6 +552,14 @@ function AddFromHF({ onClose, onAdded }: { onClose: () => void; onAdded: () => v
         GGUF repository (the Hub runs models with llama.cpp); unsloth, bartowski and ggml-org publish most models that
         way. One language model is on the card at a time; the Hub switches when a chat or an app asks for another.</p>}
       {error && <div className="callout" style={{ color: "var(--fault)" }}>{error}</div>}
+      {inHub.length > 0 && !found && (
+        <div className="callout" aria-label="Already in the Hub">
+          {inHub.map((m) => <div key={m.id}><b>{m.name}</b> is in the Hub's own list under <b>{m.section}</b>
+            {m.installed ? " - it is downloaded already." : " - download it there, not here."}</div>)}
+          {inHub.every((m) => m.group !== "llm") && <div className="muted small">This dialog adds chat models
+            (GGUF files) only.</div>}
+        </div>
+      )}
       {hits && hits.length > 0 && !found && (
         <div className="list" aria-label="Models found" style={{ maxHeight: 320, overflow: "auto" }}>
           {hits.map((h) => (
@@ -1163,6 +1182,12 @@ function AgentTab({ s }: { s: S }) {
     return [{ value: "", label: fit.length ? `The first downloaded (${fit[0].name})` : "None downloaded" },
       ...fit.map((m) => ({ value: m.id, label: m.name }))];
   };
+  const videoModels = (models?.video ?? []).filter((m) => m.installed);
+  const videoOptions = (ability: string) => {
+    const fit = videoModels.filter((m) => (m.abilities ?? []).includes(ability));
+    return [{ value: "", label: fit.length ? `The first downloaded (${fit[0].name})` : "None downloaded" },
+      ...fit.map((m) => ({ value: m.id, label: m.name }))];
+  };
   return (
     <div>
       <SectionForm s={s} section="agent" title="The assistant" fields={[
@@ -1226,6 +1251,12 @@ function AgentTab({ s }: { s: S }) {
         { key: "enhance_prompts", label: "ERNIE-Image: let its prompt enhancer expand the prompt", type: "bool",
           help: "A 3B model in the image workflow turns the prompt into a detailed description first. The chat shows what it wrote." },
       ]} />
+      {videoModels.length > 0 && <SectionForm s={s} section="video" title="Video" fields={[
+        { key: "t2v_model", label: "Model for a video from a description", type: "select", options: videoOptions("t2v") },
+        { key: "i2v_model", label: "Model for a video from a picture", type: "select", options: videoOptions("i2v"),
+          help: "A video from a first to a last picture uses it when it can (Wan 2.2 14B picture to video), otherwise a " +
+            "model that can. The assistant can still use another downloaded model if you name it." },
+      ]} />}
     </div>
   );
 }

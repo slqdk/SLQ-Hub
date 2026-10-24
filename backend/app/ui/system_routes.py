@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import shutil
 
 import httpx
@@ -192,12 +193,38 @@ async def hf_lookup(repo: str, request: Request):
     return res
 
 
+SECTIONS = {"llm": "Language models", "aux": "Helpers for libraries", "comfy": "Image models (ComfyUI)",
+            "audio": "Sound, music and speech", "video": "Video models"}
+
+
+def _in_hub(hub, q: str) -> list[dict]:
+    """Models in the Hub's own list whose name or id holds the words searched for (spaces and punctuation
+    aside): the add dialog finds only chat models on Hugging Face, and someone looking for "Seed-VC" there
+    should learn it is a download in Sound, music and speech (0.19.0)."""
+    want = re.sub(r"[^a-z0-9]+", "", q.lower())
+    if len(want) < 3:
+        return []
+    out = []
+    for group in GROUPS:
+        for e in hub.catalog.entries(group):
+            hay = re.sub(r"[^a-z0-9]+", "", f"{e.get('name', '')} {e['id']}".lower())
+            if want in hay:
+                out.append({"id": e["id"], "name": e.get("name") or e["id"], "group": group,
+                            "section": SECTIONS.get(group, group), "installed": hub.catalog.installed(e)})
+    return out[:5]
+
+
 @router.get("/hub/api/models/hf/search")
 async def hf_search(q: str, request: Request):
-    """GGUF models on Hugging Face matching some words, for the add dialog."""
+    """GGUF models on Hugging Face matching some words, for the add dialog - and the Hub's own models that
+    match, which are downloaded from their own section instead."""
+    hub = get_hub(request)
+    in_hub = _in_hub(hub, q)
     try:
-        return {"results": await hf.search(q, transport=get_hub(request).transports.web)}
+        return {"results": await hf.search(q, transport=hub.transports.web), "in_hub": in_hub}
     except hf.HFError as exc:
+        if in_hub:
+            return {"results": [], "in_hub": in_hub}
         raise HTTPException(exc.status, str(exc))
 
 

@@ -307,6 +307,27 @@ def _saved_audios(graph: dict, pid: str) -> list[tuple[str, str]]:
     return out
 
 
+def fake_mp4(size: int = 2048) -> bytes:
+    """The start of an MP4 (an ftyp box and an mdat of `size` bytes): the Hub never decodes the videos ComfyUI makes,
+    it only hands them on."""
+    ftyp = b"ftypisom" + (512).to_bytes(4, "big") + b"isomiso2avc1mp41"
+    return (8 + len(ftyp) - 4).to_bytes(4, "big") + ftyp + (8 + size).to_bytes(4, "big") + b"mdat" + bytes(size)
+
+
+def _saved_videos(graph: dict, pid: str) -> list[tuple[str, str, str]]:
+    """(node id, subfolder, file name) for each SaveVideo node, named as ComfyUI v0.42 names them: the
+    filename_prefix's folders, its last part, a counter and a trailing underscore (video/hub -> video, hub_00001_.mp4)."""
+    out = []
+    for node_id, node in graph.items():
+        if node.get("class_type") == "SaveVideo":
+            inputs = node.get("inputs") or {}
+            sub, _, stem = str(inputs.get("filename_prefix") or "ComfyUI").rpartition("/")
+            n = int(pid[1:]) if pid[1:].isdigit() else 1
+            ext = "mp4" if inputs.get("format") in (None, "auto", "mp4") else inputs["format"]
+            out.append((node_id, sub, f"{stem}_{n:05}_.{ext}"))
+    return out
+
+
 def make_comfy(state: dict) -> FastAPI:
     app = FastAPI()
     state.setdefault("prompts", [])
@@ -330,7 +351,9 @@ def make_comfy(state: dict) -> FastAPI:
                  "CheckpointLoaderSimple", "CLIPSetLastLayer", "DualCLIPLoader", "TextEncodeAceStepAudio1.5",
                  "EmptyAceStep1.5LatentAudio", "VAEDecodeAudio", "SaveAudioAdvanced", "EmptyLatentAudio", "LoadAudio",
                  "VAEEncodeAudio", "AudioMerge", "SLQAceStepReference", "SLQAceStepEncode", "SLQSeparateVocals",
-                 "SLQSeedVC"]
+                 "SLQSeedVC", "ModelSamplingSD3", "Wan22ImageToVideoLatent", "WanImageToVideo",
+                 "WanFirstLastFrameToVideo", "EmptyHunyuanLatentVideo", "KSamplerAdvanced", "LoraLoaderModelOnly",
+                 "CreateVideo", "SaveVideo"]
         names = [n for n in names if n not in state.get("missing_nodes", ())]
         return {n: {"input": {}, "output": []} for n in names}
 
@@ -359,12 +382,16 @@ def make_comfy(state: dict) -> FastAPI:
         state["prompts"].append(body["prompt"])
         pid = f"p{len(state['prompts'])}"
         sounds = _saved_audios(body["prompt"], pid)
-        if state.get("files"):                                # and the pictures (or sounds) into its output folder
+        videos = _saved_videos(body["prompt"], pid)
+        if state.get("files"):                                # and the pictures (sounds, videos) into its output folder
             out = state["files"] / "output" / ("audio" if sounds else "")
             out.mkdir(parents=True, exist_ok=True)
             for _, name in sounds:
                 (out / name).write_bytes(silent_mp3(1))
-            if not sounds:
+            for _, sub, name in videos:
+                (out / sub).mkdir(parents=True, exist_ok=True)
+                (out / sub / name).write_bytes(fake_mp4())
+            if not sounds and not videos:
                 (out / f"{pid}.png").write_bytes(PNG_1x1)
         return {"prompt_id": pid, "number": len(state["prompts"]), "node_errors": {}}
 
@@ -377,9 +404,16 @@ def make_comfy(state: dict) -> FastAPI:
     async def history(pid: str):
         graph = state["prompts"][int(pid[1:]) - 1] if pid[1:].isdigit() and int(pid[1:]) <= len(state["prompts"]) else {}
         sounds = _saved_audios(graph, pid)
-        outputs = {node: {"audio": [{"filename": name, "subfolder": "audio", "type": "output"}]}
-                   for node, name in sounds} if sounds else \
-            {"9": {"images": [{"filename": f"{pid}.png", "subfolder": "", "type": "output"}]}}
+        videos = _saved_videos(graph, pid)
+        if sounds:
+            outputs = {node: {"audio": [{"filename": name, "subfolder": "audio", "type": "output"}]}
+                       for node, name in sounds}
+        elif videos:                                          # SaveVideo reports its file among "images", animated
+            outputs = {} if state.get("no_video") else \
+                {node: {"images": [{"filename": name, "subfolder": sub, "type": "output"}], "animated": [True]}
+                 for node, sub, name in videos}
+        else:
+            outputs = {"9": {"images": [{"filename": f"{pid}.png", "subfolder": "", "type": "output"}]}}
         for node_id, node in graph.items():                   # PreviewAny shows the text it was given
             if node.get("class_type") == "PreviewAny":
                 outputs[node_id] = {"text": [state.get("preview_text", "An enhanced, detailed prompt.")]}
@@ -388,7 +422,8 @@ def make_comfy(state: dict) -> FastAPI:
                     {"semitones": 12, "reference_seconds": 18.5, "seconds": 61.0, "rate": 44100}))]}
         if state.get("fail_with"):
             return {pid: {"status": {"status_str": "error", "completed": False, "messages": [
-                ["execution_error", {"node_type": "SLQSeedVC", "exception_message": state["fail_with"]}]]},
+                ["execution_error", {"node_type": state.get("fail_node", "SLQSeedVC"),
+                                     "exception_message": state["fail_with"]}]]},
                 "outputs": {}}}
         return {pid: {"status": {"status_str": "success", "completed": True, "messages": []}, "outputs": outputs}}
 
@@ -397,6 +432,8 @@ def make_comfy(state: dict) -> FastAPI:
         if filename.rsplit(".", 1)[-1] in ("mp3", "flac", "opus"):
             return Response(state.get("audio_bytes") or silent_mp3(state.get("audio_seconds", 1.0)),
                             media_type="audio/mpeg")
+        if filename.endswith(".mp4"):
+            return Response(state.get("video_bytes") or fake_mp4(), media_type="video/mp4")
         return Response(PNG_1x1, media_type="image/png")
 
     return app

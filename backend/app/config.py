@@ -174,6 +174,10 @@ DEFAULTS: dict = {
         "speech_model_da": "",             # Danish speech
         "speech_model": "",                # every other language
     },
+    "video": {                             # "" = the first downloaded one that can (Settings -> Models order)
+        "t2v_model": "",                   # from a description
+        "i2v_model": "",                   # from a picture (and from a first and a last picture, when it can)
+    },
     "libraries": {
         "page_images": "cpu",              # cpu | gpu | off: embed page images for visual search (gpu = fast,
                                            # but it unloads the chat model while indexing)

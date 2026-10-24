@@ -61,7 +61,7 @@ def loop_notice(reason: str) -> str:
 
 
 def _ensure_tools_loaded() -> None:
-    from .tools import audio, files, images, knowledge, shell, web, windows  # noqa: F401 - registration
+    from .tools import audio, files, images, knowledge, shell, video, web, windows  # noqa: F401 - registration
     from . import meta_tools  # noqa: F401
 
 
@@ -767,13 +767,15 @@ class Agent:
         audio = self.hub.extras.get("audio")
         sound = [a for a in ("speech", "music", "sound", "voice", "separate") if audio and audio.available(a)] \
             if not subagent else []
+        video_pipe = self.hub.extras.get("video")
+        video = bool(video_pipe and video_pipe.available()) and not subagent
         if device is not None:                   # a person's chat: their name, no memory, code if allowed
             return system_prompt(user=device.name, model_name=Catalog.label(entry),
                                  folder_text=device_folder_text(wd.sandbox_path, device.code),
                                  sandbox_path=wd.sandbox_path, memory_index=[], skills=skills, project=None,
                                  images_available=bool(images and images.available()), handover_to=handover_to,
                                  subagent=subagent, taken_over_from=taken_over_from, memory=False,
-                                 code=device.code, dropped=device.dropped, sound=sound,
+                                 code=device.code, dropped=device.dropped, sound=sound, video=video,
                                  internet_asks=internet.asking(self.hub.settings))
         from .tools import windows as windows_tool
         mem = self.hub.extras["memory"].index(project["id"] if project else None)
@@ -784,7 +786,7 @@ class Agent:
                              summary="" if subagent else chat.get("summary") or "",
                              images_available=bool(images and images.available()),
                              handover_to=handover_to, subagent=subagent, cloud_model=cloud_model,
-                             taken_over_from=taken_over_from, sound=sound,
+                             taken_over_from=taken_over_from, sound=sound, video=video,
                              internet_asks=internet.asking(self.hub.settings), windows=windows_tool.ready(self.hub))
 
     def build_messages(self, chat: dict, project: dict | None, wd: projects.Workdir, entry: dict, run: Run,

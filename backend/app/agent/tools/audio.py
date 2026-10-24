@@ -28,13 +28,13 @@ def _pipe(ctx: ToolContext):
     return ctx.hub.extras.get("audio")
 
 
-def slug(text: str, limit: int = 48) -> str:
+def slug(text: str, limit: int = 48, fallback: str = "audio") -> str:
     """A file name from a text: 'Tredive sekunder!' -> 'tredive-sekunder'; æ, ø, å as ae, oe, aa."""
     t = unicodedata.normalize("NFKD", (text or "").translate(_TRANSLIT)).encode("ascii", "ignore").decode()
     words = re.sub(r"[^a-z0-9]+", "-", t.lower()).strip("-")
     if len(words) > limit:
         words = words[:limit].rsplit("-", 1)[0] or words[:limit]
-    return words or "audio"
+    return words or fallback
 
 
 def _free(ctx: ToolContext, base: str) -> str:
@@ -82,7 +82,7 @@ def _reach(ctx: ToolContext, data: bytes) -> str:
     return "The user can play it under your answer."
 
 
-async def _progress(ctx: ToolContext):
+async def _progress(ctx: ToolContext, kind: str = "audio_progress"):
     """Progress for the tool row (a sampler's steps, the planner's tokens, the speech service's sentences), at
     most twice a second - a song's planner reports every token."""
     last = {"at": 0.0, "max": 0}
@@ -92,7 +92,7 @@ async def _progress(ctx: ToolContext):
         if value < maximum and maximum == last["max"] and now - last["at"] < 0.5:
             return
         last.update(at=now, max=maximum)
-        ctx.emit("audio_progress", id=ctx.call_id, value=value, max=maximum)
+        ctx.emit(kind, id=ctx.call_id, value=value, max=maximum)
     return cb
 
 

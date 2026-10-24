@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "notes": "Model catalog. File paths are verified against Hugging Face (2026-10-21) - except mel-band-roformer-vocals and seed-vc (0.18.0): their paths come from the projects' own code and their sizes are estimates. 'dest' is relative to the models root (/srv/slq-hub/models on the VM, /models in the containers). Sizes are decimal bytes, used for progress only.",
+  "notes": "Model catalog. File paths are verified against Hugging Face (2026-10-21) - except mel-band-roformer-vocals and seed-vc (0.18.0): their paths come from the projects' own code and their sizes are estimates; the video models' (0.19.0) paths come from ComfyUI's official templates and were checked on Hugging Face's pages (2026-10-24), sizes as the pages round them. 'dest' is relative to the models root (/srv/slq-hub/models on the VM, /models in the containers). Sizes are decimal bytes, used for progress only.",
   "llm": [
     {
       "id": "qwen3.8-27b",
@@ -339,6 +339,59 @@
         {"repo": "nvidia/bigvgan_v2_22khz_80band_256x", "path": "config.json", "dest": "comfy/seed-vc/bigvgan_v2_22khz_80band_256x/config.json", "size": 1500, "role": "vocoder_speech"},
         {"repo": "nvidia/bigvgan_v2_22khz_80band_256x", "path": "bigvgan_generator.pt", "dest": "comfy/seed-vc/bigvgan_v2_22khz_80band_256x/bigvgan_generator.pt", "size": 450000000, "role": "vocoder_speech"},
         {"repo": "lj1995/VoiceConversionWebUI", "path": "rmvpe.pt", "dest": "comfy/seed-vc/rmvpe.pt", "size": 181184272, "role": "rmvpe"}
+      ]
+    }
+  ],
+  "video": [
+    {
+      "id": "wan2.2-5b",
+      "name": "Wan 2.2 5B",
+      "description": "Video from a description or from a picture - one model does both: 5 s at 720p (1280x704), 24 frames a second. Alibaba's Wan 2.2 TI2V, the lighter Wan. Apache 2.0 licence.",
+      "default": false,
+      "engine": "comfy",
+      "family": "wan2.2-5b",
+      "abilities": ["t2v", "i2v"],
+      "settings": {"steps": 20, "cfg": 5.0, "shift": 8.0, "sampler": "uni_pc", "scheduler": "simple", "fps": 24, "sizes": {"480p": [832, 480], "720p": [1280, 704]}, "size": "720p", "multiple": 32},
+      "files": [
+        {"repo": "Comfy-Org/Wan_2.2_ComfyUI_Repackaged", "path": "split_files/diffusion_models/wan2.2_ti2v_5B_fp16.safetensors", "dest": "comfy/diffusion_models/wan2.2_ti2v_5B_fp16.safetensors", "size": 10000000000, "role": "unet"},
+        {"repo": "Comfy-Org/Wan_2.1_ComfyUI_repackaged", "path": "split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors", "dest": "comfy/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors", "size": 6735906897, "role": "text_encoder"},
+        {"repo": "Comfy-Org/Wan_2.2_ComfyUI_Repackaged", "path": "split_files/vae/wan2.2_vae.safetensors", "dest": "comfy/vae/wan2.2_vae.safetensors", "size": 1409400000, "role": "vae"}
+      ]
+    },
+    {
+      "id": "wan2.2-i2v-14b",
+      "name": "Wan 2.2 14B picture to video",
+      "description": "Brings a picture to life, or moves from a first picture to a last one: the larger Wan, two 14B experts (8-bit weights), with the 4-step lightx2v LoRAs for speed or 20 steps for full quality. 480p by default, 16 frames a second. Shares 6.5 GB of files with text to video. Apache 2.0 licence.",
+      "default": false,
+      "engine": "comfy",
+      "family": "wan2.2-14b",
+      "abilities": ["i2v", "flf2v"],
+      "settings": {"fast": {"steps": 4, "split": 2, "cfg": 1.0}, "full": {"steps": 20, "split": 10, "cfg": 3.5}, "flf2v_full": {"steps": 20, "split": 10, "cfg": 4.0, "shift": 8.0}, "shift": 5.0, "sampler": "euler", "scheduler": "simple", "fps": 16, "sizes": {"480p": [832, 480], "720p": [1280, 720]}, "size": "480p", "multiple": 16},
+      "files": [
+        {"repo": "Comfy-Org/Wan_2.2_ComfyUI_Repackaged", "path": "split_files/diffusion_models/wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors", "dest": "comfy/diffusion_models/wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors", "size": 14290000000, "role": "unet_high"},
+        {"repo": "Comfy-Org/Wan_2.2_ComfyUI_Repackaged", "path": "split_files/diffusion_models/wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors", "dest": "comfy/diffusion_models/wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors", "size": 14290000000, "role": "unet_low"},
+        {"repo": "Comfy-Org/Wan_2.2_ComfyUI_Repackaged", "path": "split_files/loras/wan2.2_i2v_lightx2v_4steps_lora_v1_high_noise.safetensors", "dest": "comfy/loras/wan2.2_i2v_lightx2v_4steps_lora_v1_high_noise.safetensors", "size": 1230000000, "role": "lora_high"},
+        {"repo": "Comfy-Org/Wan_2.2_ComfyUI_Repackaged", "path": "split_files/loras/wan2.2_i2v_lightx2v_4steps_lora_v1_low_noise.safetensors", "dest": "comfy/loras/wan2.2_i2v_lightx2v_4steps_lora_v1_low_noise.safetensors", "size": 1230000000, "role": "lora_low"},
+        {"repo": "Comfy-Org/Wan_2.1_ComfyUI_repackaged", "path": "split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors", "dest": "comfy/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors", "size": 6735906897, "role": "text_encoder"},
+        {"repo": "Comfy-Org/Wan_2.2_ComfyUI_Repackaged", "path": "split_files/vae/wan_2.1_vae.safetensors", "dest": "comfy/vae/wan_2.1_vae.safetensors", "size": 253815318, "role": "vae"}
+      ]
+    },
+    {
+      "id": "wan2.2-t2v-14b",
+      "name": "Wan 2.2 14B text to video",
+      "description": "Video from a description with the larger Wan: a pair of 14B experts (8-bit weights) and 4-step LoRAs, like picture to video. 480p by default, 16 frames a second. Shares 6.5 GB of files with picture to video. Apache 2.0 licence.",
+      "default": false,
+      "engine": "comfy",
+      "family": "wan2.2-14b",
+      "abilities": ["t2v"],
+      "settings": {"fast": {"steps": 4, "split": 2, "cfg": 1.0}, "full": {"steps": 20, "split": 10, "cfg": 3.5}, "shift": 5.0, "sampler": "euler", "scheduler": "simple", "fps": 16, "sizes": {"480p": [832, 480], "720p": [1280, 720]}, "size": "480p", "multiple": 16},
+      "files": [
+        {"repo": "Comfy-Org/Wan_2.2_ComfyUI_Repackaged", "path": "split_files/diffusion_models/wan2.2_t2v_high_noise_14B_fp8_scaled.safetensors", "dest": "comfy/diffusion_models/wan2.2_t2v_high_noise_14B_fp8_scaled.safetensors", "size": 14290000000, "role": "unet_high"},
+        {"repo": "Comfy-Org/Wan_2.2_ComfyUI_Repackaged", "path": "split_files/diffusion_models/wan2.2_t2v_low_noise_14B_fp8_scaled.safetensors", "dest": "comfy/diffusion_models/wan2.2_t2v_low_noise_14B_fp8_scaled.safetensors", "size": 14290000000, "role": "unet_low"},
+        {"repo": "Comfy-Org/Wan_2.2_ComfyUI_Repackaged", "path": "split_files/loras/wan2.2_t2v_lightx2v_4steps_lora_v1.1_high_noise.safetensors", "dest": "comfy/loras/wan2.2_t2v_lightx2v_4steps_lora_v1.1_high_noise.safetensors", "size": 1230000000, "role": "lora_high"},
+        {"repo": "Comfy-Org/Wan_2.2_ComfyUI_Repackaged", "path": "split_files/loras/wan2.2_t2v_lightx2v_4steps_lora_v1.1_low_noise.safetensors", "dest": "comfy/loras/wan2.2_t2v_lightx2v_4steps_lora_v1.1_low_noise.safetensors", "size": 1230000000, "role": "lora_low"},
+        {"repo": "Comfy-Org/Wan_2.1_ComfyUI_repackaged", "path": "split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors", "dest": "comfy/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors", "size": 6735906897, "role": "text_encoder"},
+        {"repo": "Comfy-Org/Wan_2.2_ComfyUI_Repackaged", "path": "split_files/vae/wan_2.1_vae.safetensors", "dest": "comfy/vae/wan_2.1_vae.safetensors", "size": 253815318, "role": "vae"}
       ]
     }
   ]

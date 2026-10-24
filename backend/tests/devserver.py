@@ -6,7 +6,8 @@ Signs in as soren / "correct horse battery". The fake model answers by
 keyword: "files" (writes and runs a script), "install" (code that needs the
 internet), "read dr.dk" (web_fetch), "jingle" (a command makes a
 sound, a PDF and notes: the card under the answer), "announce" (speech),
-"song" (music), "horn" (a sound effect), "game" (slow steps, to try
+"song" (music), "horn" (a sound effect), "video" (Wan 2.2 5B: ffmpeg's test
+pattern when ffmpeg is installed), "game" (slow steps, to try
 sending a message while it works), "page" (makes an artifact),
 "think" (reasons first), "search" (web search), "web picture" (a picture
 from the web in the answer), "picture" (an image),
@@ -175,6 +176,12 @@ def responder(body: dict) -> dict:
                 "key": "A minor", "language": "da", "save_as": "club-song.mp3",
                 "lyrics": "[verse]\nVi spiller på is\n[chorus]\nJegerup, Jegerup!"}}]}
         return {"content": "The song is ready: **club-song.mp3** (45 s, 132 BPM)."}
+    if "video" in low:
+        if tools_done == 0:
+            return {"tool_calls": [{"name": "video_generate", "arguments": {
+                "prompt": "A red fox runs through fresh snow at dawn, low tracking shot, soft golden light",
+                "seconds": 5}}]}
+        return {"content": "The video: **a-red-fox-runs-through-fresh-snow-at-dawn-low.mp4** (5 s, no sound)."}
     if "horn" in low:
         if tools_done == 0:
             return {"tool_calls": [{"name": "sound_generate", "arguments": {
@@ -359,6 +366,22 @@ def sandbox_handler(workspace: Path):
     return handle
 
 
+def _test_clip(base: Path) -> bytes | None:
+    """A real, playable MP4 for the fake ComfyUI's videos (ffmpeg's test pattern), when ffmpeg is installed."""
+    import shutil
+    import subprocess
+    if not shutil.which("ffmpeg"):
+        return None
+    out = base / "test-clip.mp4"
+    try:
+        subprocess.run(["ffmpeg", "-nostdin", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
+                        "testsrc2=size=640x352:rate=24", "-t", "5", "-pix_fmt", "yuv420p", "-c:v", "libx264",
+                        "-movflags", "+faststart", str(out)], check=True, timeout=60)
+        return out.read_bytes()
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=8080)
@@ -373,7 +396,8 @@ def main() -> None:
     data, models = base / "data", base / "models"
     _install_fake_models(models, {"qwen3.8-27b", "qwen3.6-35b-a3b", "embed-text", "rerank", "embed-vl",
                                   "qwen-image-2.1", "qwen-image-2.1-turbo", "ernie-image-turbo", "z-image-turbo",
-                                  "roest-v3", "roest-v3-turbo", "ace-step-1.5-xl-turbo", "stable-audio-3-medium"})
+                                  "roest-v3", "roest-v3-turbo", "ace-step-1.5-xl-turbo", "stable-audio-3-medium",
+                                  "wan2.2-5b"})
     for model in ("roest-v3", "roest-v3-turbo"):
         for name, hz in (("mic", 118), ("nic", 205)):          # the voices: a low one and a high one, as WAV
             (models / "speech" / model / "voices" / f"{name}.wav").write_bytes(_voice(hz))
@@ -395,7 +419,8 @@ def main() -> None:
               lan_networks=tuple(_networks(["127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"])),
               admin_user="soren", admin_password_hash=auth.hash_password("correct horse battery", n=2**10),
               static_dir=dist if (dist / "index.html").is_file() else None, speech_url="http://speech:7100")
-    fakes = {"sup": {}, "llama": {"responder": responder}, "comfy": {"audio_seconds": 3.0},
+    fakes = {"sup": {}, "llama": {"responder": responder},
+             "comfy": {"audio_seconds": 3.0, "video_bytes": _test_clip(base)},
              "sandbox": {"handler": sandbox_handler(data / "workspace")}, "mcp": {}, "speech": {}}
     router = HostRouter({"supervisor": make_supervisor(fakes["sup"]), "llm": make_llama(fakes["llama"]),
                          "comfy": make_comfy(fakes["comfy"]), "sandbox:7000": make_sandbox(fakes["sandbox"]),

@@ -225,6 +225,19 @@ is downloaded by default). Details in section 8.
 Not chosen: YuE and OmniVoice (non-commercial licences), MiniMax Music
 (unclear licence, slow), Stable Audio Open (superseded by Stable Audio 3).
 
+**Video models** (0.19.0; Settings → Models → Video models; none is
+downloaded by default). Details in section 8.
+
+| Id | Files (`Comfy-Org/Wan_2.2_ComfyUI_Repackaged`) | Abilities | Licence |
+|---|---|---|---|
+| `wan2.2-5b` | TI2V 5B fp16 (10 GB), Wan 2.2 VAE (1.4 GB), umt5-xxl fp8 (6.7 GB, from the Wan 2.1 repository) | description, picture | Apache 2.0 |
+| `wan2.2-i2v-14b` | i2v high and low noise experts fp8_scaled (14.3 GB each), lightx2v 4-step LoRAs v1 (1.2 GB each), Wan 2.1 VAE, umt5-xxl | picture, first and last picture | Apache 2.0 |
+| `wan2.2-t2v-14b` | t2v experts fp8_scaled, lightx2v 4-step LoRAs v1.1, Wan 2.1 VAE, umt5-xxl | description | Apache 2.0 |
+
+Searching for a model that is in the Hub's own list (Seed-VC, Wan) in the
+Hugging Face dialog points to its section instead: that dialog adds GGUF chat
+models only.
+
 VRAM budget for Qwen3.8-27B (from its config: 16 full-attention layers × 4
 KV heads × 256 head dim): weights 15.3 GiB + mmproj 0.9 + recurrent state
 0.3 per slot + KV q8_0 for an 80K pool ≈ 2.7 GiB + compute buffers ≈ 1.5 GiB
@@ -859,7 +872,7 @@ restore, and the sync devices.
 
 ---
 
-## 8. Images and sound
+## 8. Images, sound and video
 
 - **Vision input.** Pasted or attached images, and `read_file` / `view_image`
   on project images, go to Qwen3.8 as images. They are downscaled to at most
@@ -1168,6 +1181,78 @@ Hub's own (`services/comfyui/nodes/slq_audio`, installed by the ComfyUI image):
   the clip and the planner's codes; cover: the song's codes, `is_covers`, the
   clip). Not checked: anything with the real weights - the sound, the time
   and memory on the card.
+
+### Video (0.19.0)
+
+Søren asked for video: from a picture, and from a description. One tool,
+`video_generate`, on the card through ComfyUI and the queue like pictures and
+sound, with ComfyUI's own nodes only (the image is unchanged):
+
+- **Models.** Wan 2.2 (Alibaba, Apache 2.0), Comfy-Org's repackaged files, in
+  a new catalog group `video` (Settings → Models → Video models):
+  - `wan2.2-5b`, TI2V 5B: one model for a description and for a picture
+    (`t2v`, `i2v`). fp16 weights (10 GB), the Wan 2.2 VAE (16× spatial, 48
+    channels), umt5-xxl fp8 as text encoder; 1280×704 and 121 frames at 24 fps
+    for 5 s; 20 steps, cfg 5, uni_pc, shift 8 - the official template
+    (`video_wan2_2_5B_ti2v.json`). 18.2 GB to download (16.9 GB as
+    Settings counts, in binary units).
+  - `wan2.2-i2v-14b` (a picture, `i2v`; a first and a last picture, `flf2v`)
+    and `wan2.2-t2v-14b` (a description): two 14B experts - high noise for
+    the first steps, low noise for the rest, each its own `KSamplerAdvanced` -
+    in fp8_scaled weights (14.3 GB each), the Wan 2.1 VAE, 16 fps, 81 frames
+    for 5 s, shift 5. `fast` (the default) adds the lightx2v 4-step LoRAs: 4
+    steps split at 2, cfg 1; `full` is 20 steps split at 10, cfg 3.5 - the
+    templates' own switch. The first-to-last template runs full quality at
+    shift 8 and cfg 4, which the catalog carries as `flf2v_full`. 480p
+    (832×480) by default, 720p (1280×720) when asked. 38.0 GB each (35.4 in
+    Settings); the pair shares the text encoder and the VAE (7.0 GB,
+    downloaded once).
+  - Why Wan: fp16 and fp8 weights, which ComfyUI computes in 16 bits on
+    RDNA3 - the plain ROCm path. LTX-2.x and the newer MiniMax and Hunyuan
+    templates ship nvfp4 or int8-convrot weights and 32B-class text encoders
+    aimed at NVIDIA. AMD's own 2026 ComfyUI material names Wan 2.2 14B fp8 for
+    RDNA3. The paths and sizes were checked on Hugging Face's pages.
+- **Graphs** (`app/video/workflows.py`), built in code from the official
+  templates (workflow_templates 0.11.93 for ComfyUI v0.42.3). 5B:
+  `UNETLoader → ModelSamplingSD3`, `CLIPLoader` (type `wan`), `VAELoader`,
+  `Wan22ImageToVideoLatent` (the picture as its first frame), `KSampler`,
+  `VAEDecode`, `CreateVideo`, `SaveVideo` (MP4, H.264). 14B: two `UNETLoader`
+  (each through `LoraLoaderModelOnly` when fast) → `ModelSamplingSD3`;
+  `EmptyHunyuanLatentVideo` for a description, `WanImageToVideo` for a
+  picture, `WanFirstLastFrameToVideo` for two; the high-noise sampler runs
+  steps 0 to the split and hands on its leftover noise, the low-noise one the
+  rest. Wan's own Chinese negative prompt comes first, the user's after it.
+  Frames are 4n + 1 (the VAE packs four frames per latent frame, plus the
+  first).
+- **Sizes** (`size_for`): the model's 480p or 720p pixel count in the
+  picture's shape (held between 1:2.5 and 2.5:1), or landscape, portrait or
+  square, rounded to 32 (5B: the 16× VAE and 2×2 patches) or 16 (14B).
+  1-10 s; 5 s is what the models learnt.
+- **The tool**: `video_generate(prompt, image, last_image, seconds,
+  orientation, hd, quality, negative, model, seed, save_as)`. A picture is a
+  path in the working folder (an attachment too), read with PIL as
+  `image_edit` does, sent to ComfyUI as PNG and deleted from its input folder
+  after the job in every chat. The MP4 goes to the working folder (`video/`
+  in a project), where the files card plays it. The result gives the length,
+  frames, size, model, quality, seed and the seconds on the card, and says
+  there is no sound; the description shows how to put `music_generate` or
+  `sound_generate` under it with ffmpeg. In a person's chat ComfyUI keeps
+  nothing (history and output deleted), and a file over 25 MB is said not to
+  reach her device. Not in subagents. Settings → Assistant → Video chooses
+  the model for a description and for a picture (first-to-last uses the
+  picture model when it can, else one that can). The two experts' steps show
+  as one progress bar. The system prompt's short Video section: minutes per
+  clip, so one at a time, and ask before making more.
+- **Checked here** (HANDOFF): ComfyUI v0.42.3 on CPU with stand-ins - one-block
+  Wan DiTs of the three kinds (48→48 channels for the 5B, 36→16 and 16→16 for
+  the 14B pairs), rank-4 LoRAs, a random Wan 2.1 VAE and a full-size random
+  Wan 2.2 VAE, and a test node for the umt5 conditioning. Every graph as the
+  Hub builds it was accepted at `/prompt`; with the stand-ins all seven (5B
+  text and picture; 14B picture fast and full, first-to-last, text fast and
+  full) ran to an MP4 - H.264 High, yuv420p, the frame count, size and frame
+  rate the Hub reports, no prompt in the file. The Hub's own client ran one
+  with websocket progress and left nothing behind in ComfyUI. Not checked:
+  anything with the real weights.
 
 ---
 
@@ -1514,6 +1599,16 @@ has them now - a song, a mix, a script that failed - newest turn first, up to
   checked against Hugging Face from here. Seed-VC (April 2025) and its
   dependencies are pinned; MSST is pinned to the commit the node was written
   against (its import line is checked when loaded).
+- **Video** (0.19.0, §8) ran only on a CPU ComfyUI with stand-ins. Unknown on
+  the 7900 XTX: the time per clip (the 5B at 720p and 121 frames; the 14B
+  pair fast and full); whether the 5B at 720p fits in 24 GB under ComfyUI's
+  memory management; the fp8 experts on gfx1100; and the 14B pair's memory -
+  ComfyUI loads the high-noise expert, then the low-noise one (14.3 GB each),
+  which with the 6.7 GB text encoder is about 35 GB of weights for the VM's
+  40 GB of RAM if ComfyUI keeps them all cached. If it swaps or runs out,
+  `COMFY_ARGS` in `.env` is the knob (`--cache-none`, `--reserve-vram`). Also
+  how the models do with Danish prompts (umt5 is multilingual; Wan learnt
+  from English and Chinese captions).
 
 ---
 

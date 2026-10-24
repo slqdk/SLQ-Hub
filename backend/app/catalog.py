@@ -59,7 +59,7 @@ def family_sampling(architecture: str | None) -> dict | None:
     return None
 # The catalog's groups: language models, CPU helpers, picture models (ComfyUI), and sound - music and sound effects
 # (ComfyUI) and speech (the speech service).
-GROUPS = ("llm", "aux", "comfy", "audio")
+GROUPS = ("llm", "aux", "comfy", "audio", "video")
 RENAMABLE = ("llm", "comfy")             # what chats show by name: the chat models and the picture models
 ORDERABLE = RENAMABLE                    # ... and in the owner's order (0.17.0)
 MAX_NAME = 60

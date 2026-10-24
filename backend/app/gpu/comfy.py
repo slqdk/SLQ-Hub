@@ -135,8 +135,9 @@ class Comfy:
 
     async def run_job(self, graph: dict, on_progress: ProgressFn | None = None, timeout: float = 1800,
                       keep: bool = True, kind: str = "images") -> tuple[list[tuple[str, bytes]], dict[str, list[str]]]:
-        """Queue a workflow, wait for it, and return the files its saving nodes wrote - pictures (kind "images")
-        or sound ("audio") - with the text outputs by node id."""
+        """Queue a workflow, wait for it, and return the files its saving nodes wrote - pictures (kind "images"),
+        sound ("audio") or video ("video": SaveVideo reports its file among "images", marked animated) - with
+        the text outputs by node id."""
         client_id = uuid.uuid4().hex
         prompt_id: str | None = None
         hist: dict | None = None
@@ -155,14 +156,17 @@ class Comfy:
             for node_id, out in (hist.get("outputs") or {}).items():
                 if isinstance(out.get("text"), list):
                     texts[str(node_id)] = [str(t) for t in out["text"]]
-                for item in out.get(kind) or []:
+                if kind == "video" and not out.get("animated"):
+                    continue
+                for item in out.get("images" if kind == "video" else kind) or []:
                     if item.get("type") not in (None, "output"):
                         continue
                     data = await self.view(item["filename"], item.get("subfolder", ""), item.get("type", "output"))
                     files.append((item["filename"], data))
             if not files:
-                raise ComfyError("the workflow finished without an output image" if kind == "images" else
-                                 "the workflow finished without a sound file")
+                raise ComfyError({"images": "the workflow finished without an output image",
+                                  "video": "the workflow finished without a video"}.get(kind,
+                                                                                         "the workflow finished without a sound file"))
             return files, texts
         except asyncio.CancelledError:
             if prompt_id:

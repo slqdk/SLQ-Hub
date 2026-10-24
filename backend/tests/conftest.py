@@ -17,7 +17,7 @@ CATALOG = Path(__file__).resolve().parents[1] / "app" / "catalog" / "models.json
 
 def _install_fake_models(models_dir: Path, ids: set[str]) -> None:
     cat = json.loads(CATALOG.read_text())
-    for group in ("llm", "aux", "comfy", "audio"):
+    for group in ("llm", "aux", "comfy", "audio", "video"):
         for e in cat[group]:
             if e["id"] in ids:
                 for f in e["files"]:

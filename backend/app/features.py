@@ -17,6 +17,7 @@ MODULES = [
     "app.agent.feature",
     "app.images.feature",
     "app.audio.feature",
+    "app.video.feature",
     "app.rag.feature",
 ]
 

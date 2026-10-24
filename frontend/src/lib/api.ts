@@ -114,6 +114,7 @@ export interface Display {
   sources?: { title: string; url: string }[];
   mcp?: { server: string; tool: string };
   audio?: { path: string; seconds: number; model: string }[];
+  video?: { path: string; seconds: number; model: string }[];
   [k: string]: unknown;
 }
 export interface Todo { content: string; status: "pending" | "in_progress" | "completed" }
@@ -205,7 +206,8 @@ export interface HFLookup { repo: string; url: string; choices: HFChoice[];
   meta: { architecture?: string | null; context_length?: number | null; parameters?: number | null;
     tools?: boolean | null; thinking?: boolean | null };
   suggested: { id: string; name: string }; freeDisk: number; vram: number }
-export interface ModelsData { llm: ModelEntry[]; aux: ModelEntry[]; comfy: ModelEntry[]; audio?: ModelEntry[]; current: string | null;
+export interface ModelsData { llm: ModelEntry[]; aux: ModelEntry[]; comfy: ModelEntry[]; audio?: ModelEntry[];
+  video?: ModelEntry[]; current: string | null;
   defaults: { default: string; fallback_alias: string; preload: boolean }; sdxl?: SdxlChoices }
 
 export interface ApiKey { id: number; name: string; prefix: string; priority: string; allowed_ips: string;

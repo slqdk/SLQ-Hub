@@ -211,7 +211,7 @@ SEARXNG_TAG=latest
 COMFY_ARGS=
 SANDBOX_CPUS=6
 SANDBOX_MEM=8g
-INSTALL_EXTRA_MODELS=$([[ "$klein" =~ ^[yYjJ] ]] && echo flux2-klein-4b || true)
+INSTALL_EXTRA_MODELS=$(if [[ "$klein" =~ ^[yYjJ] ]]; then echo flux2-klein-4b; fi)
 EOF
     umask 022
     chmod 600 "$ENV_FILE"

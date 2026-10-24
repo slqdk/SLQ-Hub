@@ -115,6 +115,15 @@ SOUND_TOOLS = {"speech": ("speech_generate",), "music": ("music_generate", "musi
                "sound": ("sound_generate",), "voice": ("voice_convert",), "separate": ("audio_separate",)}
 
 
+# 0.19.0: Wan 2.2 through ComfyUI. Minutes per clip, so one at a time.
+VIDEO = """
+
+# Video
+- video_generate makes a short video (5 s; at most 10) from a description, from a picture that starts it, or from \
+a first to a last picture, as an MP4 in the working folder that the user plays under your answer. It runs on the \
+GPU and takes minutes, so make one, let the user see it, and ask before making more. The video has no sound."""
+
+
 def sound_text(abilities: list[str]) -> str:
     """The system prompt's sound section for the downloaded sound models ('' when there are none)."""
     tools = [t for a in ("speech", "music", "sound", "voice", "separate") if a in abilities for t in SOUND_TOOLS[a]]
@@ -164,7 +173,7 @@ def system_prompt(*, user: str, model_name: str, folder_text: str, sandbox_path:
                   tz: str | None = None, handover_to: str = "", subagent: bool = False,
                   cloud_model: str = "", taken_over_from: str = "", memory: bool = True, code: bool = True,
                   dropped: int = 0, sound: list[str] | None = None, internet_asks: bool = False,
-                  windows: bool = False) -> str:
+                  windows: bool = False, video: bool = False) -> str:
     now = datetime.now(ZoneInfo(tz) if tz else local_tz())
     csharp = CSHARP.format(windows=CSHARP_SCREEN if windows else CSHARP_NO_SCREEN)
     tools_line = ((TOOLS_LINE_ASKS if internet_asks else TOOLS_LINE).format(sandbox_path=sandbox_path) + csharp
@@ -173,6 +182,8 @@ def system_prompt(*, user: str, model_name: str, folder_text: str, sandbox_path:
     text = BASE.format(user=user, model=model_name, date=now.strftime("%A %d %B %Y"), folder=folder_text,
                        tools_line=tools_line, image_gen=IMAGE_GEN if images_available else "")
     text += sound_text(sound or [])
+    if video:
+        text += VIDEO
     if memory:
         mem = ("Memory files:\n" + "\n".join(f"- {p}: {d}" for p, d in memory_index)) if memory_index else \
             "There are no memory files yet."
