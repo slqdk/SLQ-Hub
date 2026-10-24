@@ -54,6 +54,16 @@ projects, decisions) - briefly, without duplicates, never passwords or secrets.
 TOOLS_LINE = """- File tools take paths relative to the working folder. bash starts in it ({sandbox_path}) inside a sandbox \
 (Ubuntu with Python, Node, ImageMagick, ffmpeg, Tesseract) that has internet access but no access to the local \
 network. Install what you need with pip or npm."""
+# Settings -> Assistant -> Web -> Internet for the assistant: ask first.
+TOOLS_LINE_ASKS = """- File tools take paths relative to the working folder. bash starts in it ({sandbox_path}) inside a \
+sandbox (Ubuntu with Python, Node, ImageMagick, ffmpeg, Tesseract) with no access to the local network."""
+INTERNET_ASKS = """
+- The user has you ask before you go online: web_search and web_fetch wait for their answer, and bash runs without \
+the network (no connections, no DNS) unless the call sets internet: true - then they are asked; installs with pip or \
+npm need it. Use the internet when the task needs it, not more; if they decline, go on without it."""
+INTERNET_ASKS_NO_CODE = """
+- The user has you ask before you go online: web_search and web_fetch wait for their answer. Use the internet when \
+the task needs it, not more; if they decline, go on without it."""
 NO_CODE_LINE = "- File tools take paths relative to the working folder. There is no code execution (no bash) in this chat."
 
 IMAGE_GEN = """
@@ -121,9 +131,10 @@ def system_prompt(*, user: str, model_name: str, folder_text: str, sandbox_path:
                   skills: list[dict], project: dict | None, summary: str = "", images_available: bool = True,
                   tz: str | None = None, handover_to: str = "", subagent: bool = False,
                   cloud_model: str = "", taken_over_from: str = "", memory: bool = True, code: bool = True,
-                  dropped: int = 0, sound: list[str] | None = None) -> str:
+                  dropped: int = 0, sound: list[str] | None = None, internet_asks: bool = False) -> str:
     now = datetime.now(ZoneInfo(tz) if tz else local_tz())
-    tools_line = TOOLS_LINE.format(sandbox_path=sandbox_path) if code else NO_CODE_LINE
+    tools_line = ((TOOLS_LINE_ASKS if internet_asks else TOOLS_LINE).format(sandbox_path=sandbox_path) if code
+                  else NO_CODE_LINE) + ((INTERNET_ASKS if code else INTERNET_ASKS_NO_CODE) if internet_asks else "")
     text = BASE.format(user=user, model=model_name, date=now.strftime("%A %d %B %Y"), folder=folder_text,
                        tools_line=tools_line, image_gen=IMAGE_GEN if images_available else "")
     text += sound_text(sound or [])

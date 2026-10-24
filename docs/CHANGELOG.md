@@ -1,5 +1,51 @@
 # Changelog
 
+## 0.15.0 - 2026-10-24
+
+- **The internet can ask first.** Settings → Assistant → Web → **Internet
+  for the assistant**: Allowed (as before) or **Ask first**. Asking first,
+  the chat stops at the step and asks - like Claude does - with what it
+  wants: the search, the page or the command. **Allow once**, **Always**
+  (per kind: "Always allow web search", "Always allow www.dr.dk" per site,
+  "Always allow internet for code"), or **Deny**, which the assistant hears
+  and works around (a no is not a reason to hand the turn to a stronger
+  model). A subagent's question shows inside its row.
+- Asking first, code runs **without the network** (no connections, no DNS)
+  unless the assistant says a command needs it (`pip install`, `git clone`),
+  which asks. Allowed once, whatever the command leaves running is stopped
+  with it. Where the sandbox cannot keep code offline, every command asks.
+  The self-test has a new line for it: "offline code".
+- A page that redirects to another site is not followed without asking, and
+  pictures from the web in answers show as links instead of loading by
+  themselves (a picture's address can carry data out).
+- What you always allow is listed under **Always allowed online** in the Web
+  section; **Ask again** takes it back.
+- People are asked in their own chats, once each time (no "always": their
+  chats leave nothing on the Hub, and your answers are yours).
+- **web_fetch cannot be steered into the LAN.** It already refused local
+  addresses, but looked the name up twice: a name server could answer with a
+  public address for the check and a local one for the connection (DNS
+  rebinding). Now it connects to the address it checked, every redirect too.
+  Pictures that apps send by address are refused on the home network's
+  addresses too, not only the private ranges (30.11.0.x is public address
+  space).
+- **The model containers have no way out.** llm, comfyui and speech now sit
+  on their own network, and the VM's firewall stops them from connecting to
+  the internet, the LAN or the VM itself. They need nothing outside - the Hub
+  downloads the models - so a model file, a ComfyUI node or a library in them
+  cannot phone home. **Once, after this update:** `sudo bash
+  /opt/slq-hub/update.sh firewall` (the update runs the old updater, which
+  does not know the new rules). From the next update on, the updater keeps
+  the firewall current by itself.
+- `update.sh status` and `update.sh firewall` (and every update from now on)
+  try each model container's way out and say "no way out" - or which one
+  still reaches the internet.
+- Fixed: when a person's chat was handed over to the stronger model, that
+  model got your system prompt - your name and the list of your memory files
+  with their first lines - instead of hers.
+- Fixed: the picture text tool (OCR) put file names into its command with
+  the wrong quoting; a name with `$(...)` in it would have run as a command.
+
 ## 0.14.0 - 2026-10-24
 
 - **Rename models.** Settings → Models → Rename gives a chat model or a

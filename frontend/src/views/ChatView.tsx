@@ -5,7 +5,7 @@ import { api, mediaUrl, type ArtifactRef, type Block, type ChatData, type ChatSe
   type ProducedFile, type RunEvent, type RunRecord, type Settings, type Skill, type Upload } from "../lib/api";
 import { seconds, tokens } from "../lib/format";
 import { linkProps, navigate } from "../lib/router";
-import { buildTurns, liveSegments, newLive, reduceLive, type AssistantTurn, type LiveRun } from "../lib/turns";
+import { buildTurns, liveSegments, newLive, reduceLive, waitsForAnswer, type AssistantTurn, type LiveRun } from "../lib/turns";
 import { useApp } from "../state";
 import { Composer, type ComposerSettings } from "../components/Composer";
 import { FilesCard, producedFiles, type FileHandlers } from "../components/FilesCard";
@@ -560,7 +560,7 @@ export function LiveState({ live, queueCurrent, names }: { live: LiveRun; queueC
     );
   }
   if (live.status === "running") {
-    const waiting = live.items.some((i) => i.kind === "tools" && i.tools.some((t) => t.state === "approval"));
+    const waiting = waitsForAnswer(live.items);
     return (
       <div className="run-state">
         <Lamp state={waiting ? "act" : "run"} pulse={!waiting} />

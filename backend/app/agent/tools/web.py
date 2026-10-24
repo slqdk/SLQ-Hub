@@ -1,7 +1,6 @@
 """web_search (SearXNG) and web_fetch (SSRF-guarded, readable text)."""
 from __future__ import annotations
 
-import ipaddress
 import re
 
 import httpx
@@ -57,15 +56,17 @@ async def web_fetch(ctx: ToolContext, args: dict) -> ToolResult:
     url = (args.get("url") or "").strip()
     max_chars = max(1000, min(int(args.get("max_chars") or ctx.settings.get("web", "fetch_max_chars") or 30000),
                               150_000))
-    extra = []
-    for cidr in (ctx.settings.get("web", "blocked_cidrs") or []) + [str(n) for n in ctx.hub.env.lan_networks]:
-        try:
-            extra.append(ipaddress.ip_network(cidr, strict=False))
-        except ValueError:
-            pass
+    extra = netfetch.blocked_networks(ctx.hub)
+    from .. import internet
+    from ..loop import always_allowed
+    owner = getattr(ctx.engine, "device", None) is None
+    rule = internet.redirect_rule(ctx.settings, url, always_allowed if owner else (lambda key: False))
     try:
         data, ctype, final = await netfetch.fetch(url, extra_blocked=extra, transport=ctx.hub.transports.web,
-                                                  skip_check=ctx.hub.transports.web is not None)
+                                                  skip_check=ctx.hub.transports.web is not None, redirect_ok=rule)
+    except netfetch.Redirected as r:
+        return ToolResult(f"{url} redirects to {r.url}, on another site. The user is asked before each site, so it "
+                          f"was not followed: fetch {r.url} with web_fetch if you need that page.")
     except netfetch.FetchError as exc:
         return ToolResult(str(exc), is_error=True)
     except httpx.HTTPError as exc:
@@ -86,13 +87,25 @@ async def web_fetch(ctx: ToolContext, args: dict) -> ToolResult:
     return ToolResult(f"Content of {final}:\n\n{text}" + ("\n\n(cut to fit; ask for more with max_chars)" if cut else ""))
 
 
-register(Tool("web_search", "Search the web (SearXNG). Returns titles, URLs and snippets. Use it for anything "
-              "current or that you are not sure of; then read the best pages with web_fetch. Cite the URLs "
-              "you used in your answer.",
-              obj({"query": {"type": "string"}, "max_results": {"type": "integer"},
-                   "time_range": {"type": "string", "enum": ["day", "week", "month", "year"]}}, ["query"]),
-              web_search, group="web", read_only=True))
-register(Tool("web_fetch", "Fetch a public web page, PDF or image and return its readable text (or show the "
-              "image). Local network addresses are refused.",
-              obj({"url": {"type": "string"}, "max_chars": {"type": "integer"}}, ["url"]),
-              web_fetch, group="web", read_only=True))
+SEARCH_TEXT = ("Search the web (SearXNG). Returns titles, URLs and snippets. Use it for anything current or that "
+               "you are not sure of; then read the best pages with web_fetch. Cite the URLs you used in your answer.")
+FETCH_TEXT = ("Fetch a public web page, PDF or image and return its readable text (or show the image). Local network "
+              "addresses are refused.")
+ASKS = (" The user has the assistant ask before it goes online, so each call may wait for their answer: search and "
+        "fetch what the task needs, not more.")
+SEARCH_PARAMS = obj({"query": {"type": "string"}, "max_results": {"type": "integer"},
+                     "time_range": {"type": "string", "enum": ["day", "week", "month", "year"]}}, ["query"])
+FETCH_PARAMS = obj({"url": {"type": "string"}, "max_chars": {"type": "integer"}}, ["url"])
+
+
+def _asks(text: str, params: dict):
+    def dynamic(ctx: ToolContext) -> tuple[str, dict]:
+        from .. import internet
+        return (text + ASKS if internet.asking(ctx.settings) else text), params
+    return dynamic
+
+
+register(Tool("web_search", SEARCH_TEXT, SEARCH_PARAMS, web_search, group="web", read_only=True,
+              dynamic=_asks(SEARCH_TEXT, SEARCH_PARAMS)))
+register(Tool("web_fetch", FETCH_TEXT, FETCH_PARAMS, web_fetch, group="web", read_only=True,
+              dynamic=_asks(FETCH_TEXT, FETCH_PARAMS)))

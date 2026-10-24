@@ -70,10 +70,12 @@ class Run:
             if timed_out:
                 yield {"seq": sent, "type": "ping", "t": round(time.time() - self.started, 3), "data": {}}
 
-    async def ask_approval(self, call_id: str, tool: str, arguments: dict, timeout: float = 600) -> str:
+    async def ask_approval(self, call_id: str, tool: str, arguments: dict, timeout: float = 600, **extra) -> str:
+        """Wait for the user's answer to a tool call: allow, always or deny (no answer in `timeout`: deny).
+        `extra` goes with the event: what is asked (ask) and, inside a subagent, where (depth, parent)."""
         fut = asyncio.get_running_loop().create_future()
         self.approvals[call_id] = fut
-        self.emit("approval_needed", id=call_id, tool=tool, arguments=arguments)
+        self.emit("approval_needed", id=call_id, tool=tool, arguments=arguments, **extra)
         try:
             return await asyncio.wait_for(fut, timeout)
         except asyncio.TimeoutError:

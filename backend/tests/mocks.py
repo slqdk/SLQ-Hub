@@ -413,7 +413,8 @@ def make_sandbox(state: dict) -> FastAPI:
 
     @app.get("/health")
     async def health():
-        return {"ok": True, "uid": 1000, "root": "/workspace", "landlock": state.get("landlock", 7)}
+        abi = state.get("landlock", 7)
+        return {"ok": True, "uid": 1000, "root": "/workspace", "landlock": abi, "offline": state.get("offline", abi >= 4)}
 
     @app.post("/exec")
     async def exec_(request: Request):

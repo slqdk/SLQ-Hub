@@ -7,9 +7,13 @@ services. Run on the VM as root, from the clone (normally through update.sh):
     sudo bash update.sh                  pull, build, back up, restart, check
     sudo bash update.sh --yes            the same without the question (cron)
     sudo bash update.sh --force          rebuild and restart even with nothing new
-    sudo bash update.sh status           version, containers, health, backups
+    sudo bash update.sh status           version, containers, health, firewall, backups
     sudo bash update.sh backups          list the backups
     sudo bash update.sh rollback [name]  back to a backup (code + images + data)
+    sudo bash update.sh firewall         install this version's firewall and apply it
+
+`status`, `firewall` and an update try each model container's way out (a
+connection to 1.1.1.1:443 from inside it): with the firewall's rules, none.
     sudo bash update.sh compose <args>   docker compose with the right files
 
 What `update` does, in an order that keeps the running Hub safe as long as
@@ -24,7 +28,8 @@ possible:
   4. Stops everything and backs up /srv/slq-hub/data (not the models, which
      can be downloaded again) to <backups>/<time>_<version>.tar.gz + .json.
   5. Starts the new version and waits until /hub/api/health answers.
-  6. Healthy -> old backups beyond --keep are deleted. Not healthy within
+  6. Healthy -> the VM's firewall script is brought up to this version and
+     applied, and old backups beyond --keep are deleted. Not healthy within
      --timeout -> the log is shown and everything is put back: old code,
      old images, and the data from step 4.
 
@@ -43,6 +48,7 @@ import sys
 import tarfile
 import time
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 
@@ -370,6 +376,79 @@ def ensure_folders(root: Path = HUB_ROOT) -> list[str]:
     return made
 
 
+FIREWALL = ((ROOT / "deploy" / "firewall" / "slq-hub-firewall.sh", Path("/usr/local/sbin/slq-hub-firewall.sh"), 0o755),
+            (ROOT / "deploy" / "firewall" / "slq-hub-firewall.service",
+             Path("/etc/systemd/system/slq-hub-firewall.service"), 0o644))
+
+
+def sync_firewall(files=FIREWALL, systemctl: str = "systemctl") -> str:
+    """The VM's firewall as this version has it: install.sh put the script in place once, and a new rule (the
+    model containers' network, 0.15.0) comes with an update. Copies what changed and applies the rules again -
+    they are added only when missing, so this is safe every time. Returns what it did."""
+    changed = []
+    for src, dst, mode in files:
+        if not src.is_file():
+            continue
+        if dst.is_file() and dst.read_bytes() == src.read_bytes():
+            continue
+        try:
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(src, dst)
+            os.chmod(dst, mode)
+            changed.append(dst.name)
+        except OSError as exc:
+            return f"could not install {dst} ({exc})"
+    if shutil.which(systemctl) is None:
+        return "no systemd here: " + (", ".join(changed) + " copied" if changed else "nothing to do")
+    if changed:
+        run([systemctl, "daemon-reload"])
+    r = run([systemctl, "restart", "slq-hub-firewall.service"])
+    if r.returncode != 0:
+        return "the firewall did not apply - see: journalctl -u slq-hub-firewall"
+    return ("updated " + ", ".join(changed) + " and applied" if changed else "applied")
+
+
+MODELS = ("llm", "comfyui", "speech")
+WAY_OUT = ("import socket\n"
+           "s = socket.socket()\n"
+           "s.settimeout(4)\n"
+           "try:\n"
+           "    s.connect(('1.1.1.1', 443))\n"
+           "    print('open')\n"
+           "except OSError:\n"
+           "    print('closed')\n")
+
+
+def ways_out(services=MODELS) -> dict[str, str]:
+    """Whether each model container can open a connection to the internet (1.1.1.1:443) - with the inner
+    network's firewall rules it cannot. "open", "closed", or why it was not tried."""
+    def probe(svc: str) -> str:
+        if container_state(svc) != "running":
+            return "not running"
+        try:
+            r = subprocess.run([*compose_args(), "exec", "-T", svc, "python3", "-c", WAY_OUT], cwd=str(ROOT),
+                               text=True, capture_output=True, errors="replace", timeout=60, check=False)
+        except subprocess.TimeoutExpired:
+            return "no answer"
+        last = (r.stdout.strip().splitlines() or [""])[-1]
+        return last if r.returncode == 0 and last in ("open", "closed") else "could not try"
+    with ThreadPoolExecutor(len(services)) as pool:
+        return dict(zip(services, pool.map(probe, services)))
+
+
+def report_ways_out() -> bool:
+    """Tries each model container's way out and says what it found; False when one reaches the internet."""
+    found = ways_out()
+    for svc, state in found.items():
+        if state == "closed":
+            out.ok(f"{svc:<8}: no way out (the internet does not answer it)")
+        elif state == "open":
+            out.bad(f"{svc:<8}: reaches the internet - its firewall rule is missing (sudo bash update.sh firewall)")
+        else:
+            out.info(f"{svc:<8}: {state}")
+    return "open" not in found.values()
+
+
 def put_back(commit: str, images: dict[str, str | None], backup: str | None, timeout: float) -> bool:
     out.head("Putting the previous version back...")
     compose("stop")
@@ -474,6 +553,9 @@ def cmd_update(args) -> int:
         out.ok("Folders: made " + ", ".join(made))
     compose("up", "-d", "--remove-orphans", capture=False, check=True)
     if wait_healthy(args.timeout):
+        fw = sync_firewall()
+        (out.ok if fw.startswith(("applied", "updated")) else out.warn)(f"Firewall: {fw}")
+        report_ways_out()
         gone = prune_backups(args.keep)
         if gone:
             out.info(f"Deleted {len(gone)} old backup(s), keeping {args.keep}.")
@@ -546,9 +628,28 @@ def cmd_status(args) -> int:
         state = container_state(svc)
         (out.ok if state == "running" else out.warn)(f"{svc:<8}: {state}")
     (out.ok if answers() else out.bad)("Hub answers" if answers() else "Hub does not answer")
+    fw = run(["systemctl", "is-active", "slq-hub-firewall.service"]) if shutil.which("systemctl") else None
+    if fw is not None:
+        active = fw.stdout.strip() == "active"
+        current = all(dst.is_file() and dst.read_bytes() == src.read_bytes() for src, dst, _ in FIREWALL
+                      if src.is_file())
+        (out.ok if active and current else out.warn)(
+            "Firewall: " + ("applied" if active else fw.stdout.strip() or "not active")
+            + ("" if current else " - an older script; run: sudo bash update.sh firewall"))
+    report_ways_out()
     b = list_backups(backup_dir())
     out.info(f"Backups: {len(b)} in {backup_dir()}" + (f", newest {b[0]['name']}" if b else ""))
     return 0
+
+
+def cmd_firewall(args) -> int:
+    """Install this version's firewall script and apply it (an update does this by itself)."""
+    if os.geteuid() != 0:
+        raise Stop("run it as root: sudo bash update.sh firewall")
+    fw = sync_firewall()
+    ok = fw.startswith(("applied", "updated"))
+    (out.ok if ok else out.bad)(f"Firewall: {fw}")
+    return 0 if report_ways_out() and ok else 1
 
 
 def cmd_backups(args) -> int:
@@ -583,13 +684,14 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("backup", nargs="?", help="backup name (default: the newest)")
     r.add_argument("--yes", "-y", action="store_true")
     r.add_argument("--timeout", type=float, default=TIMEOUT)
-    sub.add_parser("status", help="version, containers, health, backups")
+    sub.add_parser("status", help="version, containers, health, firewall, backups")
     sub.add_parser("backups", help="list the backups")
+    sub.add_parser("firewall", help="install this version's firewall script and apply it")
     sub.add_parser("compose", help="docker compose with this install's files")
     args = p.parse_args(argv)
     try:
         return {"update": cmd_update, "rollback": cmd_rollback, "status": cmd_status,
-                "backups": cmd_backups}[args.command](args)
+                "backups": cmd_backups, "firewall": cmd_firewall}[args.command](args)
     except Stop as stop:
         out.say()
         out.bad(f"STOPPED: {stop}")

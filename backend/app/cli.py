@@ -96,6 +96,53 @@ def _confinement(rep, c, env, hz: dict) -> None:
                  "docker compose logs sandbox")
 
 
+OFFLINE_PROBE = r"""
+import socket
+out = []
+def attempt(name, way):
+    try:
+        way()
+        out.append(name + "=open")
+    except OSError as e:
+        out.append(name + ("=refused" if e.errno in (1, 13) else f"=error{e.errno}"))
+attempt("tcp", lambda: socket.create_connection(("1.1.1.1", 443), 4).close())
+attempt("mptcp", lambda: socket.socket(socket.AF_INET, socket.SOCK_STREAM, 262).close())
+attempt("udp", lambda: socket.socket(socket.AF_INET, socket.SOCK_DGRAM).close())
+print(" ".join(out))
+"""
+
+
+def _offline(rep, c, env, hz: dict) -> None:
+    """Internet for the assistant set to ask first runs code offline (Landlock ABI 4 + a seccomp filter). A
+    probe run that way: a TCP connection, an MPTCP socket and a UDP socket must all be refused."""
+    abi = int(hz.get("landlock") or 0)
+    if abi < 4:
+        rep.line("WARN", "offline code", f"Landlock ABI {abi}: code cannot be kept off the internet here, so with "
+                 "'Ask first' every command asks", "needs Linux 6.7+ (Landlock ABI 4); the HWE kernel has it")
+        return
+    try:
+        r = c.post(env.sandbox_url + "/exec", headers={"X-Internal-Token": env.internal_token},
+                   json={"cmd": "python3 -c " + _sh(OFFLINE_PROBE), "cwd": "/workspace", "timeout": 30,
+                         "offline": True}, timeout=45).json()
+    except Exception as exc:  # noqa: BLE001
+        rep.line("FAIL", "offline code", f"the probe failed ({exc.__class__.__name__}: {exc})",
+                 "docker compose logs sandbox")
+        return
+    seen = dict(p.split("=", 1) for p in (r.get("stdout") or "").split() if "=" in p)
+    if r.get("exit_code") == 126 or not seen:
+        rep.line("FAIL", "offline code", "the sandbox could not run a command offline: "
+                 + ((r.get("stderr") or r.get("stdout") or "").strip()[:200]), "docker compose logs sandbox")
+    elif "open" in seen.values():
+        rep.line("FAIL", "offline code", "a command run offline still has " +
+                 ", ".join(k for k, v in seen.items() if v == "open"),
+                 "keep Settings -> Assistant -> Web -> Internet for the assistant on Allowed until this passes")
+    elif seen.get("tcp") == "refused" and seen.get("udp") == "refused":
+        rep.line("PASS", "offline code", f"Landlock ABI {abi} + seccomp: a command run offline cannot connect "
+                 "(internet: ask first)")
+    else:
+        rep.line("WARN", "offline code", f"the probe did not answer as expected: {seen}", "docker compose logs sandbox")
+
+
 def _comfy_folders(rep, env) -> None:
     """People's pictures: the Hub deletes ComfyUI's copies after each answer, through the mounted folders."""
     base = env.comfy_files
@@ -271,6 +318,7 @@ def selftest(images: bool = False, speech: bool = False) -> int:
             rep.line("WARN", "sandbox internet", f"1.1.1.1:443 is {seen.get('1.1.1.1:443')}",
                      "the agent cannot install packages; check the VM's outbound network")
         _confinement(rep, c, env, hz)
+        _offline(rep, c, env, hz)
     except Exception as exc:  # noqa: BLE001
         rep.line("FAIL", "sandbox", f"{exc.__class__.__name__}: {exc}", "docker compose logs sandbox")
 

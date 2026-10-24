@@ -29,6 +29,7 @@ from ..projects import store as projects
 from ..state import Hub
 from . import cloud as cloudmod
 from . import context as C
+from . import internet
 from .prompt import device_folder_text, folder_text, system_prompt
 from .runs import Run, RunRegistry
 from .tools import REGISTRY, Tool, ToolContext, ToolResult
@@ -37,6 +38,7 @@ from .tools.base import clip
 log = logging.getLogger("hub.agent")
 Persist = Callable[[str, list[dict]], Awaitable[None]] | None
 STOPPED = "Stopped by the user before the tool finished."
+DECLINED = "The user declined this tool call. Do not try it again; continue without it or ask the user."
 # Small models can get stuck repeating the same step. A look-up repeated with nothing changed in between is
 # refused; after LOOP_REPEATS refusals, or the same step LOOP_SAME_STEPS times, the model must answer.
 REPEATED = ("You already called {name} with exactly these arguments in this turn, and nothing has changed since, "
@@ -120,10 +122,10 @@ class Engine:
             data.update(depth=self.depth, parent=self.parent)
         self.run.emit(kind, **data)
 
-    def tool_context(self, call_id: str) -> ToolContext:
+    def tool_context(self, call_id: str, online: bool = True, online_once: bool = False) -> ToolContext:
         return ToolContext(hub=self.hub, run=self.run, chat=self.chat, project=self.project, workdir=self.workdir,
                            ticket=self.ticket, model=self.model, depth=self.depth, call_id=call_id, state=self.state,
-                           engine=self)
+                           engine=self, online=online, online_once=online_once)
 
     def local_target(self) -> dict | None:
         if self.depth or self.cloud is not None or self.handed_over_from:
@@ -396,18 +398,31 @@ class Engine:
                     if self.repeats >= LOOP_REPEATS:
                         self._stuck(f"{self.repeats} repeated tool calls", loop=True)
                     return self._finish(name, cid, args, result, t0)
-                allowed = True
-                if tool.needs_approval and not always_allowed(name):
-                    decision = await self.run.ask_approval(cid, name, args)
+                allowed, online, once = True, True, False
+                where = {"depth": self.depth, "parent": self.parent} if self.depth else {}
+                if name in internet.TOOLS and internet.asking(self.hub.settings):
+                    owner = self.device is None           # a person answers once each time
+                    ask, online = internet.question(name, args, always_allowed if owner else (lambda key: False),
+                                                    await internet.code_can_go_offline(self.hub))
+                    if ask is not None:
+                        decision = await self.run.ask_approval(cid, name, args, ask={**ask, "can_always": owner},
+                                                               **where)
+                        self.emit("approval_answered", id=cid, decision=decision)
+                        if decision == "always" and owner:
+                            remember_allowed(ask["key"])
+                        allowed = decision in ("allow", "always")
+                        once = decision == "allow" or not owner
+                if allowed and tool.needs_approval and not always_allowed(name):
+                    decision = await self.run.ask_approval(cid, name, args, **where)
+                    self.emit("approval_answered", id=cid, decision=decision)
                     if decision == "always":
                         remember_allowed(name)
                     allowed = decision in ("allow", "always")
                 if not allowed:
-                    result = ToolResult("The user declined this tool call. Do not try it again; continue without "
-                                        "it or ask the user.", is_error=True)
+                    result = ToolResult(DECLINED, is_error=True)
                 else:
                     try:
-                        result = await tool.handler(self.tool_context(cid), args)
+                        result = await tool.handler(self.tool_context(cid, online, online and once), args)
                     except asyncio.CancelledError:
                         raise
                     except FileNotFoundError as exc:
@@ -456,7 +471,10 @@ class Engine:
 
     def _watch(self, name: str, args: dict, result: ToolResult) -> None:
         """Automatic hand-over: three failed tool calls in a row, or the same
-        call three times in the last six."""
+        call three times in the last six. A call the user declined is neither:
+        no means no, not "hand it to someone who will" (the cloud, perhaps)."""
+        if result.is_error and result.text.startswith(DECLINED):
+            return
         self.fail_streak = self.fail_streak + 1 if result.is_error else 0
         sig = name + json.dumps(args, sort_keys=True, ensure_ascii=False)[:500]
         self.recent = (self.recent + [sig])[-6:]
@@ -502,7 +520,8 @@ class Engine:
         if agent is not None and messages and messages[0].get("role") == "system":
             chat = chats.get_chat(self.chat["id"]) or self.chat
             messages[0] = {"role": "system", "content": agent.system_for(
-                chat, self.project, self.workdir, self.model, subagent=self.depth > 0, cloud_model=self.cloud.label)}
+                chat, self.project, self.workdir, self.model, subagent=self.depth > 0, cloud_model=self.cloud.label,
+                device=self.device)}
         messages.append({"role": "user", "content": f"(SLQ Hub: the local model handed this turn over to you "
                                                     f"because {reason}. Continue the task.)"})
         if self.ticket is not None:          # the card is free while the cloud works
@@ -539,9 +558,9 @@ class Engine:
         if not vision(target):
             messages[:] = C.without_images(messages)
         if agent is not None and messages and messages[0].get("role") == "system":
-            messages[0] = {"role": "system", "content": agent.system_for(
+            messages[0] = {"role": "system", "content": agent.system_for(    # a person's own prompt, not the owner's
                 chat, self.project, self.workdir, target, handover_to=self.handover_label(),
-                taken_over_from=Catalog.label(before))}
+                taken_over_from=Catalog.label(before), device=self.device)}
         messages.append({"role": "user", "content": f"(SLQ Hub: {Catalog.label(before)} handed this turn over to "
                                                     f"you because {reason}. The steps so far are above - check them "
                                                     "rather than trust them. Continue the task and answer.)"})
@@ -651,7 +670,8 @@ class Agent:
                                  sandbox_path=wd.sandbox_path, memory_index=[], skills=skills, project=None,
                                  images_available=bool(images and images.available()), handover_to=handover_to,
                                  subagent=subagent, taken_over_from=taken_over_from, memory=False,
-                                 code=device.code, dropped=device.dropped, sound=sound)
+                                 code=device.code, dropped=device.dropped, sound=sound,
+                                 internet_asks=internet.asking(self.hub.settings))
         mem = self.hub.extras["memory"].index(project["id"] if project else None)
         user = self.hub.settings.get("agent", "user_name") or (self.hub.env.admin_user or "the user").title()
         return system_prompt(user=user, model_name=Catalog.label(entry),
@@ -660,7 +680,8 @@ class Agent:
                              summary="" if subagent else chat.get("summary") or "",
                              images_available=bool(images and images.available()),
                              handover_to=handover_to, subagent=subagent, cloud_model=cloud_model,
-                             taken_over_from=taken_over_from, sound=sound)
+                             taken_over_from=taken_over_from, sound=sound,
+                             internet_asks=internet.asking(self.hub.settings))
 
     def build_messages(self, chat: dict, project: dict | None, wd: projects.Workdir, entry: dict, run: Run,
                        handover_to: str = "", taken_over_from: str = "") -> list[dict]:

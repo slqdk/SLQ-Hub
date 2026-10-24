@@ -12,9 +12,12 @@ export interface TurnActions {
   runId?: string | null;                       // set while live: approvals go to this run
   openArtifact: (ref: ArtifactRef) => void;
   live?: boolean;
+  /** Answer a call that waits for the user (a person's chat: its device turn); default: the run's approve. */
+  approve?: (callId: string, decision: "allow" | "always" | "deny") => Promise<unknown>;
 }
 
 export function Items({ items, actions }: { items: Item[]; actions: TurnActions }) {
+  const { auth } = useApp();
   const lastText = [...items].reverse().find((i) => i.kind === "text");
   return (
     <>
@@ -23,7 +26,8 @@ export function Items({ items, actions }: { items: Item[]; actions: TurnActions 
           case "thinking":
             return <Thinking key={i} text={it.text} live={actions.live && i === items.length - 1} />;
           case "text":
-            return <Markdown key={i} text={it.text} live={actions.live && it === lastText && i === items.length - 1} />;
+            return <Markdown key={i} text={it.text} live={actions.live && it === lastText && i === items.length - 1}
+              remoteImages={!auth?.internetAsks} />;
           case "tools": {
             // The task list and finished artifacts show as their own blocks.
             const shown = it.tools.filter((t) => t.name !== "todo_write" && !(t.name === "artifact" && t.display?.artifact));
@@ -88,7 +92,9 @@ function ToolRow({ tool, actions }: { tool: ToolView; actions: TurnActions }) {
         <span className="tool-time">{tool.state === "approval" ? "waiting for you" : tool.seconds != null ? seconds(tool.seconds)
           : busy ? (tool.progress ? `${tool.progress.value}/${tool.progress.max}` : "running") : ""}</span>
       </button>
-      {tool.state === "approval" && actions.runId && <Approval tool={tool} runId={actions.runId} />}
+      {tool.state === "approval" && (actions.approve || actions.runId) && <Approval tool={tool}
+        answer={actions.approve ?? ((callId, decision) => api(`/hub/api/runs/${actions.runId}/approve`,
+          { body: { call_id: callId, decision } }))} />}
       {tool.children && tool.children.length > 0 && (open || busy) && (
         <div className="tool-body"><div className="sub-run"><Items items={tool.children} actions={{ ...actions }} /></div></div>
       )}
@@ -128,13 +134,21 @@ function ToolDetail({ tool }: { tool: ToolView }) {
   );
 }
 
-function Approval({ tool, runId }: { tool: ToolView; runId: string }) {
+const ASK_TEXT: Record<string, string> = {
+  search: "wants to search the web",
+  site: "wants to read a page from",
+  code: "wants to run code with internet access",
+};
+
+function Approval({ tool, answer }: { tool: ToolView;
+  answer: (callId: string, decision: "allow" | "always" | "deny") => Promise<unknown> }) {
   const { toast } = useApp();
   const [busy, setBusy] = useState(false);
-  const answer = async (decision: "allow" | "always" | "deny") => {
+  const ask = tool.ask;
+  const reply = async (decision: "allow" | "always" | "deny") => {
     setBusy(true);
     try {
-      await api(`/hub/api/runs/${runId}/approve`, { body: { call_id: tool.id, decision } });
+      await answer(tool.id, decision);
     } catch (e) {
       toast((e as Error).message, "fault");
       setBusy(false);
@@ -143,12 +157,19 @@ function Approval({ tool, runId }: { tool: ToolView; runId: string }) {
   return (
     <div className="tool-body">
       <div className="approval" role="alert">
-        <p><b>{toolLabel(tool.name)}</b> wants to run. It reaches outside the sandbox, so it asks first.</p>
-        {tool.args && Object.keys(tool.args).length > 0 && <pre>{JSON.stringify(tool.args, null, 2)}</pre>}
+        {ask ? <>
+          <p>The assistant {ASK_TEXT[ask.what] ?? "wants to use the internet"}{ask.what === "site" ? <> <b>{ask.host}</b></> : null}.
+            {" "}You have it ask before it goes online{ask.unblockable ? " (code cannot be kept offline here, so every command asks)" : ""}.</p>
+          {ask.detail && <pre>{ask.detail}</pre>}
+        </> : <>
+          <p><b>{toolLabel(tool.name)}</b> wants to run. It reaches outside the sandbox, so it asks first.</p>
+          {tool.args && Object.keys(tool.args).length > 0 && <pre>{JSON.stringify(tool.args, null, 2)}</pre>}
+        </>}
         <div className="row wrap">
-          <button className="btn primary small" disabled={busy} onClick={() => answer("allow")}>Allow once</button>
-          <button className="btn small" disabled={busy} onClick={() => answer("always")}>Always allow this tool</button>
-          <button className="btn danger small" disabled={busy} onClick={() => answer("deny")}>Deny</button>
+          <button className="btn primary small" disabled={busy} onClick={() => reply("allow")}>Allow once</button>
+          {(!ask || ask.can_always) && <button className="btn small" disabled={busy} onClick={() => reply("always")}>
+            {ask ? ask.always : "Always allow this tool"}</button>}
+          <button className="btn danger small" disabled={busy} onClick={() => reply("deny")}>Deny</button>
         </div>
       </div>
     </div>

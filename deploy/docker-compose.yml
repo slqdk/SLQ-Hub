@@ -53,6 +53,8 @@ services:
       - ${HUB_ROOT:-/srv/slq-hub}/comfy/output:/comfy/output
     networks:
       core: {}
+      inner:
+        ipv4_address: 172.31.251.10
       sbx:
         ipv4_address: 172.31.250.10
     healthcheck:
@@ -77,7 +79,9 @@ services:
     volumes:
       - ${HUB_ROOT:-/srv/slq-hub}/models/llm:/models/llm:ro
       - ${HUB_ROOT:-/srv/slq-hub}/data/logs/llm:/logs
-    networks: [core]
+    networks:
+      inner:
+        ipv4_address: 172.31.251.11
 
   comfyui:
     <<: *gpu
@@ -102,7 +106,9 @@ services:
       - ${HUB_ROOT:-/srv/slq-hub}/comfy/user:/opt/ComfyUI/user
     ports:
       - "127.0.0.1:8188:8188"   # maintenance only: ssh -L 8188:127.0.0.1:8188 <vm>
-    networks: [core]
+    networks:
+      inner:
+        ipv4_address: 172.31.251.12
 
   # Text to speech on the CPU (Chatterbox, Røst): no GPU, so the chat model stays on the card while it speaks.
   speech:
@@ -126,7 +132,9 @@ services:
     # cores but two, or SPEECH_THREADS, and under contention it yields to the Hub and the model containers.
     cpu_shares: 512
     mem_limit: ${SPEECH_MEM:-12g}
-    networks: [core]
+    networks:
+      inner:
+        ipv4_address: 172.31.251.13
 
   searxng:
     image: docker.io/searxng/searxng:${SEARXNG_TAG:-latest}
@@ -165,7 +173,18 @@ services:
         ipv4_address: 172.31.250.20
 
 networks:
+  # The Hub and SearXNG: both reach the internet (web pages, downloads, search engines).
   core: {}
+  # The model containers (llm, comfyui, speech) and the Hub, which alone talks to them. They need nothing from
+  # outside: the VM's firewall (deploy/firewall) drops new connections from their fixed addresses to anything
+  # outside this network, so a model, a ComfyUI node or a library cannot reach the internet or the LAN.
+  inner:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.name: br-slqinner
+    ipam:
+      config:
+        - subnet: 172.31.251.0/24
   # The sandbox's own network. The VM's firewall (deploy/firewall) drops new
   # connections from the sandbox to the LAN, to the other containers and to
   # the VM itself; the internet stays open. Fixed addresses so the rules can

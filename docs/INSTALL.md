@@ -313,6 +313,41 @@ The speech container uses all CPU cores but two. `SPEECH_THREADS` and
 `SPEECH_MEM` in `.env` change that (then `sudo bash /opt/slq-hub/update.sh
 compose up -d`).
 
+## 10. The assistant and the internet
+
+By default the assistant searches the web, reads pages and runs code with
+internet access (`pip install`, `git clone`) when a task needs it - never the
+LAN. To have it ask first: **Settings → Assistant → Web → Internet for the
+assistant → Ask first**, then Save changes.
+
+Asking first, the chat stops at the step and asks, with what it wants to
+search, the page it wants to read or the command it wants to run:
+
+- **Allow once** - this call only.
+- **Always allow web search** / **Always allow www.dr.dk** (per site) /
+  **Always allow internet for code** - from now on without asking.
+- **Deny** - the assistant hears it was declined and goes on without it.
+
+Code runs without the network unless the assistant says the command needs
+it, which asks (the self-test's "offline code" line shows that this works on
+the VM). A page that redirects to another site asks again, and pictures from
+the web in answers show as links until you open them. What you always allow
+is listed under **Always allowed online** in the same section; **Ask again**
+takes it back. People are asked in their own chats, once each time.
+
+The model containers (llm, comfyui, speech) have no way out at all since
+0.15.0: the VM's firewall stops them from connecting to the internet, the
+LAN or the VM. They need nothing outside - the Hub downloads the models.
+
+**Once, after updating to 0.15.0** (the update itself runs the old updater,
+which does not know the new rules yet):
+
+    sudo bash /opt/slq-hub/update.sh firewall
+
+It installs the new firewall script, applies it and tries each model
+container's way out; all three should say "no way out". From the next update
+on, this happens by itself.
+
 ## Daily operation
 
 All commands run in the VM from `/opt/slq-hub`:
@@ -320,7 +355,8 @@ All commands run in the VM from `/opt/slq-hub`:
 | What | Command |
 |---|---|
 | Update (backup + automatic rollback) | `sudo bash /opt/slq-hub/update.sh` |
-| Status | `sudo bash /opt/slq-hub/update.sh status` |
+| Status (containers, health, firewall, the model containers' way out) | `sudo bash /opt/slq-hub/update.sh status` |
+| Install and apply this version's firewall | `sudo bash /opt/slq-hub/update.sh firewall` |
 | Follow the Hub's log | `sudo bash /opt/slq-hub/update.sh compose logs -f hub` |
 | A model server's log | `sudo bash /opt/slq-hub/update.sh compose logs -f llm` |
 | The speech service's log | `sudo bash /opt/slq-hub/update.sh compose logs -f speech` |
@@ -347,6 +383,9 @@ versions) are in `/srv/slq-hub/.env`. After editing it, run:
 | A model download fails | Run the installer again: downloads resume. |
 | The self-test fails at "load model" | `sudo bash /opt/slq-hub/update.sh compose logs llm` shows llama-server's own words. |
 | Speech fails with "the speech service is not answering" | `sudo bash /opt/slq-hub/update.sh compose ps speech` and `... compose logs speech`. |
+| `update.sh status` says a model container "reaches the internet" | Its firewall rule is missing: `sudo bash /opt/slq-hub/update.sh firewall`. |
+| A code step says it "ran without the network" | Internet for the assistant is set to Ask first; the assistant can ask to run it with internet access. |
+| The self-test's "offline code" line fails | Keep Internet for the assistant on Allowed and send me the line; asking first then cannot keep code offline. |
 | An update stops at "the build failed" | Nothing was changed; the build's output just above that line says why. Send it to me. |
 | The UI works on the LAN but not through the proxy | Check the proxy host's port (8080) and that Websockets support is on. |
 | A chat behaves strangely (loops, odd answers, stops) | The chat's ⋯ menu → **Export for troubleshooting**, and send me the ZIP. On the phone page: menu → **Export this chat**. |

@@ -600,7 +600,10 @@ export function PersonApp() {
                 return <>
                   {segs.map((seg, i) => seg.kind === "assistant" ? (
                     <div className="msg-assistant" key={`la${i}`}>
-                      <Items items={seg.items} actions={{ openArtifact, live: true }} />
+                      <Items items={seg.items} actions={{ openArtifact, live: true,
+                        // when the turn asks first (internet), she answers once: "always" is the owner's
+                        approve: (callId, decision) => api(`/hub/api/device/turns/${liveHere.runId}/approve`,
+                          { body: { call_id: callId, decision: decision === "deny" ? "deny" : "allow" } }) }} />
                       {i === segs.length - 1 && state}
                     </div>
                   ) : null)}

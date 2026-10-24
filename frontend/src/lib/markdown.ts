@@ -113,7 +113,62 @@ DOMPurify.addHook("afterSanitizeAttributes", (node) => {
   }
 });
 
-export function renderMarkdown(text: string): string {
+export function renderMarkdown(text: string, opts: { remoteImages?: boolean } = {}): string {
   const html = md.parse(text, { async: false }) as string;
-  return DOMPurify.sanitize(html, { ADD_ATTR: ["data-lang", "target"], FORBID_TAGS: ["style", "form", "input"] });
+  const safe = DOMPurify.sanitize(html, { ADD_ATTR: ["data-lang", "target"], FORBID_TAGS: ["style", "form", "input"] });
+  return opts.remoteImages === false ? withoutRemoteLoads(safe) : safe;
+}
+
+/** Whether the browser would fetch this address from somewhere else than the Hub - after its own clean-up of
+ * the address (a backslash counts as a slash, tabs and newlines go), so "\\host/x" is caught too. */
+function isRemote(address: string): boolean {
+  const v = address.trim();
+  if (!v || /^(data|blob):/i.test(v)) return false;
+  try {
+    return new URL(v, location.href).origin !== location.origin;
+  } catch {
+    return true;                                               // unreadable: leave it out
+  }
+}
+
+/** While the internet asks first, what the model writes must not make the browser fetch from the web by itself
+ * (a picture's address can carry data out): a picture from the web becomes a link to it, and other things that
+ * load by themselves (video, audio, SVG images, srcset candidates, backgrounds in styles) lose their address. The
+ * Hub's own pictures (its own origin) stay. */
+export function withoutRemoteLoads(html: string): string {
+  if (!/(src|href|poster|url\(|background)/i.test(html)) return html;
+  const t = document.createElement("template");
+  t.innerHTML = html;
+  for (const el of Array.from(t.content.querySelectorAll("*"))) {
+    const tag = el.tagName.toLowerCase();
+    el.removeAttribute("srcset");                              // the Hub's own pictures have none
+    if (/url\(/i.test(el.getAttribute("style") ?? "")) el.removeAttribute("style");
+    if (tag === "img") {
+      const src = el.getAttribute("src") ?? "";
+      if (isRemote(src)) {
+        let host = "";
+        try {
+          host = new URL(src.trim(), location.href).host;
+        } catch {
+          /* unreadable */
+        }
+        const a = document.createElement("a");
+        if (host) a.href = new URL(src.trim(), location.href).href;
+        a.target = "_blank";
+        a.rel = "noopener noreferrer";
+        a.className = "remote-image";
+        const alt = el.getAttribute("alt");
+        a.textContent = `Picture from ${host || "the web"}${alt ? `: ${alt}` : ""} (not loaded)`;
+        el.replaceWith(a);
+      }
+      continue;
+    }
+    for (const attr of ["src", "poster", "background", "xlink:href"]) {
+      if (el.hasAttribute(attr) && isRemote(el.getAttribute(attr) ?? "")) el.removeAttribute(attr);
+    }
+    if (tag !== "a" && el.hasAttribute("href") && isRemote(el.getAttribute("href") ?? "")) {
+      el.removeAttribute("href");                              // svg <image>, <use>
+    }
+  }
+  return t.innerHTML;
 }

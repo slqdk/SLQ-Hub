@@ -52,16 +52,18 @@ def decode_data_url(url: str) -> bytes:
     return base64.b64decode(b64)
 
 
-async def inline_image_url(url: str) -> dict:
+async def inline_image_url(url: str, extra_blocked=()) -> dict:
     """An image_url part with the image inlined (and downscaled). http(s)
-    URLs are fetched through the SSRF guard; llama-server never fetches."""
+    URLs are fetched through the SSRF guard (the private ranges and
+    `extra_blocked`: the LAN's, Settings'); llama-server never fetches."""
     if url.startswith("data:"):
         return image_part(decode_data_url(url))
-    data, _ctype, _final = await netfetch.fetch(url, max_bytes=20_000_000, accept="image/*")
+    data, _ctype, _final = await netfetch.fetch(url, max_bytes=20_000_000, accept="image/*",
+                                                extra_blocked=extra_blocked)
     return image_part(data)
 
 
-async def normalise_openai(messages: list[dict]) -> list[dict]:
+async def normalise_openai(messages: list[dict], extra_blocked=()) -> list[dict]:
     """OpenAI-format messages from an app, with every image inlined."""
     out = []
     for m in messages:
@@ -72,7 +74,7 @@ async def normalise_openai(messages: list[dict]) -> list[dict]:
                 t = p.get("type")
                 if t == "image_url":
                     url = p["image_url"]["url"] if isinstance(p.get("image_url"), dict) else p.get("image_url")
-                    parts.append(await inline_image_url(url))
+                    parts.append(await inline_image_url(url, extra_blocked))
                 elif t in ("text", "input_text"):
                     parts.append({"type": "text", "text": p.get("text", "")})
                 else:

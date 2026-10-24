@@ -32,6 +32,8 @@ class ToolContext:
     call_id: str = ""
     state: dict = field(default_factory=dict)             # per-turn scratch (todo list, ...)
     engine: Any = None                                    # the Engine running this tool (subagents need it)
+    online: bool = True                                   # False: bash runs without the internet (ask first)
+    online_once: bool = False                             # online by "Allow once": leftovers are ended
 
     def emit(self, kind: str, **data) -> None:
         self.run.emit(kind, **data)

@@ -17,7 +17,12 @@ export interface ToolView {
   progress?: { value: number; max: number };   // a long GPU or speech job, while it runs
   children?: Item[];
   subagent?: { description: string; finished: boolean };
+  ask?: AskInfo;                               // what the turn asks before this call (internet set to ask first)
 }
+
+/** Internet for the assistant, asking first: what a call wants and what "always" would allow. */
+export interface AskInfo { kind: "internet"; what: "search" | "site" | "code"; key: string; detail?: string; host?: string;
+  always: string; can_always: boolean; unblockable?: boolean }
 
 export type Item =
   | { kind: "thinking"; text: string }
@@ -48,6 +53,12 @@ function lastTools(items: Item[]): ToolView[] {
   const strip: Item = { kind: "tools", tools: [] };
   items.push(strip);
   return strip.tools;
+}
+
+/** Whether a call - here or inside a subagent - waits for the user's answer. */
+export function waitsForAnswer(items: Item[]): boolean {
+  return items.some((it) => it.kind === "tools" && it.tools.some((t) => t.state === "approval"
+    || (t.children ? waitsForAnswer(t.children) : false)));
 }
 
 export function findTool(items: Item[], id: string): ToolView | undefined {
@@ -191,7 +202,15 @@ function applyStream(items: Item[], ev: RunEvent): void {
     }
     case "approval_needed": {
       const t = findTool(items, d.id);
-      if (t) t.state = "approval";
+      if (t) {
+        t.state = "approval";
+        t.ask = d.ask;
+      }
+      break;
+    }
+    case "approval_answered": {            // the buttons go; a reload replays this too
+      const t = findTool(items, d.id);
+      if (t && t.state === "approval") t.state = "running";
       break;
     }
     case "image_progress":

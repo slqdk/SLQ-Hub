@@ -5,13 +5,17 @@ Runs as the unprivileged `sandbox` user inside the sandbox container. Every
 call needs the shared token in X-Internal-Token. Working directories must be
 inside /workspace (the Hub's project and chat folders).
 
-    GET  /health                          -> {ok, root, uid, landlock: ABI or 0}
-    POST /exec        {cmd, cwd, timeout, env, max_output, confine}
+    GET  /health                          -> {ok, root, uid, landlock: ABI or 0, offline: bool}
+    POST /exec        {cmd, cwd, timeout, env, max_output, confine, offline, end_leftovers}
                       -> {exit_code, stdout, stderr, timed_out, duration_ms, truncated}
                       confine {root, home, require}: the command may touch only
                       that folder (confine.py, Landlock); with require it is not
                       run where Landlock is missing (exit code 126). Processes it
                       leaves running are killed when it ends.
+                      offline: no network at all (Landlock ABI 4 and a seccomp
+                      filter; not run where that cannot be enforced: exit code 126).
+                      end_leftovers: kill what an unconfined command leaves running
+                      too (the owner's command allowed online once).
     POST /proc/start  {cmd, cwd, env}     -> {id}         long-lived process with
     POST /proc/write  {id, data}          -> {ok}         pipes (MCP stdio servers)
     POST /proc/read   {id, timeout}       -> {data, eof, exit_code}
@@ -100,7 +104,7 @@ def _drain(stream, sink: Capped) -> None:
         sink.add(chunk)
 
 
-def _confined(cmd: str, cwd: str, conf) -> list[str]:
+def _confined(cmd: str, cwd: str, conf, offline: bool = False) -> list[str]:
     """The command line for a command that may touch only one folder (inside ROOT)."""
     if not isinstance(conf, dict):
         raise ValueError("confine must be an object")
@@ -111,7 +115,8 @@ def _confined(cmd: str, cwd: str, conf) -> list[str]:
     if home != root and not home.startswith(root + os.sep):
         raise ValueError("home must be inside the confined folder")
     return [sys.executable, CONFINE, "--root", root, "--home", home,
-            *(["--require"] if conf.get("require") else []), "--", "bash", "-c", cmd]
+            *(["--require"] if conf.get("require") or offline else []), *(["--offline"] if offline else []),
+            "--", "bash", "-c", cmd]
 
 
 def landlock_abi() -> int:
@@ -128,6 +133,21 @@ def landlock_abi() -> int:
 
 LANDLOCK = landlock_abi()
 RUN_MARK = "SLQ_HUB_RUN"
+
+
+def offline_works() -> bool:
+    """Whether a command can run offline here (confine.py --offline: Landlock ABI 4 and the seccomp filter) - tried
+    once, so the Hub asks before every command instead of failing them where it cannot."""
+    if LANDLOCK < 4:
+        return False
+    try:
+        return subprocess.run([sys.executable, CONFINE, "--offline", "--require", "--", "true"], timeout=20,
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+OFFLINE = offline_works()
 
 
 def _end_leftovers(pgid: int, mark: str) -> int:
@@ -160,10 +180,16 @@ def run_exec(body: dict) -> dict:
     cwd = _inside_root(body.get("cwd") or ROOT)
     timeout = max(1, min(MAX_TIMEOUT, int(body.get("timeout") or DEFAULT_TIMEOUT)))
     cap = max(1000, min(2_000_000, int(body.get("max_output") or DEFAULT_MAX_OUTPUT)))
-    argv = _confined(cmd, cwd, body["confine"]) if body.get("confine") else ["bash", "-c", cmd]
+    offline = body.get("offline") is True
+    if body.get("confine"):
+        argv = _confined(cmd, cwd, body["confine"], offline)
+    elif offline:                                      # the owner's command, without the internet
+        argv = [sys.executable, CONFINE, "--offline", "--require", "--", "bash", "-c", cmd]
+    else:
+        argv = ["bash", "-c", cmd]
     env = _env(body.get("env"))
     mark = ""
-    if body.get("confine"):
+    if body.get("confine") or body.get("end_leftovers") is True:
         mark = env[RUN_MARK] = secrets.token_hex(12)
     t0 = time.monotonic()
     p = subprocess.Popen(argv, cwd=cwd, env=env,
@@ -278,7 +304,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):  # noqa: N802
         if urlparse(self.path).path == "/health":
-            return self._send(200, {"ok": True, "root": ROOT, "uid": os.getuid(), "landlock": LANDLOCK})
+            return self._send(200, {"ok": True, "root": ROOT, "uid": os.getuid(), "landlock": LANDLOCK,
+                                    "offline": OFFLINE})
         self._send(404, {"error": "not found"})
 
     def do_POST(self):  # noqa: N802
@@ -323,7 +350,8 @@ def main() -> None:
         ctypes.CDLL(None, use_errno=True).prctl(4, 0, 0, 0, 0)          # PR_SET_DUMPABLE = 4
     except (OSError, AttributeError):
         pass
-    print(f"slq-hub sandbox daemon on :{PORT}, root {ROOT}, uid {os.getuid()}, landlock ABI {LANDLOCK}", flush=True)
+    print(f"slq-hub sandbox daemon on :{PORT}, root {ROOT}, uid {os.getuid()}, landlock ABI {LANDLOCK}, "
+          f"offline commands {'possible' if OFFLINE else 'not possible'}", flush=True)
     httpd.serve_forever()
 
 

@@ -11,6 +11,7 @@ import time
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
+from .. import netfetch
 from ..gpu.runner import RunnerError
 from ..gpu.scheduler import SchedulerError
 from ..llm import payload as P
@@ -86,7 +87,7 @@ async def chat_completions(request: Request):
     if entry is None:
         return _err(404, f"the model '{name}' does not exist on this Hub", code="model_not_found")
     try:
-        messages = await normalise_openai(body.get("messages") or [])
+        messages = await normalise_openai(body.get("messages") or [], netfetch.blocked_networks(hub))
     except Exception as exc:  # noqa: BLE001 - bad image, unreachable URL
         return _err(400, f"could not read the messages: {exc}")
     thinking, effort, extra = _thinking(body, entry)

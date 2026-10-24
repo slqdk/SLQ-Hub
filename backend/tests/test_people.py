@@ -203,6 +203,33 @@ async def test_a_device_turn_answers_and_keeps_nothing(signed_in, app, fakes):
     assert jobs == [{"owner": "Maria", "label": "Chat"}]
 
 
+async def test_a_hand_over_keeps_her_own_prompt(signed_in, app, fakes):
+    """When her small model hands the turn over to the stronger one, the stronger model gets her prompt - her
+    name, no memory - not the owner's (0.15.0: the hand-over rebuilt the owner's prompt, memory index and all)."""
+    r = await signed_in.put("/hub/api/memory/file", json={"path": "/memories/owner.md",
+                                                         "content": "# The owner's private note\nNot for others."})
+    assert r.status_code == 200, r.text
+    await add_person(signed_in)
+
+    def responder(body):
+        if "short title" in json.dumps(body["messages"][-1]):
+            return {"content": "Hjælp"}
+        if body["model"] == "qwen3.8-27b":
+            return {"content": "Her er svaret."}
+        return {"tool_calls": [{"name": "escalate", "arguments": {"reason": "too hard for me"}}]}
+    fakes.llama["responder"] = responder
+    async with client_from(app) as phone:
+        await sign_in(phone)
+        res = await turn(app, phone, {"title": "New chat", "settings": {"model": "qwen3.6-35b-a3b"},
+                                      "messages": [user_msg("Et svært spørgsmål")]})
+    assert res["status"] == "done", res
+    big = [b for b in fakes.llama["requests"] if b["model"] == "qwen3.8-27b"]
+    assert big, "no hand-over"
+    system = big[0]["messages"][0]["content"]
+    assert "The user is Maria." in system and "# Memory" not in system and "private note" not in system
+    assert "handed over to you by" in system
+
+
 async def test_pictures_files_and_artifacts_go_back_to_the_device(signed_in, app, fakes):
     await add_person(signed_in)
     fakes.llama["replies"] = [

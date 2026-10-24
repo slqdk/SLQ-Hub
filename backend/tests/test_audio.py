@@ -680,7 +680,9 @@ def test_the_compose_file_runs_the_speech_service_without_the_gpu():
     speech = text.split("\n  speech:\n", 1)[1].split("\n\n  ", 1)[0]
     assert "<<: *gpu" not in speech and "/dev/kfd" not in speech
     # models/ read-only, not models/speech: Docker would make a missing mount folder as root on the first update
-    assert "/models:/models:ro" in speech and "models/speech:" not in speech and "networks: [core]" in speech
+    assert "/models:/models:ro" in speech and "models/speech:" not in speech
+    nets = speech.split("\n    networks:", 1)[1]
+    assert nets == "\n      inner:\n        ipv4_address: 172.31.251.13"            # no way out (0.15.0)
     # no hard CPU cap: one above the VM's cores stops the container from starting
     assert "cpus:" not in speech and "cpu_shares:" in speech
     assert "HUB_SPEECH_URL: http://speech:7100" in text

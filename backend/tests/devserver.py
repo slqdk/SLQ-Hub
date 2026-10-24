@@ -3,11 +3,13 @@
     cd backend && python -m tests.devserver [--port 8080] [--data /tmp/hub-dev]
 
 Signs in as soren / "correct horse battery". The fake model answers by
-keyword: "files" (writes and runs a script), "jingle" (a command makes a
+keyword: "files" (writes and runs a script), "install" (code that needs the
+internet), "read dr.dk" (web_fetch), "jingle" (a command makes a
 sound, a PDF and notes: the card under the answer), "announce" (speech),
 "song" (music), "horn" (a sound effect), "game" (slow steps, to try
 sending a message while it works), "page" (makes an artifact),
-"think" (reasons first), "search" (web search), "picture" (an image),
+"think" (reasons first), "search" (web search), "web picture" (a picture
+from the web in the answer), "picture" (an image),
 "loop" (repeats the same searches until the Hub makes it answer), or
 anything else (a short markdown answer). The built UI (frontend/dist) is
 served when it exists; otherwise use `npm run dev` in frontend/.
@@ -76,12 +78,19 @@ def responder(body: dict) -> dict:
     text = re.sub(r"^\[[^\]\n]{8,40}\]\n", "", text)          # the time it was sent
     after_tool = msgs[-1]["role"] == "tool" or (msgs[-1]["role"] == "user" and isinstance(msgs[-1]["content"], list)
                                                 and "Images returned" in json.dumps(msgs[-1]["content"]))
-    tools_done = sum(1 for m in msgs if m["role"] == "tool")
+    # tool steps in this turn: after the user's own last message (not the Hub's notes or returned images)
+    def own(m: dict) -> bool:
+        raw = m["content"] if isinstance(m["content"], str) else json.dumps(m["content"])
+        return m["role"] == "user" and "Images returned" not in raw and not raw.lstrip().startswith("(SLQ Hub")
+    start = max((i for i, m in enumerate(msgs) if own(m)), default=-1)
+    tools_done = sum(1 for m in msgs[start + 1:] if m["role"] == "tool")
     low = text.lower()
     if "short title" in low:
         return {"content": text.split("starts with:")[-1].strip()[:40].title() or "Chat"}
     if "condense the conversation" in low:
         return {"content": "Summary of the chat so far."}
+    if "web picture" in low:                            # a picture from the web in the answer (a link while asking)
+        return {"content": "Here is one from the web:\n\n![a red fox](https://example.com/fox.jpg)\n\nThat is all."}
     if "files" in low:
         if tools_done == 0:
             return {"content": "I will write the script first.", "tool_calls": [{"name": "write_file", "arguments": {
@@ -164,6 +173,14 @@ def responder(body: dict) -> dict:
             return {"tool_calls": [{"name": "task", "arguments": {"description": "Find maintenance intervals",
                                                                    "prompt": "Find pump maintenance intervals."}}]}
         return {"content": "The subagent found it: yearly service, seals every six months."}
+    if "install" in low:                                # code that needs the internet (asks when Settings says so)
+        if tools_done == 0:
+            return {"tool_calls": [{"name": "bash", "arguments": {"command": "pip install rich", "internet": True}}]}
+        return {"content": "Installed rich."}
+    if "read dr.dk" in low:
+        if tools_done == 0:
+            return {"tool_calls": [{"name": "web_fetch", "arguments": {"url": "https://www.dr.dk/nyheder"}}]}
+        return {"content": "I read the page."}
     if "search" in low:
         if tools_done == 0:
             return {"tool_calls": [{"name": "web_search", "arguments": {"query": text[:60]}}]}

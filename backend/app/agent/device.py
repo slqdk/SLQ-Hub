@@ -582,6 +582,24 @@ async def stop_turn(turn_id: str, request: Request):
     return {"ok": True}
 
 
+@router.post("/hub/api/device/turns/{turn_id}/approve")
+async def approve(turn_id: str, request: Request):
+    """The person's answer when the turn asks first (internet for the assistant set to ask): allow once or deny -
+    "always" is the owner's."""
+    turn = _turns(request).get(turn_id, _person(request))
+    if turn is None:
+        raise HTTPException(404, "no such answer being written")
+    try:
+        body = json.loads(await request.body())
+    except ValueError:
+        raise HTTPException(400, "the body must be JSON")
+    if not isinstance(body, dict) or body.get("decision") not in ("allow", "deny") or not body.get("call_id"):
+        raise HTTPException(400, "call_id and a decision of allow or deny")
+    if not turn.run.answer_approval(str(body["call_id"]), body["decision"]):
+        raise HTTPException(404, "that tool call is not waiting for an answer")
+    return {"ok": True}
+
+
 @router.post("/hub/api/device/turns/{turn_id}/done")
 async def turn_done(turn_id: str, request: Request):
     """The device has what it needs: the Hub forgets the turn."""

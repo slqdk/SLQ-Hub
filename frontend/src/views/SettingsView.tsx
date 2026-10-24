@@ -18,7 +18,7 @@ const TABS = [
 ];
 
 function useSettings() {
-  const { toast } = useApp();
+  const { toast, refreshAuth } = useApp();
   const [data, setData] = useState<{ settings: Settings; defaults: Settings } | null>(null);
   const load = useCallback(async () => {
     try {
@@ -35,13 +35,14 @@ function useSettings() {
       const r = await api<{ settings: Settings }>("/hub/api/settings", { method: "PUT", body: { section, values } });
       setData((d) => (d ? { ...d, settings: r.settings } : d));
       forgetSettings();
+      if (section === "web") refreshAuth();           // whether the internet asks first shapes how answers show
       toast("Saved", "run");
       return true;
     } catch (e) {
       toast((e as Error).message, "fault");
       return false;
     }
-  }, [toast]);
+  }, [toast, refreshAuth]);
   return { data, save, reload: load };
 }
 
@@ -1175,9 +1176,15 @@ function AgentTab({ s }: { s: S }) {
         { key: "rerank", label: "Re-rank the hits", type: "bool", help: "Better order, a little slower." },
       ]} />
       <SectionForm s={s} section="web" title="Web" fields={[
+        { key: "access", label: "Internet for the assistant", type: "select", options: [
+          { value: "allow", label: "Allowed" }, { value: "ask", label: "Ask first" }],
+          help: "Ask first: a web search, a page from a site and code that goes online wait for your answer in the chat - " +
+            "allow once, always, or deny. Code runs without the network unless it asks, and pictures from the web in " +
+            "answers show as links. People are asked in their own chats, once each time." },
         { key: "search_results", label: "Results per web search", type: "number", min: 1, max: 20 },
         { key: "fetch_max_chars", label: "Longest page text read (characters)", type: "number", min: 2000, max: 200000 },
       ]} />
+      <InternetAllowed asking={s.data?.settings.web?.access === "ask"} />
       <SectionForm s={s} section="sandbox" title="Sandbox" intro="Where the assistant runs code: no access to your LAN, internet allowed." fields={[
         { key: "timeout_s", label: "Default time limit for a command (seconds)", type: "number", min: 5, max: 3600 },
         { key: "max_timeout_s", label: "Longest a command may run (seconds)", type: "number", min: 10, max: 7200 },
@@ -1205,6 +1212,49 @@ function AgentTab({ s }: { s: S }) {
           help: "A 3B model in the image workflow turns the prompt into a detailed description first. The chat shows what it wrote." },
       ]} />
     </div>
+  );
+}
+
+/** What "always" answers allow while the assistant asks before it goes online: web search, sites, code. */
+function InternetAllowed({ asking }: { asking: boolean }) {
+  const { toast } = useApp();
+  const [perms, setPerms] = useState<{ tool: string; created_at: string }[] | null>(null);
+  const load = useCallback(async () => {
+    try {
+      const all = await api<{ tool: string; created_at: string }[]>("/hub/api/tool-permissions");
+      setPerms(all.filter((p) => p.tool.startsWith("internet:")));
+    } catch (e) {
+      toast((e as Error).message, "fault");
+    }
+  }, [toast]);
+  useEffect(() => {
+    load();
+  }, [load, asking]);
+  if (!perms || (!asking && !perms.length)) return null;
+  const label = (key: string) => key === "internet:search" ? "Web search" : key === "internet:code" ? "Internet for code"
+    : key.replace(/^internet:site:/, "");
+  const forget = async (tool: string) => {
+    try {
+      await api(`/hub/api/tool-permissions/${encodeURIComponent(tool)}`, { method: "DELETE" });
+      load();
+    } catch (e) {
+      toast((e as Error).message, "fault");
+    }
+  };
+  return (
+    <section className="stack" style={{ marginTop: -12, marginBottom: 28 }}>
+      <h3 style={{ margin: 0 }}>Always allowed online</h3>
+      <div className="list">
+        {perms.length === 0 ? <Empty>Nothing yet. When the assistant asks and you choose Always, it appears here.</Empty>
+          : perms.map((p) => (
+            <div className="list-row" key={p.tool}><span className="grow">{label(p.tool)}
+              {p.tool.startsWith("internet:site:") && <span className="muted small"> (site)</span>}</span>
+              <span className="meta">{ago(p.created_at)}</span>
+              <button className="btn quiet small" onClick={() => forget(p.tool)}>Ask again</button></div>
+          ))}
+      </div>
+      {!asking && <p className="muted small" style={{ margin: 0 }}>Internet is allowed now, so these are not used.</p>}
+    </section>
   );
 }
 
@@ -1372,7 +1422,8 @@ function McpTab({ s }: { s: S }) {
   const load = useCallback(async () => {
     try {
       setStatus(await api<McpStatus[]>("/hub/api/mcp"));
-      setPerms(await api("/hub/api/tool-permissions"));
+      setPerms((await api<{ tool: string; created_at: string }[]>("/hub/api/tool-permissions"))
+        .filter((p) => !p.tool.startsWith("internet:")));         // those are listed under Assistant -> Web
     } catch (e) {
       toast((e as Error).message, "fault");
     }

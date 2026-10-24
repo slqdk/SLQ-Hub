@@ -10,10 +10,15 @@ class SandboxError(RuntimeError):
     pass
 
 
-async def sandbox_exec(ctx: ToolContext, cmd: str, cwd: str, timeout: int) -> dict:
+async def sandbox_exec(ctx: ToolContext, cmd: str, cwd: str, timeout: int, offline: bool = False,
+                       end_leftovers: bool = False) -> dict:
     hub = ctx.hub
     headers = {"X-Internal-Token": hub.env.internal_token} if hub.env.internal_token else {}
     body: dict = {"cmd": cmd, "cwd": cwd, "timeout": timeout, "max_output": 200_000}
+    if offline:                       # internet for the assistant asks first: no network (Landlock + seccomp)
+        body["offline"] = True
+    if end_leftovers:                 # online once: nothing it starts stays online after it
+        body["end_leftovers"] = True
     if getattr(ctx.engine, "device", None) is not None:
         # A person's chat: the command may touch only this turn's temporary folder (Landlock in the sandbox;
         # refused there when it cannot be enforced), with a home of its own inside it.
@@ -43,8 +48,9 @@ async def bash(ctx: ToolContext, args: dict) -> ToolResult:
     wd = ctx.workdir
     target = wd.resolve(sub)
     cwd = f"{wd.sandbox_path}/{wd.rel(target)}".rstrip("/.") if wd.rel(target) != "." else wd.sandbox_path
+    offline = not ctx.online
     try:
-        res = await sandbox_exec(ctx, cmd, cwd, timeout)
+        res = await sandbox_exec(ctx, cmd, cwd, timeout, offline=offline, end_leftovers=ctx.online_once)
     except SandboxError as exc:
         return ToolResult(str(exc), is_error=True)
     wd.checkin("agent", "sandbox", f"bash: {cmd[:120]}")
@@ -57,17 +63,38 @@ async def bash(ctx: ToolContext, args: dict) -> ToolResult:
         parts.append("stdout:\n" + out)
     if err:
         parts.append("stderr:\n" + err)
-    return ToolResult("\n".join(parts), is_error=bool(res.get("timed_out")) or res.get("exit_code") not in (0, None))
+    failed = bool(res.get("timed_out")) or res.get("exit_code") not in (0, None)
+    if offline and failed:
+        parts.append(OFFLINE_NOTE)
+    return ToolResult("\n".join(parts), is_error=failed)
 
 
-register(Tool(
-    "bash",
-    "Run a bash command in the sandbox (Ubuntu with Python 3 + numpy/pandas/matplotlib/pillow/opencv, Node.js, "
-    "git, curl, ImageMagick, ffmpeg, Tesseract OCR, poppler). It starts in the working folder, has internet "
-    "access but no access to the local network, and runs as an unprivileged user. Each call is a fresh shell "
-    "(cd and variables do not carry over; files do). Use it to run code, tests, conversions and installs "
-    "(pip install --user is not needed: pip install works).",
-    obj({"command": {"type": "string"},
-         "timeout": {"type": "integer", "description": "Seconds (default 120, max 1800)"},
-         "cwd": {"type": "string", "description": "Sub-folder of the working folder to start in"}}, ["command"]),
-    bash))
+OFFLINE_NOTE = ("(This command ran without the network - no connections, no DNS: the user has the assistant ask "
+                "before it goes online. If it needs the internet - pip install, npm, git clone, curl - run it again "
+                "with internet: true, and the user is asked.)")
+BASH_TEXT = ("Run a bash command in the sandbox (Ubuntu with Python 3 + numpy/pandas/matplotlib/pillow/opencv, "
+             "Node.js, git, curl, ImageMagick, ffmpeg, Tesseract OCR, poppler). It starts in the working folder, "
+             "has internet access but no access to the local network, and runs as an unprivileged user. Each call "
+             "is a fresh shell (cd and variables do not carry over; files do). Use it to run code, tests, "
+             "conversions and installs (pip install --user is not needed: pip install works).")
+BASH_PARAMS = {"command": {"type": "string"},
+               "timeout": {"type": "integer", "description": "Seconds (default 120, max 1800)"},
+               "cwd": {"type": "string", "description": "Sub-folder of the working folder to start in"}}
+
+
+def _bash_dynamic(ctx: ToolContext) -> tuple[str, dict]:
+    from .. import internet
+    if not internet.asking(ctx.settings):
+        return BASH_TEXT, obj(BASH_PARAMS, ["command"])
+    text = BASH_TEXT.replace("has internet access but no access to the local network",
+                             "has no access to the local network and, unless the call says internet: true, no "
+                             "network at all (no connections, not even to localhost, and no DNS)")
+    return (text + " The user has the assistant ask before it goes online: set internet: true only for a command "
+            "that needs it (pip install, npm install, git clone, curl, downloads) - the user is asked first. "
+            "Allowed once, whatever the command leaves running is stopped when it ends.",
+            obj({**BASH_PARAMS, "internet": {"type": "boolean", "description": "The command needs the internet "
+                                                                                "(the user is asked)."}},
+                ["command"]))
+
+
+register(Tool("bash", BASH_TEXT, obj(BASH_PARAMS, ["command"]), bash, dynamic=_bash_dynamic))

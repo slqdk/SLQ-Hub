@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import io
 import re
+import shlex
 import time
 from pathlib import Path
 
@@ -122,7 +123,8 @@ async def image_ocr(ctx: ToolContext, args: dict) -> ToolResult:
     lang = re.sub(r"[^a-z+_]", "", (args.get("languages") or "dan+eng").lower()) or "eng"
     sandbox_file = f"{ctx.workdir.sandbox_path}/{ctx.workdir.rel(p)}"
     try:
-        res = await sandbox_exec(ctx, f"tesseract {sandbox_file!r} - -l {lang} 2>/dev/null", ctx.workdir.sandbox_path, 120)
+        res = await sandbox_exec(ctx, f"tesseract {shlex.quote(sandbox_file)} - -l {lang} 2>/dev/null",
+                                 ctx.workdir.sandbox_path, 120)
     except SandboxError as exc:
         return ToolResult(str(exc), is_error=True)
     text = (res.get("stdout") or "").strip()

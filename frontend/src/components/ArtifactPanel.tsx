@@ -69,7 +69,7 @@ export function ArtifactPanel({ chatId, id, version, onClose, loader }: { chatId
   onClose: () => void;
   loader?: (id: string, version?: number) => Promise<Artifact>;     // a person's chat: artifacts live on the device
 }) {
-  const { toast } = useApp();
+  const { toast, auth } = useApp();
   const [art, setArt] = useState<Artifact | null>(null);
   const [v, setV] = useState<number | undefined>(version);
   const [view, setView] = useState<"preview" | "code">("preview");
@@ -133,7 +133,7 @@ export function ArtifactPanel({ chatId, id, version, onClose, loader }: { chatId
           <iframe key={`${art.version}-${reloadKey}`} className="artifact-frame" title={art.title} srcDoc={doc}
             sandbox="allow-scripts allow-popups allow-forms allow-modals allow-downloads" />
         ) : art.type === "markdown" ? (
-          <div style={{ padding: "18px 22px" }}><Markdown text={art.content} /></div>
+          <div style={{ padding: "18px 22px" }}><Markdown text={art.content} remoteImages={!auth?.internetAsks} /></div>
         ) : (
           <pre className="code-view"><code className="hljs" dangerouslySetInnerHTML={{
             __html: highlight(art.content, art.type === "react" ? "tsx" : art.type === "code" ? null : art.type) }} /></pre>

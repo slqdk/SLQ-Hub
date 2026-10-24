@@ -61,11 +61,12 @@ Proxmox host
     │              scheduler, the agent harness and every public API.
     │              Published: 8080 (UI + API) and 11434 (same app, Ollama-style URL).
     ├── llm        llama.cpp ROCm image + a small supervisor. Starts/stops one
-    │              llama-server per model when the Hub says so. Internal only.
-    ├── comfyui    ComfyUI on PyTorch ROCm 7.14. Internal only
+    │              llama-server per model when the Hub says so. Internal only,
+    │              no way out (the inner network, below).
+    ├── comfyui    ComfyUI on PyTorch ROCm 7.14. Internal only, no way out
     │              (127.0.0.1:8188 on the VM for maintenance through an SSH tunnel).
     ├── speech     Text to speech on the CPU (Chatterbox, Røst; CPU PyTorch).
-    │              No GPU. Internal only.
+    │              No GPU. Internal only, no way out.
     ├── searxng    Web search for the agent. Internal only.
     └── sandbox    Ubuntu with Python, Node, ImageMagick, Tesseract, ffmpeg …
                    runs the agent's commands as uid 1000 in /workspace.
@@ -74,10 +75,30 @@ Proxmox host
 
 Networks:
 
-- `core` — hub, llm, comfyui, speech, searxng.
+- `core` — hub and searxng: the two that use the internet (web pages, model
+  downloads, search engines).
+- `inner` (0.15.0) — hub, llm (172.31.251.11), comfyui (.12) and speech
+  (.13); the Hub is .10. The model containers need nothing outside it, so
+  `DOCKER-USER` and `INPUT` rules on the VM drop new connections from their
+  addresses to anything outside `172.31.251.0/24`: the internet, the LAN and
+  the VM itself. A model file, a ComfyUI node or a Python library in them
+  cannot phone home. New connections inside the network (to the Hub, to each
+  other) pass, and so do replies to the Hub's connections and to ComfyUI's
+  maintenance port. Firewall rules rather than Docker's `internal` networks,
+  which publish no ports - ComfyUI's maintenance port is published on the
+  VM's loopback.
 - `sbx` — hub and sandbox only. The sandbox is not on `core`, has no Docker
   socket, and `DOCKER-USER` rules on the VM drop its traffic to private
   ranges (internet stays open for `pip install`, `git clone`, …).
+
+All of this was tested with Docker 29.9.1, the compose file's networks and
+the real firewall script outside the VM (0.15.0): before the rules a model
+container reached the internet, the LAN and the VM; after them none of the
+three, while the Hub reached the models by name, the internet and the
+sandbox, the sandbox kept its internet and lost the LAN and the models, and
+both published ports answered. The Hub's default route went through `core`.
+Moving running 0.14.0 containers from `core` to `inner` with `compose up`
+worked too.
 
 Volumes (host paths, all under `/srv/slq-hub`):
 
@@ -376,7 +397,7 @@ message's time with the conversation.
 
 | Tool | What it does |
 |---|---|
-| `web_search`, `web_fetch` | SearXNG; fetch with an SSRF guard (no private addresses), readable text extraction, truncation. |
+| `web_search`, `web_fetch` | SearXNG; fetch with an SSRF guard (no private addresses, the connection made to the checked address, every redirect checked), readable text extraction, truncation. |
 | `list_files`, `read_file`, `write_file`, `edit_file`, `search_files`, `move_file`, `delete_file` | The project's folder (or the chat's scratch folder). Every write is checked in as a sync revision, so everything can be restored. `read_file` on an image puts the image in front of the model. |
 | `bash` | Runs in the sandbox in the project folder, with a timeout and output limits. Long output goes to a file, and the model gets the head, the tail and the path. |
 | `view_image`, `image_transform`, `image_ocr` | Look at an image; crop, resize, rotate, convert and compress (Pillow); Tesseract OCR (dan+eng). |
@@ -392,7 +413,90 @@ message's time with the conversation.
 | `escalate` | Present when someone can take over: the stronger local model (Settings → Assistant), or the cloud where escalation is on. Its description names who. |
 
 **Approval.** Everything inside the sandbox runs without asking: files,
-bash, image tools, web. MCP tools ask the first time.
+bash, image tools, web - unless the internet asks first (below). MCP tools
+ask the first time.
+
+**Internet for the assistant** (0.15.0, `app/agent/internet.py`). Settings →
+Assistant → Web → "Internet for the assistant": **Allowed** (the default, as
+before) or **Ask first** (`web.access = "ask"`). Asking first, a call that
+would go online stops the turn and asks in the chat, at the call, like an MCP
+tool: Allow once, Always, or Deny.
+
+| Call | Asks | "Always" remembers |
+|---|---|---|
+| `web_search` | every search, showing the query | "Always allow web search" (`internet:search`) |
+| `web_fetch` | per site, showing the URL | "Always allow www.dr.dk" (`internet:site:www.dr.dk`; the exact host as the connection names it - IDNA, so a look-alike name shows as `xn--...` - and `dr.dk` is another) |
+| `bash` | only with `internet: true`; otherwise the command runs offline | "Always allow internet for code" (`internet:code`) |
+
+- **Offline code.** The sandbox daemon runs the command under `confine.py
+  --offline`: Landlock (ABI 4+) refuses every TCP connection, and a seccomp
+  filter the ways around Landlock's rule, which sees only `connect()` on a
+  plain TCP socket - MPTCP sockets (which reach any TCP server), TCP Fast
+  Open (`sendto`/`sendmsg` with `MSG_FASTOPEN` opens a connection without
+  `connect()`), every other socket family and protocol, io_uring, and the
+  32-bit and x32 system call tables. Offline, UDP sockets go too, so no DNS
+  lookup or QUIC; Unix sockets and netlink stay, and a local server can still
+  listen (nothing can connect to it over TCP). In its Landlock domain the
+  command cannot ptrace or read the memory of a process outside it either
+  (tried: a uid-1000 process unconfined can attach to another, offline it
+  gets "Operation not permitted"), so it cannot drive an online process that
+  way. A person's online command keeps UDP (DNS needs it; the firewall still
+  keeps the sandbox off the LAN) and its ports 53, 80 and 443. Files as usual: the owner's
+  commands keep their access, a person's confined command its usual limits.
+  All of it was tried for real (kernel 6.18, ABI 7), also inside a Docker
+  29.9.1 container with the default seccomp profile, as the sandbox runs: each
+  way out open without the filter, refused with it. The daemon tries an
+  offline command when it starts and says on `/health` whether it works
+  (`offline`); where it does not (no Landlock ABI 4, or the filter cannot be
+  installed), code cannot be kept offline, so every command asks, and the
+  question says why. The self-test's "offline code" line probes it on the VM.
+  A failed offline command's result tells the model to run it again with
+  `internet: true`, which asks.
+- **Once is once.** A command allowed online with "Allow once" has what it
+  leaves running ended with it (the daemon's run mark, as for people's
+  commands), so no background process keeps the internet for later offline
+  commands. A process that clears its environment and leaves its session can
+  outlive it - the mark's limit.
+- **Redirects.** Asking first, `web_fetch` follows a redirect only within the
+  site the user said yes to (with or without `www.`) or to a site the owner
+  always allows; to another it stops, and the result gives the model the new
+  address to fetch - which asks.
+- **What the model knows.** The system prompt and the tool descriptions say
+  that the user has it ask first (and no longer that the sandbox has internet
+  access), and `bash` gets its `internet` parameter only then. A denied call
+  returns "The user declined this tool call"; no answer in ten minutes is a
+  deny. A declined call does not count as a failed one, so three of them do
+  not hand the turn over to a stronger model or the cloud.
+- **Where it asks.** `approval_needed` carries `ask` (what, the detail - whole,
+  or cut with a note saying so - the "always" text, `can_always`); a
+  subagent's question carries `depth` and `parent`, so it shows inside its row,
+  and the turn says "Waiting for your answer" then too. The answer goes to
+  `POST /hub/api/runs/{id}/approve` (`allow`, `always`, `deny`), and
+  `approval_answered` takes the buttons away at once (a reload replays it).
+  While the turn waits it keeps its lease: other turns on the same model go
+  on, but the card does not switch to other work - as with an MCP question.
+- **Always.** The owner's answers are kept with the tools they always allow
+  (`tool_permissions`, `internet:` keys) and listed under "Always allowed
+  online" in the Web section, each with "Ask again"; the MCP tab leaves them
+  out.
+- **People.** A person is asked in their own chat, once each time (Allow
+  once, Deny; `POST /hub/api/device/turns/{id}/approve` refuses "always"):
+  their chats leave nothing on the Hub, and the owner's answers are the
+  owner's.
+- **What the browser loads.** Asking first, a picture from the web in an
+  answer or a Markdown artifact shows as a link ("Picture from example.com -
+  not loaded"), and other things that load by themselves (video, audio, SVG
+  images, backgrounds in styles) lose their web address, so what the model
+  writes cannot make the browser fetch from the web - a picture's address can
+  carry data out. `/hub/api/auth/status` says `internetAsks`.
+- **Not covered.** HTML and React artifacts run in the user's browser (a
+  sandboxed frame) and can load from the web there. Offline code can still
+  talk, over a Unix socket or through files, to a process that is online
+  already (one a command allowed "always" left running, say). SearXNG talks to the search engines
+  (that is the search); image URLs that apps send to the model API are
+  fetched as before (the app's request, not the assistant's choice - with the
+  same guard, LAN ranges included); MCP servers ask by their own rule; the
+  Hub's model downloads are not the assistant's.
 
 **Thinking.** The default is on for agent turns in projects and off for
 quick chats. A toggle in the composer overrides it. Qwen3.8 tends to
@@ -479,7 +583,8 @@ chats in the browser. Each answer is a **device turn**
    (`workspace/device/<turn>`), stores the pictures, and runs the normal
    `Engine` with `engine.device` set: the person's name, no memory, no
    libraries, no MCP, no cloud escalation (a hand-over to the stronger local
-   model is fine), bash only when allowed, artifacts kept in the turn
+   model is fine; it gets the person's prompt too - before 0.15.0 it got the
+   owner's, memory index and all), bash only when allowed, artifacts kept in the turn
    (`DeviceInfo`), only the skills the owner switched on. Without a stored
    summary to fold old messages into, the oldest are left out until the
    context fits (the system prompt says how many).
@@ -892,8 +997,10 @@ assistant made), each sent with every message.
   turn folder (its home and `TMPDIR` are in it), read the system (`/usr`,
   `/etc`, `/opt`, `/proc`, ...), `/dev/null`-style devices - nothing else:
   not `/workspace`, `/home/sandbox`, `/tmp`, `/dev/shm` or terminals. With
-  ABI 4+ it connects only to ports 53, 80 and 443; with ABI 6+ it cannot
-  signal processes or reach abstract sockets outside. Landlock also denies
+  ABI 4+ it connects only to ports 53, 80 and 443 - and (0.15.0) a seccomp
+  filter refuses MPTCP, TCP Fast Open and other socket kinds, which
+  Landlock's rule does not see; with ABI 6+ it cannot signal processes or
+  reach abstract sockets outside. Landlock also denies
   reading other processes' memory and environment, but `/proc/<pid>/cmdline`
   stays readable: the command lines of the owner's commands and MCP servers
   running at the same moment are visible to a person's code (so keep secrets
@@ -910,8 +1017,25 @@ assistant made), each sent with every message.
     systemd unit re-applies them at boot);
   - public DNS servers (Docker's embedded DNS would otherwise forward to the
     LAN resolver).
-- **Web fetch.** `web_fetch` refuses private and loopback addresses.
-- **Speech service.** On `core` only: not published, and the sandbox's
+- **Web fetch.** `web_fetch` and image URLs from apps refuse private and
+  loopback addresses, the LAN's ranges (`HUB_LAN_CIDRS`, which may be public
+  addresses) and Settings' blocked ranges (`app/netfetch.py`; before 0.15.0
+  an app's image URL was checked against the private ranges only). It looks
+  the name up once - as the connection names it (IDNA 2008, as httpx), so
+  `straße.de` is not looked up as `strasse.de` - checks every address, and
+  connects to a checked address (0.15.0: a pinned connection pool; TLS is
+  still verified against the name), so a name server that answers
+  differently the second time - DNS rebinding - cannot steer it into the LAN.
+  Each of up to five redirects is checked and pinned the same way. No proxy
+  from the environment (a proxy would look the name up itself).
+- **Model containers** (0.15.0). llm, comfyui and speech are on `inner` only,
+  and the VM's firewall drops new connections from them to anything outside
+  it (section 2). They need nothing outside: the Hub downloads the models,
+  and Hugging Face is offline in speech.
+- **Internet for the assistant.** "Ask first" (section 6) makes web search,
+  each site and code that goes online wait for the user's answer, and runs
+  other code without TCP connections.
+- **Speech service.** On `inner` only: not published, and the sandbox's
   network cannot reach it. It reads only files under `/models/speech`
   (resolved paths; the models folder is mounted read-only), a voice file only
   as `.wav` and at most 25 MB, a clip only as WAV bytes (users' audio is
@@ -946,12 +1070,22 @@ assistant made), each sent with every message.
 3. Stop the app and back up `data/`.
 4. Start the new version and wait for health.
 5. On failure, roll back code, images and data automatically.
+6. Install the firewall script and unit as the new version has them, and
+   apply the rules (0.15.0; they are added only when missing).
 
-`update.sh status|backups|rollback` exist too. An update makes the folders
-the services mount when a new version adds one (owned by uid 1000).
+`update.sh status|backups|rollback|firewall` exist too (`status` says whether
+the installed firewall is the clone's, `firewall` installs and applies it).
+`status`, `firewall` and an update also try each model container's way out -
+a connection to 1.1.1.1:443 from inside it, which the rules must stop - and
+say what they found.
+An update makes the folders the services mount when a new version adds one
+(owned by uid 1000). An update runs the updater it started with, so a step
+new in a version (like 6 in 0.15.0) first runs on the update after it - or
+with `update.sh firewall` right away.
 
 **Self-test.** `python -m app.cli selftest` checks every service, the
-sandbox's isolation and one answer with its tokens/s; `--images` makes a
+sandbox's isolation (since 0.15.0 also that a command run offline cannot
+connect: "offline code") and one answer with its tokens/s; `--images` makes a
 picture, and `--speech` speaks the same sentence with each downloaded voice
 model, reports the real-time factor with T3's and the decoder's share, and
 saves each in `data/selftest/` (with `speech.json`), where Settings →
@@ -1012,6 +1146,15 @@ has them now - a song, a mix, a script that failed - newest turn first, up to
   XL Turbo in 19 s (about 10 s of it loading, 8 s the planner), the LLM back
   in about 9 s. Still unknown: a 2-3 minute song's time and VRAM (XL is about
   20 GB with its planner), how they sound, and how well ACE-Step sings Danish.
+- **The inner network and its firewall rules** (0.15.0) were tested with
+  Docker 29.9.1 outside the VM, not yet on it. `update.sh status` shows
+  whether the VM's firewall is current and tries each model container's way
+  out; a model container that cannot load or answer after the update would be
+  the sign of a rule too many.
+- **Offline code** (internet asking first) needs Landlock ABI 4 and a nested
+  seccomp filter in the sandbox; tested with ABI 7 here, also inside a Docker
+  29.9.1 container with the default seccomp profile, not on the VM. The
+  self-test's "offline code" line probes it there.
 - **People's chats in the browser** depend on the browser keeping IndexedDB.
   The app asks for persistent storage, but Safari deletes a website's storage
   after seven days of use without a visit to it - except for a page added to

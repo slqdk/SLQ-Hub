@@ -150,6 +150,8 @@ DEFAULTS: dict = {
         "max_tokens": 16000,
     },
     "web": {
+        "access": "allow",                 # allow | ask: internet for the assistant - ask first: web search, pages
+                                           # and code that goes online wait for the user's answer
         "search_results": 8,
         "fetch_max_chars": 30000,
         "blocked_cidrs": [],               # extra ranges web_fetch refuses (private ranges always are)

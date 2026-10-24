@@ -87,7 +87,8 @@ export interface User { id: number; username: string; role?: "admin" | "member";
   may_run_code?: boolean }
 export interface Person { id: number; username: string; display_name: string; away: boolean; may_run_code: boolean;
   created_at: string; last_seen: string | null }
-export interface AuthStatus { signedIn: boolean; user: User | null; version: string; setupNeeded: boolean }
+export interface AuthStatus { signedIn: boolean; user: User | null; version: string; setupNeeded: boolean;
+  internetAsks?: boolean }                     // Settings -> Web: the internet asks first
 
 export type Block =
   | { type: "text"; text: string; while_working?: boolean }   // while_working: sent while a turn worked

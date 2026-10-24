@@ -35,8 +35,10 @@ async def health(request: Request):
 async def status(request: Request):
     hub = get_hub(request)
     user = getattr(request.state, "user", None)
+    # internetAsks: the UI then shows pictures from the web in answers as links (agent/internet.py)
     return {"signedIn": user is not None, "user": user, "version": hub.env.version,
-            "setupNeeded": auth.user_count() == 0}
+            "setupNeeded": auth.user_count() == 0,
+            "internetAsks": user is not None and hub.settings.get("web", "access") == "ask"}
 
 
 @router.post("/hub/api/auth/login")

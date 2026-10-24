@@ -9,6 +9,7 @@ import secrets
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
+from .. import netfetch
 from ..gpu.scheduler import SchedulerError
 from ..llm import payload as P
 from ..llm.client import LlmError
@@ -64,7 +65,8 @@ async def _prepare(request: Request):
     if entry is None:
         return None, _err(404, f"model: {name} does not exist on this Hub", "not_found_error")
     try:
-        messages = await normalise_openai(from_anthropic(body.get("system"), body.get("messages") or []))
+        messages = await normalise_openai(from_anthropic(body.get("system"), body.get("messages") or []),
+                                          netfetch.blocked_networks(hub))
     except Exception as exc:  # noqa: BLE001
         return None, _err(400, f"could not read the messages: {exc}")
     return (hub, body, name, entry, messages), None
