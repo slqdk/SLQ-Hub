@@ -296,8 +296,9 @@ def selftest(images: bool = False, speech: bool = False) -> int:
     # ---- the sandbox and its isolation
     try:
         hz = c.get(env.sandbox_url + "/health").json()
-        res = _sandbox_exec(c, env, "python3 --version && node --version && tesseract --version 2>&1 | head -1")
-        tools = " / ".join(x.strip() for x in res["stdout"].splitlines()[:3])
+        res = _sandbox_exec(c, env, "python3 --version && node --version && tesseract --version 2>&1 | head -1; "
+                                    "dotnet --version 2>/dev/null | sed 's/^/.NET /'")
+        tools = " / ".join(x.strip() for x in res["stdout"].splitlines()[:4])
         if hz.get("uid") == 0:
             rep.line("FAIL", "sandbox", "runs as root", "the sandbox image must run as uid 1000")
         else:

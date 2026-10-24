@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.15.1 - 2026-10-24
+
+- **C# in the sandbox.** The assistant can write, build and run C# with the
+  .NET 10 SDK: console programs, libraries, ASP.NET, tests.
+- **Windows Forms and WPF** build in the sandbox but cannot run there
+  (Windows only, no screen). The assistant builds them to catch errors and
+  hands you the program as one .exe (`publish/` in the chat's or project's
+  folder, in the files card): small, for a PC with the .NET 10 Desktop
+  Runtime - or, if you ask, self-contained (about 150 MB). It writes the
+  forms in code; there is no designer here.
+- Build output (`bin/`, `obj/`) stays out of the folder - in `.hub/dotnet` -
+  so a build is not synced to your PC and does not mix with Visual Studio's.
+  Nothing of a build keeps running in the sandbox afterwards.
+- With the internet asking first, a build that needs NuGet packages asks the
+  first time (a Windows program always does); after that it builds offline.
+- The self-test's sandbox line shows the .NET version.
+- Update backups leave out the sandbox's NuGet packages and .NET build
+  output, which come back by themselves.
+- The sandbox image grows by about 600 MB.
+
 ## 0.15.0 - 2026-10-24
 
 - **The internet can ask first.** Settings → Assistant → Web → **Internet

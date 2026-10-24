@@ -65,7 +65,10 @@ FOLDERS = ("data", "models/llm", "models/comfy", "models/speech", "comfy/input",
 KEEP = 3
 TIMEOUT = 300
 POLL = float(os.environ.get("HUB_UPDATE_POLL", "3"))
-BACKUP_EXCLUDE = ("./logs",)
+# Left out of the backups: logs, and what is downloaded or built again by itself - the sandbox's NuGet packages
+# and caches, and .NET build output (.hub/dotnet) in any working folder (0.15.1).
+BACKUP_EXCLUDE = ("./logs", "./sandbox-home/.nuget", "./sandbox-home/.local/share/NuGet")
+BACKUP_EXCLUDE_ANYWHERE = ("/.hub/dotnet",)
 
 
 class Stop(Exception):
@@ -311,7 +314,9 @@ def show_log(lines: int = 40) -> None:
 
 
 def _exclude(info: tarfile.TarInfo) -> tarfile.TarInfo | None:
-    return None if any(info.name == e or info.name.startswith(e + "/") for e in BACKUP_EXCLUDE) else info
+    if any(info.name == e or info.name.startswith(e + "/") for e in BACKUP_EXCLUDE):
+        return None
+    return None if any(e + "/" in info.name + "/" for e in BACKUP_EXCLUDE_ANYWHERE) else info
 
 
 def make_backup(name: str, info: dict) -> Path:

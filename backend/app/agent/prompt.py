@@ -52,11 +52,19 @@ projects, decisions) - briefly, without duplicates, never passwords or secrets.
 {memory_index}"""
 
 TOOLS_LINE = """- File tools take paths relative to the working folder. bash starts in it ({sandbox_path}) inside a sandbox \
-(Ubuntu with Python, Node, ImageMagick, ffmpeg, Tesseract) that has internet access but no access to the local \
-network. Install what you need with pip or npm."""
+(Ubuntu with Python, Node, .NET 10 (C#), ImageMagick, ffmpeg, Tesseract) that has internet access but no access to \
+the local network. Install what you need with pip or npm."""
 # Settings -> Assistant -> Web -> Internet for the assistant: ask first.
 TOOLS_LINE_ASKS = """- File tools take paths relative to the working folder. bash starts in it ({sandbox_path}) inside a \
-sandbox (Ubuntu with Python, Node, ImageMagick, ffmpeg, Tesseract) with no access to the local network."""
+sandbox (Ubuntu with Python, Node, .NET 10 (C#), ImageMagick, ffmpeg, Tesseract) with no access to the local network."""
+# C# in the sandbox (the .NET 10 SDK): where builds go, and Windows programs, which build here but cannot run here.
+CSHARP_LINE = """
+- C#: dotnet new, build, run and test work; build output goes to .hub/dotnet, not bin/ and obj/. Windows Forms and \
+WPF build here with <EnableWindowsTargeting>true</EnableWindowsTargeting> in the project, but cannot run here \
+(Windows only, no screen): build to catch errors, keep logic testable in a class library, write forms in code (no \
+designer here), and give the user the program: `dotnet publish -c Release -r win-x64 --self-contained false \
+-p:PublishSingleFile=true -o publish` makes one small .exe that needs the .NET 10 Desktop Runtime on their PC \
+(--self-contained true: no runtime needed, but about 150 MB)."""
 INTERNET_ASKS = """
 - The user has you ask before you go online: web_search and web_fetch wait for their answer, and bash runs without \
 the network (no connections, no DNS) unless the call sets internet: true - then they are asked; installs with pip or \
@@ -133,8 +141,9 @@ def system_prompt(*, user: str, model_name: str, folder_text: str, sandbox_path:
                   cloud_model: str = "", taken_over_from: str = "", memory: bool = True, code: bool = True,
                   dropped: int = 0, sound: list[str] | None = None, internet_asks: bool = False) -> str:
     now = datetime.now(ZoneInfo(tz) if tz else local_tz())
-    tools_line = ((TOOLS_LINE_ASKS if internet_asks else TOOLS_LINE).format(sandbox_path=sandbox_path) if code
-                  else NO_CODE_LINE) + ((INTERNET_ASKS if code else INTERNET_ASKS_NO_CODE) if internet_asks else "")
+    tools_line = ((TOOLS_LINE_ASKS if internet_asks else TOOLS_LINE).format(sandbox_path=sandbox_path) + CSHARP_LINE
+                  if code else NO_CODE_LINE) + ((INTERNET_ASKS if code else INTERNET_ASKS_NO_CODE) if internet_asks
+                                                else "")
     text = BASE.format(user=user, model=model_name, date=now.strftime("%A %d %B %Y"), folder=folder_text,
                        tools_line=tools_line, image_gen=IMAGE_GEN if images_available else "")
     text += sound_text(sound or [])

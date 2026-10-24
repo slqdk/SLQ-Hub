@@ -41,6 +41,25 @@ RUN for t in ffmpeg ffprobe; do \
         && chmod 755 "/usr/local/bin/$t"; \
     done
 
+# C# with the .NET 10 SDK (Ubuntu's own build, from the archive; without the recommended AOT compiler), in a
+# layer of its own so adding it did not rebuild the ones above. No telemetry, banner, dev certificate or workload
+# update checks; no build servers left running after a command (MSBuild nodes, the MSBuild server, the C# compiler
+# server) - they would hold memory in the sandbox between commands. Windows Forms and WPF projects build here
+# with <EnableWindowsTargeting>true</EnableWindowsTargeting> in the project (not set here: it makes every restore
+# fetch the Windows pack from NuGet); they cannot run here. Each command's build output goes to .hub/dotnet in its
+# working folder (ArtifactsPath, set by the Hub), not into bin/ and obj/ beside the project, where sync and the
+# files card would pick it up.
+RUN apt-get update && apt-get install -y --no-install-recommends dotnet-sdk-10.0 \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+ENV DOTNET_CLI_TELEMETRY_OPTOUT=1 \
+    DOTNET_NOLOGO=1 \
+    DOTNET_GENERATE_ASPNET_CERTIFICATE=false \
+    DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE=1 \
+    MSBUILDDISABLENODEREUSE=1 \
+    DOTNET_CLI_USE_MSBUILD_SERVER=0 \
+    UseSharedCompilation=false \
+    NUGET_XMLDOC_MODE=skip
+
 COPY execd.py confine.py /opt/execd/
 
 USER sandbox

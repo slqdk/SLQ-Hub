@@ -14,7 +14,10 @@ async def sandbox_exec(ctx: ToolContext, cmd: str, cwd: str, timeout: int, offli
                        end_leftovers: bool = False) -> dict:
     hub = ctx.hub
     headers = {"X-Internal-Token": hub.env.internal_token} if hub.env.internal_token else {}
-    body: dict = {"cmd": cmd, "cwd": cwd, "timeout": timeout, "max_output": 200_000}
+    # .NET builds into .hub/dotnet (ignored by sync and the files card), not bin/ and obj/ beside the project:
+    # nothing of a build reaches the user's PC through sync or fights with the build there.
+    body: dict = {"cmd": cmd, "cwd": cwd, "timeout": timeout, "max_output": 200_000,
+                  "env": {"ArtifactsPath": f"{ctx.workdir.sandbox_path}/.hub/dotnet"}}
     if offline:                       # internet for the assistant asks first: no network (Landlock + seccomp)
         body["offline"] = True
     if end_leftovers:                 # online once: nothing it starts stays online after it
@@ -70,10 +73,11 @@ async def bash(ctx: ToolContext, args: dict) -> ToolResult:
 
 
 OFFLINE_NOTE = ("(This command ran without the network - no connections, no DNS: the user has the assistant ask "
-                "before it goes online. If it needs the internet - pip install, npm, git clone, curl - run it again "
-                "with internet: true, and the user is asked.)")
+                "before it goes online. If it needs the internet - pip install, npm, a dotnet build that restores NuGet "
+                "packages, git clone, curl - run it again with internet: true, and the user is asked.)")
 BASH_TEXT = ("Run a bash command in the sandbox (Ubuntu with Python 3 + numpy/pandas/matplotlib/pillow/opencv, "
-             "Node.js, git, curl, ImageMagick, ffmpeg, Tesseract OCR, poppler). It starts in the working folder, "
+             "Node.js, the .NET 10 SDK (C#), git, curl, ImageMagick, ffmpeg, Tesseract OCR, poppler). It starts in "
+             "the working folder, "
              "has internet access but no access to the local network, and runs as an unprivileged user. Each call "
              "is a fresh shell (cd and variables do not carry over; files do). Use it to run code, tests, "
              "conversions and installs (pip install --user is not needed: pip install works).")
@@ -90,7 +94,8 @@ def _bash_dynamic(ctx: ToolContext) -> tuple[str, dict]:
                              "has no access to the local network and, unless the call says internet: true, no "
                              "network at all (no connections, not even to localhost, and no DNS)")
     return (text + " The user has the assistant ask before it goes online: set internet: true only for a command "
-            "that needs it (pip install, npm install, git clone, curl, downloads) - the user is asked first. "
+            "that needs it (pip install, npm install, NuGet packages for dotnet, git clone, curl, downloads) - the user "
+            "is asked first. "
             "Allowed once, whatever the command leaves running is stopped when it ends.",
             obj({**BASH_PARAMS, "internet": {"type": "boolean", "description": "The command needs the internet "
                                                                                 "(the user is asked)."}},

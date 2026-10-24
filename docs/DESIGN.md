@@ -68,7 +68,7 @@ Proxmox host
     ├── speech     Text to speech on the CPU (Chatterbox, Røst; CPU PyTorch).
     │              No GPU. Internal only, no way out.
     ├── searxng    Web search for the agent. Internal only.
-    └── sandbox    Ubuntu with Python, Node, ImageMagick, Tesseract, ffmpeg …
+    └── sandbox    Ubuntu with Python, Node, .NET 10 (C#), ImageMagick, Tesseract, ffmpeg …
                    runs the agent's commands as uid 1000 in /workspace.
                    Own network, blocked from the LAN by the VM's firewall.
 ```
@@ -104,7 +104,7 @@ Volumes (host paths, all under `/srv/slq-hub`):
 
 | Path | Contents |
 |---|---|
-| `data/` | `hub.db`, settings, chats, uploads, generated images, project files, sync revisions, skills, memory, libraries. Backed up by `update.sh`. |
+| `data/` | `hub.db`, settings, chats, uploads, generated images, project files, sync revisions, skills, memory, libraries, the sandbox's home. Backed up by `update.sh` (not the logs, the sandbox's NuGet caches or .NET build output). |
 | `models/llm/` | GGUF files. Not backed up (re-downloadable). |
 | `models/comfy/` | ComfyUI model folders (`diffusion_models/`, `text_encoders/`, `vae/`, …). |
 | `models/speech/` | The speech models (made by the Hub on the first download; the speech container mounts `models/` read-only). |
@@ -399,7 +399,7 @@ message's time with the conversation.
 |---|---|
 | `web_search`, `web_fetch` | SearXNG; fetch with an SSRF guard (no private addresses, the connection made to the checked address, every redirect checked), readable text extraction, truncation. |
 | `list_files`, `read_file`, `write_file`, `edit_file`, `search_files`, `move_file`, `delete_file` | The project's folder (or the chat's scratch folder). Every write is checked in as a sync revision, so everything can be restored. `read_file` on an image puts the image in front of the model. |
-| `bash` | Runs in the sandbox in the project folder, with a timeout and output limits. Long output goes to a file, and the model gets the head, the tail and the path. |
+| `bash` | Runs in the sandbox in the project folder, with a timeout and output limits. Long output goes to a file, and the model gets the head, the tail and the path. C# with the .NET 10 SDK (0.15.1, below). |
 | `view_image`, `image_transform`, `image_ocr` | Look at an image; crop, resize, rotate, convert and compress (Pillow); Tesseract OCR (dan+eng). |
 | `image_generate`, `image_edit`, `image_remove_background` | ComfyUI through the queue (the lease switches residency). |
 | `speech_generate`, `music_generate`, `sound_generate` | Audio files in the working folder (0.13.0, section 8): speech on the CPU (the speech service), music and sound effects in ComfyUI through the queue. Offered when a model for them is downloaded. |
@@ -497,6 +497,38 @@ tool: Allow once, Always, or Deny.
   fetched as before (the app's request, not the assistant's choice - with the
   same guard, LAN ranges included); MCP servers ask by their own rule; the
   Hub's model downloads are not the assistant's.
+
+**C# in the sandbox** (0.15.1). The sandbox has the .NET 10 SDK from Ubuntu's
+archive (`dotnet-sdk-10.0`, about 600 MB without the AOT compiler it
+recommends): console programs, libraries, ASP.NET and tests build and run
+there.
+
+- **Build output.** Each command gets `ArtifactsPath=<working folder>/.hub/dotnet`
+  from the Hub, so .NET's artifacts layout puts `bin/` and `obj/` there - out
+  of sync, the files card and the Files panel - instead of beside the
+  project, where every build would be checked in and synced to the user's PC
+  (Linux paths in `obj/` against Visual Studio's). A project that sets its own
+  output keeps it (an environment property is the weakest kind).
+- **No build servers.** `MSBUILDDISABLENODEREUSE`, `DOTNET_CLI_USE_MSBUILD_SERVER=0`
+  and `UseSharedCompilation=false`: nothing of a build keeps running and
+  holding memory after the command. No telemetry, banner, developer
+  certificate or workload update checks.
+- **Windows programs.** Windows Forms and WPF build on Linux with
+  `<EnableWindowsTargeting>true</EnableWindowsTargeting>` in the project; the
+  first such build fetches the Windows targeting pack from NuGet. It is not
+  set for every project: then each restore would fetch that pack, so nothing
+  would build offline. They cannot run here (Windows only, no screen), so the
+  system prompt tells the model to build to catch errors, keep logic in a
+  testable class library, write forms in code, and hand over the program
+  with `dotnet publish -c Release -r win-x64 --self-contained false
+  -p:PublishSingleFile=true -o publish` - one small .exe that needs the .NET
+  10 Desktop Runtime (`--self-contained true`: none, about 150 MB, which sync
+  leaves out at 25 MB).
+- **Offline and people.** Builds work offline once their NuGet packages are
+  in the cache (`~/.nuget/packages` in the sandbox's home); a restore that
+  needs the internet asks while it asks first. A person's build goes to
+  `.hub/dotnet` in her turn's folder, with her packages in her turn's home -
+  fetched again for each answer, never sent to her device.
 
 **Thinking.** The default is on for agent turns in projects and off for
 quick chats. A toggle in the composer overrides it. Qwen3.8 tends to
@@ -1067,7 +1099,8 @@ assistant made), each sent with every message.
 
 1. Fast-forward the clone.
 2. Build the new images while the old ones serve.
-3. Stop the app and back up `data/`.
+3. Stop the app and back up `data/` (not the logs, the sandbox's NuGet caches
+   or .NET build output: they come back by themselves).
 4. Start the new version and wait for health.
 5. On failure, roll back code, images and data automatically.
 6. Install the firewall script and unit as the new version has them, and
@@ -1151,6 +1184,13 @@ has them now - a song, a mix, a script that failed - newest turn first, up to
   whether the VM's firewall is current and tries each model container's way
   out; a model container that cannot load or answer after the update would be
   the sign of a rule too many.
+- **Windows programs from the sandbox** (0.15.1): building Windows Forms on
+  Linux needs the Windows Desktop targeting pack from NuGet, which this build
+  environment cannot reach, so the first WinForms build and `win-x64` publish
+  happen on the VM. Not known: whether an icon and version information get
+  into an .exe built on Linux; whether `dotnet test` works offline and in
+  people's chats (the classic test runner talks to its test host over TCP on
+  localhost, which offline code and people's port rules refuse).
 - **Offline code** (internet asking first) needs Landlock ABI 4 and a nested
   seccomp filter in the sandbox; tested with ABI 7 here, also inside a Docker
   29.9.1 container with the default seccomp profile, not on the VM. The
