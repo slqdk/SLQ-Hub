@@ -602,14 +602,45 @@ reads in each window.
   `eng+dan`) on the screenshot made three times larger, then each window alone
   (a drop-down list's highlighted row otherwise hides the rows under it), then
   inverted - the first place the words are read, as a whole word sequence,
-  else as the start of words. Typing goes by Unicode code point through
-  libX11/libXtst (already in the image as xdotool's own libraries): a spare
-  key code is remapped to each character's keysym at every shift level and
-  pressed with XTEST. `xdotool type` was not usable for this - in a non-UTF-8
-  locale it refuses non-ASCII outright, and it breaks a Latin-1 capital such
-  as Æ into its lower/upper pair and presses no Shift, so it arrives as æ
-  (measured; Danish capitals Æ Ø Å matter here). The code-point path is
-  case- and locale-independent.
+  else as the start of words.
+- **Typing** (0.16.1) goes through HubKeys, a small Windows program
+  (`HUBKEYS_PROGRAM` in winshot.py) built into the prefix with it -
+  `winshot --setup` builds it with no package source and starts it once under
+  Wine to see it answer. At a run's first type step it starts beside the
+  program (0.1-0.2 s) and sends each text with `SendInput`, as Windows'
+  on-screen keyboard does: a character on the keyboard as its key, with Shift
+  when it needs one, anything else as a Unicode packet (`KEYEVENTF_UNICODE`),
+  which arrives as exactly that character - Æ Ø Å, other scripts and emoji
+  included. Wine's `VkKeyScanW` answers a character that is not on the
+  keyboard with the key of a look-alike (č: c, Ж: ?), so each key is checked
+  with `ToUnicode` first. `\n` is Return, `\t` Tab.
+  - **The barrier.** The text goes straight into Wine's input queue, but
+    clicks and keys go through the X server, which Wine reads only when the
+    program takes its next input: a busy program got a text before the click
+    sent ahead of it (measured: the second box's text landed in the first).
+    So before each text winshot holds Shift down through X and HubKeys waits
+    until Wine reports it down (`GetAsyncKeyState`, 5 s at most), then the
+    same for up - every click and key before it is in the queue ahead of the
+    text. If the program does not get there in 5 s, it types anyway and the
+    step says the text may have gone ahead.
+  - **Why not through X** (0.16.0 did; measured under Wine 9.0 with the
+    image's packages, uid 1000, `C.UTF-8`). 0.16.0 remapped a spare key code
+    to each character's Unicode keysym and pressed it with XTEST. Wine lost
+    the first key (its `+key` trace: the key map change reached it only after
+    that key, so the key had no virtual key, `VK_NONAME`; after any real key
+    the change came in time), turned every Latin-1 letter into U+FFFD (such a keysym
+    comes back from Xlib as one Latin-1 byte, which Wine decodes as UTF-8;
+    the legacy keysym passed, and Unicode keysyms beyond Latin-1 did too),
+    put U+FFFD for every letter into WPF, and gave a busy program other
+    letters (43 typed at 120 ms of work each came out as `br5.`): Wine looks
+    up a key's character when the program translates it, from the key map as
+    it is by then. Legacy keysyms fixed the letters only; 250 ms between keys
+    did not bring the first one back. `xdotool type` remaps the same way, and
+    pressed no Shift for capitals.
+  - **What a program sees.** Typed characters arrive as `WM_CHAR`. A key on
+    the keyboard also gives its `WM_KEYDOWN`/`WM_KEYUP`; a Unicode packet
+    gives `VK_PACKET` there (`Keys.Packet` in a KeyDown handler), as on
+    Windows. Keys (`key` steps), clicks and drags still go through X.
 - **How Wine is set up** (once, in the image: `winshot --setup` as the
   sandbox user, the prefix `/opt/hub-wine`, fresh with every new container).
   Measured, each against the alternative: no virtual desktop (in Wine 9's, a
@@ -1177,7 +1208,8 @@ assistant made), each sent with every message.
 - **Windows programs** (0.16.0). They run in the sandbox under Wine as the
   sandbox user, like any command (offline while asking first, the same
   firewall); Wine needs no privileges, and its X server listens on no TCP
-  port.
+  port. HubKeys, the typing helper (0.16.1), runs beside them the same way
+  and talks only to winshot, through a pipe.
 - **Speech service.** On `inner` only: not published, and the sandbox's
   network cannot reach it. It reads only files under `/models/speech`
   (resolved paths; the models folder is mounted read-only), a voice file only
@@ -1238,7 +1270,8 @@ An update makes the folders the services mount when a new version adds one
 sandbox's isolation (since 0.15.0 also that a command run offline cannot
 connect: "offline code"; since 0.16.0 "windows programs": a small Windows
 Forms program built offline and run under Wine, its button found by its text
-and clicked, which closes it) and one answer with its tokens/s; `--images` makes a
+and clicked, which closes it - since 0.16.1 after "Søren: ÆØÅ æøå" is typed
+into it, which must arrive exactly) and one answer with its tokens/s; `--images` makes a
 picture, and `--speech` speaks the same sentence with each downloaded voice
 model, reports the real-time factor with T3's and the decoder's share, and
 saves each in `data/selftest/` (with `speech.json`), where Settings →
@@ -1307,7 +1340,9 @@ has them now - a song, a mix, a script that failed - newest turn first, up to
 - **Windows programs from the sandbox** (0.15.1, 0.16.0): Windows Forms and
   WPF build offline with the packs in the image and run under Wine - tried in
   the real image here (Docker 29.9.1, the default seccomp profile, offline),
-  not yet on the VM. The packs and the Windows runtime come from conda-forge
+  not yet on the VM. Typing through HubKeys (0.16.1) was tried under Wine 9.0
+  with the image's packages, not in the built image: the self-test's
+  "windows programs" line types Danish letters there. The packs and the Windows runtime come from conda-forge
   at the image build: if a pinned file is ever withdrawn there, the sandbox
   image does not build (and the update rolls back) until the pins are
   changed. Not known: whether an icon and version information get into an

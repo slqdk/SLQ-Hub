@@ -1,7 +1,8 @@
-"""Windows programs on a virtual screen (0.16.0): windows_app in the Hub, winshot.py and dotnet_windows.py in the
-sandbox image. The sandbox is faked here; winshot's own parts are tested without Wine (its whole run was tried by
-hand in a container - docs/HANDOFF.md), and with SLQ_TEST_WINE=1 on a machine that has Wine, Xvfb and the Windows
-.NET runtime (HUB_WINE_PREFIX, HUB_DOTNET_WINDOWS) it is run for real."""
+"""Windows programs on a virtual screen (0.16.0; typing through HubKeys since 0.16.1): windows_app in the Hub,
+winshot.py and dotnet_windows.py in the sandbox image. The sandbox is faked here; winshot's own parts are tested
+without Wine (its whole run was tried by hand in a container - docs/HANDOFF.md), and with SLQ_TEST_WINE=1 on a
+machine that has Wine, Xvfb and the Windows .NET runtime (HUB_WINE_PREFIX - a prefix from winshot --setup -,
+HUB_DOTNET_WINDOWS) it is run for real."""
 from __future__ import annotations
 
 import importlib.util
@@ -12,6 +13,7 @@ import shlex
 import shutil
 import struct
 import subprocess
+import sys
 import tarfile
 import zipfile
 from pathlib import Path
@@ -348,42 +350,223 @@ def test_check_says_what_is_missing(monkeypatch, tmp_path):
     r = subprocess.run(["python3", "-I", str(SANDBOX / "winshot.py"), "--json", json.dumps({"target": "x"})],
                        capture_output=True, text=True, env={**os.environ, "HUB_WINE_PREFIX": str(tmp_path / "none")},
                        check=False)
-    assert json.loads(r.stdout) == {"ok": False, "error": "Windows programs cannot run in this sandbox (Wine or the "
-                                                          "Windows .NET runtime is missing)"}
+    assert json.loads(r.stdout) == {"ok": False, "error": "Windows programs cannot run in this sandbox (Wine, the "
+                                                          "Windows .NET runtime or the typing helper is missing)"}
 
 
-@pytest.mark.skipif(os.environ.get("SLQ_TEST_WINE") != "1" or not shutil.which("dotnet"),
-                    reason="SLQ_TEST_WINE=1 with Wine, Xvfb, xdotool, ImageMagick, Tesseract and dotnet")
-def test_a_real_run_under_wine(tmp_path):
-    """Build a Windows Forms program, type into it, click its button by its text, see the dialog."""
+def test_check_needs_the_typing_helper(monkeypatch, tmp_path):
+    for name in ("wine64", "wineserver", "dotnet/dotnet.exe", "prefix/user.reg"):
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / name).write_text("")
+    for attr, name in (("WINE", "wine64"), ("WINESERVER", "wineserver"), ("DOTNET_DIR", "dotnet"), ("PREFIX", "prefix")):
+        monkeypatch.setattr(winshot, attr, str(tmp_path / name))
+    monkeypatch.setattr(winshot, "TOOLS", ("sh",))
+    assert winshot.check() is False                              # a prefix from before 0.16.1
+    (tmp_path / "prefix" / "hubkeys").mkdir()
+    (tmp_path / "prefix" / "hubkeys" / "HubKeys.dll").write_bytes(b"MZ")
+    assert winshot.check() is True and winshot.hubkeys() == str(tmp_path / "prefix" / "hubkeys" / "HubKeys.dll")
+
+
+# ---------------------------------------------------------------- typing (0.16.1)
+
+FAKE_HUBKEYS = r"""
+import json, sys
+mode, log = sys.argv[1], open(sys.argv[2], "a", encoding="utf-8")
+if mode == "dies":
+    sys.exit(3)
+if mode == "silent":
+    sys.stdin.read()
+    sys.exit(0)
+print(json.dumps({"ready": True}), flush=True)
+for line in sys.stdin:
+    req = json.loads(line)
+    log.write(line)
+    log.flush()
+    if "shift" in req:
+        ok = not (mode == "busy" and req["shift"])
+        print(json.dumps({"ok": ok, "ms": 3 if ok else req["wait"]}), flush=True)
+    elif mode == "refuses":
+        print(json.dumps({"ok": False, "error": "SendInput did not take the keys (error 5)"}), flush=True)
+    elif mode == "garbage":
+        print("Unhandled exception", flush=True)
+    elif mode == "quits":
+        sys.exit(1)
+    else:
+        print(json.dumps({"ok": True, "sent": len(req["text"])}), flush=True)
+"""
+
+
+def _typist(tmp_path, mode: str):
+    script = tmp_path / "fake_hubkeys.py"
+    script.write_text(FAKE_HUBKEYS)
+    log, xdo = tmp_path / "requests.jsonl", []
+    t = winshot.Typist(":99", lambda *a: xdo.append(a), cmd=[sys.executable, "-I", str(script), mode, str(log)])
+    return t, xdo, log
+
+
+def _requests(log) -> list[dict]:
+    return [json.loads(ln) for ln in log.read_text(encoding="utf-8").splitlines()] if log.exists() else []
+
+
+def test_typing_goes_through_the_helper_behind_a_barrier(tmp_path):
+    """Each text: Shift down through X, the helper waits until Wine has it, Shift up, the same for up, then the
+    text - so a click or key sent through X before it cannot be overtaken. The helper starts once per run."""
+    t, xdo, log = _typist(tmp_path, "ok")
+    try:
+        assert t.type("Søren: ÆØÅ æøå") == "typed 14 characters"
+        assert t.type("😀\n") == "typed 2 characters"
+    finally:
+        t.close()
+    assert _requests(log) == [{"shift": True, "wait": 5000}, {"shift": False, "wait": 5000},
+                              {"text": "Søren: ÆØÅ æøå", "delay": 10},
+                              {"shift": True, "wait": 5000}, {"shift": False, "wait": 5000},
+                              {"text": "😀\n", "delay": 10}]
+    assert xdo == [("keydown", "Shift_L"), ("keyup", "Shift_L")] * 2
+    assert t.proc.returncode == 0                                # it ended at the end of its input
+
+
+def test_typing_says_when_the_program_had_not_read_the_input_before_it(tmp_path):
+    t, xdo, log = _typist(tmp_path, "busy")
+    try:
+        did = t.type("abc")
+    finally:
+        t.close()
+    assert did == ("typed 3 characters - the program had not read the input before them within 5 s, so they may "
+                   "have gone ahead of it")
+    assert _requests(log) == [{"shift": True, "wait": 5000}, {"text": "abc", "delay": 10}]
+    assert xdo == [("keydown", "Shift_L"), ("keyup", "Shift_L")]
+
+
+@pytest.mark.parametrize("mode, error", [
+    ("refuses", "could not type: SendInput did not take the keys (error 5)"),
+    ("garbage", "could not type: the typing helper said b'Unhandled exception'"),
+    ("quits", "could not type: the typing helper ended"),
+    ("dies", "could not type: the typing helper ended"),
+    ("silent", "could not type: the typing helper did not answer"),
+])
+def test_what_typing_says_when_the_helper_fails(tmp_path, monkeypatch, mode, error):
+    monkeypatch.setattr(winshot, "HELPER_START_S", 1.0)
+    monkeypatch.setattr(winshot, "ANSWER_S", 1.0)
+    t, _, _ = _typist(tmp_path, mode)
+    try:
+        with pytest.raises(winshot.Fail) as exc:
+            t.type("abc")
+    finally:
+        t.close()
+    assert str(exc.value) == error
+
+
+def test_the_typing_helpers_source():
+    src = winshot.HUBKEYS_PROGRAM
+    for part in ("SendInput", "KEYUP = 2, UNICODE = 4", "VkKeyScanW", "ToUnicode", "GetAsyncKeyState",
+                 "\\r\\n is one Return", "char.IsHighSurrogate", "{\\\"ready\\\":true}"):
+        assert part in src, part
+    proj = winshot.HUBKEYS_PROJECT
+    assert "<TargetFramework>net10.0</TargetFramework>" in proj and "<UseAppHost>false</UseAppHost>" in proj
+    assert '"""' not in src
+
+
+@pytest.mark.skipif(not shutil.which("dotnet"), reason="the .NET SDK")
+def test_the_typing_helper_builds_offline(tmp_path):
+    dll = winshot.build_hubkeys(str(tmp_path / "hubkeys"))
+    assert dll == str(tmp_path / "hubkeys" / "HubKeys.dll") and os.path.isfile(dll)
+    cfg = json.loads((tmp_path / "hubkeys" / "HubKeys.runtimeconfig.json").read_text())
+    assert cfg["runtimeOptions"]["tfm"] == "net10.0"
+    assert not (tmp_path / "hubkeys" / "HubKeys.exe").exists()  # dotnet.exe runs it: no app host
+
+
+def test_the_self_test_types_danish_letters():
+    """selftest's "windows programs" line: the probe types WINDOWS_TYPED, and its Close button says what arrived
+    and sets the exit code (0: exactly that, 3: something else)."""
+    from app import cli
+    shot = [{"windows": [{"title": "SLQ Hub self-test"}]}]
+    assert cli.WINDOWS_TYPED == "Søren: ÆØÅ æøå" and f'box.Text == "{cli.WINDOWS_TYPED}" ? 0 : 3' in cli.WINDOWS_PROBE["Program.cs"]
+    status, name, what, _ = cli.windows_verdict({"ok": True, "exit_code": 0, "seconds": 10.5, "shots": shot,
+                                                 "output": "typed: Søren: ÆØÅ æøå"}, True)
+    assert (status, name) == ("PASS", "windows programs")
+    assert what == ('a Windows Forms program built offline and ran under Wine; "Søren: ÆØÅ æøå" typed into it arrived '
+                    'exactly, and its button, found by its text, closed it (10.5 s)')
+    got = "\ufffdren: \ufffd\ufffd\ufffd \ufffd\ufffd\ufffd"                   # what 0.16.0's typing gave it
+    status, _, what, hint = cli.windows_verdict({"ok": True, "exit_code": 3, "shots": shot,
+                                                 "output": f"typed: {got}"}, True)
+    assert status == "FAIL" and what == f'typing into a Windows program: "Søren: ÆØÅ æøå" arrived as "{got}"'
+    assert "HubKeys" in hint
+    assert cli.windows_verdict({"ok": True, "exit_code": None, "shots": shot, "steps": []}, False)[0] == "WARN"
+    assert cli.windows_verdict({"ok": False, "error": "no window appeared within 90 s"}, False) == (
+        "FAIL", "windows programs", "no window appeared within 90 s", "docker compose logs sandbox")
+
+
+REAL_WINE = pytest.mark.skipif(os.environ.get("SLQ_TEST_WINE") != "1" or not shutil.which("dotnet"),
+                               reason="SLQ_TEST_WINE=1 with Wine, Xvfb, xdotool, ImageMagick, Tesseract and dotnet")
+
+
+def _real_run(tmp_path, program: str, steps: list[dict]) -> dict:
     proj = tmp_path / "Tester"
     proj.mkdir()
     (proj / "Tester.csproj").write_text(dotnet_windows.PROJECT.replace("<EnableWindowsTargeting>true"
                                                                        "</EnableWindowsTargeting>", ""))
-    (proj / "Program.cs").write_text("""
+    (proj / "Program.cs").write_text(program, encoding="utf-8")
+    env = {**os.environ, "ArtifactsPath": str(proj / ".hub" / "dotnet"), "EnableWindowsTargeting": "true"}
+    req = {"target": str(proj), "out": str(tmp_path / "shots"), "steps": steps}
+    r = subprocess.run(["python3", "-I", str(SANDBOX / "winshot.py"), "--json", json.dumps(req)], env=env,
+                       capture_output=True, text=True, timeout=600, check=False)
+    return json.loads(r.stdout)
+
+
+SAY = """
+    static void Say(string text)
+    {
+        var bytes = System.Text.Encoding.UTF8.GetBytes(text + "\\n");
+        using (var o = System.Console.OpenStandardOutput()) o.Write(bytes, 0, bytes.Length);
+    }
+"""
+
+
+@REAL_WINE
+def test_a_real_run_under_wine(tmp_path):
+    """Build a Windows Forms program, type Danish letters and an emoji into it, click its button by its text, see
+    the dialog - and the program says exactly what it got (in 0.16.0 Æ Ø Å arrived as U+FFFD, the first key was
+    lost)."""
+    res = _real_run(tmp_path, """
 using System.Windows.Forms;
 static class P {
     [System.STAThread] static void Main() {
         var f = new Form { Text = "Tester", Width = 360, Height = 200 };
         var box = new TextBox { Left = 16, Top = 16, Width = 200 };
         var b = new Button { Text = "Greet", Left = 230, Top = 14, Width = 90 };
-        b.Click += (_, _) => MessageBox.Show(f, "Hello " + box.Text, "Greeting");
+        b.Click += (_, _) => { Say("got:" + box.Text); MessageBox.Show(f, "Hello " + box.Text, "Greeting"); };
         f.Controls.Add(box); f.Controls.Add(b);
         Application.Run(f);
     }
-}
-""")
-    env = {**os.environ, "ArtifactsPath": str(proj / ".hub" / "dotnet"), "EnableWindowsTargeting": "true"}
-    req = {"target": str(proj), "out": str(tmp_path / "shots"),
-           "steps": [{"click": [100, 50]}, {"type": "Søren"}, {"click": "Greet"}, {"shot": "dialog"},
-                     {"key": "Return"}]}
-    r = subprocess.run(["python3", "-I", str(SANDBOX / "winshot.py"), "--json", json.dumps(req)], env=env,
-                       capture_output=True, text=True, timeout=600, check=False)
-    res = json.loads(r.stdout)
+""" + SAY + "}\n", [{"click": [100, 50]}, {"type": "Søren: ÆØÅ æøå 😀"}, {"click": "Greet"}, {"shot": "dialog"},
+                    {"key": "Return"}])
     assert res["ok"], res
     assert [s.get("error") for s in res["steps"]] == [None] * 5
     titles = [[w["title"] for w in s["windows"]] for s in res["shots"]]
     assert titles[1] == ["Tester", "Greeting"] and "Greeting" not in titles[-1]
+    assert "got:Søren: ÆØÅ æøå 😀" in res["output"].splitlines()
+
+
+@REAL_WINE
+def test_real_typing_keeps_its_place_behind_a_click(tmp_path):
+    """The first box is slow (150 ms of work per change), so it is still busy when the click on the second box
+    is sent: the second text must not overtake that click in Wine's input queue (0.16.1's barrier)."""
+    res = _real_run(tmp_path, """
+using System.Windows.Forms;
+static class P {
+    [System.STAThread] static void Main() {
+        var f = new Form { Text = "Two", Width = 560, Height = 150 };
+        var a = new TextBox { Left = 12, Top = 12, Width = 520 };
+        var b = new TextBox { Left = 12, Top = 52, Width = 520 };
+        a.TextChanged += (_, _) => System.Threading.Thread.Sleep(150);
+        f.FormClosing += (_, _) => Say("a:" + a.Text + "|b:" + b.Text);
+        f.Controls.Add(a); f.Controls.Add(b);
+        Application.Run(f);
+    }
+""" + SAY + "}\n", [{"click": [200, 45]}, {"type": "first ÆØÅ"}, {"click": [200, 85]}, {"type": "second æøå"},
+                    {"wait": 4}, {"key": "alt+F4"}, {"wait": 1}])
+    assert res["ok"], res
+    assert "a:first ÆØÅ|b:second æøå" in res["output"].splitlines(), res
 
 
 # ---------------------------------------------------------------- dotnet_windows.py

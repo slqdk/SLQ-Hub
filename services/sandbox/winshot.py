@@ -15,13 +15,23 @@ its .dll runs), a .NET .dll (run by the Windows build of the .NET 10 runtime in 
     {"click": [x, y]} or {"click": "OK"} (text found on the screen by OCR); "button": "right"/"middle",
                                           "double": true
     {"drag": [x1, y1, x2, y2]}            {"scroll": [x, y, n]}   (n > 0: down, < 0: up)
-    {"type": "text"}                      {"key": "ctrl+s"} or {"key": "Tab Tab Return"}   (xdotool key names)
+    {"type": "text"} (\n is Return, \t Tab)  {"key": "ctrl+s"} or {"key": "Tab Tab Return"}   (xdotool key names)
     {"wait": seconds}                     {"shot": "label"}
 
 Coordinates are screen pixels, the same as in the screenshots: every screenshot starts at the top-left corner of
 the program's first window (so that corner is (0, 0)). A screenshot is taken when that window has appeared, at
 every shot step, and after the last step; each one covers the program's windows (popups, menus and dialogs too).
 ocr adds the text Tesseract reads in each screenshot (for a model that cannot see pictures).
+
+Typing goes through HubKeys, a small Windows program (HUBKEYS_PROGRAM below, built into the prefix by --setup)
+that runs beside the program under Wine and sends each text with SendInput, as Windows' on-screen keyboard does:
+a character on the keyboard as its key (with Shift when it needs it), anything else as a Unicode packet - so the
+program gets exactly those characters, Æ Ø Å and emoji included, however busy it is. Before each text a Shift
+goes through the X server and HubKeys waits until Wine has seen it: then every click and key before it is in
+Wine's input queue ahead of the text, which would otherwise overtake a click a busy program had not read yet.
+(Typing through X failed under Wine 9, measured: xdotool's type, and a spare key code remapped to each character,
+lost the first key, turned Latin-1 letters into U+FFFD - in WPF every letter - and gave a busy program the wrong
+characters, because Wine reads a key's character when the program gets to it, from the key map as it is by then.)
 
 How Wine runs here (all set once, in the prefix): 64-bit only (no 32-bit programs); no virtual desktop - each
 window is an X window of its own, so menus and drop-down lists open where they belong (in Wine 9's virtual
@@ -57,7 +67,9 @@ PROJECTS = (".csproj", ".vbproj", ".fsproj")
 SCREEN = (1024, 768)
 MAX_STEPS, MAX_SHOTS, MAX_TEXT = 40, 8, 2000
 BUILD_TIMEOUT = 300
-TYPE_KEYS = {"\n": 0xFF0D, "\r": 0xFF0D, "\t": 0xFF09}      # Return, Return, Tab (the rest go by code point)
+TYPE_DELAY_MS = 10                               # between two typed characters
+BARRIER_S = 5.0                                  # how long typing waits for the program to read the input before it
+HELPER_START_S, ANSWER_S = 60.0, 10.0            # the typing helper's start; its answers, beyond their own work
 NOT_PROGRAM_WINDOWS = ("explorer.exe",)          # Wine's own hidden desktop and tray
 SETTINGS = r"""REGEDIT4
 
@@ -319,67 +331,234 @@ def find_text(words: list[dict], text: str) -> tuple[int, int, str] | None:
     return None
 
 
-_XLIB = None
+# ---------------------------------------------------------------- typing
+
+HUBKEYS_PROJECT = """<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <UseAppHost>false</UseAppHost>
+    <DebugType>none</DebugType>
+  </PropertyGroup>
+</Project>
+"""
+
+HUBKEYS_PROGRAM = r"""// HubKeys types for winshot. It runs under Wine beside the program it types into, reads one JSON request per
+// line and answers each with one JSON line (it starts with {"ready":true}):
+//   {"text": "...", "delay": ms}   the text to whatever has the keyboard focus        -> {"ok":true,"sent":n}
+//   {"shift": true, "wait": ms}    wait until Shift is down (false: up) - the barrier -> {"ok":seen,"ms":n}
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Text.Json;
+using System.Threading;
+
+static class HubKeys
+{
+    const uint KEYBOARD = 1, KEYUP = 2, UNICODE = 4;
+    const ushort SHIFT = 0x10, RETURN = 0x0D, TAB = 0x09;
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct KeyInput { public ushort Vk, Scan; public uint Flags, Time; public IntPtr Extra; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct MouseInput { public int X, Y; public uint Data, Flags, Time; public IntPtr Extra; }
+
+    [StructLayout(LayoutKind.Explicit)]
+    struct Union { [FieldOffset(0)] public MouseInput Mouse; [FieldOffset(0)] public KeyInput Key; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct Input { public uint Type; public Union U; }
+
+    [DllImport("user32.dll", SetLastError = true)] static extern uint SendInput(uint count, Input[] inputs, int size);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern short VkKeyScanW(char c);
+    [DllImport("user32.dll")] static extern uint MapVirtualKeyW(uint code, uint type);
+    [DllImport("user32.dll")] static extern short GetAsyncKeyState(int vk);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    static extern int ToUnicode(uint vk, uint scan, byte[] state, StringBuilder text, int size, uint flags);
+
+    static Input Key(ushort vk, ushort scan, uint flags) =>
+        new Input { Type = KEYBOARD, U = new Union { Key = new KeyInput { Vk = vk, Scan = scan, Flags = flags } } };
+
+    static void Press(List<Input> keys, ushort vk, bool shift)
+    {
+        ushort scan = (ushort)MapVirtualKeyW(vk, 0), shiftScan = (ushort)MapVirtualKeyW(SHIFT, 0);
+        if (shift) keys.Add(Key(SHIFT, shiftScan, 0));
+        keys.Add(Key(vk, scan, 0));
+        keys.Add(Key(vk, scan, KEYUP));
+        if (shift) keys.Add(Key(SHIFT, shiftScan, KEYUP));
+    }
+
+    // What a key makes, with or without Shift. Wine's VkKeyScanW answers a character that is not on the keyboard
+    // with the key of a look-alike that is (č: the key for c, Ж: the key for ?), so its answer is checked.
+    static string Makes(ushort vk, bool shift)
+    {
+        var state = new byte[256];
+        if (shift) state[SHIFT] = 0x80;
+        var text = new StringBuilder(8);
+        int n = ToUnicode(vk, MapVirtualKeyW(vk, 0), state, text, text.Capacity, 4);
+        return n > 0 ? text.ToString(0, n) : "";
+    }
+
+    static Input[] For(char c)
+    {
+        var keys = new List<Input>();
+        if (c == '\n' || c == '\r') Press(keys, RETURN, false);
+        else if (c == '\t') Press(keys, TAB, false);
+        else
+        {
+            short found = char.IsSurrogate(c) ? (short)-1 : VkKeyScanW(c);
+            int mods = found == -1 ? -1 : (found >> 8) & 0xFF;
+            ushort vk = (ushort)(found & 0xFF);
+            if ((mods == 0 || mods == 1) && Makes(vk, mods == 1) == c.ToString())
+                Press(keys, vk, mods == 1);           // a key on the keyboard, at most with Shift
+            else
+            {                                         // anything else: a Unicode packet, exactly this character
+                keys.Add(Key(0, c, UNICODE));
+                keys.Add(Key(0, c, UNICODE | KEYUP));
+            }
+        }
+        return keys.ToArray();
+    }
+
+    static int Type(string text, int delay)
+    {
+        int sent = 0;
+        for (int i = 0; i < text.Length; i++)
+        {
+            if (text[i] == '\r' && i + 1 < text.Length && text[i + 1] == '\n') continue;   // \r\n is one Return
+            var keys = For(text[i]);
+            if (SendInput((uint)keys.Length, keys, Marshal.SizeOf<Input>()) != keys.Length)
+                throw new Exception($"SendInput did not take the keys (error {Marshal.GetLastWin32Error()})");
+            sent++;
+            if (delay > 0 && !char.IsHighSurrogate(text[i])) Thread.Sleep(delay);
+        }
+        return sent;
+    }
+
+    static bool Shift(bool down, int wait, out long ms)
+    {
+        var clock = Stopwatch.StartNew();
+        bool seen;
+        while (!(seen = ((GetAsyncKeyState(SHIFT) & 0x8000) != 0) == down) && clock.ElapsedMilliseconds < wait)
+            Thread.Sleep(5);
+        ms = clock.ElapsedMilliseconds;
+        return seen;
+    }
+
+    static void Main()
+    {
+        var input = new StreamReader(Console.OpenStandardInput(), new UTF8Encoding(false));
+        var output = new StreamWriter(Console.OpenStandardOutput(), new UTF8Encoding(false)) { AutoFlush = true };
+        output.Write("{\"ready\":true}\n");
+        for (string line; (line = input.ReadLine()) != null;)
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(line);
+                var req = doc.RootElement;
+                if (req.TryGetProperty("shift", out var shift))
+                {
+                    bool seen = Shift(shift.GetBoolean(), req.GetProperty("wait").GetInt32(), out long ms);
+                    output.Write($"{{\"ok\":{(seen ? "true" : "false")},\"ms\":{ms}}}\n");
+                }
+                else
+                {
+                    int sent = Type(req.GetProperty("text").GetString() ?? "", req.GetProperty("delay").GetInt32());
+                    output.Write($"{{\"ok\":true,\"sent\":{sent}}}\n");
+                }
+            }
+            catch (Exception e)
+            {
+                output.Write("{\"ok\":false,\"error\":" + JsonSerializer.Serialize(e.Message) + "}\n");
+            }
+        }
+    }
+}
+"""
 
 
-def _xlib():
-    """libX11 and libXtst (already in the image as xdotool's own dependencies), set up once for type_text."""
-    global _XLIB
-    if _XLIB is None:
-        import ctypes
-        import ctypes.util
-        x11 = ctypes.CDLL(ctypes.util.find_library("X11") or "libX11.so.6")
-        xtst = ctypes.CDLL(ctypes.util.find_library("Xtst") or "libXtst.so.6")
-        ks = ctypes.c_ulong
-        x11.XOpenDisplay.restype = ctypes.c_void_p
-        x11.XOpenDisplay.argtypes = [ctypes.c_char_p]
-        x11.XGetKeyboardMapping.restype = ctypes.POINTER(ks)
-        x11.XGetKeyboardMapping.argtypes = [ctypes.c_void_p, ctypes.c_ubyte, ctypes.c_int, ctypes.POINTER(ctypes.c_int)]
-        x11.XChangeKeyboardMapping.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.POINTER(ks),
-                                               ctypes.c_int]
-        x11.XDisplayKeycodes.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int)]
-        x11.XSync.argtypes = [ctypes.c_void_p, ctypes.c_int]
-        x11.XFree.argtypes = [ctypes.POINTER(ks)]
-        x11.XCloseDisplay.argtypes = [ctypes.c_void_p]
-        xtst.XTestFakeKeyEvent.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_int, ctypes.c_ulong]
-        _XLIB = (ctypes, x11, xtst, ks)
-    return _XLIB
+def hubkeys() -> str:
+    return os.path.join(PREFIX, "hubkeys", "HubKeys.dll")
 
 
-def type_text(display: str, text: str, delay: float = 0.012) -> None:
-    """Type text into the focused window as exact Unicode code points. A spare key code is remapped to each
-    character's keysym at every shift level, so pressing it with XTEST needs no Shift and cannot be read at the
-    wrong case. (xdotool's own `type` breaks a letter like AE into its Latin-1 pair and presses no Shift, so Æ
-    arrives as æ; and in a non-UTF-8 locale it refuses non-ASCII outright. Going by code point sidesteps both.)"""
-    ctypes, x11, xtst, KeySym = _xlib()
-    dpy = x11.XOpenDisplay(display.encode())
-    if not dpy:
-        raise Fail("could not open the screen to type")
-    try:
-        lo, hi = ctypes.c_int(), ctypes.c_int()
-        x11.XDisplayKeycodes(dpy, ctypes.byref(lo), ctypes.byref(hi))
-        per = ctypes.c_int()
-        count = hi.value - lo.value + 1
-        arr = x11.XGetKeyboardMapping(dpy, lo.value, count, ctypes.byref(per))
-        width = per.value
-        spare = next((lo.value + i for i in range(count) if all(arr[i * width + j] == 0 for j in range(width))),
-                     hi.value)
-        x11.XFree(arr)
+class Typist:
+    """HubKeys under Wine for one run, started at its first type step (HUBKEYS_PROGRAM says what it does)."""
 
-        def remap(sym: int) -> None:
-            row = (KeySym * width)(*([sym] * width))
-            x11.XChangeKeyboardMapping(dpy, spare, width, row, 1)
-            x11.XSync(dpy, 0)
+    def __init__(self, display: str, xdo, cmd: list[str] | None = None):
+        self.display, self.xdo = display, xdo
+        self.cmd = cmd or [WINE, winpath(os.path.join(DOTNET_DIR, "dotnet.exe")), winpath(hubkeys())]
+        self.proc: subprocess.Popen | None = None
+        self.buf = b""
 
-        for c in text:
-            remap(TYPE_KEYS.get(c, 0x01000000 | ord(c)))
-            xtst.XTestFakeKeyEvent(dpy, spare, 1, 0)
-            xtst.XTestFakeKeyEvent(dpy, spare, 0, 0)
-            x11.XSync(dpy, 0)
-            time.sleep(delay)
-        remap(0)                                     # leave the spare key code as we found it
-    finally:
-        x11.XCloseDisplay(dpy)
+    def ask(self, req: dict | None, timeout: float) -> dict:
+        """Send a request (None: only read) and read the answer."""
+        assert self.proc is not None and self.proc.stdin is not None and self.proc.stdout is not None
+        if req is not None:
+            try:
+                self.proc.stdin.write(json.dumps(req).encode() + b"\n")
+                self.proc.stdin.flush()
+            except OSError:
+                raise Fail("could not type: the typing helper ended") from None
+        end = time.monotonic() + timeout
+        while b"\n" not in self.buf:
+            left = end - time.monotonic()
+            if left <= 0 or not select.select([self.proc.stdout], [], [], left)[0]:
+                raise Fail("could not type: the typing helper did not answer")
+            chunk = os.read(self.proc.stdout.fileno(), 4096)
+            if not chunk:
+                raise Fail("could not type: the typing helper ended")
+            self.buf += chunk
+        line, self.buf = self.buf.split(b"\n", 1)
+        try:
+            res = json.loads(line)
+        except ValueError:
+            res = None
+        if not isinstance(res, dict):
+            raise Fail(f"could not type: the typing helper said {line[:200]!r}")
+        return res
+
+    def type(self, text: str) -> str:
+        if self.proc is None:
+            self.proc = subprocess.Popen(self.cmd, env=wine_env(self.display), stdin=subprocess.PIPE,
+                                         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+            if self.ask(None, HELPER_START_S).get("ready") is not True:
+                raise Fail("could not type: the typing helper did not start")
+        # The text goes straight into Wine's input queue, but clicks and keys go through the X server, which Wine
+        # reads only when the program takes its next input. So a Shift through X first, and the helper waits until
+        # Wine has seen it: every click and key before it is then in the queue ahead of the text.
+        wait = int(BARRIER_S * 1000)
+        self.xdo("keydown", "Shift_L")
+        seen = self.ask({"shift": True, "wait": wait}, BARRIER_S + ANSWER_S).get("ok") is True
+        self.xdo("keyup", "Shift_L")
+        if seen:
+            self.ask({"shift": False, "wait": wait}, BARRIER_S + ANSWER_S)
+        res = self.ask({"text": text, "delay": TYPE_DELAY_MS}, ANSWER_S + len(text) * (TYPE_DELAY_MS + 20) / 1000)
+        if res.get("ok") is not True:
+            raise Fail("could not type: " + str(res.get("error") or "the typing helper failed"))
+        if not seen:
+            return (f"typed {len(text)} characters - the program had not read the input before them within "
+                    f"{BARRIER_S:g} s, so they may have gone ahead of it")
+        return f"typed {len(text)} characters"
+
+    def close(self) -> None:
+        if self.proc is None:
+            return
+        try:
+            if self.proc.stdin is not None:
+                self.proc.stdin.close()          # it ends at the end of its input
+            self.proc.wait(2)
+        except (OSError, subprocess.TimeoutExpired):
+            self.proc.kill()
+            self.proc.wait(5)
+        if self.proc.stdout is not None:
+            self.proc.stdout.close()
 
 
 class Session:
@@ -391,6 +570,7 @@ class Session:
         self.env = {**os.environ, "DISPLAY": display}
         self.origin = (0, 0)
         self.shots: list[dict] = []
+        self.typist: Typist | None = None
 
     def xdo(self, *args: str) -> None:
         res = quiet(["xdotool", *args], self.env, 30)
@@ -527,9 +707,11 @@ class Session:
                 raise Fail(f"type takes at most {MAX_TEXT} characters")
             if "\x00" in text:
                 raise Fail("type text cannot contain a null byte")
-            type_text(self.display, text)
+            if self.typist is None:
+                self.typist = Typist(self.display, self.xdo)
+            did = self.typist.type(text)
             time.sleep(0.4)
-            return f"typed {len(text)} characters"
+            return did
         if "key" in s:
             keys = str(s["key"]).split()
             if not keys or len(keys) > 20 or not all(re.fullmatch(r"[A-Za-z0-9_+]{1,40}", k) for k in keys):
@@ -658,6 +840,8 @@ def run(req: dict) -> dict:
                 result["shots"] = s.shots
             if proc is not None and proc.poll() is not None:
                 result["exit_code"] = proc.returncode
+            if s is not None and s.typist is not None:
+                s.typist.close()
             end_wine()
             if proc is not None and proc.poll() is None:
                 proc.kill()
@@ -702,17 +886,49 @@ def setup(prefix: str) -> None:
                 os.symlink(orig, path)
                 linked += 1
     print(f"winshot --setup: prefix {prefix}, {linked} DLLs ({size // 2**20} MB) linked to {builtin}")
+    dll = build_hubkeys(os.path.join(prefix, "hubkeys"))
+    prove_hubkeys(prefix, dll)
+    print(f"winshot --setup: typing helper in {os.path.dirname(dll)}")
+
+
+def build_hubkeys(dest: str) -> str:
+    """The typing helper, built into dest with no package source (a plain net10.0 program needs only the SDK's
+    own packs). Returns its .dll."""
+    with tempfile.TemporaryDirectory() as tmp:
+        src, empty = os.path.join(tmp, "HubKeys"), os.path.join(tmp, "no-packages")
+        os.makedirs(src)
+        os.makedirs(empty)
+        for name, text in (("HubKeys.csproj", HUBKEYS_PROJECT), ("Program.cs", HUBKEYS_PROGRAM)):
+            with open(os.path.join(src, name), "w", encoding="utf-8") as f:
+                f.write(text)
+        env = {k: v for k, v in os.environ.items() if k != "ArtifactsPath"}
+        env.update(HOME=tmp, DOTNET_CLI_HOME=tmp, NUGET_PACKAGES=os.path.join(tmp, "cache"),
+                   DOTNET_CLI_TELEMETRY_OPTOUT="1", DOTNET_NOLOGO="1", MSBUILDDISABLENODEREUSE="1",
+                   DOTNET_CLI_USE_MSBUILD_SERVER="0", UseSharedCompilation="false")
+        res = subprocess.run(["dotnet", "build", src, "-nologo", "-c", "Release", f"-p:RestoreSources={empty}",
+                              "-o", dest], env=env, capture_output=True, text=True, timeout=600,
+                             stdin=subprocess.DEVNULL, check=False)
+    dll = os.path.join(dest, "HubKeys.dll")
+    if res.returncode != 0 or not os.path.isfile(dll):
+        raise SystemExit("winshot --setup: the typing helper did not build:\n" + (res.stdout + res.stderr)[-3000:])
+    return dll
+
+
+def prove_hubkeys(prefix: str, dll: str) -> None:
+    """The typing helper started once under Wine, to see it answer - as programs run, with mscoree (Wine loads
+    .NET assemblies through it; setup's wineboot leaves it out only so that Wine does not install Mono)."""
+    env = {**wine_env(), "WINEPREFIX": prefix}
+    ran = subprocess.run([WINE, winpath(os.path.join(DOTNET_DIR, "dotnet.exe")), winpath(dll)], env=env, input=b"",
+                         capture_output=True, timeout=300, check=False)
+    subprocess.run([WINESERVER, "-w"], env=env, check=False, timeout=120, stdin=subprocess.DEVNULL)
+    if ran.stdout.strip() != b'{"ready":true}':
+        raise SystemExit(f"winshot --setup: the typing helper did not start under Wine (exit {ran.returncode}): "
+                         f"{(ran.stdout + ran.stderr)[-1500:]!r}")
 
 
 def check() -> bool:
-    need = (WINE, WINESERVER, os.path.join(DOTNET_DIR, "dotnet.exe"), os.path.join(PREFIX, "user.reg"))
-    if not (all(os.path.exists(p) for p in need) and all(shutil.which(t) for t in TOOLS)):
-        return False
-    try:
-        _xlib()                                      # libX11 and libXtst, for type_text
-    except OSError:
-        return False
-    return True
+    need = (WINE, WINESERVER, os.path.join(DOTNET_DIR, "dotnet.exe"), os.path.join(PREFIX, "user.reg"), hubkeys())
+    return all(os.path.exists(p) for p in need) and all(shutil.which(t) for t in TOOLS)
 
 
 def main(argv: list[str]) -> int:
@@ -729,7 +945,8 @@ def main(argv: list[str]) -> int:
         if not isinstance(req, dict):
             raise Fail("the request must be a JSON object")
         if not check():
-            raise Fail("Windows programs cannot run in this sandbox (Wine or the Windows .NET runtime is missing)")
+            raise Fail("Windows programs cannot run in this sandbox (Wine, the Windows .NET runtime or the typing "
+                       "helper is missing)")
         result = run(req)
     except Fail as exc:
         result = {"ok": False, "error": str(exc)}

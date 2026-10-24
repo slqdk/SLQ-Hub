@@ -143,6 +143,7 @@ def _offline(rep, c, env, hz: dict) -> None:
         rep.line("WARN", "offline code", f"the probe did not answer as expected: {seen}", "docker compose logs sandbox")
 
 
+WINDOWS_TYPED = "Søren: ÆØÅ æøå"
 WINDOWS_PROBE = {
     "SelfTest.csproj": """<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
@@ -155,29 +156,41 @@ WINDOWS_PROBE = {
     "Program.cs": """static class P
 {
     [System.STAThread]
-    static void Main()
+    static int Main()
     {
         var form = new System.Windows.Forms.Form { Text = "SLQ Hub self-test", Width = 320, Height = 160 };
-        var close = new System.Windows.Forms.Button { Text = "Close", Left = 110, Top = 40, Width = 90 };
-        close.Click += (_, _) => form.Close();
+        var box = new System.Windows.Forms.TextBox { Left = 20, Top = 14, Width = 260 };
+        var close = new System.Windows.Forms.Button { Text = "Close", Left = 110, Top = 52, Width = 90 };
+        int code = 2;
+        close.Click += (_, _) =>
+        {
+            code = box.Text == "%s" ? 0 : 3;
+            var said = System.Text.Encoding.UTF8.GetBytes("typed: " + box.Text + "\\n");
+            using (var o = System.Console.OpenStandardOutput()) o.Write(said, 0, said.Length);
+            form.Close();
+        };
+        form.Controls.Add(box);
         form.Controls.Add(close);
+        form.ActiveControl = box;
         System.Windows.Forms.Application.Run(form);
+        return code;
     }
 }
-"""}
+""" % WINDOWS_TYPED}
 
 
 def _windows(rep, c, env, hz: dict) -> None:
     """windows_app: a small Windows Forms program is built (offline where the sandbox can do that: the Windows packs
-    are in the image) and run under Wine, and its button, found by its text, closes it."""
+    are in the image) and run under Wine; Danish letters are typed into it and must arrive exactly, and its button,
+    found by its text, closes it."""
     if not hz.get("windows"):
         rep.line("WARN", "windows programs", "the sandbox cannot run Windows programs (Wine or the Windows .NET "
                  "runtime is missing in its image)", "update the Hub; docker compose logs sandbox")
         return
     root, folder = (hz.get("root") or "/workspace").rstrip("/"), ".hub/selftest-windows"
     files = " && ".join(f"printf %s {_sh(text)} > {folder}/{name}" for name, text in WINDOWS_PROBE.items())
-    req = {"target": f"{root}/{folder}", "steps": [{"click": "Close"}], "out": f"{root}/{folder}/shots",
-           "timeout": 90}
+    req = {"target": f"{root}/{folder}", "steps": [{"type": WINDOWS_TYPED}, {"click": "Close"}],
+           "out": f"{root}/{folder}/shots", "timeout": 90}
     try:
         _sandbox_exec(c, env, f"rm -rf {folder} && mkdir -p {folder} && {files}")
         r = c.post(env.sandbox_url + "/exec", headers={"X-Internal-Token": env.internal_token},
@@ -190,16 +203,25 @@ def _windows(rep, c, env, hz: dict) -> None:
         rep.line("FAIL", "windows programs", f"the probe failed ({exc.__class__.__name__}: {exc})",
                  "docker compose logs sandbox")
         return
+    rep.line(*windows_verdict(res, hz.get("offline") is True))
+
+
+def windows_verdict(res: dict, offline: bool) -> tuple[str, str, str, str]:
+    """(status, what, hint) for the self-test's line from winshot's result."""
     titles = [w.get("title") for s in res.get("shots") or [] for w in s.get("windows") or []]
-    how = "built offline and " if hz.get("offline") is True else "built and "
-    if res.get("ok") and "SLQ Hub self-test" in titles and res.get("exit_code") is not None:
-        rep.line("PASS", "windows programs", f"a Windows Forms program {how}ran under Wine; its button, found by its "
-                 f"text, closed it ({res.get('seconds')} s)")
-    elif res.get("ok") and "SLQ Hub self-test" in titles:
-        rep.line("WARN", "windows programs", "the program ran under Wine, but clicking its Close button did not "
-                 f"close it: {res.get('steps')}", "windows_app can show programs; clicks by text may miss")
-    else:
-        rep.line("FAIL", "windows programs", str(res.get("error") or res)[:300], "docker compose logs sandbox")
+    how = "built offline and " if offline else "built and "
+    typed = next((ln[len("typed: "):] for ln in (res.get("output") or "").splitlines() if ln.startswith("typed: ")),
+                 None)
+    if res.get("ok") and "SLQ Hub self-test" in titles and res.get("exit_code") == 0:
+        return ("PASS", "windows programs", f"a Windows Forms program {how}ran under Wine; \"{WINDOWS_TYPED}\" "
+                f"typed into it arrived exactly, and its button, found by its text, closed it ({res.get('seconds')} s)", "")
+    if res.get("ok") and res.get("exit_code") == 3:
+        return ("FAIL", "windows programs", f"typing into a Windows program: \"{WINDOWS_TYPED}\" arrived as "
+                f"\"{typed}\"", "windows_app types through HubKeys (winshot.py); docker compose logs sandbox")
+    if res.get("ok") and "SLQ Hub self-test" in titles:
+        return ("WARN", "windows programs", "the program ran under Wine, but clicking its Close button did not "
+                f"close it: {res.get('steps')}", "windows_app can show programs; clicks by text may miss")
+    return ("FAIL", "windows programs", str(res.get("error") or res)[:300], "docker compose logs sandbox")
 
 
 def _comfy_folders(rep, env) -> None:

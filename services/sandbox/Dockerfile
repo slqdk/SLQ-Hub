@@ -76,8 +76,9 @@ RUN /usr/bin/python3 -I /tmp/dotnet_windows.py packs /usr/lib/dotnet \
 ENV EnableWindowsTargeting=true
 
 # Wine's prefix, made once here as the sandbox user (Wine wants it to be the user's own): winshot.py --setup
-# (settings and why are in winshot.py). Each container starts from this one; what a program changes in it is
-# gone when the container is recreated.
+# (settings and why are in winshot.py), which also builds HubKeys, the typing helper, into it - offline - and
+# starts it once under Wine. Each container starts from this one; what a program changes in it is gone when the
+# container is recreated.
 COPY winshot.py /opt/execd/winshot.py
 RUN printf '#!/bin/sh\nexec /usr/bin/python3 -I /opt/execd/winshot.py "$@"\n' > /usr/local/bin/winshot \
     && chmod 755 /usr/local/bin/winshot \

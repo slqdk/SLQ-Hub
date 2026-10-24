@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.16.1 - 2026-10-24
+
+- **Typing into Windows programs is exact.** In 0.16.0 `windows_app` typed
+  through the X server, and under Wine that lost the first key, turned Æ Ø Å
+  (every Latin-1 letter) into "�", put "�" for every letter into WPF, and gave
+  a busy program the wrong letters. Now a small Windows helper in the sandbox
+  (HubKeys) types each text with SendInput, as Windows' on-screen keyboard
+  does: Danish letters, accents, other scripts and emoji arrive as typed,
+  however busy the program is, and a text typed after a click waits until the
+  program has taken the click. `\n` in a text is Return, `\t` Tab.
+- The self-test's "windows programs" line also types "Søren: ÆØÅ æøå" into its
+  program, and passes only if exactly that arrives.
+- The sandbox image builds HubKeys with its Wine prefix (seconds, nothing to
+  download).
+
 ## 0.16.0 - 2026-10-24
 
 - **The assistant sees Windows programs.** A Windows Forms or WPF program it
