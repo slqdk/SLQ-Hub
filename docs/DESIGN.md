@@ -799,8 +799,8 @@ Settings: models (download with progress, load, free the GPU, server
 parameters; the sound models in their own group, each marked CPU or GPU),
 queue, apps and keys (with connection examples and CORS), assistant (agent,
 libraries, web, sandbox, images, sound: the model for music, for sound effects,
-the voice models for Danish and for other languages, the speech speed, and
-the last speech self-test's samples with players), skills, memory, MCP
+the voice models for Danish and for other languages, and the last speech
+self-test's samples with players), skills, memory, MCP
 servers (and the tools you always allow), cloud, system (services - the speech
 service with its threads and loaded models - VRAM, disk, logs, theme,
 password).
@@ -808,6 +808,26 @@ password).
 On mobile it shows one column, and the panels become overlays. It is an
 installable PWA (manifest, icons, a service worker that caches only the app
 shell).
+
+**An open page across an update (0.13.6).** A page runs the code it loaded
+until it is reloaded, and a phone's tab can stay open for days. On 2026-10-24
+a jingle had no player under the answer on Søren's phone - most likely a tab
+still on a build from before the files card (0.12.0): the current build shows
+the card at phone width. Every answer to the UI (`ui` and
+`public` paths) carries `X-Hub-Version`; `api()` remembers the first one it
+sees, and a different one later puts "SLQ Hub was updated to … - Reload" in
+the toast corner until the page is reloaded (or the notice put away). The page
+asks again when it comes back into view and when its queue stream reconnects
+after a restart.
+
+**A turn's stream on a phone (0.13.6).** A phone that sleeps or loses its
+network breaks the turn's event stream. The browser reconnects on its own,
+resuming after the last event; when it gives up (an error answer from the
+proxy while the Hub restarts, or no network), the page fetches the stored
+turn - and without a connection it keeps what streamed in and tries again when
+the network is back, when the page is in view again, or after 2-30 s, instead
+of showing the chat as it was before the turn. If the turn is still at work,
+it follows it again from the start of its events.
 
 **The phone chat page (`/chat`)** is a second, small page for the rest of the
 household: one column, a drawer of chats, and a composer with Picture (the

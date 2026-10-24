@@ -77,6 +77,44 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
     }
   }, [chatId, toast]);
 
+  // The stored turn once a run's stream has ended. Without a connection (a phone that lost its network as the turn
+  // ended) it waits and tries again - when the network is back, the page is in view again, or after a while - and
+  // keeps what streamed in meanwhile, instead of leaving the chat as it was before the turn.
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
+  const loadAgain = useCallback(async (runId: string): Promise<ChatData | null> => {
+    for (let wait = 2000; ; wait = Math.min(wait * 2, 30000)) {
+      try {
+        const d = await api<ChatData>(`/hub/api/chats/${chatId}`);
+        setData(d);
+        return d;
+      } catch (e) {
+        const status = (e as { status?: number }).status;
+        if (status !== 0) {
+          if (status === 404) setMissing(true);
+          else toast((e as Error).message, "fault");
+          return null;
+        }
+        if (!mounted.current || liveRef.current?.runId !== runId) return null;
+        await new Promise<void>((resolve) => {
+          const done = () => {
+            window.clearTimeout(timer);
+            window.removeEventListener("online", done);
+            document.removeEventListener("visibilitychange", seen);
+            resolve();
+          };
+          const seen = () => { if (document.visibilityState === "visible") done(); };
+          const timer = window.setTimeout(done, wait);
+          window.addEventListener("online", done);
+          document.addEventListener("visibilitychange", seen);
+        });
+      }
+    }
+  }, [chatId, toast]);
+
   const attach = useCallback((runId: string) => {
     if (esRef.current && liveRef.current?.runId === runId) return;
     detach();
@@ -104,11 +142,16 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
       es.close();
       if (esRef.current === es) esRef.current = null;
       const err = liveRef.current?.status === "error" ? liveRef.current.error : null;
-      const d = await load();
-      if (liveRef.current?.runId === runId) {
+      const d = await loadAgain(runId);
+      if (liveRef.current?.runId !== runId) return;           // another turn or another chat by now
+      if (d?.run?.id === runId) {
+        // The stream broke while the turn still works (a phone that slept or lost its network): follow it again.
         liveRef.current = null;
-        setLive(null);
+        window.setTimeout(() => attachRef.current?.(runId), 1000);
+        return;
       }
+      liveRef.current = null;
+      setLive(null);
       refreshLists();
       if (err) toast(err, "fault");
       // A message that came after the turn's last step (or with Stop) has started the next turn.
@@ -119,7 +162,7 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
       // A finished run's stream closes; a lost connection is retried by the browser.
       if (ended || es.readyState === EventSource.CLOSED) finish();
     };
-  }, [detach, load, refreshLists, toast]);
+  }, [detach, loadAgain, refreshLists, toast]);
   const attachRef = useRef(attach);
   attachRef.current = attach;
 

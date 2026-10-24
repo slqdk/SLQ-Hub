@@ -66,6 +66,17 @@ async def test_through_the_proxy_the_api_is_refused_but_the_ui_works(app, api_ke
         assert r.status_code == 200
 
 
+async def test_the_ui_hears_the_hubs_version_with_every_answer(app, signed_in, client, api_key):
+    """A page loaded before an update runs the old code (a phone's tab stays open for days): every answer to the UI
+    carries the version, so the page notices the change and offers a reload. Not the model API's answers."""
+    version = app.state.hub.env.version
+    for path in ("/hub/api/auth/status", "/hub/api/chats", "/hub/api/health"):
+        r = await signed_in.get(path)
+        assert r.status_code == 200 and r.headers["x-hub-version"] == version, path
+    r = await client.get("/v1/models", headers={"Authorization": f"Bearer {api_key}"})
+    assert r.status_code == 200 and "x-hub-version" not in r.headers
+
+
 async def test_a_key_set_to_work_away_from_home(app, signed_in, api_key):
     r = await signed_in.post("/hub/api/keys", json={"name": "Maria", "priority": "interactive", "away": True})
     assert r.status_code == 200 and r.json()["away"] is True

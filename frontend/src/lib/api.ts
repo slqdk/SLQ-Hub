@@ -10,6 +10,21 @@ export class ApiError extends Error {
 
 type Opts = { method?: string; body?: unknown; form?: FormData; signal?: AbortSignal; query?: Record<string, unknown> };
 
+// The Hub's version as this page first heard it (every answer to the UI carries X-Hub-Version). An answer with
+// another one means the Hub was updated after the page loaded: the page runs the old code until it is reloaded -
+// on a phone a tab can stay open for days.
+let loadedVersion: string | null = null;
+let newerVersion: string | null = null;
+
+function noteVersion(v: string | null): void {
+  if (!v) return;
+  if (loadedVersion === null) loadedVersion = v;
+  else if (v !== loadedVersion && v !== newerVersion) {
+    newerVersion = v;
+    window.dispatchEvent(new CustomEvent("hub:updated", { detail: v }));
+  }
+}
+
 export async function api<T = unknown>(path: string, opts: Opts = {}): Promise<T> {
   let url = path;
   if (opts.query) {
@@ -32,6 +47,7 @@ export async function api<T = unknown>(path: string, opts: Opts = {}): Promise<T
     if ((e as Error).name === "AbortError") throw e;
     throw new ApiError(0, "The Hub does not answer. Check the connection.");
   }
+  noteVersion(res.headers.get("x-hub-version"));
   if (res.status === 401 && !path.startsWith("/hub/api/auth/")) {
     window.dispatchEvent(new CustomEvent("hub:signed-out"));
   }

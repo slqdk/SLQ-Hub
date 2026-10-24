@@ -24,6 +24,7 @@ interface AppState {
   setTheme: (t: Theme) => void;
   sidebarOpen: boolean;
   setSidebarOpen: (v: boolean) => void;
+  updated: string | null;                    // the Hub was updated to this version after the page loaded
 }
 
 const Ctx = createContext<AppState | null>(null);
@@ -53,6 +54,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [theme, setThemeState] = useState<Theme>(readTheme);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [updated, setUpdated] = useState<string | null>(null);
   const toastId = useRef(0);
 
   const refreshAuth = useCallback(async () => {
@@ -116,6 +118,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener("hub:signed-out", out);
   }, [refreshAuth]);
 
+  // An update restarts the Hub: an open page hears the new version on its next answer (api() compares). Ask when
+  // the page comes back into view too - a phone's tab may have slept through the update.
+  useEffect(() => {
+    const onUpdate = (e: Event) => setUpdated(String((e as CustomEvent).detail));
+    let asked = 0;
+    const onVisible = () => {
+      if (document.visibilityState !== "visible" || Date.now() - asked < 30000) return;
+      asked = Date.now();
+      api("/hub/api/auth/status").catch(() => undefined);
+    };
+    window.addEventListener("hub:updated", onUpdate);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.removeEventListener("hub:updated", onUpdate);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, []);
+
   const signedIn = !!auth?.signedIn;
   const member = auth?.user?.role === "member";          // a person: no projects or chats on the Hub
   useEffect(() => {
@@ -133,6 +153,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
     });
     es.onerror = () => setQueueLive(false);
+    let opened = false;
+    es.onopen = () => {                       // a reconnect after the Hub restarted - perhaps a new version
+      if (opened) api("/hub/api/auth/status").catch(() => undefined);
+      opened = true;
+    };
     const t = member ? 0 : window.setInterval(refreshLists, 60000);
     return () => {
       es.close();
@@ -153,6 +178,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [models]);
 
   const value: AppState = { auth, refreshAuth, queue, queueLive, models, refreshModels, modelNames, projects, chats,
-    refreshLists, toast, toasts, dismiss, theme, setTheme, sidebarOpen, setSidebarOpen };
+    refreshLists, toast, toasts, dismiss, theme, setTheme, sidebarOpen, setSidebarOpen, updated };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

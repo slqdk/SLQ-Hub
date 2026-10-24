@@ -131,9 +131,19 @@ export function Tabs<T extends string>({ tabs, value, onChange }: { tabs: { id: 
 }
 
 export function Toasts() {
-  const { toasts, dismiss } = useApp();
+  const { toasts, dismiss, updated } = useApp();
+  const [later, setLater] = useState<string | null>(null);
   return (
     <div className="toasts" aria-live="polite">
+      {updated && later !== updated && (
+        <div className="toast update" role="status">
+          <Lamp state="act" />
+          <div className="grow">SLQ Hub was updated to {updated}. Reload the page to get the new version.</div>
+          <button className="btn small" onClick={() => window.location.reload()}>Reload</button>
+          <button className="icon-btn small" style={{ color: "inherit" }} onClick={() => setLater(updated)}
+            aria-label="Later"><X size={14} /></button>
+        </div>
+      )}
       {toasts.map((t) => (
         <div key={t.id} className="toast" role={t.kind === "fault" ? "alert" : "status"}>
           <Lamp state={t.kind === "fault" ? "fault" : t.kind === "run" ? "run" : "off"} />

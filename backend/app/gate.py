@@ -190,9 +190,21 @@ class Gate:
                 origin = headers.get("origin")
                 if origin and not _same_origin(origin, headers, hub.env.public_url):
                     return await _json(send, 403, {"detail": "cross-origin request refused"})
-            return await self.app(scope, receive, send)
+            return await self.app(scope, receive, _with_version(send, hub.env.version) if kind != "media" else send)
 
         return await self.app(scope, receive, send)
+
+
+def _with_version(send, version: str):
+    """The Hub's version on every answer to the UI. A page loaded before an update runs the old code until it is
+    reloaded (a phone's tab may stay open for days): when the version changes under it, it offers a reload."""
+    extra = (b"x-hub-version", version.encode())
+
+    async def wrapped(message):
+        if message["type"] == "http.response.start":
+            message = {**message, "headers": [*(message.get("headers") or []), extra]}
+        await send(message)
+    return wrapped
 
 
 def _signed_in(user: dict | None, lan: bool) -> dict | None:

@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.13.6 - 2026-10-24
+
+- **An open page notices an update.** A page keeps running the version it
+  loaded until it is reloaded, and a phone's tab can stay open for days -
+  the missing player under the jingle on Søren's phone was most likely a tab
+  from before the files card (0.12.0). Every answer from the Hub to the page
+  now carries its version; when it changes, the page says "SLQ Hub was
+  updated to … - Reload". It also checks when the page comes back into view.
+- **A lost connection no longer loses the answer.** When a phone lost its
+  network or slept as a turn ended, the chat stayed as it was before the
+  turn until a reload. Now the page keeps what came in and fetches the
+  finished turn when the connection is back. If the stream breaks while the
+  turn still works, the page picks it up again.
+- The design text no longer lists the speech speed under Settings.
+
 ## 0.13.5 - 2026-10-24
 
 - **Music in one piece.** In the first real music chat the assistant made a
