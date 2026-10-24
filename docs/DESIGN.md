@@ -215,6 +215,21 @@ min_p, presence penalty; checked against limits), which replaces the card's
 values until reset. The order for thinking: the turn's toggle, the chat, the
 project, the model's own choice, then Settings.
 
+**Names (0.14.0).** Settings → Models → Rename gives a chat or picture model
+the owner's name: `name` becomes it everywhere a person reads a model's name -
+the composer, the turn's footer, the hand-over notice, the picture menu, tool
+results, Settings, the queue plate, people's chats and the phone page (its
+list comes from `/v1/models`' `name`). A bundled model keeps it in
+`data/models.override.json` (`llm` or `comfy`, `name`) and its own name as
+`name_card`, with "Use Qwen3.8 27B" (its own name) to go back; one the owner
+added changes its entry in `models.custom.json`. The id - what apps, keys,
+aliases and settings use - never changes, and `/api/tags` lists ids. Two
+models in a group cannot share a name. The model's own texts (its system
+prompt, who takes over, the image tools' model lists) say both,
+`Catalog.label`: "You run as Store hjerne (Qwen3.8 27B)", so what it knows
+about the model still applies. Sound and helper models keep their names (texts
+and descriptions refer to Røst and Chatterbox by name).
+
 Sampling comes from the model cards. Qwen3.8 with thinking: temperature 1.0,
 top_p 0.95, top_k 20. Without thinking: 0.7 / 0.8 / 20, presence penalty 1.5.
 Models added from Hugging Face have no card values; those of the Qwen3 family
@@ -795,7 +810,7 @@ running, amber waiting, blue your action is needed (a tool asks), red fault.
   restore per file), settings, revisions, sync devices.
 - **Libraries.** Documents with indexing progress and a search to try.
 
-Settings: models (download with progress, load, free the GPU, server
+Settings: models (download with progress, load, free the GPU, rename, server
 parameters; the sound models in their own group, each marked CPU or GPU),
 queue, apps and keys (with connection examples and CORS), assistant (agent,
 libraries, web, sandbox, images, sound: the model for music, for sound effects,

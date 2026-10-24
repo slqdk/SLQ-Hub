@@ -153,6 +153,8 @@ function ModelsTab({ s }: { s: S }) {
   const [addingHF, setAddingHF] = useState(false);
   const [addingImage, setAddingImage] = useState(false);
   const [imageSettings, setImageSettings] = useState<ModelEntry | null>(null);
+  const [renaming, setRenaming] = useState<ModelEntry | null>(null);
+  const renameButton = (m: ModelEntry) => <button className="btn quiet small" onClick={() => setRenaming(m)}>Rename</button>;
   if (!models) return <div className="faint">Loading</div>;
   const installedLlms = models.llm.filter((m) => m.installed);
 
@@ -176,6 +178,7 @@ function ModelsTab({ s }: { s: S }) {
         extra={(m) => <>
           {m.installed && (m.loaded ? <span className="tag"><Lamp state="run" size="sm" /> Loaded</span>
             : <button className="btn small" disabled={!!busy} onClick={() => load(m.id)}>{busy === `load-${m.id}` ? "Loading" : "Load"}</button>)}
+          {renameButton(m)}
           {m.installed && <button className="btn quiet small" onClick={() => setAdvanced(m)}>Settings</button>}
           {m.custom && <ConfirmButton className="btn quiet small" confirmText="Remove it and its files?"
             disabled={!!busy || m.loaded} onConfirm={() => remove(m)}>Remove</ConfirmButton>}
@@ -184,11 +187,12 @@ function ModelsTab({ s }: { s: S }) {
         note="Run on the CPU (the image embedder can use the GPU, see Assistant, Libraries)." />
       <ModelGroup title="Image models (ComfyUI)" items={models.comfy} busy={busy} onDownload={download} onCancel={cancel}
         action={models.sdxl && <button className="btn small" onClick={() => setAddingImage(true)}><Plus size={14} /> Add image model</button>}
-        extra={(m) => m.custom ? <>
-          {m.sdxl && <button className="btn quiet small" onClick={() => setImageSettings(m)}>Settings</button>}
-          <ConfirmButton className="btn quiet small" confirmText="Remove it and its file?" disabled={!!busy}
-            onConfirm={() => remove(m)}>Remove</ConfirmButton>
-        </> : null} />
+        extra={(m) => <>
+          {renameButton(m)}
+          {m.custom && m.sdxl && <button className="btn quiet small" onClick={() => setImageSettings(m)}>Settings</button>}
+          {m.custom && <ConfirmButton className="btn quiet small" confirmText="Remove it and its file?" disabled={!!busy}
+            onConfirm={() => remove(m)}>Remove</ConfirmButton>}
+        </>} />
       {!!models.audio?.length && <ModelGroup title="Sound, music and speech" items={models.audio} busy={busy}
         onDownload={download} onCancel={cancel}
         note="Speech runs on the CPU, so the chat model stays loaded; music and sound effects run on the card through ComfyUI. Once one is downloaded, ask for it in any chat."
@@ -200,6 +204,8 @@ function ModelsTab({ s }: { s: S }) {
         onAdded={() => { setAddingImage(false); refreshModels(); }} />}
       {imageSettings && models.sdxl && <ImageModelSettings model={imageSettings} choices={models.sdxl}
         onClose={() => setImageSettings(null)} onSaved={() => { setImageSettings(null); refreshModels(); }} />}
+      {renaming && <RenameModel model={renaming} onClose={() => setRenaming(null)}
+        onSaved={() => { setRenaming(null); refreshModels(); }} />}
     </div>
   );
 }
@@ -223,7 +229,7 @@ function ModelGroup({ title, items, busy, onDownload, onCancel, extra, note, act
             <div className="list-row" key={m.id} style={{ alignItems: "flex-start", flexWrap: "wrap" }}>
               <Lamp state={m.installed ? (m.loaded ? "run" : "off") : active.length ? "wait" : "off"} pulse={!!active.length} />
               <div className="grow" style={{ minWidth: 220 }}>
-                <b>{m.name}</b> {m.custom && m.source
+                <b>{m.name}</b>{m.name_card && <span className="muted small"> ({m.name_card})</span>} {m.custom && m.source
                   ? <><a className="tag" href={m.source.url} target="_blank" rel="noreferrer">
                       {m.source.site === "civitai" ? "Civitai" : "Hugging Face"}</a>
                     {m.source.nsfw && <span className="tag" title="Civitai marks this model NSFW">NSFW</span>}</>
@@ -363,6 +369,36 @@ function ModelSettings({ model, thinkingInChats, onClose, onSaved }: { model: Mo
         placeholder="--temp 0.6" /><small>For experiments. The Hub sets <code className="mono">--host</code> and{" "}
         <code className="mono">--port</code>; <code className="mono">--api-key</code> is not allowed (the model server is
         reachable only on the Hub's internal network).</small></label>
+    </Modal>
+  );
+}
+
+/** The name the Hub shows for a chat or picture model: in chats, the model choices, Settings and on the phone page.
+ * Its id - what apps, keys and settings use - stays. */
+function RenameModel({ model, onClose, onSaved }: { model: ModelEntry; onClose: () => void; onSaved: () => void }) {
+  const { toast } = useApp();
+  const own = model.name_card ?? model.name;
+  const [name, setName] = useState(model.name);
+  const save = async (value: string) => {
+    try {
+      await api(`/hub/api/models/${encodeURIComponent(model.id)}/name`, { method: "PUT", body: { name: value } });
+      toast(value.trim() && value.trim() !== own ? `Now called ${value.trim()}` : `Called ${own} again`, "run");
+      onSaved();
+    } catch (e) {
+      toast((e as Error).message, "fault");
+    }
+  };
+  return (
+    <Modal title={`Rename ${model.name}`} onClose={onClose} footer={<>
+      {model.name_card && <button className="btn quiet" style={{ marginRight: "auto" }} onClick={() => save("")}>
+        Use {model.name_card}</button>}
+      <button className="btn" onClick={onClose}>Cancel</button>
+      <button className="btn primary" disabled={!name.trim()} onClick={() => save(name)}>Save</button></>}>
+      <label className="field"><span>Name</span>
+        <input className="input" value={name} maxLength={60} autoFocus placeholder={own}
+          onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && name.trim()) save(name); }} />
+        <small>Shown in chats, the model choices, Settings and on the phone page.{model.custom ? "" : ` Its own name is ${own};`}
+          {" "}apps keep using its id, <code className="mono">{model.id}</code>.</small></label>
     </Modal>
   );
 }
@@ -705,11 +741,10 @@ function AddImageModel({ choices, onClose, onAdded }: { choices: SdxlChoices; on
 function ImageModelSettings({ model, choices, onClose, onSaved }: { model: ModelEntry; choices: SdxlChoices;
   onClose: () => void; onSaved: () => void }) {
   const { toast } = useApp();
-  const [name, setName] = useState(model.name);
   const [settings, setSettings] = useState<SdxlSettings>(model.sdxl ?? presetSettings(choices, "sdxl"));
   const save = async () => {
     try {
-      await api(`/hub/api/models/images/${model.id}`, { method: "PUT", body: { name, settings } });
+      await api(`/hub/api/models/images/${model.id}`, { method: "PUT", body: { settings } });
       toast("Saved", "run");
       onSaved();
     } catch (e) {
@@ -720,8 +755,7 @@ function ImageModelSettings({ model, choices, onClose, onSaved }: { model: Model
     <Modal title={`${model.name}: settings`} onClose={onClose} footer={<><button className="btn" onClick={onClose}>Cancel</button>
       <button className="btn primary" onClick={save}>Save</button></>}>
       <p className="muted" style={{ margin: 0 }}>How the Hub makes pictures with this model. The next picture uses the
-        new settings.</p>
-      <label className="field"><span>Name</span><input className="input" value={name} onChange={(e) => setName(e.target.value)} /></label>
+        new settings. Rename it from the list.</p>
       <SdxlFields value={settings} choices={choices} onChange={setSettings} />
     </Modal>
   );

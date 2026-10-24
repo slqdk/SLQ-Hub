@@ -8,6 +8,7 @@ from pathlib import Path
 
 from PIL import Image, ImageEnhance, ImageFilter, ImageOps
 
+from ...catalog import Catalog
 from ...chats import store as chats
 from ...projects import blobs
 from ...projects.store import mime_of
@@ -198,7 +199,8 @@ async def image_generate(ctx: ToolContext, args: dict) -> ToolResult:
     used = items[0].get("prompt_used")
     enhanced = f"\nERNIE-Image's prompt enhancer turned the prompt into: {used[:2000]}" if used else ""
     other = _other_model_note(ctx, args, items[0]["model"])
-    return ToolResult(f"Generated {len(items)} image(s) with {items[0]['model']} ({desc}). They are shown to the "
+    used_by = (pipe.entry(items[0]["model"]) or {}).get("name") or items[0]["model"]      # the owner's name for it
+    return ToolResult(f"Generated {len(items)} image(s) with {used_by} ({desc}). They are shown to the "
                       f"user and below.{other}{where}{enhanced}",
                       images=[{"sha": it["sha"], "mime": "image/png"} for it in items],
                       display={"generated": [{"sha": it["sha"], "seed": it["seed"], "path": p}
@@ -298,7 +300,8 @@ def _generate_dynamic(ctx: ToolContext) -> tuple[str, dict]:
     chosen = next((e for e in gens if e["id"] == mine), gens[0] if gens else None)
     if chosen is None:
         return GENERATE_TEXT, _generate_params([])
-    lines = [f"- {e['id']}: {e['name']}{' (this chat uses it)' if e is chosen else ''}. {prompt_hint(e)}" for e in gens]
+    lines = [f"- {e['id']}: {Catalog.label(e)}{' (this chat uses it)' if e is chosen else ''}. {prompt_hint(e)}"
+             for e in gens]
     return (f"Generate images from a text prompt. Without model, this chat uses {chosen['name']}; pick another "
             "only when the user asks for it. Write the prompt the way the model wants it:\n" + "\n".join(lines) +
             "\nTakes 15-90 s per image (longer when the model has to load first).",
@@ -314,7 +317,7 @@ def _edit_params(models: list[str]) -> dict:
 
 def _edit_dynamic(ctx: ToolContext) -> tuple[str, dict]:
     eds = _pipeline(ctx).installed("edit")
-    names = " or ".join(e["name"] for e in eds) or "Qwen-Image 2.1"
+    names = " or ".join(Catalog.label(e) for e in eds) or "Qwen-Image 2.1"
     return EDIT_TEXT.replace("(Qwen-Image 2.1)", f"({names})"), _edit_params([e["id"] for e in eds])
 
 

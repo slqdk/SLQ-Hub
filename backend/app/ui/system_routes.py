@@ -406,6 +406,21 @@ async def update_model(model_id: str, body: ModelPatch, request: Request):
     return {"model": entry, "reloadNeeded": body.server is not None and hub.loaded_model() == model_id}
 
 
+class ModelName(BaseModel):
+    name: str = ""                       # "" = the model's own name again
+
+
+@router.put("/hub/api/models/{model_id}/name")
+async def rename_model(model_id: str, body: ModelName, request: Request):
+    """The name the Hub shows for a chat or picture model; its id - what apps and settings use - stays."""
+    try:
+        return {"model": get_hub(request).catalog.rename(model_id, body.name)}
+    except KeyError:
+        raise HTTPException(404, "Only chat and picture models can be renamed.")
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
 @router.post("/hub/api/models/{model_id}/load")
 async def load_model(model_id: str, request: Request):
     hub = get_hub(request)

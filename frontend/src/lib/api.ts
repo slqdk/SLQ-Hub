@@ -167,7 +167,9 @@ export interface SdxlSettings { preset: string; steps: number; cfg: number; samp
 export interface SdxlChoices { presets: Record<string, SdxlSettings & { label: string }>; samplers: string[];
   schedulers: string[] }
 
-export interface ModelEntry { id: string; name: string; description?: string; default?: boolean; installed: boolean;
+/** name: what the Hub shows (the owner may rename chat and picture models); name_card: the model's own name, when
+ * a bundled model was renamed. */
+export interface ModelEntry { id: string; name: string; name_card?: string; description?: string; default?: boolean; installed: boolean;
   loaded?: boolean; downloads: DownloadState[]; capabilities?: string[]; kind?: string;
   files: { repo?: string; path?: string; url?: string; dest: string; size?: number; role?: string }[];
   server?: Record<string, unknown>; thinking?: { efforts?: string[]; default_effort?: string; default?: boolean };

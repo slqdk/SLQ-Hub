@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Awaitable, Callable
 
 from .. import db
+from ..catalog import Catalog
 from ..chats import store as chats
 from ..gpu.scheduler import SchedulerError, Ticket
 from ..llm import payload as P
@@ -136,7 +137,7 @@ class Engine:
         """Who takes over if this model gets stuck (for its prompt and the escalate tool); "" = nobody."""
         target = self.local_target()
         if target is not None:
-            return f"{target['name']}, a stronger model on this server"
+            return f"{Catalog.label(target)}, a stronger model on this server"
         if self.escalation and self.cloud is None:
             return "a stronger cloud model"
         return ""
@@ -527,7 +528,7 @@ class Engine:
                 pass
         self.model, self.need = target, self.hub.model_need(target["id"])
         self.ctx_limit = self.hub.catalog.context_per_request(target["id"])
-        self.handed_over_from = before["name"]
+        self.handed_over_from = Catalog.label(before)
         self.must_answer, self.repeats, self.same_steps, self.fail_streak, self.recent = "", 0, {}, 0, []
         self.emit("escalated", model=target["name"], model_id=target["id"], reason=reason, local=True)
         self.steps.append({"type": "escalated", "model": target["id"], "from": before["id"], "reason": reason,
@@ -540,9 +541,9 @@ class Engine:
         if agent is not None and messages and messages[0].get("role") == "system":
             messages[0] = {"role": "system", "content": agent.system_for(
                 chat, self.project, self.workdir, target, handover_to=self.handover_label(),
-                taken_over_from=before["name"])}
-        messages.append({"role": "user", "content": f"(SLQ Hub: {before['name']} handed this turn over to you "
-                                                    f"because {reason}. The steps so far are above - check them "
+                taken_over_from=Catalog.label(before))}
+        messages.append({"role": "user", "content": f"(SLQ Hub: {Catalog.label(before)} handed this turn over to "
+                                                    f"you because {reason}. The steps so far are above - check them "
                                                     "rather than trust them. Continue the task and answer.)"})
         job = getattr(self.ticket, "job", None)
         if job is not None:
@@ -645,7 +646,7 @@ class Agent:
         audio = self.hub.extras.get("audio")
         sound = [a for a in ("speech", "music", "sound") if audio and audio.available(a)] if not subagent else []
         if device is not None:                   # a person's chat: their name, no memory, code if allowed
-            return system_prompt(user=device.name, model_name=entry["name"],
+            return system_prompt(user=device.name, model_name=Catalog.label(entry),
                                  folder_text=device_folder_text(wd.sandbox_path, device.code),
                                  sandbox_path=wd.sandbox_path, memory_index=[], skills=skills, project=None,
                                  images_available=bool(images and images.available()), handover_to=handover_to,
@@ -653,7 +654,8 @@ class Agent:
                                  code=device.code, dropped=device.dropped, sound=sound)
         mem = self.hub.extras["memory"].index(project["id"] if project else None)
         user = self.hub.settings.get("agent", "user_name") or (self.hub.env.admin_user or "the user").title()
-        return system_prompt(user=user, model_name=entry["name"], folder_text=folder_text(project, wd.sandbox_path),
+        return system_prompt(user=user, model_name=Catalog.label(entry),
+                             folder_text=folder_text(project, wd.sandbox_path),
                              sandbox_path=wd.sandbox_path, memory_index=mem, skills=skills, project=project,
                              summary="" if subagent else chat.get("summary") or "",
                              images_available=bool(images and images.available()),

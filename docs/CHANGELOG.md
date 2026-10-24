@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.14.0 - 2026-10-24
+
+- **Rename models.** Settings → Models → Rename gives a chat model or a
+  picture model your own name. It shows everywhere a name is read: the
+  composer, under each answer, the picture menu, hand-over notices, tool
+  results, Settings, the queue, people's chats and the phone page. "Use
+  Qwen3.8 27B" (its own name) goes back. Apps are not affected: they keep
+  using the model's id (`qwen3.8-27b`). Two models cannot share a name.
+- The model itself is told both names ("You run as Store hjerne (Qwen3.8
+  27B)"), so it still knows what it is.
+- A picture's result names the model by its shown name instead of its id.
+- An added picture model is renamed from the list now, like the others,
+  instead of in its Settings.
+
 ## 0.13.6 - 2026-10-24
 
 - **An open page notices an update.** A page keeps running the version it

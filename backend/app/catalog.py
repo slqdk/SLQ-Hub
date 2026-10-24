@@ -2,8 +2,9 @@
 start them, and what names apps may use for them.
 
 The bundled catalog is app/catalog/models.json. Per-model changes made in
-Settings -> Models (context, slots, extra llama-server flags) are stored in
-<data>/models.override.json and merged over it. Language models added from
+Settings -> Models (context, slots, extra llama-server flags, the name the Hub
+shows for a chat or picture model) are stored in <data>/models.override.json
+and merged over it. Language models added from
 Hugging Face (Settings -> Models -> Add from Hugging Face, app/hf.py) and SDXL
 picture models added from a link (Add image model, app/images/sources.py)
 live in <data>/models.custom.json and are marked "custom".
@@ -59,6 +60,8 @@ def family_sampling(architecture: str | None) -> dict | None:
 # The catalog's groups: language models, CPU helpers, picture models (ComfyUI), and sound - music and sound effects
 # (ComfyUI) and speech (the speech service).
 GROUPS = ("llm", "aux", "comfy", "audio")
+RENAMABLE = ("llm", "comfy")             # what chats show by name: the chat models and the picture models
+MAX_NAME = 60
 EDITABLE_SERVER_KEYS = {"ctx", "parallel", "kv_unified", "cache_type", "gpu_layers", "flash_attn",
                         "cache_ram_mib", "extra"}
 
@@ -125,6 +128,12 @@ class Catalog:
                 entry["sampling_own"] = True
             if o.get("thinking_mode") in ("on", "off"):          # think in chats regardless of Settings -> Assistant
                 entry["thinking_mode"] = o["thinking_mode"]
+        for group in RENAMABLE:                                   # the owner's name for a bundled model
+            for entry in data.get(group, []):
+                name = ((over.get(group) or {}).get(entry["id"]) or {}).get("name")
+                if isinstance(name, str) and name.strip() and not entry.get("custom"):
+                    entry["name_card"] = entry["name"]
+                    entry["name"] = name.strip()[:MAX_NAME]
         return data
 
     def _architecture(self, entry: dict) -> str | None:
@@ -176,6 +185,39 @@ class Catalog:
             self.override_path.write_text(json.dumps(over, indent=1), encoding="utf-8")
         self.reload()
         return self.get_llm(model_id) or {}
+
+    def rename(self, model_id: str, name: str) -> dict:
+        """The name the Hub shows for a chat or picture model - in chats, the model choices, Settings and on the
+        phone page. The id, which apps and settings use, stays. A model the owner added keeps the name in its own
+        entry; a bundled one in the overrides, where an empty name (or the card's) goes back to the card's."""
+        name = " ".join(str(name or "").split())[:MAX_NAME]
+        with self._lock:
+            group, entry = next(((g, e) for g in RENAMABLE for e in self._data.get(g, []) if e["id"] == model_id),
+                                (None, None))
+            if entry is None:
+                raise KeyError(model_id)
+            if name and any(e["id"] != model_id and e["name"].casefold() == name.casefold()
+                            for e in self._data.get(group, [])):
+                raise ValueError(f"Another model is already called {name}.")
+            if entry.get("custom"):
+                data = self._read(self.custom_path)
+                own = next((e for e in data.get(group) or [] if isinstance(e, dict) and e.get("id") == model_id), None)
+                if own is None:
+                    raise KeyError(model_id)
+                own["name"] = name or model_id
+                self._write(self.custom_path, data)
+            else:
+                over = self._read(self.override_path)
+                slot = over.setdefault(group, {}).setdefault(model_id, {})
+                if name and name != entry.get("name_card", entry["name"]):
+                    slot["name"] = name
+                else:
+                    slot.pop("name", None)
+                    if not slot:
+                        del over[group][model_id]
+                self._write(self.override_path, over)
+        self.reload()
+        return self.get(group, model_id) or {}
 
     def add_custom(self, entry: dict, group: str = "llm") -> dict:
         """Add a language model from Hugging Face (hf.make_entry) or, with
@@ -236,6 +278,13 @@ class Catalog:
 
     def get_llm(self, model_id: str) -> dict | None:
         return self.get("llm", model_id)
+
+    @staticmethod
+    def label(entry: dict) -> str:
+        """A model's name for the model's own texts (its system prompt, the tool descriptions): the owner's name
+        with the model's own after it, so hints about the model still find it - "Store hjerne (Qwen3.8 27B)"."""
+        card = entry.get("name_card")
+        return f"{entry['name']} ({card})" if card and card != entry["name"] else entry["name"]
 
     def path(self, f: dict) -> Path:
         return self.models_dir / f["dest"]
