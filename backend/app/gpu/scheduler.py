@@ -17,7 +17,9 @@ Concepts (docs/DESIGN.md section 3):
   one level per `aging_s` seconds of waiting, so nothing starves.
 * lease     - an agent turn holds its slot for the whole turn, pauses between
   tool calls included, and may switch residency inside it (to ComfyUI for an
-  image and back).
+  image and back). While the turn waits for the user's answer to a question,
+  it gives the card up (Ticket.pause) and queues again with the answer
+  (Ticket.resume): a person away from the screen holds nothing up.
 
 Admission (re-run whenever something changes):
 
@@ -103,10 +105,35 @@ class Ticket:
         self._sched = sched
         self.job = job
         self._released = False
+        self._paused = False
 
     @property
     def need(self) -> str:
         return self.job.need
+
+    @property
+    def paused(self) -> bool:
+        return self._paused
+
+    async def pause(self) -> None:
+        """Give the card up for a while and keep the ticket (everyone holding it - a turn and its subagents - keeps
+        working with it after resume()). Its job ends as done; the next one starts at resume."""
+        if self._released or self._paused or self.job.state != "running":
+            return
+        self._paused = True
+        self._sched._release(self.job, None)
+
+    async def resume(self, on_job: Callable[[Job], None] | None = None) -> None:
+        """Queue for the card again, as before the pause: the same owner, residency, priority and lease. Waits;
+        cancelling the waiting task gives the place up."""
+        if self._released or not self._paused:
+            return
+        old = self.job
+        meta = {**old.meta, "resumed": True}
+        new = await self._sched.acquire(old.owner, old.kind, old.need, old.priority, label=old.label, lease=old.lease,
+                                        meta=meta, on_job=on_job)
+        self.job = new.job
+        self._paused = False
 
     async def switch(self, need: str) -> None:
         """Change residency inside a lease (e.g. to ComfyUI and back)."""

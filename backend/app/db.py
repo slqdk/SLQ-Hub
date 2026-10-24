@@ -283,12 +283,25 @@ _M005_PEOPLE = """
 """
 
 
+# "Allow in this chat" (0.16.0): a question answered for the rest of one chat - a tool that asks first, or what
+# internet for the assistant asks about (internet:search, internet:site:<host>, internet:code). Gone with the chat.
+_M006_CHAT_PERMISSIONS = """
+        CREATE TABLE chat_permissions (
+            chat_id    INTEGER NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+            tool       TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (chat_id, tool)
+        );
+"""
+
+
 MIGRATIONS = [
     (1, _M001_CORE),
     (2, _M002_LIBRARIES),
     (3, _M003_RUN_PROMPTS),
     (4, _M004_KEYS_AWAY),
     (5, _M005_PEOPLE),
+    (6, _M006_CHAT_PERMISSIONS),
 ]
 
 

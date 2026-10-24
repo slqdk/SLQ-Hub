@@ -64,7 +64,7 @@ async def test_web_search_asks_first_once_always_or_deny(signed_in, app, fakes):
     q = await answer(signed_in, app, rid, "allow")
     assert q["tool"] == "web_search" and q["ask"] == {
         "kind": "internet", "key": "internet:search", "what": "search", "detail": "vejret i Vojens",
-        "always": "Always allow web search", "can_always": True}
+        "always": "Always allow web search", "can_always": True, "can_chat": True}
     run = await finish(app, rid)
     assert run.status == "done" and result_of(run, "web_search")["ok"]
     tools = {t["function"]["name"]: t["function"] for t in fakes.llama["requests"][0]["tools"]}
@@ -347,3 +347,133 @@ def test_the_model_containers_have_no_way_out():
     assert f'MODEL_IPS="${{MODEL_IPS:-{ips["llm"]} {ips["comfyui"]} {ips["speech"]}}}"' in fw
     assert 'INNER_NET="${INNER_NET:-172.31.251.0/24}"' in fw
     assert 'add DOCKER-USER -s "$ip" ! -d "$INNER_NET" -m conntrack --ctstate NEW -j DROP' in fw
+
+
+async def test_allow_in_this_chat(signed_in, app, fakes):
+    """"Allow in this chat": no question for the rest of the chat (and its subagents), the next chat asks again; the
+    chat lists it and can take it back; it goes with the chat. A person is not offered it."""
+    asking(app)
+    c = await new_chat(signed_in)
+
+    def search(q: str):
+        fakes.llama["requests"].clear()
+        fakes.llama["replies"] = [{"tool_calls": [{"name": "web_search", "arguments": {"query": q}}]},
+                                  {"content": "Svar."}, {"content": "Titel"}]
+
+    search("vejret i Vojens")
+    rid = await say(signed_in, c["id"], "Vejret?")
+    q = await answer(signed_in, app, rid, "chat")
+    assert q["ask"]["can_chat"] is True and q["ask"]["can_always"] is True
+    run = await finish(app, rid)
+    assert result_of(run, "web_search")["ok"]
+    assert [e["data"]["decision"] for e in run.events if e["type"] == "approval_answered"] == ["chat"]
+    assert not permissions()                                             # not "always"
+    data = (await signed_in.get(f"/hub/api/chats/{c['id']}")).json()
+    assert [p["tool"] for p in data["allowed"]] == ["internet:search"]
+    search("vejret i morgen")                                            # the same chat: no question
+    run = await finish(app, await say(signed_in, c["id"], "Og i morgen?"))
+    assert not approvals(run) and result_of(run, "web_search")["ok"]
+    fakes.llama["requests"].clear()                                      # its subagent neither
+    fakes.llama["replies"] = [{"tool_calls": [{"name": "task", "arguments": {"description": "Find it",
+                                                                               "prompt": "Search the weather."}}]},
+                              {"tool_calls": [{"name": "web_search", "arguments": {"query": "vejr"}}]},
+                              {"content": "Sol."}, {"content": "Det bliver sol."}]
+    run = await finish(app, await say(signed_in, c["id"], "Spørg en hjælper"))
+    assert not approvals(run) and run.status == "done"
+    other = await new_chat(signed_in)                                    # another chat asks again
+    search("vejret i Aabenraa")
+    rid = await say(signed_in, other["id"], "Vejret?")
+    await answer(signed_in, app, rid, "deny")
+    await finish(app, rid)
+    # taken back: it asks again
+    r = await signed_in.delete(f"/hub/api/chats/{c['id']}/allowed", params={"tool": "internet:search"},
+                               headers={"Origin": "http://hub"})
+    assert r.status_code == 200 and r.json() == {"allowed": []}
+    search("vejret igen")
+    rid = await say(signed_in, c["id"], "Igen?")
+    await answer(signed_in, app, rid, "chat")
+    await finish(app, rid)
+    # deleting the chat takes its answers with it
+    assert (await signed_in.delete(f"/hub/api/chats/{c['id']}", headers={"Origin": "http://hub"})).status_code == 200
+    with db.connect() as con:
+        assert con.execute("SELECT COUNT(*) FROM chat_permissions").fetchone()[0] == 0
+    bad = await signed_in.post("/hub/api/runs/nope/approve", json={"call_id": "x", "decision": "forever"})
+    assert bad.status_code == 400
+
+
+async def test_a_person_is_not_offered_this_chat(signed_in, app, fakes):
+    asking(app)
+    await add_person(signed_in)
+    fakes.llama["replies"] = [{"tool_calls": [{"name": "web_search", "arguments": {"query": "opskrift"}}]},
+                              {"content": "Her."}]
+    async with client_from(app) as phone:
+        await sign_in(phone)
+        r = await phone.post("/hub/api/device/turns", json={"title": "Mad", "messages": [user_msg("Find en opskrift")]},
+                             headers={"Origin": "http://hub"})
+        tid = r.json()["turn_id"]
+        t = app.state.hub.extras["device"].turns[tid]
+        await until(lambda: approvals(t.run))
+        q = approvals(t.run)[0]
+        assert q["ask"]["can_chat"] is False and q["ask"]["can_always"] is False
+        bad = await phone.post(f"/hub/api/device/turns/{tid}/approve", json={"call_id": q["id"], "decision": "chat"})
+        assert bad.status_code == 400
+        ok = await phone.post(f"/hub/api/device/turns/{tid}/approve", json={"call_id": q["id"], "decision": "deny"})
+        assert ok.status_code == 200
+        await until(lambda: t.result is not None, 15)
+
+
+async def test_the_card_is_free_while_a_question_waits(signed_in, app, fakes):
+    """While the turn waits for the user, its lease is given up: other jobs run on the card (here background jobs
+    for the same model take every slot); after the answer the turn queues, says so, and goes on."""
+    asking(app)
+    sched = app.state.hub.scheduler
+    fakes.llama["replies"] = [{"tool_calls": [{"name": "web_search", "arguments": {"query": "vejret"}}]},
+                              {"content": "Sol."}, {"content": "Vejret"}]
+    c = await new_chat(signed_in)
+    rid = await say(signed_in, c["id"], "Vejret?")
+    run = app.state.hub.extras["agent"].runs.get(rid)
+    await until(lambda: approvals(run))
+    assert not sched.running                                          # nothing holds the card
+    need = app.state.hub.model_need(next(e for e in run.events if e["type"] == "started")["data"]["model"])
+    others = [await sched.acquire("famlog", "chat", need, "background") for _ in range(sched.backend.slots(need))]
+    q = approvals(run)[0]
+    r = await signed_in.post(f"/hub/api/runs/{rid}/approve", json={"call_id": q["id"], "decision": "allow"})
+    assert r.status_code == 200
+
+    def after_answer(kind: str) -> list:
+        types = [e["type"] for e in run.events]
+        if "approval_answered" not in types:
+            return []
+        return [e for e in run.events[types.index("approval_answered"):] if e["type"] == kind]
+    await until(lambda: after_answer("queued"))
+    assert isinstance(after_answer("queued")[0]["data"]["position"], int) and not run.finished
+    assert not [e for e in run.events if e["type"] == "tool_result"]
+    for t in others:
+        await t.release()
+    run = await finish(app, rid)
+    assert run.status == "done" and result_of(run, "web_search")["ok"]
+    assert len(after_answer("started")) == 1                            # and it went on
+
+
+async def test_stop_while_a_question_waits_does_not_take_the_card_back(signed_in, app, fakes):
+    """Stop while the turn waits for the user must not make it queue for the card again: the turn is ending, so the
+    card it gave up stays free. Other jobs hold every slot here, so a wrong re-take would wait behind them."""
+    asking(app)
+    sched = app.state.hub.scheduler
+    fakes.llama["replies"] = [{"tool_calls": [{"name": "web_search", "arguments": {"query": "vejret"}}]},
+                              {"content": "unreached"}]
+    c = await new_chat(signed_in)
+    rid = await say(signed_in, c["id"], "Vejret?")
+    run = app.state.hub.extras["agent"].runs.get(rid)
+    await until(lambda: approvals(run))
+    assert not sched.running                                            # the card is free while it asks
+    need = app.state.hub.model_need(next(e for e in run.events if e["type"] == "started")["data"]["model"])
+    others = [await sched.acquire("famlog", "chat", need, "background") for _ in range(sched.backend.slots(need))]
+    await signed_in.post(f"/hub/api/runs/{rid}/stop")
+    await until(lambda: run.finished)                                   # (not finish(): the card is held below)
+    assert run.status == "cancelled"
+    assert not [e for e in run.events if e["type"] == "approval_answered"]       # it was never answered
+    assert set(sched.running) == {t.job.id for t in others} and not sched.pending   # the turn did not re-take
+    for t in others:
+        await t.release()
+    await sched.drain()

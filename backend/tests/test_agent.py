@@ -569,6 +569,41 @@ async def test_mcp_over_http_asks_first_and_can_be_always_allowed(signed_in, app
     assert run.status == "done" and not any(e["type"] == "approval_needed" for e in run.events)
 
 
+async def test_a_tool_allowed_in_this_chat(signed_in, app, fakes):
+    """A tool that asks first, answered "Allow in this chat": not asked again in the chat, asked in the next."""
+    await signed_in.put("/hub/api/settings", json={"section": "mcp", "values": {"servers": [
+        {"name": "calc", "transport": "http", "url": "http://mcp.test/mcp", "enabled": True}]}})
+    await signed_in.post("/hub/api/mcp/reload")
+
+    def add(a: int):
+        fakes.llama["requests"].clear()
+        fakes.llama["replies"] = [{"tool_calls": [{"name": "mcp__calc__add", "arguments": {"a": a, "b": 1}}]},
+                                  {"content": "ok"}, {"content": "Sum"}]
+
+    c = await new_chat(signed_in)
+    add(1)
+    run_id = await say(signed_in, c["id"], "add")
+    run = app.state.hub.extras["agent"].runs.get(run_id)
+    await until(lambda: any(e["type"] == "approval_needed" for e in run.events))
+    ask = next(e for e in run.events if e["type"] == "approval_needed")["data"]
+    assert ask["can_chat"] is True and "ask" not in ask
+    r = await signed_in.post(f"/hub/api/runs/{run_id}/approve", json={"call_id": ask["id"], "decision": "chat"})
+    assert r.status_code == 200
+    await finish(app, run_id)
+    add(2)
+    run = await finish(app, await say(signed_in, c["id"], "again"))
+    assert not any(e["type"] == "approval_needed" for e in run.events)
+    assert (await signed_in.get("/hub/api/tool-permissions")).json() == []
+    other = await new_chat(signed_in)
+    add(3)
+    run_id = await say(signed_in, other["id"], "add")
+    run = app.state.hub.extras["agent"].runs.get(run_id)
+    await until(lambda: any(e["type"] == "approval_needed" for e in run.events))
+    ask = next(e for e in run.events if e["type"] == "approval_needed")["data"]
+    await signed_in.post(f"/hub/api/runs/{run_id}/approve", json={"call_id": ask["id"], "decision": "deny"})
+    await finish(app, run_id)
+
+
 async def test_a_declined_tool_call_is_reported_to_the_model(signed_in, app, fakes):
     await signed_in.put("/hub/api/settings", json={"section": "mcp", "values": {"servers": [
         {"name": "calc", "transport": "http", "url": "http://mcp.test/mcp", "enabled": True}]}})

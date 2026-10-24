@@ -7,7 +7,9 @@ Allow once, Always, or Deny. What is asked and what "always" remembers:
 * web_fetch - per site: "Always allow dr.dk" (internet:site:dr.dk);
 * bash - code runs without the internet (Landlock in the sandbox: no TCP connections), unless the call says
   internet: true, which asks: "Always allow internet for code" (internet:code). Where the sandbox cannot keep code
-  off the internet (no Landlock ABI 4), every command asks.
+  off the internet (no Landlock ABI 4), every command asks;
+* windows_app - the program (and its build) runs without the internet, or with it where internet for code is
+  always allowed; where the sandbox cannot keep it off, every run asks (internet:code).
 
 The owner's "always" answers are kept with the tools they always allow (tool_permissions) and listed in Settings,
 where each can be taken back. A person (a member's chat) answers once each time: their chats leave nothing on the
@@ -25,7 +27,7 @@ from .. import netfetch
 SEARCH = "internet:search"
 CODE = "internet:code"
 SITE = "internet:site:"
-TOOLS = ("web_search", "web_fetch", "bash")
+TOOLS = ("web_search", "web_fetch", "bash", "windows_app")
 
 
 def asking(settings) -> bool:
@@ -112,6 +114,14 @@ def question(name: str, args: dict, allowed, can_block_code: bool) -> tuple[dict
             return {"kind": "internet", "key": CODE, "what": "code", "detail": shown(args.get("command"), 4000),
                     "always": "Always allow internet for code", "unblockable": not can_block_code}, True
         return None, False                             # runs offline
+    if name == "windows_app":
+        if allowed(CODE):
+            return None, True
+        if not can_block_code:
+            return {"kind": "internet", "key": CODE, "what": "code",
+                    "detail": shown(f"Run {args.get('target') or 'a Windows program'} on the virtual screen", 1000),
+                    "always": "Always allow internet for code", "unblockable": True}, True
+        return None, False
     return None, True
 
 

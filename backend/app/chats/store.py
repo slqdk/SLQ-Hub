@@ -97,6 +97,21 @@ def delete_chat(chat_id: int) -> bool:
         return con.execute("DELETE FROM chats WHERE id=?", (chat_id,)).rowcount > 0
 
 
+def chat_permissions(chat_id: int) -> list[dict]:
+    """What was allowed for the rest of this chat ("Allow in this chat"), oldest first."""
+    with db.connect() as con:
+        return [dict(r) for r in con.execute("SELECT tool, created_at FROM chat_permissions WHERE chat_id=? "
+                                             "ORDER BY created_at, tool", (chat_id,))]
+
+
+def forget_chat_permissions(chat_id: int, tool: str | None = None) -> None:
+    with db.connect() as con:
+        if tool is None:
+            con.execute("DELETE FROM chat_permissions WHERE chat_id=?", (chat_id,))
+        else:
+            con.execute("DELETE FROM chat_permissions WHERE chat_id=? AND tool=?", (chat_id, tool))
+
+
 # ---------------------------------------------------------------- messages
 
 def add_message(chat_id: int, role: str, content: list[dict], run_id: str | None = None) -> dict:

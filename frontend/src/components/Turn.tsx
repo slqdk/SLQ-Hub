@@ -3,7 +3,7 @@ import { useState, type ReactNode } from "react";
 import { AppWindow, Brain, ChevronDown, ChevronRight, Code2, FileText, GitBranch, Image as ImageIcon, Shapes } from "lucide-react";
 import { api, mediaUrl, type ArtifactRef } from "../lib/api";
 import { seconds } from "../lib/format";
-import { toolLabel, toolSummary, type Item, type ToolView } from "../lib/turns";
+import { toolLabel, toolSummary, type Decision, type Item, type ToolView } from "../lib/turns";
 import { useApp } from "../state";
 import { Markdown } from "./Markdown";
 import { Lamp, type LampState } from "./ui";
@@ -13,7 +13,7 @@ export interface TurnActions {
   openArtifact: (ref: ArtifactRef) => void;
   live?: boolean;
   /** Answer a call that waits for the user (a person's chat: its device turn); default: the run's approve. */
-  approve?: (callId: string, decision: "allow" | "always" | "deny") => Promise<unknown>;
+  approve?: (callId: string, decision: Decision) => Promise<unknown>;
 }
 
 export function Items({ items, actions }: { items: Item[]; actions: TurnActions }) {
@@ -141,11 +141,11 @@ const ASK_TEXT: Record<string, string> = {
 };
 
 function Approval({ tool, answer }: { tool: ToolView;
-  answer: (callId: string, decision: "allow" | "always" | "deny") => Promise<unknown> }) {
+  answer: (callId: string, decision: Decision) => Promise<unknown> }) {
   const { toast } = useApp();
   const [busy, setBusy] = useState(false);
   const ask = tool.ask;
-  const reply = async (decision: "allow" | "always" | "deny") => {
+  const reply = async (decision: Decision) => {
     setBusy(true);
     try {
       await answer(tool.id, decision);
@@ -167,6 +167,8 @@ function Approval({ tool, answer }: { tool: ToolView;
         </>}
         <div className="row wrap">
           <button className="btn primary small" disabled={busy} onClick={() => reply("allow")}>Allow once</button>
+          {tool.canChat && <button className="btn small" disabled={busy} onClick={() => reply("chat")}
+            title="Until the chat is deleted, or you take it back in the chat's menu">Allow in this chat</button>}
           {(!ask || ask.can_always) && <button className="btn small" disabled={busy} onClick={() => reply("always")}>
             {ask ? ask.always : "Always allow this tool"}</button>}
           <button className="btn danger small" disabled={busy} onClick={() => reply("deny")}>Deny</button>

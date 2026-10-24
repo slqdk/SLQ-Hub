@@ -67,7 +67,16 @@ async def get_chat(chat_id: int, request: Request):
     agent = _agent(request)
     return {"chat": chat, "messages": store.messages(chat_id), "artifacts": store.list_artifacts(chat_id),
             "runs": store.runs_for_chat(chat_id), "run": _run_info(agent.runs.active_for_chat(chat_id)),
-            "project": projects.get_project(chat["project_id"]) if chat.get("project_id") else None}
+            "project": projects.get_project(chat["project_id"]) if chat.get("project_id") else None,
+            "allowed": store.chat_permissions(chat_id)}
+
+
+@router.delete("/chats/{chat_id}/allowed")
+async def take_back(chat_id: int, tool: str | None = None):
+    """Take back what was allowed in this chat ("Allow in this chat"): one (tool=...) or all of it."""
+    _chat_or_404(chat_id)
+    store.forget_chat_permissions(chat_id, tool)
+    return {"allowed": store.chat_permissions(chat_id)}
 
 
 class ChatPatch(BaseModel):
@@ -264,14 +273,14 @@ async def stop(run_id: str, request: Request):
 
 class Approval(BaseModel):
     call_id: str
-    decision: str                        # allow | always | deny
+    decision: str                        # allow (once) | chat (the rest of this chat) | always | deny
 
 
 @router.post("/runs/{run_id}/approve")
 async def approve(run_id: str, body: Approval, request: Request):
     run = _agent(request).runs.get(run_id)
-    if run is None or body.decision not in ("allow", "always", "deny"):
-        raise HTTPException(400, "no such run, or decision is not allow/always/deny")
+    if run is None or body.decision not in ("allow", "chat", "always", "deny"):
+        raise HTTPException(400, "no such run, or decision is not allow/chat/always/deny")
     if not run.answer_approval(body.call_id, body.decision):
         raise HTTPException(404, "that tool call is not waiting for an answer")
     return {"ok": True}

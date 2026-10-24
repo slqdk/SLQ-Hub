@@ -324,9 +324,17 @@ Asking first, the chat stops at the step and asks, with what it wants to
 search, the page it wants to read or the command it wants to run:
 
 - **Allow once** - this call only.
+- **Allow in this chat** - the same kind of call in this chat without asking
+  again (since 0.16.0; the chat's ⋯ menu → Allowed in this chat lists it, with
+  Take back).
 - **Always allow web search** / **Always allow www.dr.dk** (per site) /
   **Always allow internet for code** - from now on without asking.
 - **Deny** - the assistant hears it was declined and goes on without it.
+
+While a question waits, the card is free for other work (pictures, other
+chats); after your answer the chat may wait its turn for a moment. Web pages
+and apps the assistant makes as artifacts load nothing from the web while it
+asks first (since 0.16.0; reload the page after switching to Ask first).
 
 Code runs without the network unless the assistant says the command needs
 it, which asks (the self-test's "offline code" line shows that this works on
@@ -347,6 +355,20 @@ which does not know the new rules yet):
 It installs the new firewall script, applies it and tries each model
 container's way out; all three should say "no way out". From the next update
 on, this happens by itself.
+
+## 11. Windows programs (C#)
+
+The assistant writes C# in the sandbox (the .NET 10 SDK) and, since 0.16.0,
+looks at Windows Forms and WPF programs it builds: they run under Wine on a
+virtual screen in the sandbox, and it gets screenshots, clicks and types into
+them (`windows_app`). Nothing to set up - the update to 0.16.0 builds it into
+the sandbox image (about 1 GB more; downloads from the Ubuntu archive and
+conda-forge). The self-test's "windows programs" line checks it: a small
+program built offline and run, its button found and clicked.
+
+What Wine shows is close to Windows, not the same (fonts, some controls). To
+use a program, ask for it "published": the folder with its .exe goes into the
+chat's (or project's) files; it runs on a PC with the .NET 10 Desktop Runtime.
 
 ## Daily operation
 

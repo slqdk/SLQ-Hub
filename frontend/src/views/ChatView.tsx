@@ -1,16 +1,16 @@
 // A chat: history, the live turn, and the composer.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
-import { Copy, Download, FileText, FolderOpen, Menu, MoreHorizontal, Pencil, RotateCcw, Trash2 } from "lucide-react";
+import { Copy, Download, FileText, FolderOpen, Menu, MoreHorizontal, Pencil, RotateCcw, ShieldCheck, Trash2 } from "lucide-react";
 import { api, mediaUrl, type ArtifactRef, type Block, type ChatData, type ChatSettings, type Library, type Message,
   type ProducedFile, type RunEvent, type RunRecord, type Settings, type Skill, type Upload } from "../lib/api";
 import { seconds, tokens } from "../lib/format";
 import { linkProps, navigate } from "../lib/router";
-import { buildTurns, liveSegments, newLive, reduceLive, waitsForAnswer, type AssistantTurn, type LiveRun } from "../lib/turns";
+import { buildTurns, liveSegments, newLive, reduceLive, toolLabel, waitsForAnswer, type AssistantTurn, type LiveRun } from "../lib/turns";
 import { useApp } from "../state";
 import { Composer, type ComposerSettings } from "../components/Composer";
 import { FilesCard, producedFiles, type FileHandlers } from "../components/FilesCard";
 import { Items } from "../components/Turn";
-import { copyText, Lamp, MenuButton } from "../components/ui";
+import { copyText, Lamp, MenuButton, Modal } from "../components/ui";
 import { download } from "../lib/download";
 import type { PanelState } from "../App";
 import type { Folder } from "../components/Files";
@@ -42,6 +42,7 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
   const [draft, setDraft] = useState<Partial<ChatSettings>>({});
   const [editing, setEditing] = useState<number | null>(null);
   const [renaming, setRenaming] = useState(false);
+  const [showAllowed, setShowAllowed] = useState(false);
   const scroller = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
   const seenArtifacts = useRef(0);
@@ -366,6 +367,8 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
                   <button key={a.id} className="menu-item" onClick={() => { close(); openPanel({ kind: "artifact", chatId, id: a.id }); }}>
                     <span className="tag">artifact</span> {a.title}</button>
                 ))}
+                {(data?.allowed?.length ?? 0) > 0 && <button className="menu-item" onClick={() => { close(); setShowAllowed(true); }}>
+                  <ShieldCheck size={15} /><span>Allowed in this chat<small>{data!.allowed!.map((p) => allowedLabel(p.tool)).join(", ")}</small></span></button>}
                 <div className="menu-sep" />
                 <button className="menu-item" onClick={() => { close(); download(`/hub/api/chats/${chatId}/export?format=md`); }}>
                   <FileText size={15} /> Export as Markdown</button>
@@ -379,6 +382,9 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
           </MenuButton>
         )}
       </div>
+
+      {showAllowed && chatId && <AllowedInChat chatId={chatId} allowed={data?.allowed ?? []}
+        onChange={(allowed) => setData((d) => (d ? { ...d, allowed } : d))} onClose={() => setShowAllowed(false)} />}
 
       <div className="scroll" ref={scroller} onScroll={(e) => {
         const el = e.currentTarget;
@@ -571,4 +577,45 @@ export function LiveState({ live, queueCurrent, names }: { live: LiveRun; queueC
   }
   if (live.status === "error") return <div className="run-state"><Lamp state="fault" />{live.error ?? "The turn failed"}</div>;
   return null;
+}
+
+
+/** What an "Allow in this chat" answer allows, in words. */
+export function allowedLabel(key: string): string {
+  if (key === "internet:search") return "Web search";
+  if (key === "internet:code") return "Internet for code";
+  if (key.startsWith("internet:site:")) return `Pages from ${key.slice("internet:site:".length)}`;
+  return toolLabel(key);
+}
+
+function AllowedInChat({ chatId, allowed, onChange, onClose }: { chatId: number;
+  allowed: { tool: string; created_at: string }[]; onChange: (a: { tool: string; created_at: string }[]) => void;
+  onClose: () => void }) {
+  const { toast } = useApp();
+  const takeBack = async (tool?: string) => {
+    try {
+      const r = await api<{ allowed: { tool: string; created_at: string }[] }>(`/hub/api/chats/${chatId}/allowed`,
+        { method: "DELETE", query: tool ? { tool } : {} });
+      onChange(r.allowed);
+      if (!r.allowed.length) onClose();
+    } catch (e) {
+      toast((e as Error).message, "fault");
+    }
+  };
+  return (
+    <Modal title="Allowed in this chat" onClose={onClose} footer={<>
+      <button className="btn" onClick={onClose}>Close</button>
+      <button className="btn danger" onClick={() => takeBack()} disabled={!allowed.length}>Take all back</button></>}>
+      <p className="small muted" style={{ marginTop: 0 }}>You answered these with "Allow in this chat": the assistant does
+        them in this chat without asking. They end when the chat is deleted.</p>
+      <div className="perm-list">
+        {allowed.map((p) => (
+          <div key={p.tool} className="row" style={{ justifyContent: "space-between", padding: "6px 0" }}>
+            <span>{allowedLabel(p.tool)}</span>
+            <button className="btn quiet small" onClick={() => takeBack(p.tool)}>Take back</button>
+          </div>
+        ))}
+      </div>
+    </Modal>
+  );
 }

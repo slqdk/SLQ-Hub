@@ -275,3 +275,44 @@ async def test_a_crashed_model_is_noticed_and_loaded_again():
     t = await asyncio.wait_for(s.acquire("fam", "chat", "llm:a"), 1)
     await t.release()
     assert card.log == [("load", "llm:a"), ("load", "llm:a")]      # noticed, loaded again, served
+
+
+async def test_a_paused_lease_frees_the_card_and_queues_again():
+    """A turn waiting for the user's answer gives the card up (Ticket.pause): an image job switches to ComfyUI and
+    runs; the turn's resume() waits for it, switches back, and the same ticket works on."""
+    card = FakeCard()
+    s = sched(card)
+    turn = await s.acquire("web", "agent", "llm:a", "interactive", lease=True, meta={"chat_id": 7})
+    first = turn.job
+    await turn.pause()
+    assert turn.paused and not s.running and first.state == "done"
+    await turn.pause()                                     # twice: nothing more
+    image = await asyncio.wait_for(s.acquire("web", "image", "comfy"), 1)
+    back = asyncio.create_task(turn.resume())
+    await settle()
+    assert not back.done() and card.loaded == "comfy"     # the image job has the card
+    await image.release()
+    await asyncio.wait_for(back, 1)
+    assert not turn.paused and turn.job is not first and turn.job.state == "running"
+    assert turn.job.lease and turn.job.meta == {"chat_id": 7, "resumed": True} and turn.job.priority == 0
+    assert card.log == [("load", "llm:a"), ("unload", "llm:a"), ("load", "comfy"), ("unload", "comfy"),
+                        ("load", "llm:a")]
+    await turn.release()
+    assert not s.running
+    await turn.resume()                                    # released: resume does nothing
+    assert not s.running and not s.pending
+
+
+async def test_a_turn_stopped_while_it_queues_again_leaves_nothing():
+    s = sched()
+    turn = await s.acquire("web", "agent", "llm:a", lease=True)
+    await turn.pause()
+    other = await s.acquire("web", "image", "comfy")
+    back = asyncio.create_task(turn.resume())
+    await settle()
+    back.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await back
+    await turn.release()
+    await other.release()
+    assert not s.running and not s.pending

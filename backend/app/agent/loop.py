@@ -56,7 +56,7 @@ def loop_notice(reason: str) -> str:
 
 
 def _ensure_tools_loaded() -> None:
-    from .tools import audio, files, images, knowledge, shell, web  # noqa: F401 - registration
+    from .tools import audio, files, images, knowledge, shell, web, windows  # noqa: F401 - registration
     from . import meta_tools  # noqa: F401
 
 
@@ -400,24 +400,29 @@ class Engine:
                     return self._finish(name, cid, args, result, t0)
                 allowed, online, once = True, True, False
                 where = {"depth": self.depth, "parent": self.parent} if self.depth else {}
+                owner = self.device is None               # a person answers once each time
+                chat_id = self.chat.get("id") if owner else None
+
+                def ok_here(key: str) -> bool:            # always, or in this chat (the owner's answers)
+                    return owner and (always_allowed(key) or (chat_id is not None and allowed_in_chat(chat_id, key)))
+
+                def remember(decision: str, key: str) -> None:
+                    if owner and decision == "always":
+                        remember_allowed(key)
+                    elif owner and decision == "chat" and chat_id is not None:
+                        remember_in_chat(chat_id, key)
                 if name in internet.TOOLS and internet.asking(self.hub.settings):
-                    owner = self.device is None           # a person answers once each time
-                    ask, online = internet.question(name, args, always_allowed if owner else (lambda key: False),
-                                                    await internet.code_can_go_offline(self.hub))
+                    ask, online = internet.question(name, args, ok_here, await internet.code_can_go_offline(self.hub))
                     if ask is not None:
-                        decision = await self.run.ask_approval(cid, name, args, ask={**ask, "can_always": owner},
-                                                               **where)
-                        self.emit("approval_answered", id=cid, decision=decision)
-                        if decision == "always" and owner:
-                            remember_allowed(ask["key"])
-                        allowed = decision in ("allow", "always")
+                        decision = await self._ask(
+                            cid, name, args, ask={**ask, "can_always": owner, "can_chat": chat_id is not None}, **where)
+                        remember(decision, ask["key"])
+                        allowed = decision in ("allow", "always", "chat")
                         once = decision == "allow" or not owner
-                if allowed and tool.needs_approval and not always_allowed(name):
-                    decision = await self.run.ask_approval(cid, name, args, **where)
-                    self.emit("approval_answered", id=cid, decision=decision)
-                    if decision == "always":
-                        remember_allowed(name)
-                    allowed = decision in ("allow", "always")
+                if allowed and tool.needs_approval and not ok_here(name):
+                    decision = await self._ask(cid, name, args, can_chat=chat_id is not None, **where)
+                    remember(decision, name)
+                    allowed = decision in ("allow", "always", "chat")
                 if not allowed:
                     result = ToolResult(DECLINED, is_error=True)
                 else:
@@ -437,6 +442,44 @@ class Engine:
                 else:
                     self.epoch += 1                   # it may have changed something: look-ups count again
         return self._finish(name, cid, args, result, t0)
+
+    async def _ask(self, cid: str, name: str, args: dict, **extra) -> str:
+        """The user's answer to a call that asks first. Meanwhile the card is free for others: the turn's lease is
+        given up and taken again with the answer (the same ticket, so its subagents keep it too). If the wait is
+        cancelled - the user pressed Stop - or fails, the turn is ending, so the card stays given up (the outer
+        release() is then a no-op on it) rather than being taken back only to be let go again."""
+        ticket = self.ticket
+        if ticket is not None:
+            await ticket.pause()
+        decision = await self.run.ask_approval(cid, name, args, **extra)    # Stop while waiting propagates from here
+        self.emit("approval_answered", id=cid, decision=decision)           # the buttons go, even while it queues
+        if ticket is not None and ticket.paused:
+            await self._resume(ticket)
+        return decision
+
+    async def _resume(self, ticket) -> None:
+        """Queue for the card again after a question; the chat shows the place in the queue when it has to wait."""
+        holder: dict = {}
+        task = asyncio.get_running_loop().create_task(ticket.resume(on_job=lambda j: holder.setdefault("job", j)))
+        t0 = time.monotonic()
+        try:
+            done, _ = await asyncio.wait({task}, timeout=0.5)
+            last = None
+            while not done:
+                job = holder.get("job")
+                if job is not None and job.state == "queued":
+                    pos = self.hub.scheduler.position(job)
+                    if pos != last:
+                        last = pos
+                        self.run.emit("queued", position=pos, current=self.hub.scheduler.current)
+                done, _ = await asyncio.wait({task}, timeout=1)
+            task.result()
+        except BaseException:
+            task.cancel()
+            raise
+        if last is not None:
+            self.run.emit("started", model=self.model["id"], waited=round(time.monotonic() - t0, 2),
+                          thinking=self.thinking)
 
     def _finish(self, name: str, cid: str, args: dict, result: ToolResult, t0: float) -> ToolResult:
         result.text = self._store_long(cid, result.text or "(no output)")
@@ -612,6 +655,19 @@ def remember_allowed(tool: str) -> None:
                     (tool, "always", db.utcnow()))
 
 
+def allowed_in_chat(chat_id: int, tool: str) -> bool:
+    """Allowed for the rest of this chat ("Allow in this chat")."""
+    with db.connect() as con:
+        return con.execute("SELECT 1 FROM chat_permissions WHERE chat_id=? AND tool=?", (chat_id, tool)).fetchone() \
+            is not None
+
+
+def remember_in_chat(chat_id: int, tool: str) -> None:
+    with db.connect() as con:
+        con.execute("INSERT OR REPLACE INTO chat_permissions (chat_id, tool, created_at) VALUES (?,?,?)",
+                    (chat_id, tool, db.utcnow()))
+
+
 class Agent:
     """Starts and tracks turns."""
 
@@ -672,6 +728,7 @@ class Agent:
                                  subagent=subagent, taken_over_from=taken_over_from, memory=False,
                                  code=device.code, dropped=device.dropped, sound=sound,
                                  internet_asks=internet.asking(self.hub.settings))
+        from .tools import windows as windows_tool
         mem = self.hub.extras["memory"].index(project["id"] if project else None)
         user = self.hub.settings.get("agent", "user_name") or (self.hub.env.admin_user or "the user").title()
         return system_prompt(user=user, model_name=Catalog.label(entry),
@@ -681,7 +738,7 @@ class Agent:
                              images_available=bool(images and images.available()),
                              handover_to=handover_to, subagent=subagent, cloud_model=cloud_model,
                              taken_over_from=taken_over_from, sound=sound,
-                             internet_asks=internet.asking(self.hub.settings))
+                             internet_asks=internet.asking(self.hub.settings), windows=windows_tool.ready(self.hub))
 
     def build_messages(self, chat: dict, project: dict | None, wd: projects.Workdir, entry: dict, run: Run,
                        handover_to: str = "", taken_over_from: str = "") -> list[dict]:
@@ -791,6 +848,8 @@ class Agent:
             mcp = self.hub.extras.get("mcp")
             if mcp is not None:
                 await mcp.ensure_started()
+            from .tools import windows as windows_tool    # (registered with the others, in their order)
+            await windows_tool.refresh(self.hub)          # whether windows_app is there, before the prompt says so
             holder: dict = {}
             run.emit("queued", position=None, current=self.hub.scheduler.current)
             pos_task = asyncio.get_running_loop().create_task(self._report_position(run, holder))

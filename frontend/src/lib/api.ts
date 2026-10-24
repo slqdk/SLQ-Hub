@@ -142,7 +142,8 @@ export interface Artifact { id: string; chat_id: number; version: number; title:
 export interface ArtifactListItem { id: string; title: string; type: string; version: number; updated: string }
 
 export interface ChatData { chat: Chat; messages: Message[]; artifacts: ArtifactListItem[]; runs: RunRecord[];
-  run: RunInfo | null; project: Project | null }
+  run: RunInfo | null; project: Project | null;
+  allowed?: { tool: string; created_at: string }[] }      // "Allow in this chat" answers
 
 export interface ProjectSettings { model: string | null; cloud_escalation: boolean; skills: string[]; libraries: number[];
   thinking: boolean | null; image_model: string | null }

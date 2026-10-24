@@ -153,6 +153,9 @@ services:
     image: slq-hub-sandbox:latest
     container_name: slq-hub-sandbox
     restart: unless-stopped
+    # An init as PID 1 collects the processes commands leave behind when they end (Wine's server and services
+    # after every windows_app run, anything started in the background) - the sandbox daemon would not.
+    init: true
     environment:
       EXECD_TOKEN: ${HUB_INTERNAL_TOKEN:?HUB_INTERNAL_TOKEN is not set in .env}
       TZ: ${TZ:-Europe/Copenhagen}

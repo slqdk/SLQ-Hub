@@ -74,6 +74,65 @@ def test_grouping_a_real_repository_tree():
         "id": "qwen3-coder-30b-a3b-instruct", "name": "Qwen3 Coder 30B A3B Instruct"}
 
 
+# JonathanColetti/Qwen3.8-27B-Uncensored-GGUF (2026-08): each quant with and without the MTP head, a draft model
+# for speculative decoding and a vision projector not named mmproj.
+TWINS_TREE = [_f(f"Qwen3.8-27B-Uncensored-{q}.gguf", n) for q, n in (
+    ("IQ2_M", 10624771968), ("IQ4_XS", 15309039008), ("Q4_K_M", 16810714528), ("Q5_K_M", 19535701408),
+    ("Q6_K", 22430999968), ("Q8_0", 29047084448), ("draft-Q8_0", 3164006592), ("noMTP-IQ2_M", 10173451200),
+    ("noMTP-IQ4_XS", 15082506720), ("noMTP-Q4_K_M", 16547400160), ("noMTP-Q5_K_M", 19231099360),
+    ("noMTP-Q6_K", 22082529760), ("noMTP-Q8_0", 28595763680), ("vision-f16", 927606912))] + [
+    _f("Qwen3.8-27B-Uncensored-imatrix.dat", 13642656), _f("README.md", 19640)]
+# HauhauCS/Qwen3.8-27B-Uncensored-HauhauCS-Aggressive-MTP-GGUF: a FastMTP sidecar, and Hugging Face's numbers are
+# that sidecar's (1.9B parameters).
+SIDECAR_TREE = [_f(f"Qwen3.8-27B-Uncensored-HauhauCS-Aggressive-{q}.gguf", n) for q, n in (
+    ("FastMTP-32K", 903453952), ("IQ2_M", 10319906944), ("Q4_K_P", 17923393664), ("Q5_K_P", 20218177664),
+    ("Q8_K_P", 31457990784))] + [_f("mmproj-Qwen3.8-27B-Uncensored-HauhauCS-Aggressive-BF16.gguf", 931146624)]
+
+
+def test_twins_heads_and_projectors_by_other_names():
+    choices, mmproj = hf.group(TWINS_TREE)
+    assert [c["label"] for c in choices] == [
+        "noMTP-IQ2_M", "IQ2_M", "noMTP-IQ4_XS", "IQ4_XS", "noMTP-Q4_K_M", "Q4_K_M", "noMTP-Q5_K_M", "Q5_K_M",
+        "noMTP-Q6_K", "Q6_K", "noMTP-Q8_0", "Q8_0"]                       # no draft model, no projector
+    assert [(m["label"], m["path"]) for m in mmproj] == [("f16", "Qwen3.8-27B-Uncensored-vision-f16.gguf")]
+    choices, mmproj = hf.group(SIDECAR_TREE)
+    assert [c["label"] for c in choices] == ["IQ2_M", "Q4_K_P", "Q5_K_P", "Q8_K_P"]      # no FastMTP sidecar
+    assert [m["label"] for m in mmproj] == ["BF16"]
+    # a big model with Vision in its name stays a model; the same quant in two folders is told by folder
+    choices, mmproj = hf.group([_f("Llama-3.2-11B-Vision-Q2_K.gguf", 4_000), _f("Llama-3.2-11B-Vision-F16.gguf", 22_000),
+                                _f("Llama-3.2-11B-Vision-Q4_K_M.gguf", 6_700), _f("old/Llama-3.2-11B-Vision-Q4_K_M.gguf", 6_600),
+                                _f("mmproj-f16.gguf", 1_700)])
+    assert [c["label"] for c in choices] == ["Q2_K", "Q4_K_M (old)", "Q4_K_M (top level)", "F16"]
+    assert [m["label"] for m in mmproj] == ["f16"]
+
+
+def test_projectors_with_the_same_label_are_told_apart():
+    """Two projector files that would read the same are distinguished by their folder."""
+    _, mmproj = hf.group([_f("model-Q4_K_M.gguf", 9_000), _f("mmproj-F16.gguf", 1_000),
+                          _f("extra/mmproj-F16.gguf", 1_000)])
+    assert sorted(m["label"] for m in mmproj) == ["F16 (extra)", "F16 (top level)"]
+
+
+async def test_numbers_that_describe_another_file_are_left_out(signed_in, fakes):
+    fakes.hf.setdefault("repos", {})["hauhaucs/Sidecar-GGUF"] = {
+        "tree": SIDECAR_TREE, "gguf": {"architecture": "qwen35", "context_length": 262144, "total": 1863907840}}
+    r = await signed_in.get("/hub/api/models/hf", params={"repo": "hauhaucs/Sidecar-GGUF"})
+    assert r.status_code == 200, r.text
+    meta = r.json()["meta"]
+    assert meta["parameters"] is None and meta["architecture"] == "qwen35"
+
+
+async def test_a_real_parameter_count_survives_an_f32_repo(signed_in, fakes):
+    """F32 is 32 bits per weight; the 'too many bits for these weights' guard must clear it (its cut-off caught
+    F32 back when it was 20 bits, hiding a true count)."""
+    fakes.hf.setdefault("repos", {})["acme/Big-F32-GGUF"] = {
+        "tree": [_f("Big-F32.gguf", 4_000_000_000)],
+        "gguf": {"architecture": "qwen3", "context_length": 4096, "total": 1_000_000_000}}
+    r = await signed_in.get("/hub/api/models/hf", params={"repo": "acme/Big-F32-GGUF"})
+    assert r.status_code == 200, r.text
+    assert r.json()["meta"]["parameters"] == 1_000_000_000
+
+
 def _repo(fakes, name="acme/Tiny-Coder-GGUF", gguf=None):
     fakes.hf.setdefault("repos", {})[name] = {
         "tree": [_f("Tiny-Coder-Q4_K_M.gguf", 1000), _f("Tiny-Coder-Q8_0.gguf", 2000),

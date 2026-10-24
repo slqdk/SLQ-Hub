@@ -37,12 +37,12 @@ decided and how the pieces fit; `docs/INSTALL.md` is the step-by-step guide.
 | Where images are made | In the chat only. No separate studio section. |
 | API clients | FamilyLog (Ollama API) and TwinCAT Coagent (format unknown, so all three: OpenAI, Ollama, Anthropic, with a CORS allowlist). |
 | Queue policy | Priority + FIFO. Interactive web chat before apps, apps before background work. FIFO within a priority. Jobs for the loaded model are grouped to avoid model swaps. |
-| Queue granularity | A whole agent task (one user turn with all its tool calls) holds the GPU until it is done. |
+| Queue granularity | A whole agent task (one user turn with all its tool calls) holds the GPU until it is done - except while it waits for the user's answer to a question (0.16.0). |
 | Parallelism | 2 slots per model: another request for the **same** model may run beside an agent task. Model swaps and image jobs wait. |
 | Stack | Python 3.12 + FastAPI backend, React + TypeScript + Vite frontend (the same as SLQ and FamilyLog, so the queue, sync and Ollama code carries over). |
 | Agent tools | Web search + fetch (own SearXNG), code execution in a sandbox, project files, MCP servers. |
 | Harness features | Skills, memory, artifacts (live HTML/React), subagents + context compaction. |
-| Approval | Runs freely inside the sandbox. Asks only for actions outside it (MCP tools), with "Always allow" per tool. |
+| Approval | Runs freely inside the sandbox. Asks only for actions outside it (MCP tools; with the internet set to ask first, also going online): Allow once, Allow in this chat, Always, Deny. |
 | File sync | SLQ Sync ported with the **same protocol**, so the existing SLQSync.exe works against the Hub. |
 | UI language | English. The model answers in the language it is spoken to. |
 | Mobile | Responsive layout + installable PWA from the start. |
@@ -139,6 +139,12 @@ for statistics.
 - **Lease**: an agent task holds its slot for the whole turn, including the
   pauses while tools run. Inside its lease it may switch residency, for
   example to ComfyUI for `image_generate` and back to the LLM afterwards.
+  While the turn waits for the user's answer to a question (an MCP tool, the
+  internet asking first), it gives the card up (`Ticket.pause`) and queues
+  again with the answer (`Ticket.resume`: the same owner, residency, priority
+  and lease; the same ticket, so its subagents keep working with it) - a
+  person away from the screen holds nothing up (0.16.0). The chat shows the
+  place in the queue if it has to wait then.
 
 ### Admission (re-run on every state change)
 
@@ -187,7 +193,10 @@ Defaults (`backend/app/catalog/models.json`; Settings → Models changes the
 server parameters per model, stored in `data/models.override.json`). More
 language models come from Hugging Face (Settings → Models → Add from Hugging
 Face, `backend/app/hf.py`): any GGUF repository - the Hub groups its files into
-quantisations (split files together, the vision projector apart), rates each
+quantisations (split files together, the vision projector apart - also one named
+`...-vision-f16.gguf` rather than `mmproj...`; MTP heads and draft models for
+speculative decoding left out; two files of one quantisation, like `Model-Q4_K_M`
+and `Model-noMTP-Q4_K_M`, by what their names do not share), rates each
 against the card's VRAM, and stores the entry in `data/models.custom.json`
 (files under `models/llm/hf/<owner>--<name>/`, downloaded by the Hub's own
 queue; `HF_TOKEN` in `.env` for gated repositories). They start with two slots
@@ -400,6 +409,7 @@ message's time with the conversation.
 | `web_search`, `web_fetch` | SearXNG; fetch with an SSRF guard (no private addresses, the connection made to the checked address, every redirect checked), readable text extraction, truncation. |
 | `list_files`, `read_file`, `write_file`, `edit_file`, `search_files`, `move_file`, `delete_file` | The project's folder (or the chat's scratch folder). Every write is checked in as a sync revision, so everything can be restored. `read_file` on an image puts the image in front of the model. |
 | `bash` | Runs in the sandbox in the project folder, with a timeout and output limits. Long output goes to a file, and the model gets the head, the tail and the path. C# with the .NET 10 SDK (0.15.1, below). |
+| `windows_app` | A Windows desktop program (Windows Forms or WPF on .NET 10) run under Wine on a virtual screen in the sandbox, built first if it is a project: screenshots when its first window is up, at each `shot` step and at the end; steps click (by position or by the text on the screen), type, press keys, drag, scroll and wait (0.16.0, "Windows programs on a virtual screen" below). The owner's chats, where the sandbox has Wine. |
 | `view_image`, `image_transform`, `image_ocr` | Look at an image; crop, resize, rotate, convert and compress (Pillow); Tesseract OCR (dan+eng). |
 | `image_generate`, `image_edit`, `image_remove_background` | ComfyUI through the queue (the lease switches residency). |
 | `speech_generate`, `music_generate`, `sound_generate` | Audio files in the working folder (0.13.0, section 8): speech on the CPU (the speech service), music and sound effects in ComfyUI through the queue. Offered when a model for them is downloaded. |
@@ -414,19 +424,27 @@ message's time with the conversation.
 
 **Approval.** Everything inside the sandbox runs without asking: files,
 bash, image tools, web - unless the internet asks first (below). MCP tools
-ask the first time.
+ask the first time. Every question offers Allow once, **Allow in this chat**
+(0.16.0: the owner's chats), Always (the owner's) and Deny. "This chat" is
+kept per chat (`chat_permissions`: the tool, or the `internet:` key the
+question was about) and goes with the chat; its subagents share it; the
+chat's ⋯ menu lists what was allowed there ("Allowed in this chat"), each
+with Take back (`GET /hub/api/chats/{id}` → `allowed`, `DELETE
+/hub/api/chats/{id}/allowed[?tool=]`). While a question waits, the turn's
+lease is given up (section 3).
 
 **Internet for the assistant** (0.15.0, `app/agent/internet.py`). Settings →
 Assistant → Web → "Internet for the assistant": **Allowed** (the default, as
 before) or **Ask first** (`web.access = "ask"`). Asking first, a call that
 would go online stops the turn and asks in the chat, at the call, like an MCP
-tool: Allow once, Always, or Deny.
+tool: Allow once, Allow in this chat, Always, or Deny.
 
 | Call | Asks | "Always" remembers |
 |---|---|---|
 | `web_search` | every search, showing the query | "Always allow web search" (`internet:search`) |
 | `web_fetch` | per site, showing the URL | "Always allow www.dr.dk" (`internet:site:www.dr.dk`; the exact host as the connection names it - IDNA, so a look-alike name shows as `xn--...` - and `dr.dk` is another) |
 | `bash` | only with `internet: true`; otherwise the command runs offline | "Always allow internet for code" (`internet:code`) |
+| `windows_app` | never where code can be kept offline: the program and its build run offline (online where internet for code is always or in this chat allowed); where it cannot, every run asks | as `bash` (`internet:code`) |
 
 - **Offline code.** The sandbox daemon runs the command under `confine.py
   --offline`: Landlock (ABI 4+) refuses every TCP connection, and a seccomp
@@ -471,10 +489,10 @@ tool: Allow once, Always, or Deny.
   or cut with a note saying so - the "always" text, `can_always`); a
   subagent's question carries `depth` and `parent`, so it shows inside its row,
   and the turn says "Waiting for your answer" then too. The answer goes to
-  `POST /hub/api/runs/{id}/approve` (`allow`, `always`, `deny`), and
-  `approval_answered` takes the buttons away at once (a reload replays it).
-  While the turn waits it keeps its lease: other turns on the same model go
-  on, but the card does not switch to other work - as with an MCP question.
+  `POST /hub/api/runs/{id}/approve` (`allow`, `chat`, `always`, `deny`), and
+  `approval_answered` takes the buttons away at once (a reload replays it) -
+  before the turn queues for the card again. While the turn waits, the card
+  is free for other work (section 3).
 - **Always.** The owner's answers are kept with the tools they always allow
   (`tool_permissions`, `internet:` keys) and listed under "Always allowed
   online" in the Web section, each with "Ask again"; the MCP tab leaves them
@@ -488,11 +506,28 @@ tool: Allow once, Always, or Deny.
   not loaded"), and other things that load by themselves (video, audio, SVG
   images, backgrounds in styles) lose their web address, so what the model
   writes cannot make the browser fetch from the web - a picture's address can
-  carry data out. `/hub/api/auth/status` says `internetAsks`.
-- **Not covered.** HTML and React artifacts run in the user's browser (a
-  sandboxed frame) and can load from the web there. Offline code can still
-  talk, over a Unix socket or through files, to a process that is online
-  already (one a command allowed "always" left running, say). SearXNG talks to the search engines
+  carry data out. `/hub/api/auth/status` says `internetAsks`. HTML, React, SVG
+  and Mermaid artifacts (0.16.0) get a Content-Security-Policy as the first
+  thing in their page: inline code, `data:` and `blob:`, and the Hub's own
+  artifact runtime (React, Babel, Tailwind, Mermaid) - no scripts, styles,
+  fonts, pictures, connections, frames or form posts from anywhere else; their
+  frame loses `allow-popups`. Two things the policy alone does not close, a
+  small guard script at the top of the page does: Chromium does not gate WebRTC
+  by `connect-src`, so the guard removes `RTCPeerConnection` and its kin (a data
+  channel could otherwise carry data out past the policy); and `frame-src 'none'`
+  blocks a frame's content but a frame of its own would get fresh WebRTC, so the
+  guard strips any frame a script adds (frames are blocked here anyway). A frame
+  navigating itself away (a link, `location`, a `meta` refresh) is not something
+  its own policy can stop, so the UI's page carries `frame-src 'self'` while
+  asking (sent with the page, which is never cached: after switching to "Ask
+  first", a page loaded before keeps the old rule until it is reloaded). Tried
+  in Chromium: nothing reached the web, the fetch rejected, a link left the frame
+  on Chrome's error page; with a separate harness, neither a direct
+  `RTCPeerConnection` nor one in a nested `srcdoc` frame reached a STUN server.
+  This is defence in depth - the per-call approval is the real gate.
+- **Not covered.** Offline code can still talk, over a Unix socket or through
+  files, to a process that is online already (one a command allowed "always"
+  left running, say). SearXNG talks to the search engines
   (that is the search); image URLs that apps send to the model API are
   fetched as before (the app's request, not the assistant's choice - with the
   same guard, LAN ranges included); MCP servers ask by their own rule; the
@@ -513,22 +548,93 @@ there.
   and `UseSharedCompilation=false`: nothing of a build keeps running and
   holding memory after the command. No telemetry, banner, developer
   certificate or workload update checks.
-- **Windows programs.** Windows Forms and WPF build on Linux with
-  `<EnableWindowsTargeting>true</EnableWindowsTargeting>` in the project; the
-  first such build fetches the Windows targeting pack from NuGet. It is not
-  set for every project: then each restore would fetch that pack, so nothing
-  would build offline. They cannot run here (Windows only, no screen), so the
-  system prompt tells the model to build to catch errors, keep logic in a
-  testable class library, write forms in code, and hand over the program
-  with `dotnet publish -c Release -r win-x64 --self-contained false
-  -p:PublishSingleFile=true -o publish` - one small .exe that needs the .NET
-  10 Desktop Runtime (`--self-contained true`: none, about 150 MB, which sync
-  leaves out at 25 MB).
+- **Windows programs** (0.16.0). The Windows Forms/WPF reference pack and
+  the win-x64 app host are in the image, beside the SDK's own packs
+  (`services/sandbox/dotnet_windows.py` at the image build: Microsoft's files
+  as conda-forge repackages them for win-64, pinned by SHA-256, put under the
+  version the SDK's `BundledVersions.props` asks for - a 10.0.12 pack serves
+  an SDK that asks for 10.0.13; then a Windows Forms project is built with no
+  package source at all, or the build fails). So `EnableWindowsTargeting=true`
+  is set for every project (in 0.15.1 it made every restore fetch the pack)
+  and Windows projects build offline. The system prompt says to target
+  `net10.0`/`net10.0-windows` (other versions need packages) and to hand over
+  the program with `dotnet publish -c Release
+  -p:DefaultAppHostRuntimeIdentifier=win-x64 -o publish`: the .dll with a
+  Windows .exe beside it, which runs on the user's PC with the .NET 10 Desktop
+  Runtime. A RID-specific publish (`-r win-x64`) wants the Windows runtime
+  packs from NuGet even framework-dependent - only for `--self-contained`
+  (no runtime needed, about 150 MB). Where the sandbox has Wine, the model
+  sees the program with `windows_app` (below); elsewhere (a person's chat)
+  the prompt says Windows programs build but cannot run here.
 - **Offline and people.** Builds work offline once their NuGet packages are
   in the cache (`~/.nuget/packages` in the sandbox's home); a restore that
   needs the internet asks while it asks first. A person's build goes to
   `.hub/dotnet` in her turn's folder, with her packages in her turn's home -
   fetched again for each answer, never sent to her device.
+
+**Windows programs on a virtual screen** (0.16.0, `windows_app` in
+`app/agent/tools/windows.py`, `services/sandbox/winshot.py`). The sandbox
+image has 64-bit Wine 9 from Ubuntu's archive (no i386 packages, so no 32-bit
+programs), Xvfb, xdotool, the X tools and the Windows build of the .NET 10
+runtime with Windows Desktop in `/opt/dotnet-win` (about 1 GB more image).
+The Hub runs `winshot --json {...}` in the sandbox like a bash command - so as
+the owner, offline while the internet asks first - and reads the screenshots
+from `.hub/windows/<call>/` in the working folder (only those paths, checked
+as pictures, then deleted), and shows them to the model with the steps' and
+windows' description; for a model without vision it adds the text Tesseract
+reads in each window.
+
+- **One run.** The target is a project (`.csproj`, or the folder with one:
+  `dotnet build` first, its errors are the result), a .NET `.dll` (run by
+  the Windows `dotnet.exe`) or a 64-bit `.exe` (the app host .NET builds finds
+  the runtime through `DOTNET_ROOT`; a .NET Framework or 32-bit program is
+  refused with the reason). Xvfb on a free display (no TCP), the program
+  started, the first window awaited (a program that ends first, its exit code
+  and console output, an unhandled .NET exception included), the steps, then
+  everything Wine started ended (`wineserver -k`) and the screen stopped. One
+  program at a time (a lock in the prefix; Wine's server is shared). Each
+  call starts the program afresh. Default screen 1024x768, timeout 60 s (300
+  at most) after the build.
+- **Coordinates.** Every screenshot starts at the top-left corner of the
+  program's first window and reaches to the right and bottom edges of all its
+  windows (dialogs, menus, drop-down lists), so a click at (x, y) is that
+  pixel of a screenshot. A click may name a text instead: OCR (Tesseract,
+  `eng+dan`) on the screenshot made three times larger, then each window alone
+  (a drop-down list's highlighted row otherwise hides the rows under it), then
+  inverted - the first place the words are read, as a whole word sequence,
+  else as the start of words. Typing goes by Unicode code point through
+  libX11/libXtst (already in the image as xdotool's own libraries): a spare
+  key code is remapped to each character's keysym at every shift level and
+  pressed with XTEST. `xdotool type` was not usable for this - in a non-UTF-8
+  locale it refuses non-ASCII outright, and it breaks a Latin-1 capital such
+  as Æ into its lower/upper pair and presses no Shift, so it arrives as æ
+  (measured; Danish capitals Æ Ø Å matter here). The code-point path is
+  case- and locale-independent.
+- **How Wine is set up** (once, in the image: `winshot --setup` as the
+  sandbox user, the prefix `/opt/hub-wine`, fresh with every new container).
+  Measured, each against the alternative: no virtual desktop (in Wine 9's, a
+  window that moved itself, as WinForms' CenterScreen does, was drawn at twice
+  its position and its menus opened at the real one); Wine draws Windows'
+  frames itself (`Decorated=N`, there is no window manager) and manages its
+  windows itself (`Managed=N`: as managed windows without a window manager,
+  each dialog's appearing and closing waited two seconds for one, and keys
+  pressed meanwhile were late); programs are told it is Windows 8.1 (as
+  Windows 10, opening a WinForms menu ended the program: "Failed to get
+  thread's DpiAwareness context"); no crash debugger (`winedbg` off: the .NET
+  exception stays readable); no menu entries, Mono or Gecko. The copies of
+  Wine's own DLLs that `wineboot` puts in the prefix are links to the
+  originals: 19 MB instead of 688.
+- **An init in the sandbox** (`init: true` in compose): Wine's server and
+  services outlive each run's process and became zombies under the sandbox
+  daemon, which does not reap them.
+- **Who.** The owner's chats, where the sandbox's `/health` says `windows`
+  (`winshot --check`: files only), asked every few minutes before a turn
+  writes its prompt. Not in a person's chat: her code may write only her
+  turn's folder.
+- **Fidelity.** Wine is close to Windows, not the same: fonts (Wine's Tahoma,
+  Liberation for Arial and friends) and some controls look a little
+  different, and the OS version a program reads says 8.1. The prompt says so;
+  the user tries the program on a real PC.
 
 **Thinking.** The default is on for agent turns in projects and off for
 quick chats. A toggle in the composer overrides it. Qwen3.8 tends to
@@ -1066,7 +1172,12 @@ assistant made), each sent with every message.
   and Hugging Face is offline in speech.
 - **Internet for the assistant.** "Ask first" (section 6) makes web search,
   each site and code that goes online wait for the user's answer, and runs
-  other code without TCP connections.
+  other code without TCP connections. HTML and React artifacts load nothing
+  from the web then (their own policy; the page's `frame-src 'self'`).
+- **Windows programs** (0.16.0). They run in the sandbox under Wine as the
+  sandbox user, like any command (offline while asking first, the same
+  firewall); Wine needs no privileges, and its X server listens on no TCP
+  port.
 - **Speech service.** On `inner` only: not published, and the sandbox's
   network cannot reach it. It reads only files under `/models/speech`
   (resolved paths; the models folder is mounted read-only), a voice file only
@@ -1106,19 +1217,28 @@ assistant made), each sent with every message.
 6. Install the firewall script and unit as the new version has them, and
    apply the rules (0.15.0; they are added only when missing).
 
+When the fast-forward changed the updater itself (`tools/hub_update.py` or
+`update.sh`), the new updater does steps 2-6 (0.16.0): the old one writes what
+it knows (`HUB_ROOT/update-resume.json`: the commits, versions and the images
+tagged `:rollback`), starts `hub_update.py update --resume <file>` and waits.
+The new one deletes the file as it takes over; a file still there afterwards
+means it never started, and the old one puts the code back as after a failed
+build. So a step new in a version runs in the update that brings it - from the
+update after 0.16.0 on (0.16.0 itself arrives through 0.15.1's updater).
+
 `update.sh status|backups|rollback|firewall` exist too (`status` says whether
 the installed firewall is the clone's, `firewall` installs and applies it).
 `status`, `firewall` and an update also try each model container's way out -
 a connection to 1.1.1.1:443 from inside it, which the rules must stop - and
 say what they found.
 An update makes the folders the services mount when a new version adds one
-(owned by uid 1000). An update runs the updater it started with, so a step
-new in a version (like 6 in 0.15.0) first runs on the update after it - or
-with `update.sh firewall` right away.
+(owned by uid 1000).
 
 **Self-test.** `python -m app.cli selftest` checks every service, the
 sandbox's isolation (since 0.15.0 also that a command run offline cannot
-connect: "offline code") and one answer with its tokens/s; `--images` makes a
+connect: "offline code"; since 0.16.0 "windows programs": a small Windows
+Forms program built offline and run under Wine, its button found by its text
+and clicked, which closes it) and one answer with its tokens/s; `--images` makes a
 picture, and `--speech` speaks the same sentence with each downloaded voice
 model, reports the real-time factor with T3's and the decoder's share, and
 saves each in `data/selftest/` (with `speech.json`), where Settings →
@@ -1184,13 +1304,19 @@ has them now - a song, a mix, a script that failed - newest turn first, up to
   whether the VM's firewall is current and tries each model container's way
   out; a model container that cannot load or answer after the update would be
   the sign of a rule too many.
-- **Windows programs from the sandbox** (0.15.1): building Windows Forms on
-  Linux needs the Windows Desktop targeting pack from NuGet, which this build
-  environment cannot reach, so the first WinForms build and `win-x64` publish
-  happen on the VM. Not known: whether an icon and version information get
-  into an .exe built on Linux; whether `dotnet test` works offline and in
-  people's chats (the classic test runner talks to its test host over TCP on
-  localhost, which offline code and people's port rules refuse).
+- **Windows programs from the sandbox** (0.15.1, 0.16.0): Windows Forms and
+  WPF build offline with the packs in the image and run under Wine - tried in
+  the real image here (Docker 29.9.1, the default seccomp profile, offline),
+  not yet on the VM. The packs and the Windows runtime come from conda-forge
+  at the image build: if a pinned file is ever withdrawn there, the sandbox
+  image does not build (and the update rolls back) until the pins are
+  changed. Not known: whether an icon and version information get into an
+  .exe built on Linux; whether `dotnet test` works offline and in people's
+  chats (the classic test runner talks to its test host over TCP on
+  localhost, which offline code and people's port rules refuse); how well the
+  local models click by coordinates in screenshots (by text is the fallback),
+  and programs with more than standard controls under Wine (DataGridView,
+  owner-drawn controls, charts, DirectX).
 - **Offline code** (internet asking first) needs Landlock ABI 4 and a nested
   seccomp filter in the sandbox; tested with ABI 7 here, also inside a Docker
   29.9.1 container with the default seccomp profile, not on the VM. The

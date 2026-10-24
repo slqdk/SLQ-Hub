@@ -10,8 +10,10 @@ sound, a PDF and notes: the card under the answer), "announce" (speech),
 sending a message while it works), "page" (makes an artifact),
 "think" (reasons first), "search" (web search), "web picture" (a picture
 from the web in the answer), "picture" (an image),
-"loop" (repeats the same searches until the Hub makes it answer), or
-anything else (a short markdown answer). The built UI (frontend/dist) is
+"loop" (repeats the same searches until the Hub makes it answer), "window" (writes a
+Windows Forms program and looks at it with windows_app: needs --sandbox), or anything else (a short markdown
+answer). --sandbox http://IP:7000 sends the sandbox's work to a real sandbox daemon (token "tok") that mounts
+this Hub's data/workspace as /workspace. The built UI (frontend/dist) is
 served when it exists; otherwise use `npm run dev` in frontend/.
 """
 from __future__ import annotations
@@ -70,18 +72,60 @@ PAGE = """<div class="p-8 max-w-xl mx-auto">
 </div>"""
 
 
+WINFORMS_PROJECT = """<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+</Project>
+"""
+WINFORMS_PROGRAM = """static class Program
+{
+    [STAThread]
+    static void Main()
+    {
+        ApplicationConfiguration.Initialize();
+        var form = new Form { Text = "Tester", ClientSize = new Size(360, 220), StartPosition = FormStartPosition.CenterScreen };
+        var name = new TextBox { Location = new Point(16, 40), Width = 200 };
+        var greet = new Button { Text = "Greet", Location = new Point(230, 38), Size = new Size(100, 28) };
+        var pumps = new ComboBox { Location = new Point(16, 80), Width = 200, DropDownStyle = ComboBoxStyle.DropDownList };
+        pumps.Items.AddRange(new object[] { "Pump 1", "Pump 2", "Pump 3" });
+        pumps.SelectedIndex = 0;
+        greet.Click += (_, _) => MessageBox.Show(form, "Hello " + name.Text, "Greeting");
+        form.Controls.AddRange(new Control[] { name, greet, pumps });
+        Application.Run(form);
+    }
+}
+"""
+
+
+REMOTE_PAGE = """<h1 class="text-2xl font-semibold">Remote things</h1>
+<p id="state">loading</p>
+<img id="pic" src="https://example.com/pixel.png" alt="a picture from the web">
+<link rel="stylesheet" href="https://fonts.example.com/font.css">
+<script src="https://cdn.example.com/lib.js"></script>
+<script>
+fetch("https://api.example.com/data").then(function () { document.getElementById("state").textContent = "fetched"; },
+  function () { document.getElementById("state").textContent = "fetch stopped"; });
+</script>
+<a id="go" href="https://example.com/elsewhere">go elsewhere</a>"""
+
+
 def responder(body: dict) -> dict:
     msgs = body["messages"]
-    last_user = next((m for m in reversed(msgs) if m["role"] == "user"), {"content": ""})
+
+    def own(m: dict) -> bool:                       # the user's own message, not the Hub's notes or returned images
+        raw = m["content"] if isinstance(m["content"], str) else json.dumps(m["content"])
+        return m["role"] == "user" and "Images returned" not in raw and not raw.lstrip().startswith("(SLQ Hub")
+    last_user = next((m for m in reversed(msgs) if own(m)), {"content": ""})
     text = last_user["content"] if isinstance(last_user["content"], str) else " ".join(
         p.get("text", "") for p in last_user["content"])
     text = re.sub(r"^\[[^\]\n]{8,40}\]\n", "", text)          # the time it was sent
     after_tool = msgs[-1]["role"] == "tool" or (msgs[-1]["role"] == "user" and isinstance(msgs[-1]["content"], list)
                                                 and "Images returned" in json.dumps(msgs[-1]["content"]))
-    # tool steps in this turn: after the user's own last message (not the Hub's notes or returned images)
-    def own(m: dict) -> bool:
-        raw = m["content"] if isinstance(m["content"], str) else json.dumps(m["content"])
-        return m["role"] == "user" and "Images returned" not in raw and not raw.lstrip().startswith("(SLQ Hub")
+    # tool steps in this turn: after the user's own last message
     start = max((i for i, m in enumerate(msgs) if own(m)), default=-1)
     tools_done = sum(1 for m in msgs[start + 1:] if m["role"] == "tool")
     low = text.lower()
@@ -89,6 +133,18 @@ def responder(body: dict) -> dict:
         return {"content": text.split("starts with:")[-1].strip()[:40].title() or "Chat"}
     if "condense the conversation" in low:
         return {"content": "Summary of the chat so far."}
+    if "window" in low:                                 # a Windows program on the virtual screen (a real sandbox)
+        if tools_done == 0:
+            return {"content": "I will write a small Windows Forms program.", "tool_calls": [{"name": "write_file",
+                    "arguments": {"path": "Tester/Tester.csproj", "content": WINFORMS_PROJECT}}]}
+        if tools_done == 1:
+            return {"tool_calls": [{"name": "write_file", "arguments": {"path": "Tester/Program.cs",
+                                                                        "content": WINFORMS_PROGRAM}}]}
+        if tools_done == 2:
+            return {"content": "Now I look at it.", "tool_calls": [{"name": "windows_app", "arguments": {
+                "target": "Tester", "steps": [{"click": [120, 80]}, {"type": "Søren"}, {"click": "Greet"},
+                                              {"shot": "the greeting"}, {"click": "OK"}, {"click": [120, 120]}]}}]}
+        return {"content": "The form opens, the greeting shows the name, and the list has the three pumps."}
     if "web picture" in low:                            # a picture from the web in the answer (a link while asking)
         return {"content": "Here is one from the web:\n\n![a red fox](https://example.com/fox.jpg)\n\nThat is all."}
     if "files" in low:
@@ -124,6 +180,12 @@ def responder(body: dict) -> dict:
             return {"tool_calls": [{"name": "sound_generate", "arguments": {
                 "prompt": "Ice hockey arena horn at the end of a period, loud, huge echoing hall", "duration": 3}}]}
         return {"content": "The horn: **ice-hockey-arena-horn-at-the-end-of-a-period.mp3** (3 s)."}
+    if "remote page" in low:                            # an artifact that loads from the web (stopped while asking)
+        if tools_done == 0:
+            return {"tool_calls": [{"name": "artifact", "arguments": {"action": "create", "id": "remote",
+                                                                      "title": "Remote things", "type": "html",
+                                                                      "content": REMOTE_PAGE}}]}
+        return {"content": "The page is open on the right."}
     if "page" in low:
         if tools_done == 0:
             return {"tool_calls": [{"name": "todo_write", "arguments": {"todos": [
@@ -304,6 +366,8 @@ def main() -> None:
     ap.add_argument("--public-url", default="", help="the address through the proxy, e.g. https://hub.example.test")
     ap.add_argument("--proxy", default="", help="treat this peer as the trusted proxy (X-Forwarded-For is believed)")
     ap.add_argument("--lan-host", default="", help="the Hub's LAN address, for the Apps page")
+    ap.add_argument("--sandbox", default="", help="a real sandbox daemon (http://IP:7000, token tok) that mounts "
+                                                  "this Hub's data/workspace as /workspace")
     a = ap.parse_args()
     base = Path(a.data or tempfile.mkdtemp(prefix="hub-dev-"))
     data, models = base / "data", base / "models"
@@ -325,7 +389,7 @@ def main() -> None:
                      "factor": round(took / secs, 2), "capped": False} for m, n, secs, took in runs]}))
     dist = ROOT / "frontend" / "dist"
     env = Env(data_dir=data, models_dir=models, llm_url="http://supervisor", llm_host="llm", comfy_url="http://comfy",
-              searxng_url="http://searxng", sandbox_url="http://sandbox:7000", sandbox_ip="172.31.250.20",
+              searxng_url="http://searxng", sandbox_url=a.sandbox or "http://sandbox:7000", sandbox_ip="172.31.250.20",
               internal_token="tok", secret_key="dev", public_url=a.public_url,
               trusted_proxies=(a.proxy,) if a.proxy else (), lan_host=a.lan_host,
               lan_networks=tuple(_networks(["127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"])),
@@ -339,9 +403,11 @@ def main() -> None:
                          "huggingface.co": make_hf(HF_DEMO), "civitai.com": make_civitai(CIVITAI_DEMO),
                          "delivery.civitai.test": make_civitai_delivery(CIVITAI_DEMO),
                          "speech:7100": make_speech(fakes["speech"])})
-    t = Transports(llm=router, runner=router, comfy=router, sandbox=router, web=router, speech=router)
+    t = Transports(llm=router, runner=router, comfy=router, sandbox=None if a.sandbox else router, web=router,
+                   speech=router)
     app = create_app(env, t, startup=False)
-    print(f"SLQ Hub (fake services) on http://127.0.0.1:{a.port}  data: {base}")
+    print(f"SLQ Hub (fake services{', a real sandbox' if a.sandbox else ''}) on http://127.0.0.1:{a.port}  "
+          f"data: {base}")
     uvicorn.run(app, host="127.0.0.1", port=a.port, log_level="warning", proxy_headers=False)   # as in production
 
 

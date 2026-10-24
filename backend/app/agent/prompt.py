@@ -57,14 +57,21 @@ the local network. Install what you need with pip or npm."""
 # Settings -> Assistant -> Web -> Internet for the assistant: ask first.
 TOOLS_LINE_ASKS = """- File tools take paths relative to the working folder. bash starts in it ({sandbox_path}) inside a \
 sandbox (Ubuntu with Python, Node, .NET 10 (C#), ImageMagick, ffmpeg, Tesseract) with no access to the local network."""
-# C# in the sandbox (the .NET 10 SDK): where builds go, and Windows programs, which build here but cannot run here.
-CSHARP_LINE = """
-- C#: dotnet new, build, run and test work; build output goes to .hub/dotnet, not bin/ and obj/. Windows Forms and \
-WPF build here with <EnableWindowsTargeting>true</EnableWindowsTargeting> in the project, but cannot run here \
-(Windows only, no screen): build to catch errors, keep logic testable in a class library, write forms in code (no \
-designer here), and give the user the program: `dotnet publish -c Release -r win-x64 --self-contained false \
--p:PublishSingleFile=true -o publish` makes one small .exe that needs the .NET 10 Desktop Runtime on their PC \
-(--self-contained true: no runtime needed, but about 150 MB)."""
+# C# in the sandbox (the .NET 10 SDK, with the Windows targeting packs): where builds go, which versions build
+# offline, and Windows programs - seen with windows_app where the sandbox has Wine, else only built here.
+CSHARP = """
+- C#: dotnet new, build, run and test work; build output goes to .hub/dotnet, not bin/ and obj/. Target net10.0 \
+(net10.0-windows for Windows Forms and WPF): other versions need packages from the internet. {windows} Give the \
+user the program with `dotnet publish -c Release -p:DefaultAppHostRuntimeIdentifier=win-x64 -o publish`: a folder \
+with the .exe, which runs on their PC once the .NET 10 Desktop Runtime is installed (-r win-x64 --self-contained \
+needs no runtime there, but downloads about 150 MB of packages)."""
+CSHARP_NO_SCREEN = ("Windows Forms and WPF programs build here but cannot run here (no Windows, no screen): build to "
+                    "catch errors, keep logic testable in a class library, and write forms in code (there is no "
+                    "designer here).")
+CSHARP_SCREEN = ("Windows Forms and WPF programs build here, and windows_app runs one on a virtual screen (Wine) and "
+                 "shows you screenshots: after it builds, look at the forms and click through what you made before "
+                 "you hand it over. Write forms in code (there is no designer here) and keep logic testable in a "
+                 "class library.")
 INTERNET_ASKS = """
 - The user has you ask before you go online: web_search and web_fetch wait for their answer, and bash runs without \
 the network (no connections, no DNS) unless the call sets internet: true - then they are asked; installs with pip or \
@@ -139,9 +146,11 @@ def system_prompt(*, user: str, model_name: str, folder_text: str, sandbox_path:
                   skills: list[dict], project: dict | None, summary: str = "", images_available: bool = True,
                   tz: str | None = None, handover_to: str = "", subagent: bool = False,
                   cloud_model: str = "", taken_over_from: str = "", memory: bool = True, code: bool = True,
-                  dropped: int = 0, sound: list[str] | None = None, internet_asks: bool = False) -> str:
+                  dropped: int = 0, sound: list[str] | None = None, internet_asks: bool = False,
+                  windows: bool = False) -> str:
     now = datetime.now(ZoneInfo(tz) if tz else local_tz())
-    tools_line = ((TOOLS_LINE_ASKS if internet_asks else TOOLS_LINE).format(sandbox_path=sandbox_path) + CSHARP_LINE
+    csharp = CSHARP.format(windows=CSHARP_SCREEN if windows else CSHARP_NO_SCREEN)
+    tools_line = ((TOOLS_LINE_ASKS if internet_asks else TOOLS_LINE).format(sandbox_path=sandbox_path) + csharp
                   if code else NO_CODE_LINE) + ((INTERNET_ASKS if code else INTERNET_ASKS_NO_CODE) if internet_asks
                                                 else "")
     text = BASE.format(user=user, model=model_name, date=now.strftime("%A %d %B %Y"), folder=folder_text,

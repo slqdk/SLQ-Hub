@@ -5,7 +5,8 @@ RX 7900 XTX in a Proxmox VM — and the single owner of that GPU, so every
 other app on the network calls models through the Hub's queue.
 
 - **Web UI**: chats and projects with an agent that searches the web, works
-  on project files, runs code in a sandbox, sees, generates and edits images,
+  on project files, runs code in a sandbox (Python, Node, C# - and Windows
+  programs it can look at under Wine), sees, generates and edits images,
   speaks text and makes music and sound effects, builds live artifacts, uses
   skills and memory, and can hand hard tasks to a cloud model where you allow
   it.

@@ -90,6 +90,17 @@ def _install_features(hub: Hub) -> None:
     features.install(hub)
 
 
+def _page(request: Request, path: Path) -> FileResponse:
+    """The web UI's page. While the assistant asks before it goes online, frames on it may show only the Hub's own
+    pages: an artifact's frame cannot navigate itself to another site (or a data: page) - its own policy, which
+    stops everything it loads, cannot stop that."""
+    hub = getattr(request.app.state, "hub", None)
+    headers = {"Cache-Control": "no-cache"}               # asked for again each time: the policy is the current one
+    if hub is not None and hub.settings.get("web", "access") == "ask":
+        headers["Content-Security-Policy"] = "frame-src 'self'"
+    return FileResponse(path, headers=headers)
+
+
 def _static(app: FastAPI, static_dir: Path | None) -> None:
     # HEAD too: some Ollama apps (Enchanted) probe the server with HEAD / and
     # call it unreachable unless that answers 200, as Ollama's own server does.
@@ -99,7 +110,7 @@ def _static(app: FastAPI, static_dir: Path | None) -> None:
         if "text/html" not in accept:
             return PlainTextResponse("Ollama is running (SLQ Hub)")      # what Ollama clients probe
         if static_dir:
-            return FileResponse(static_dir / "index.html")
+            return _page(request, static_dir / "index.html")
         return PlainTextResponse("SLQ Hub: the web UI is not built (frontend/dist missing).")
 
     if not static_dir:
@@ -108,13 +119,13 @@ def _static(app: FastAPI, static_dir: Path | None) -> None:
         app.mount("/assets", StaticFiles(directory=static_dir / "assets"), name="assets")
 
     @app.get("/{path:path}", include_in_schema=False)
-    async def spa(path: str):
+    async def spa(path: str, request: Request):
         if path.startswith(("hub/api/", "api/", "v1/")):
             return JSONResponse({"detail": "Not Found"}, status_code=404)
         f = (static_dir / path).resolve()
         if path and f.is_file() and static_dir.resolve() in f.parents:
-            return FileResponse(f)
+            return _page(request, f) if f.name == "index.html" else FileResponse(f)
         # The phone chat page (/chat) is a small app of its own on the model API.
         if (path == "chat" or path.startswith("chat/")) and (static_dir / "chat.html").is_file():
             return FileResponse(static_dir / "chat.html")
-        return FileResponse(static_dir / "index.html")
+        return _page(request, static_dir / "index.html")

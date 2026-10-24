@@ -111,10 +111,44 @@ async def _meta(c: httpx.AsyncClient, repo: str) -> dict:
             "thinking": ("enable_thinking" in tpl) if tpl else None}
 
 
+HEAD_RE = re.compile(r"(?i)(?<![a-z])(?:fast)?mtp(?![a-z])|(?<![a-z])draft(?![a-z])")    # not "noMTP"
+SIDE_RE = re.compile(r"(?i)vision|projector")
+
+
 def _skip(path: str) -> bool:
     base = path.rsplit("/", 1)[-1].lower()
     return (not base.endswith(".gguf") or "imatrix" in base or base.startswith("mtp-")
             or path.lower().startswith("mtp/") or not safe_path(path))
+
+
+def _tell_apart(label: str, cs: list[dict]) -> None:
+    """Labels for files of one quant: by what their names do not share (Model-Q4_K_M and Model-noMTP-Q4_K_M:
+    Q4_K_M and noMTP-Q4_K_M), and by folder where they are in different ones."""
+    stems = [re.sub(r"(?i)\.gguf$", "", SPLIT_RE.sub(r"\g<stem>", c["key"].rsplit("/", 1)[-1])) for c in cs]
+    pres = [st[:len(st) - len(label)] if st.lower().endswith(label.lower()) else st for st in stems]
+    head = os.path.commonprefix(pres)
+    head = head[:max(head.rfind("-"), head.rfind("_"), head.rfind("."), -1) + 1]
+    where = [c["key"].rsplit("/", 1)[0] if "/" in c["key"] else "top level" for c in cs]
+    for c, pre, w in zip(cs, pres, where, strict=True):
+        name = pre[len(head):] + label
+        c["label"] = f"{name} ({w})" if len(set(where)) > 1 else name
+
+
+def _label_projectors(mmproj: list[dict]) -> None:
+    """Distinct labels when several projector files would otherwise read the same (by folder, else numbered)."""
+    same: dict[str, list[dict]] = {}
+    for m in mmproj:
+        same.setdefault(m["label"], []).append(m)
+    for label, ms in same.items():
+        if len(ms) < 2:
+            continue
+        where = [m["path"].rsplit("/", 1)[0] if "/" in m["path"] else "top level" for m in ms]
+        if len(set(where)) == len(ms):
+            for m, w in zip(ms, where, strict=True):
+                m["label"] = f"{label} ({w})"
+        else:
+            for i, m in enumerate(ms, 1):
+                m["label"] = f"{label} #{i}"
 
 
 def group(items: list[dict]) -> tuple[list[dict], list[dict]]:
@@ -124,13 +158,17 @@ def group(items: list[dict]) -> tuple[list[dict], list[dict]]:
     choices: list[dict] = []
     mmproj: list[dict] = []
     splits: dict[tuple[str, str, int], dict[int, tuple[str, int]]] = {}
+    biggest = max((size for path, size in files if path.lower().endswith(".gguf")), default=0)
     for path, size in files:
         if _skip(path):
             continue
         d, _, base = path.rpartition("/")
-        if "mmproj" in base.lower():                       # mmproj-F16.gguf, Model-mmproj-f16.gguf, ...
+        if size < biggest / 8 and HEAD_RE.search(base):    # an MTP head or a draft model for speculative decoding
+            continue
+        side = quant_label(base[:-5]).upper() in ("F16", "BF16", "F32", "Q8_0", base[:-5].upper())
+        if "mmproj" in base.lower() or (side and size < biggest / 4 and SIDE_RE.search(base)):   # Model-vision-f16
             label = re.sub(r"(?i)\.gguf$", "", base)
-            label = re.sub(r"(?i)^.*mmproj[-_.]?", "", label) or label
+            label = quant_label(re.sub(r"(?i)^.*(?:mmproj|vision|projector)[-_.]?", "", label) or label)
             mmproj.append({"path": path, "size": size, "label": label})
             continue
         m = SPLIT_RE.match(base)
@@ -145,10 +183,13 @@ def group(items: list[dict]) -> tuple[list[dict], list[dict]]:
         fs = [{"path": parts[n][0], "size": parts[n][1]} for n in range(1, total + 1)]
         choices.append({"key": fs[0]["path"], "label": quant_label(stem), "split": True, "files": fs,
                         "size": sum(f["size"] for f in fs)})
-    labels = [c["label"] for c in choices]
-    for c in choices:                                      # the same quant in two places: say where
-        if labels.count(c["label"]) > 1:
-            c["label"] = f"{c['label']} ({c['key'].rsplit('/', 1)[0] if '/' in c['key'] else 'top level'})"
+    same: dict[str, list[dict]] = {}
+    for c in choices:
+        same.setdefault(c["label"], []).append(c)
+    for label, cs in same.items():                         # one quant, several files: tell them apart
+        if len(cs) > 1:
+            _tell_apart(label, cs)
+    _label_projectors(mmproj)
     choices.sort(key=lambda c: c["size"])
     mmproj.sort(key=lambda m: m["size"])
     return choices, mmproj
@@ -173,6 +214,10 @@ async def lookup(repo: str, transport: httpx.AsyncBaseTransport | None = None) -
     if not choices:
         raise HFError(f"{repo} has no GGUF model files. The Hub runs GGUF models with llama.cpp; look for a "
                       "repository ending in -GGUF (unsloth, bartowski and ggml-org publish many).")
+    params = meta.get("parameters")
+    if isinstance(params, (int, float)) and params > 0 and min(c["size"] for c in choices) * 8 / params > 40:
+        meta = {**meta, "parameters": None}     # more bits/param than even F32 (32): HF counted a small side file,
+        #                                         e.g. an MTP head - not these weights. (A real F32 repo clears 40.)
     return {"repo": repo, "url": f"{HF}/{repo}", "choices": choices, "mmproj": mmproj, "meta": meta,
             "suggested": suggest(repo)}
 

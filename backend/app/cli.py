@@ -143,6 +143,65 @@ def _offline(rep, c, env, hz: dict) -> None:
         rep.line("WARN", "offline code", f"the probe did not answer as expected: {seen}", "docker compose logs sandbox")
 
 
+WINDOWS_PROBE = {
+    "SelfTest.csproj": """<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+  </PropertyGroup>
+</Project>
+""",
+    "Program.cs": """static class P
+{
+    [System.STAThread]
+    static void Main()
+    {
+        var form = new System.Windows.Forms.Form { Text = "SLQ Hub self-test", Width = 320, Height = 160 };
+        var close = new System.Windows.Forms.Button { Text = "Close", Left = 110, Top = 40, Width = 90 };
+        close.Click += (_, _) => form.Close();
+        form.Controls.Add(close);
+        System.Windows.Forms.Application.Run(form);
+    }
+}
+"""}
+
+
+def _windows(rep, c, env, hz: dict) -> None:
+    """windows_app: a small Windows Forms program is built (offline where the sandbox can do that: the Windows packs
+    are in the image) and run under Wine, and its button, found by its text, closes it."""
+    if not hz.get("windows"):
+        rep.line("WARN", "windows programs", "the sandbox cannot run Windows programs (Wine or the Windows .NET "
+                 "runtime is missing in its image)", "update the Hub; docker compose logs sandbox")
+        return
+    root, folder = (hz.get("root") or "/workspace").rstrip("/"), ".hub/selftest-windows"
+    files = " && ".join(f"printf %s {_sh(text)} > {folder}/{name}" for name, text in WINDOWS_PROBE.items())
+    req = {"target": f"{root}/{folder}", "steps": [{"click": "Close"}], "out": f"{root}/{folder}/shots",
+           "timeout": 90}
+    try:
+        _sandbox_exec(c, env, f"rm -rf {folder} && mkdir -p {folder} && {files}")
+        r = c.post(env.sandbox_url + "/exec", headers={"X-Internal-Token": env.internal_token},
+                   json={"cmd": "winshot --json " + _sh(json.dumps(req)), "cwd": root, "timeout": 420,
+                         "offline": hz.get("offline") is True, "env": {"ArtifactsPath": f"{root}/{folder}/.hub/dotnet"}},
+                   timeout=450).json()
+        _sandbox_exec(c, env, f"rm -rf {folder}")
+        res = json.loads((r.get("stdout") or "").strip().splitlines()[-1])
+    except Exception as exc:  # noqa: BLE001
+        rep.line("FAIL", "windows programs", f"the probe failed ({exc.__class__.__name__}: {exc})",
+                 "docker compose logs sandbox")
+        return
+    titles = [w.get("title") for s in res.get("shots") or [] for w in s.get("windows") or []]
+    how = "built offline and " if hz.get("offline") is True else "built and "
+    if res.get("ok") and "SLQ Hub self-test" in titles and res.get("exit_code") is not None:
+        rep.line("PASS", "windows programs", f"a Windows Forms program {how}ran under Wine; its button, found by its "
+                 f"text, closed it ({res.get('seconds')} s)")
+    elif res.get("ok") and "SLQ Hub self-test" in titles:
+        rep.line("WARN", "windows programs", "the program ran under Wine, but clicking its Close button did not "
+                 f"close it: {res.get('steps')}", "windows_app can show programs; clicks by text may miss")
+    else:
+        rep.line("FAIL", "windows programs", str(res.get("error") or res)[:300], "docker compose logs sandbox")
+
+
 def _comfy_folders(rep, env) -> None:
     """People's pictures: the Hub deletes ComfyUI's copies after each answer, through the mounted folders."""
     base = env.comfy_files
@@ -320,6 +379,7 @@ def selftest(images: bool = False, speech: bool = False) -> int:
                      "the agent cannot install packages; check the VM's outbound network")
         _confinement(rep, c, env, hz)
         _offline(rep, c, env, hz)
+        _windows(rep, c, env, hz)
     except Exception as exc:  # noqa: BLE001
         rep.line("FAIL", "sandbox", f"{exc.__class__.__name__}: {exc}", "docker compose logs sandbox")
 

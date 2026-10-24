@@ -24,7 +24,9 @@ possible:
   2. Shows the new commits and version, and asks.
   3. Tags the running images `:rollback`, fast-forwards, and BUILDS the new
      images while the old ones keep serving. A failed build puts the code
-     back - nothing was stopped.
+     back - nothing was stopped. When the fast-forward changed the updater
+     itself, the new updater does the rest (from the build on): what it
+     changed applies to this update, not only the next one.
   4. Stops everything and backs up /srv/slq-hub/data (not the models, which
      can be downloaded again) to <backups>/<time>_<version>.tar.gz + .json.
   5. Starts the new version and waits until /hub/api/health answers.
@@ -483,6 +485,9 @@ def put_back(commit: str, images: dict[str, str | None], backup: str | None, tim
 # ---------------------------------------------------------------- commands
 
 def cmd_update(args) -> int:
+    if args.resume:                                   # the old updater fast-forwarded and handed over
+        out.head("=== SLQ Hub - update, continued by the new updater ===")
+        return finish_update(args, take_over(args.resume))
     out.head("=== SLQ Hub - update ===")
     branch = preflight()
     old = git("rev-parse", "HEAD").stdout.strip()
@@ -522,6 +527,66 @@ def cmd_update(args) -> int:
     old_images = tag_images("latest", "rollback")
     if incoming and run(["git", "merge", "--ff-only", f"origin/{branch}"], capture=False).returncode != 0:
         raise Stop("the update is not a fast-forward - the clone has commits of its own.")
+    state = {"v": RESUME_VERSION, "old": old, "old_version": old_version, "new_version": new_version,
+             "target": target, "old_images": old_images}
+    if incoming and updater_changed(old):
+        return hand_over(args, state)
+    return finish_update(args, state)
+
+
+# The rest of an update, done by the updater of the version being installed when the fast-forward changed this
+# file or update.sh: the old one writes what the new one needs (RESUME_VERSION 1 - every later updater reads it)
+# and waits for it. The new one deletes the file when it takes over; a file still there afterwards means it never
+# did (it did not start), and the old one puts the code back as a failed build would.
+RESUME_VERSION = 1
+UPDATER_FILES = ("tools/hub_update.py", "update.sh")
+
+
+def updater_changed(old: str) -> bool:
+    return git("diff", "--quiet", old, "HEAD", "--", *UPDATER_FILES).returncode == 1
+
+
+def resume_file() -> Path:
+    return HUB_ROOT / "update-resume.json"
+
+
+def hand_over(args, state: dict) -> int:
+    path = resume_file()
+    path.write_text(json.dumps(state), encoding="utf-8")
+    out.info("The updater itself changed - the new one does the rest of this update.")
+    flags = ["--keep", str(args.keep), "--timeout", str(args.timeout)] + (["--no-backup"] if args.no_backup else [])
+    try:
+        rc = subprocess.call([sys.executable, str(ROOT / "tools" / "hub_update.py"), "update", "--resume", str(path),
+                              *flags])
+    except KeyboardInterrupt:
+        rc = 130
+    if path.exists():                                   # it never took over: as a failed build
+        path.unlink(missing_ok=True)
+        git("reset", "--hard", state["old"])
+        tag_images("rollback", "latest")
+        raise Stop(f"the new updater did not start (exit code {rc}). The code is back where it was; nothing was "
+                   "stopped.")
+    return rc
+
+
+def take_over(path: str) -> dict:
+    """The state the old updater left (and the file gone, so it knows this one took over)."""
+    p = Path(path)
+    try:
+        state = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise Stop(f"cannot read {p} ({exc}).") from exc
+    if not isinstance(state, dict) or state.get("v") != RESUME_VERSION or not state.get("old"):
+        raise Stop(f"{p} is not an update this updater can continue.")   # leave the file: the old one rolls back
+    p.unlink(missing_ok=True)                        # now the old updater sees it is gone and knows this one took over
+    state["old_images"] = state.get("old_images") or {}
+    return state
+
+
+def finish_update(args, state: dict) -> int:
+    """Build, back up, start, check - or put the old version back."""
+    old, old_version, new_version = state["old"], state["old_version"], state["new_version"]
+    old_images = state["old_images"]
     out.head("Building the new images (the Hub keeps running)...")
     compose("pull", "searxng", capture=False)
     if compose("build", capture=False).returncode != 0:
@@ -574,7 +639,7 @@ def cmd_update(args) -> int:
     if not any(old_images.values()):
         raise Stop("the new version does not start, and there are no earlier images to go back to.")
     backup_dir().mkdir(parents=True, exist_ok=True)
-    failed_file().write_text(json.dumps({"commit": target, "version": new_version,
+    failed_file().write_text(json.dumps({"commit": state["target"], "version": new_version,
                                          "at": datetime.now().isoformat(timespec="seconds")}),
                              encoding="utf-8")
     if put_back(old, old_images, name, args.timeout):
@@ -685,6 +750,7 @@ def main(argv: list[str] | None = None) -> int:
     u.add_argument("--no-backup", action="store_true", help="skip the data backup")
     u.add_argument("--keep", type=int, default=KEEP, help=f"backups to keep (default {KEEP})")
     u.add_argument("--timeout", type=float, default=TIMEOUT, help="seconds to wait for the Hub")
+    u.add_argument("--resume", metavar="FILE", help=argparse.SUPPRESS)      # the old updater handing over
     r = sub.add_parser("rollback", help="back to a backup: its code, images and data")
     r.add_argument("backup", nargs="?", help="backup name (default: the newest)")
     r.add_argument("--yes", "-y", action="store_true")

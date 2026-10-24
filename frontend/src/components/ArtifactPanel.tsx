@@ -11,7 +11,42 @@ import { copyText, Modal } from "./ui";
 const RUNNABLE = new Set(["html", "react", "svg", "mermaid"]);
 const EXT: Record<string, string> = { html: "html", react: "jsx", svg: "svg", mermaid: "mmd", markdown: "md", code: "txt" };
 
-export function artifactDoc(type: string, content: string): string {
+/** While the assistant asks before it goes online (Settings -> Web), an artifact loads nothing from the web: a
+ * Content-Security-Policy limits it to inline code, data:/blob: URLs and the Hub's own artifact runtime - no
+ * scripts, styles, fonts, pictures, connections, frames or form posts from other sites. A guard script then
+ * removes WebRTC (which ignores the policy's connect-src in Chromium) and strips any frame the page adds, so a
+ * nested page cannot regain either. (The frame navigating itself away is stopped by the Hub page's own frame-src,
+ * set by the server.) The per-call approval is the real gate; this keeps a page honest once it is rendering. */
+export function offlinePolicy(origin: string): string {
+  return [`default-src 'none'`, `script-src 'unsafe-inline' 'unsafe-eval' ${origin}/artifact-runtime/`,
+    `style-src 'unsafe-inline' ${origin}/artifact-runtime/`, `img-src data: blob: ${origin}`, `font-src data: blob:`,
+    `media-src data: blob:`, `connect-src 'none'`, `frame-src 'none'`, `form-action 'none'`, `base-uri 'none'`].join("; ");
+}
+
+/** Closes what the policy alone does not: WebRTC (Chromium does not honour connect-src for it) and frames a
+ * script adds after load (frame-src blocks their content, but a frame of its own gets a fresh WebRTC to use). */
+const OFFLINE_GUARD = `<script>(function(){
+try{["RTCPeerConnection","webkitRTCPeerConnection","RTCDataChannel","RTCRtpSender","RTCRtpReceiver",
+"RTCIceTransport","RTCSctpTransport","RTCDtlsTransport"].forEach(function(k){
+try{Object.defineProperty(window,k,{value:undefined,configurable:false,writable:false});}catch(e){}});}catch(e){}
+try{var F="iframe,frame,object,embed";function strip(n){if(n.nodeType!==1)return;
+if(n.matches&&n.matches(F))n.remove();else if(n.querySelectorAll)n.querySelectorAll(F).forEach(function(el){el.remove();});}
+new MutationObserver(function(ms){ms.forEach(function(m){m.addedNodes.forEach(strip);});}).observe(document,{childList:true,subtree:true});}catch(e){}
+})();</script>`;
+
+/** The policy and the guard as the first things in the page (after a doctype), so they cover all it loads. */
+export function withPolicy(doc: string, policy: string): string {
+  const head = `<meta http-equiv="Content-Security-Policy" content="${policy}">${OFFLINE_GUARD}`;
+  const doctype = doc.match(/^\s*<!doctype[^>]*>/i);
+  return doctype ? doctype[0] + head + doc.slice(doctype[0].length) : head + doc;
+}
+
+export function artifactDoc(type: string, content: string, offline = false): string {
+  const doc = buildDoc(type, content);
+  return offline ? withPolicy(doc, offlinePolicy(window.location.origin)) : doc;
+}
+
+function buildDoc(type: string, content: string): string {
   const head = `<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">`;
   const showErrors = `<script>window.addEventListener("error", function (e) {
     var p = document.createElement("pre");
@@ -86,7 +121,9 @@ export function ArtifactPanel({ chatId, id, version, onClose, loader }: { chatId
     };
   }, [chatId, id, v, toast, loader]);
 
-  const doc = useMemo(() => (art && RUNNABLE.has(art.type) ? artifactDoc(art.type, art.content) : ""), [art]);
+  const offline = !!auth?.internetAsks;
+  const doc = useMemo(() => (art && RUNNABLE.has(art.type) ? artifactDoc(art.type, art.content, offline) : ""),
+    [art, offline]);
   if (!art) return <aside className="panel"><div className="panel-head"><h2>Loading</h2>
     <button className="icon-btn" onClick={onClose} aria-label="Close"><X size={18} /></button></div></aside>;
 
@@ -130,10 +167,11 @@ export function ArtifactPanel({ chatId, id, version, onClose, loader }: { chatId
       )}
       <div className="panel-body">
         {runnable && view === "preview" ? (
-          <iframe key={`${art.version}-${reloadKey}`} className="artifact-frame" title={art.title} srcDoc={doc}
-            sandbox="allow-scripts allow-popups allow-forms allow-modals allow-downloads" />
+          <iframe key={`${art.version}-${reloadKey}-${offline}`} className="artifact-frame" title={art.title} srcDoc={doc}
+            sandbox={offline ? "allow-scripts allow-forms allow-modals allow-downloads"
+              : "allow-scripts allow-popups allow-forms allow-modals allow-downloads"} />
         ) : art.type === "markdown" ? (
-          <div style={{ padding: "18px 22px" }}><Markdown text={art.content} remoteImages={!auth?.internetAsks} /></div>
+          <div style={{ padding: "18px 22px" }}><Markdown text={art.content} remoteImages={!offline} /></div>
         ) : (
           <pre className="code-view"><code className="hljs" dangerouslySetInnerHTML={{
             __html: highlight(art.content, art.type === "react" ? "tsx" : art.type === "code" ? null : art.type) }} /></pre>

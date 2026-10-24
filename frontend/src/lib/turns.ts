@@ -18,11 +18,15 @@ export interface ToolView {
   children?: Item[];
   subagent?: { description: string; finished: boolean };
   ask?: AskInfo;                               // what the turn asks before this call (internet set to ask first)
+  canChat?: boolean;                           // "Allow in this chat" is offered (the owner's chats)
 }
 
 /** Internet for the assistant, asking first: what a call wants and what "always" would allow. */
 export interface AskInfo { kind: "internet"; what: "search" | "site" | "code"; key: string; detail?: string; host?: string;
-  always: string; can_always: boolean; unblockable?: boolean }
+  always: string; can_always: boolean; can_chat?: boolean; unblockable?: boolean }
+
+/** An answer to a call that waits for the user: once, the rest of this chat, always, or no. */
+export type Decision = "allow" | "chat" | "always" | "deny";
 
 export type Item =
   | { kind: "thinking"; text: string }
@@ -205,6 +209,7 @@ function applyStream(items: Item[], ev: RunEvent): void {
       if (t) {
         t.state = "approval";
         t.ask = d.ask;
+        t.canChat = !!(d.can_chat || d.ask?.can_chat);
       }
       break;
     }
@@ -312,6 +317,10 @@ export function toolSummary(t: ToolView): string {
   const s = (k: string) => (typeof a[k] === "string" ? (a[k] as string) : "");
   switch (t.name) {
     case "bash": return s("command").split("\n")[0];
+    case "windows_app": {
+      const n = Array.isArray(a.steps) ? a.steps.length : 0;
+      return s("target") + (n ? ` (${n} step${n === 1 ? "" : "s"})` : "");
+    }
     case "read_file": case "write_file": case "edit_file": case "delete_file": case "view_image": return s("path");
     case "list_files": return s("path") || "the folder";
     case "move_file": return `${s("src") || s("source")} to ${s("dst") || s("destination")}`;

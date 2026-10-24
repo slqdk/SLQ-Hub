@@ -1,5 +1,51 @@
 # Changelog
 
+## 0.16.0 - 2026-10-24
+
+- **The assistant sees Windows programs.** A Windows Forms or WPF program it
+  builds runs under Wine on a virtual screen in the sandbox (`windows_app`):
+  it gets screenshots when the window is up and after the steps it gives -
+  clicks (by position, or by the text on the screen: "OK", "Start"), typing,
+  keys, dragging a slider, scrolling - so it can check what a form looks like
+  and that its buttons, lists, menus and dialogs work before it hands the
+  program over. The screenshots show in the tool's row. Wine is close to
+  Windows, not the same: try the program on a PC too. Owner's chats only.
+- **Windows projects build offline.** The Windows packs are in the sandbox
+  image now, so Windows Forms and WPF projects build without NuGet, and the
+  program is handed over as a folder with its .exe (`dotnet publish -p:DefaultAppHostRuntimeIdentifier=win-x64`)
+  for a PC with the .NET 10 Desktop Runtime.
+- **Allow in this chat.** In your own chats, a question - a search, a site,
+  code online, an MCP tool - also offers **Allow in this chat**: the same kind
+  of call goes ahead without asking for the rest of the chat (its subagents
+  too), and the chat's ⋯ menu lists what was allowed there, each with Take
+  back. It ends with the chat.
+- **A question no longer holds the card.** While the chat waits for your
+  answer, pictures, music and other chats can use the GPU; after the answer
+  the chat waits its turn if it must (it says so), then goes on.
+- **Artifacts load nothing from the web while asking first.** Web pages and
+  apps the assistant makes (HTML, React, SVG, diagrams) may use only their own
+  code and the Hub's own libraries then - no pictures, scripts, fonts or
+  connections from other sites, no pop-ups, and their frame cannot navigate
+  away (reload the page after switching to Ask first). Allowed, as before.
+- **Add from Hugging Face**: a repository with each quantisation twice (with
+  and without MTP, like JonathanColetti's Qwen3.8 27B Uncensored) showed both
+  with the same name - now `Q5_K_M` and `noMTP-Q5_K_M`; a vision file not
+  named mmproj (`...-vision-f16.gguf`) is offered as vision instead of as a
+  0.9 GB model; MTP heads and draft models are left out; and a parameter
+  count that describes such a small file (HauhauCS's "1.9B") is not shown.
+- **The updater finishes with its new version.** When an update changes the
+  updater itself, the new one does the rest of the update (build, backup,
+  start, firewall), so a new step works in the update that brings it - from
+  the next update on (this one still runs 0.15.1's updater).
+- The self-test has a new line, "windows programs": a small Windows Forms
+  program built offline and run under Wine, its button found and clicked.
+- The sandbox gets an init process, which collects what commands leave
+  behind (Wine's background processes after each run).
+- The UI's page is never served from the browser's cache (a new version, and
+  the internet setting, apply at the next load).
+- The sandbox image grows by about 1 GB (Wine, the Windows .NET runtime and
+  packs); the update downloads about 320 MB more while building it.
+
 ## 0.15.1 - 2026-10-24
 
 - **C# in the sandbox.** The assistant can write, build and run C# with the
