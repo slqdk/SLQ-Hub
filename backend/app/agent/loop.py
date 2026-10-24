@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 from pathlib import Path
 from typing import Awaitable, Callable
@@ -24,7 +25,7 @@ from ..chats import store as chats
 from ..gpu.scheduler import SchedulerError, Ticket
 from ..llm import payload as P
 from ..llm.client import LlmError
-from ..llm.stream import Accumulator, parse_arguments
+from ..llm.stream import Accumulator, parse_arguments, salvage_cut_write, valid_arguments
 from ..projects import store as projects
 from ..state import Hub
 from . import cloud as cloudmod
@@ -49,6 +50,10 @@ MUST_ANSWER = ("(SLQ Hub: you are repeating the same steps and getting the same 
 NO_ANSWER = "(The model kept repeating the same tool calls and gave no answer. Ask again, or try another model.)"
 LOOP_REPEATS = 3
 LOOP_SAME_STEPS = 3
+# A call the end of the context cut off (chat 21: a whole game in one write_file, 13 minutes of output, lost).
+CUT_OFF = "This call was cut off: your answer reached {where} after {chars:,} characters of its arguments, so it {what}."
+IN_PARTS = ("Write a long file in parts of at most a few hundred lines: write_file with the first part, then "
+            "write_file with append: true for each next part.")
 
 
 def loop_notice(reason: str) -> str:
@@ -94,6 +99,8 @@ class Engine:
         self.fail_streak = 0
         self.recent: list[str] = []
         self.last_prompt_tokens = 0
+        self.last_step: dict = {}            # the latest model step's record (its tokens, why it stopped)
+        self.kept: set[str] = set()          # calls the end of the context cut off whose file was kept
         self.ctx_limit = hub.catalog.context_per_request(model["id"])
         self.schema_tokens = 0               # the tool definitions take room in every request too
         self._partial = {"text": "", "thinking": ""}
@@ -206,8 +213,9 @@ class Engine:
             msg: dict = {"role": "assistant", "content": res["content"]}
             calls = res.get("tool_calls") or []
             if calls:
-                msg["tool_calls"] = [{"id": c["id"], "type": "function",
-                                      "function": {"name": c["name"], "arguments": c["arguments"] or "{}"}} for c in calls]
+                msg["tool_calls"] = [{"id": c["id"], "type": "function",       # what the model server can read back
+                                      "function": {"name": c["name"], "arguments": valid_arguments(c["arguments"])}}
+                                     for c in calls]
             if res.get("reasoning") and not self.cloud:
                 msg["reasoning_content"] = res["reasoning"]
             messages.append(msg)
@@ -241,9 +249,10 @@ class Engine:
                     continue
                 return final
             images: list[dict] = []
+            cut = res.get("finish_reason") == "length"
             for c in calls:
                 try:
-                    result = await self._execute(c, by_name)
+                    result = await self._execute(c, by_name, cut=cut)
                 except asyncio.CancelledError:
                     if persist:
                         await persist("tool", [{"type": "tool_result", "tool_call_id": c["id"], "name": c["name"],
@@ -359,6 +368,7 @@ class Engine:
                "seconds": round(time.monotonic() - t0, 2),
                "sent": sent, "finish": res.get("finish_reason")}
         self.steps.append(rec)
+        self.last_step = rec
         self.emit("usage", **{k: v for k, v in rec.items() if k not in ("type", "depth")})
         return res
 
@@ -374,7 +384,8 @@ class Engine:
         elif kind == "tool_args":
             self.emit("tool_args", id=data["id"], delta=data["delta"])
 
-    async def _execute(self, call: dict, by_name: dict[str, Tool]) -> ToolResult:
+    async def _execute(self, call: dict, by_name: dict[str, Tool], cut: bool = False) -> ToolResult:
+        """Run one call. `cut`: the answer it came in ended at the end of the context (finish "length")."""
         name, cid = call["name"], call["id"]
         t0 = time.monotonic()
         tool = by_name.get(name)
@@ -383,11 +394,9 @@ class Engine:
             result = ToolResult(f"There is no tool called {name!r}. Available: {', '.join(sorted(by_name))}.",
                                 is_error=True)
         else:
-            try:
-                args = parse_arguments(call.get("arguments"))
-            except ValueError as exc:
-                result = ToolResult(f"The arguments are not valid JSON ({exc}). Send them again as one JSON "
-                                    "object.", is_error=True)
+            args, bad = self._arguments(call, cut)
+            if bad is not None:
+                result = ToolResult(bad, is_error=True)
             else:
                 self.emit("tool_call", id=cid, name=name, arguments=args)
                 key = name + json.dumps(args, sort_keys=True, ensure_ascii=False)
@@ -441,7 +450,44 @@ class Engine:
                     self.seen[key] = (self.epoch, not result.is_error, (tries if epoch == self.epoch else 0) + 1)
                 else:
                     self.epoch += 1                   # it may have changed something: look-ups count again
+                if cid in self.kept and not result.is_error:
+                    result = ToolResult(self._kept_text(call, args, result.text), is_error=True)
         return self._finish(name, cid, args, result, t0)
+
+    def _arguments(self, call: dict, cut: bool) -> tuple[dict, str | None]:
+        """A call's arguments, or why it gets none. When the end of the context cut the call off, the model is
+        told so; a write_file keeps what it had written (its id goes into self.kept)."""
+        raw = call.get("arguments") or ""
+        try:
+            return parse_arguments(raw), None
+        except ValueError as exc:
+            if not cut:
+                return {}, f"The arguments are not valid JSON ({exc}). Send them again as one JSON object."
+        kept = salvage_cut_write(raw) if call["name"] == "write_file" else None
+        if kept is None:
+            return {}, self._cut_text(raw, "did not run") + " " + IN_PARTS
+        self.kept.add(call["id"])
+        return kept, None
+
+    def _cut_text(self, raw: str, what: str) -> str:
+        step = self.last_step
+        prompt, written = int(step.get("prompt_tokens") or 0), int(step.get("completion_tokens") or 0)
+        cap = int((step.get("sent") or {}).get("max_tokens") or 0)
+        where = (f"the limit for one answer ({cap:,} tokens)" if cap and written >= cap else
+                 f"the end of the context ({self.ctx_limit:,} tokens: {prompt:,} for the conversation, {written:,} "
+                 "that you wrote)")
+        return CUT_OFF.format(where=where, chars=len(raw), what=what)
+
+    def _kept_text(self, call: dict, args: dict, done: str) -> str:
+        content = args["content"]
+        tail = content[-300:]
+        fence = "`" * max(3, max((len(r) for r in re.findall(r"`+", tail)), default=0) + 1)
+        part = (f"a part of {len(content):,} characters added to the end of the file, which now ends with"
+                if args.get("append") else f"the first {len(content):,} characters of the file, ending with")
+        return (self._cut_text(call.get("arguments") or "", "did not finish") + f" What it had is kept: {done} "
+                f"That is {part}:\n{fence}\n{tail}\n{fence}\n"
+                "The file is not complete. Add the rest with write_file and append: true, starting exactly after "
+                "those characters. " + IN_PARTS)
 
     async def _ask(self, cid: str, name: str, args: dict, **extra) -> str:
         """The user's answer to a call that asks first. Meanwhile the card is free for others: the turn's lease is

@@ -111,7 +111,10 @@ def fake_embedding(x) -> list[float]:
 
 def make_llama(script: dict) -> FastAPI:
     """script["replies"]: list of replies used in order (the last repeats).
-    A reply is {"content": str, "reasoning": str, "tool_calls": [{"name","arguments"}], "finish": str}."""
+    A reply is {"content": str, "reasoning": str, "tool_calls": [{"name","arguments"}], "finish": str}; a tool
+    call's "raw" is its arguments text as sent (cut off, say), a reply's "usage" its token counts. Like
+    llama-server with --jinja, a request whose history has a tool call with arguments that are not a JSON object
+    is refused with a 500 (it renders every earlier call into the chat template)."""
     app = FastAPI()
     script.setdefault("requests", [])
 
@@ -155,6 +158,17 @@ def make_llama(script: dict) -> FastAPI:
     async def chat(request: Request):
         body = await request.json()
         script["requests"].append(body)
+        for m in body.get("messages") or []:
+            for tc in m.get("tool_calls") or []:
+                try:
+                    readable = isinstance(json.loads(tc["function"]["arguments"]), dict)
+                except (KeyError, TypeError, ValueError):
+                    readable = False
+                if not readable:
+                    script["refused"] = script.get("refused", 0) + 1
+                    return JSONResponse({"error": {"code": 500, "message": "Failed to parse tool call arguments as "
+                                                   "JSON: [json.exception.parse_error.101] parse error"}},
+                                        status_code=500)
         reply = next_reply(body)
         if reply.get("delay"):
             import asyncio
@@ -162,11 +176,12 @@ def make_llama(script: dict) -> FastAPI:
         if reply.get("error"):
             return JSONResponse({"error": {"message": reply["error"]}}, status_code=500)
         calls = [{"index": i, "id": f"call_{len(script['requests'])}_{i}", "type": "function",
-                  "function": {"name": c["name"], "arguments": json.dumps(c.get("arguments", {}))}}
+                  "function": {"name": c["name"],
+                               "arguments": c["raw"] if "raw" in c else json.dumps(c.get("arguments", {}))}}
                  for i, c in enumerate(reply.get("tool_calls") or [])]
         finish = reply.get("finish") or ("tool_calls" if calls else "stop")
         timings = {"prompt_n": 12, "prompt_ms": 50.0, "predicted_n": 7, "predicted_ms": 100.0, "cache_n": 3}
-        usage = {"prompt_tokens": 12, "completion_tokens": 7, "total_tokens": 19}
+        usage = reply.get("usage") or {"prompt_tokens": 12, "completion_tokens": 7, "total_tokens": 19}
         if not body.get("stream"):
             msg = {"role": "assistant", "content": reply.get("content", "")}
             if reply.get("reasoning"):

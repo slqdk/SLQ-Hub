@@ -106,7 +106,15 @@ async def write_file(ctx: ToolContext, args: dict) -> ToolResult:
     content = args.get("content")
     if not isinstance(content, str):
         return ToolResult("content must be a string", is_error=True)
-    existed = ctx.workdir.resolve(rel).exists()
+    p = ctx.workdir.resolve(rel)
+    existed = p.exists()
+    if args.get("append") is True and existed:       # the next part of a long file (0.16.2)
+        if not p.is_file():
+            return ToolResult(f"{rel} is a folder, not a file", is_error=True)
+        data = p.read_bytes() + content.encode()
+        ctx.workdir.write(rel, data, "agent", "hub", f"agent added to {rel}")
+        lines = data.count(b"\n") + 1
+        return ToolResult(f"Added {len(content.encode())} bytes to {rel} (now {len(data)} bytes, {lines} lines).")
     ctx.workdir.write(rel, content, "agent", "hub", f"agent wrote {rel}")
     return ToolResult(f"{'Overwrote' if existed else 'Created'} {rel} ({len(content.encode())} bytes, "
                       f"{content.count(chr(10)) + 1} lines).")
@@ -194,9 +202,13 @@ register(Tool("read_file", "Read a file from the working folder. Text comes back
               "(lines; pages for PDFs).",
               obj({"path": {"type": "string"}, "offset": {"type": "integer"}, "limit": {"type": "integer"}},
                   ["path"]), read_file, read_only=True))
-register(Tool("write_file", "Create or overwrite a text file in the working folder. Prefer edit_file for "
-              "changes to an existing file.",
-              obj({"path": {"type": "string"}, "content": {"type": "string", "description": "The whole file"}},
+register(Tool("write_file", "Create or overwrite a text file in the working folder, or with append: true add to "
+              "its end. Prefer edit_file for changes to an existing file. Write a long file in parts: the first with "
+              "write_file, each next one with append: true.",
+              obj({"path": {"type": "string"},
+                   "content": {"type": "string", "description": "The whole file - or with append, the next part"},
+                   "append": {"type": "boolean", "description": "Add content at the end of the file (it is created "
+                                                                "if it does not exist)"}},
                   ["path", "content"]), write_file))
 register(Tool("edit_file", "Replace exact text in a file. old_string must match the file exactly (whitespace "
               "included) and be unique unless replace_all is true. Read the file first.",

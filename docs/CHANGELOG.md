@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.16.2 - 2026-10-24
+
+- **A tool call cut off at the end of the context no longer breaks the chat.**
+  In chat 21 the assistant wrote a whole game into one file; after 13
+  minutes the context was full in the middle of it, and the next step failed
+  with "Failed to parse tool call arguments as JSON" - as every later message
+  in that chat would have. Now the assistant is told the call was cut off,
+  where and why, and a file it was writing keeps what was written, so it adds
+  the rest instead of starting over. A broken tool call never goes back to the
+  model server, so chat 21 itself can go on.
+- `write_file` can append, and the assistant is told to write long files in
+  parts.
+
 ## 0.16.1 - 2026-10-24
 
 - **Typing into Windows programs is exact.** In 0.16.0 `windows_app` typed

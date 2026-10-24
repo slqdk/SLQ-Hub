@@ -7,6 +7,7 @@ import re
 
 from ..chats import store as chats
 from ..llm.messages import image_part
+from ..llm.stream import valid_arguments
 from ..projects import blobs
 from .prompt import sent_stamp
 
@@ -130,7 +131,8 @@ def to_model_messages(rows: list[dict], current_run: str | None = None, keep_ima
         elif role == "assistant":
             text = "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
             msg: dict = {"role": "assistant", "content": text}
-            calls = [{"id": b["id"], "type": "function", "function": {"name": b["name"], "arguments": b.get("arguments") or "{}"}}
+            calls = [{"id": b["id"], "type": "function",      # as stored, unless the model server could not read it back
+                      "function": {"name": b["name"], "arguments": valid_arguments(b.get("arguments"))}}
                      for b in blocks if b.get("type") == "tool_call"]
             if calls:
                 msg["tool_calls"] = calls

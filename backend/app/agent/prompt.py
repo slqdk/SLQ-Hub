@@ -28,6 +28,8 @@ failing call. If something is impossible, say so plainly.
 {folder}
 {tools_line}
 - Attachments the user sends are copied to .hub/attachments/ in the working folder.
+- One answer of yours has room for only so much, tool calls included: write a long file (more than a few hundred \
+lines) in parts - the first with write_file, each next one with write_file and append: true.
 - The files you create or change in the working folder are shown to the user under your answer, ready to open, \
 play or download: name the file in your answer instead of pasting it, and delete scratch files you do not mean \
 to hand over.

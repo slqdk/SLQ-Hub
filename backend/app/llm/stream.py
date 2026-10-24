@@ -133,3 +133,47 @@ def parse_arguments(raw: str | dict | None) -> dict:
         return val if isinstance(val, dict) else {"value": val}
     except ValueError:
         raise ValueError(f"the tool arguments are not valid JSON: {s[:200]}")
+
+
+def valid_arguments(raw: str | dict | None) -> str:
+    """Tool-call arguments as JSON object text a chat template can render, for the history sent to a model: as
+    they are when they parse, repaired when parse_arguments can, else a small object saying they were not valid
+    JSON. llama-server parses every earlier call of the conversation and refuses the whole request over one it
+    cannot (chat 21: a call the context's end had cut off, sent back at the next step)."""
+    if isinstance(raw, dict):
+        return json.dumps(raw, ensure_ascii=False)
+    try:
+        if isinstance(json.loads(raw or "{}"), dict):
+            return raw or "{}"
+    except (TypeError, ValueError):
+        pass
+    try:
+        return json.dumps(parse_arguments(raw), ensure_ascii=False)
+    except ValueError:
+        s = str(raw)
+        more = f"... [{len(s) - 300:,} more characters]" if len(s) > 300 else ""
+        return json.dumps({"_not_valid_json": s[:300] + more}, ensure_ascii=False)
+
+
+def salvage_cut_write(raw: str) -> dict | None:
+    """write_file arguments the end of the context cut off inside their content: {"path", "content"} (and
+    "append") with what the model had written. None unless the path is whole and the cut is in the content."""
+    for drop in range(7):                            # the cut may split an escape: \ or \u00e
+        if drop > len(raw):
+            break
+        try:
+            val = json.loads(raw[:len(raw) - drop] + '"}')
+        except ValueError:
+            continue
+        if not (isinstance(val, dict) and isinstance(val.get("path"), str) and val["path"].strip()
+                and isinstance(val.get("content"), str) and val["content"]
+                and set(val) <= {"path", "content", "append"} and list(val)[-1] == "content"):
+            return None
+        content = val["content"]
+        if "\ud800" <= content[-1] <= "\udbff":    # half of a pair the cut split
+            content = content[:-1]
+        out = {"path": val["path"], "content": content}
+        if val.get("append") is True:
+            out["append"] = True
+        return out if content else None
+    return None

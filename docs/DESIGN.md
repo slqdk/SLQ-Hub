@@ -364,6 +364,26 @@ block (shown in the chat, never sent to a model). When someone can take
 over (below), the turn is handed over instead of forced to answer; a
 hand-over resets the guard.
 
+**Cut-off calls** (0.16.2). An answer that ends at the end of the context, or
+at the limit for one answer (finish `length`), may stop inside a tool call.
+Chat 21: the model put a whole game into one `write_file` with 48,596 of
+65,536 tokens already in use, and after 16,940 tokens the context was full,
+31 KB into the file's content. Such a call does not run. Its result says it
+was cut off and where - the context's end with the tokens on each side, or the
+limit for one answer - and to write a long file in parts (`write_file`, then
+`write_file` with `append: true`, as the system prompt says too). A cut-off
+`write_file` whose path is whole and whose cut is in its content keeps what it
+had: the content so far is written (appended, if the call said so), and the
+result shows its last 300 characters for the model to continue from, with
+`append`. Arguments that are not valid JSON - cut off or not - never go back to
+the model server as they are: llama-server parses every earlier call to
+render the chat template, and refused the whole next request (a 500), so the
+turn failed and every later message in that chat would have too. The history
+carries them as they were when they parse, repaired when the tolerant parser
+can, else `{"_not_valid_json": "<their first 300 characters>..."}` - within a
+turn and from a stored chat alike. The stored blocks keep what the model sent,
+for the UI and the export.
+
 The UI receives every event as it happens over SSE
 (`GET /hub/api/runs/{id}/events`): `queued` (with the position), `started`,
 `step`, `thinking`, `text`, `tool_start`, `tool_args`, `tool_call`,
@@ -407,7 +427,7 @@ message's time with the conversation.
 | Tool | What it does |
 |---|---|
 | `web_search`, `web_fetch` | SearXNG; fetch with an SSRF guard (no private addresses, the connection made to the checked address, every redirect checked), readable text extraction, truncation. |
-| `list_files`, `read_file`, `write_file`, `edit_file`, `search_files`, `move_file`, `delete_file` | The project's folder (or the chat's scratch folder). Every write is checked in as a sync revision, so everything can be restored. `read_file` on an image puts the image in front of the model. |
+| `list_files`, `read_file`, `write_file`, `edit_file`, `search_files`, `move_file`, `delete_file` | The project's folder (or the chat's scratch folder). Every write is checked in as a sync revision, so everything can be restored. `read_file` on an image puts the image in front of the model. `write_file` with `append: true` adds to a file's end (0.16.2): a long file goes in parts. |
 | `bash` | Runs in the sandbox in the project folder, with a timeout and output limits. Long output goes to a file, and the model gets the head, the tail and the path. C# with the .NET 10 SDK (0.15.1, below). |
 | `windows_app` | A Windows desktop program (Windows Forms or WPF on .NET 10) run under Wine on a virtual screen in the sandbox, built first if it is a project: screenshots when its first window is up, at each `shot` step and at the end; steps click (by position or by the text on the screen), type, press keys, drag, scroll and wait (0.16.0, "Windows programs on a virtual screen" below). The owner's chats, where the sandbox has Wine. |
 | `view_image`, `image_transform`, `image_ocr` | Look at an image; crop, resize, rotate, convert and compress (Pillow); Tesseract OCR (dan+eng). |
