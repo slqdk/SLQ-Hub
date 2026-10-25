@@ -12,11 +12,70 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, PlainTextResponse, RedirectResponse, Response, StreamingResponse
 
 
-class HostRouter(httpx.AsyncBaseTransport):
-    """Sends each request to the ASGI app registered for its host[:port]."""
+class StreamingASGITransport(httpx.AsyncBaseTransport):
+    """Like httpx.ASGITransport, but the response body arrives as the app sends it (ASGITransport waits for the
+    whole body): the dev server's model streams for real, so the UI can be watched while text arrives."""
 
-    def __init__(self, apps: dict[str, FastAPI]):
-        self.transports = {host: httpx.ASGITransport(app=app) for host, app in apps.items()}
+    def __init__(self, app):
+        self.app = app
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        import asyncio
+        body = await request.aread()
+        queue: asyncio.Queue = asyncio.Queue()
+        started: asyncio.Future = asyncio.get_running_loop().create_future()
+        scope = {"type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1", "method": request.method,
+                 "scheme": request.url.scheme, "path": request.url.path, "raw_path": request.url.raw_path.split(b"?")[0],
+                 "query_string": request.url.query, "root_path": "",
+                 "headers": [(k.lower(), v) for k, v in request.headers.raw],
+                 "server": (request.url.host, request.url.port or 80), "client": ("127.0.0.1", 12345)}
+        sent = False
+
+        async def receive():
+            nonlocal sent
+            if sent:
+                await asyncio.Event().wait()                   # the client stays connected
+            sent = True
+            return {"type": "http.request", "body": body, "more_body": False}
+
+        async def send(message):
+            if message["type"] == "http.response.start" and not started.done():
+                started.set_result((message["status"], message.get("headers") or []))
+            elif message["type"] == "http.response.body":
+                if message.get("body"):
+                    await queue.put(message["body"])
+                if not message.get("more_body"):
+                    await queue.put(None)
+
+        async def run():
+            try:
+                await self.app(scope, receive, send)
+            except Exception as exc:  # noqa: BLE001 - surfaces as the request's error
+                if not started.done():
+                    started.set_exception(exc)
+            finally:
+                await queue.put(None)
+
+        task = asyncio.create_task(run())
+        status, headers = await started
+
+        class Body(httpx.AsyncByteStream):
+            async def __aiter__(self):
+                while (chunk := await queue.get()) is not None:
+                    yield chunk
+
+            async def aclose(self):
+                task.cancel()
+
+        return httpx.Response(status, headers=headers, stream=Body(), request=request)
+
+
+class HostRouter(httpx.AsyncBaseTransport):
+    """Sends each request to the ASGI app registered for its host[:port]; `streaming` hosts answer as they go."""
+
+    def __init__(self, apps: dict[str, FastAPI], streaming: tuple[str, ...] = ()):
+        self.transports = {host: StreamingASGITransport(app) if host in streaming else httpx.ASGITransport(app=app)
+                           for host, app in apps.items()}
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         host = request.url.host
@@ -209,7 +268,13 @@ def make_llama(script: dict) -> FastAPI:
             return f"data: {json.dumps(obj)}\n\n".encode()
 
         async def gen():
-            if reply.get("reasoning"):
+            if reply.get("reasoning") and reply.get("pace"):      # streamed a little at a time, to watch it arrive
+                import asyncio
+                text = reply["reasoning"]
+                for i in range(0, len(text), 9):
+                    yield chunk({"reasoning_content": text[i:i + 9]})
+                    await asyncio.sleep(reply["pace"])
+            elif reply.get("reasoning"):
                 for part in (reply["reasoning"][:5], reply["reasoning"][5:]):
                     if part:
                         yield chunk({"reasoning_content": part})

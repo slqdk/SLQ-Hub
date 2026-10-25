@@ -10,7 +10,8 @@ sound, a PDF and notes: the card under the answer), "announce" (speech),
 pattern when ffmpeg is installed), "game" (slow steps, to try
 sending a message while it works), "page" (makes an artifact), a test case of
 Settings -> Tests (tests/dev_evals.py), "endless" (a file each step until the
-step limit: the answer is marked unfinished, with Continue), "think" (reasons first), "search" (web search), "web picture" (a picture
+step limit: the answer is marked unfinished, with Continue), "think" (reasons first), "long thinking" (a box full of
+thinking, streamed slowly), "search" (web search), "web picture" (a picture
 from the web in the answer), "picture" (an image),
 "loop" (repeats the same searches until the Hub makes it answer), "long chat" (a long answer with a big
 tool result, to fill the context: Continue in a new chat is offered), "make a skill" (writes a skill and shows its
@@ -296,6 +297,15 @@ def responder(body: dict) -> dict:
         if tools_done == 0:
             return {"tool_calls": [{"name": "web_search", "arguments": {"query": text[:60]}}]}
         return {"content": "Two results came back; the first one looks most relevant.\n\nSources:\n- [Result](https://example.com/a)"}
+    if "long thinking" in low:                          # 0.28.2: a box full of thinking, arriving slowly
+        steps = [f"{n}. Step {n} of the plan: check the field descriptors at offset 0x{n * 64:04X}, compare them "
+                 f"with the record layout, and note what differs before going on." for n in range(1, 41)]
+        text = ("Actually, let me do this systematically:\n\n" + "\n".join(steps[:20]) + "\n\nA longer thought "
+                "without line breaks follows, as models often write them: " + " ".join(
+                    f"the {w} part has to fit the rest of the structure," for w in ("first", "second", "third",
+                                                                                     "fourth", "fifth", "sixth"))
+                + " and then the records.\n\n" + "\n".join(steps[20:]))
+        return {"reasoning": text, "pace": 0.02, "content": "Done thinking: **the layout is clear**."}
     if "think" in low:
         return {"reasoning": "The user wants me to think. First I consider the question, then I check the numbers, "
                              "and then I write a short answer.", "content": "After thinking it over: **42**."}
@@ -469,7 +479,7 @@ def main() -> None:
                          "searxng": make_searxng(), "mcp.test": make_mcp_http(fakes["mcp"]),
                          "huggingface.co": make_hf(HF_DEMO), "civitai.com": make_civitai(CIVITAI_DEMO),
                          "delivery.civitai.test": make_civitai_delivery(CIVITAI_DEMO),
-                         "speech:7100": make_speech(fakes["speech"])})
+                         "speech:7100": make_speech(fakes["speech"])}, streaming=("llm",))
     t = Transports(llm=router, runner=router, comfy=router, sandbox=None if a.sandbox else router, web=router,
                    speech=router)
     app = create_app(env, t, startup=False)

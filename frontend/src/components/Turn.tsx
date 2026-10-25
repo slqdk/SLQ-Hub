@@ -7,6 +7,7 @@ import { bytes, seconds } from "../lib/format";
 import { toolLabel, toolSummary, type Decision, type Item, type ToolView } from "../lib/turns";
 import { useApp } from "../state";
 import { Markdown } from "./Markdown";
+import { ThinkingText } from "./ThinkingText";
 import { Lamp, type LampState } from "./ui";
 
 export interface TurnActions {
@@ -73,7 +74,7 @@ function Thinking({ text, live }: { text: string; live?: boolean }) {
         <Brain size={15} /> {live ? "Thinking" : `Thought for ${words} words`}
         {open || live ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
       </button>
-      {(open || live) && <div className="thinking-body">{live ? text.slice(-1500) : text}</div>}
+      {(open || live) && <ThinkingText text={text} live={live} />}
     </div>
   );
 }

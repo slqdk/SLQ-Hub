@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.28.2 - 2026-10-25
+
+- **Live thinking reads like a terminal.** While a model thinks, its box
+  follows the end: new lines appear at the bottom and nothing already on
+  screen moves. It used to show the last 1500 characters from their start,
+  so on a phone the words crept backwards while the newest ones were out of
+  sight below the box. Scroll up in the box to read, and it stays where you
+  are until you scroll back to the end. In the phone chat (/chat) too.
+
 ## 0.28.1 - 2026-10-25
 
 - **Settings → Assistant → Video tells the truth about first-to-last videos.**

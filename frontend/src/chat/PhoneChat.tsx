@@ -5,6 +5,7 @@ import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type R
 import { ArrowUp, Brain, ChevronDown, ChevronRight, Copy, Download, Image as ImageIcon, ImagePlus, KeyRound, Menu,
   RotateCcw, Square, SquarePen, Trash2, X } from "lucide-react";
 import { Markdown } from "../components/Markdown";
+import { ThinkingText } from "../components/ThinkingText";
 import { copyText } from "../lib/clipboard";
 import { saveText } from "../lib/download";
 import { HubError, keyFrom, listModels, makePicture, saveKey, SIZES, storedKey, streamChat, takeKeyFromLink,
@@ -674,7 +675,7 @@ function Thinking({ text, live }: { text: string; live: boolean }) {
         <Brain size={15} /> {live ? "Thinking" : `Thought for ${words} words`}
         {open || live ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
       </button>
-      {(open || live) && <div className="thinking-body">{live ? text.slice(-1500) : text}</div>}
+      {(open || live) && <ThinkingText text={text} live={live} />}
     </div>
   );
 }
