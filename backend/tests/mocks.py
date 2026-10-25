@@ -40,18 +40,20 @@ def make_supervisor(state: dict) -> FastAPI:
 
     @app.get("/status")
     async def status():
-        return {"processes": state["procs"], "gpu": {"vram_total": 24 * 1024**3, "vram_used": 1024**3}}
+        return {"processes": state["procs"], "gpu": {"vram_total": 24 * 1024**3,
+                                                     "vram_used": state.get("vram_used", 1024**3)}}
 
     @app.get("/gpu")
     async def gpu():
-        return {"vram_total": 24 * 1024**3, "vram_used": 1024**3}
+        return {"vram_total": 24 * 1024**3, "vram_used": state.get("vram_used", 1024**3)}
 
     @app.post("/start")
     async def start(request: Request):
         body = await request.json()
         state["starts"].append(body)
+        oom = state.get("vram_used", 0) > 20 * 1024**3        # the card is full: llama-server stops while loading
         state["procs"][body["name"]] = {"name": body["name"], "port": body["port"], "args": body["args"],
-                                        "state": "running", "returncode": None}
+                                        "state": "exited" if oom else "running", "returncode": 1 if oom else None}
         return state["procs"][body["name"]]
 
     @app.post("/stop")
@@ -64,6 +66,9 @@ def make_supervisor(state: dict) -> FastAPI:
 
     @app.get("/logs")
     async def logs():
+        if state.get("vram_used", 0) > 20 * 1024**3:
+            return PlainTextResponse("0.01.462.660 E ggml_backend_cuda_buffer_type_alloc_buffer: allocating 16383.34 MiB "
+                                     "on device 0: cudaMalloc failed: out of memory")
         return PlainTextResponse("log line")
 
     return app
@@ -127,6 +132,8 @@ def make_llama(script: dict) -> FastAPI:
 
     @app.get("/health")
     async def health():
+        if script.get("down"):                                # still loading, or never will
+            return JSONResponse({"error": {"message": "Loading model"}}, status_code=503)
         return {"status": "ok"}
 
     @app.post("/tokenize")
@@ -342,6 +349,8 @@ def make_comfy(state: dict) -> FastAPI:
 
     @app.get("/object_info")
     async def object_info():
+        if state.get("object_info_down"):                     # too busy to list its nodes
+            return JSONResponse({"error": "busy"}, status_code=503)
         names = ["UNETLoader", "QwenImage21Cache", "CLIPLoader", "VAELoader", "TextEncodeQwenImage21",
                  "EmptyLatentImage", "KSampler", "VAEDecode", "SaveImage", "SaveImageAdvanced", "LoadImage",
                  "KSamplerSelect", "RandomNoise", "CFGGuider", "SamplerCustomAdvanced", "ManualSigmas",
@@ -353,17 +362,25 @@ def make_comfy(state: dict) -> FastAPI:
                  "VAEEncodeAudio", "AudioMerge", "SLQAceStepReference", "SLQAceStepEncode", "SLQSeparateVocals",
                  "SLQSeedVC", "ModelSamplingSD3", "Wan22ImageToVideoLatent", "WanImageToVideo",
                  "WanFirstLastFrameToVideo", "EmptyHunyuanLatentVideo", "KSamplerAdvanced", "LoraLoaderModelOnly",
-                 "CreateVideo", "SaveVideo", "TrimAudioDuration", "AudioConcat"]
+                 "CreateVideo", "SaveVideo", "TrimAudioDuration", "AudioConcat", "VAEDecodeTiled"]
         names = [n for n in names if n not in state.get("missing_nodes", ())]
         return {n: {"input": {}, "output": []} for n in names}
 
     @app.post("/free")
     async def free():
         state["frees"] += 1
+        if state.get("on_free"):
+            state["on_free"]()
         return {}
 
     @app.post("/interrupt")
-    async def interrupt():
+    async def interrupt(request: Request):
+        state.setdefault("interrupts", []).append(await request.json())
+        return {}
+
+    @app.post("/queue")
+    async def queue_edit(request: Request):
+        state.setdefault("queue_edits", []).append(await request.json())
         return {}
 
     @app.post("/upload/image")

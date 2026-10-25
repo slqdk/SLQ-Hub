@@ -136,6 +136,11 @@ def test_the_checks_tell_good_answers_from_bad():
         "chat.math": "ANSWER: 10:45",
         "chat.json": "Her er dataene: firma er Holm",
         "chat.danish": "Dear all, a hyggelig party on December 4.",
+        # the first real run's answer: all right but the weekday of the sign-up date
+        "chat.danish-weekday": "Kære kolleger – vi samles til julefrokost:\n\n- Fredag den 4. december serveres frokost "
+                               "i kantinen.\n- Tilmeld dig senest torsdag den 20. november.\n- Du kan vælge mellem tre "
+                               "forskellige måltider.\n- Vi slutter af med kage og kaffe bagefter.\n\nVenlig hilsen, "
+                               "Ledelsen",
         "documents.csv": "REGION: Syd; 360.000 kr.\nMÅNED: juni",
         "documents.pdf": "SVAR: 2.150 driftstimer",
         "documents.log": "SVAR: 2026-10-02; E-5102; 5",
@@ -145,8 +150,10 @@ def test_the_checks_tell_good_answers_from_bad():
         got = _run_check(case_id, Turn(answer=text, calls=[{"name": "bash", "ok": True, "arguments": {}, "text": ""}]))
         assert all(got.values()), (case_id, got)
     for case_id, text in bad.items():
-        got = _run_check(case_id, Turn(answer=text))
+        got = _run_check(case_id.split("-")[0], Turn(answer=text))
         assert not all(got.values()), (case_id, got)
+    weekday = _run_check("chat.danish", Turn(answer=bad["chat.danish-weekday"]))
+    assert [k for k, v in weekday.items() if not v] == ["no wrong weekday for the dates (both are Fridays)"]
     # the page: an artifact with two fields, a reset and the formula
     html = ("<input id=c><input id=f><button>Nulstil</button><script>f.value = c.value * 9 / 5 + 32</script>")
     ok = _run_check("code.web", Turn(artifacts=[{"id": "x", "title": "Omregner", "type": "html", "content": html}]))
@@ -209,6 +216,9 @@ wb.save("budget.xlsx")
     cut.save(tmp_path / "cut.png")
     res = _check_lib(tmp_path, "images.cutout", {"images": [{"path": "cut.png"}], "expected": geo})
     assert all(c["ok"] for c in res.values() if c["level"] != "info"), res
+    assert res["a cut-out was made"]["detail"] == "cut.png"                # the file, not what a failure would say
+    assert _check_lib(tmp_path, "images.cutout", {"images": [], "expected": geo})["a cut-out was made"] == {
+        "name": "a cut-out was made", "ok": False, "level": "must", "detail": "no picture from the picture tools"}
     res = _check_lib(tmp_path, "images.edit", {"images": [{"path": "in.png"}], "inputs": {"picture": "in.png"},
                                                "expected": geo})
     assert res["the ball is blue now"]["ok"] is False and res["the rest of the picture is unchanged"]["ok"] is True

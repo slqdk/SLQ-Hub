@@ -169,7 +169,7 @@ class TestRuns:
     async def start(self, case_ids: list[str], model: str | None = None, thinking: bool | None = None) -> dict:
         if self.running():
             raise RuntimeError("A test run is already going")
-        cases = [BY_ID[i] for i in dict.fromkeys(case_ids) if i in BY_ID]
+        cases = sorted((BY_ID[i] for i in set(case_ids) if i in BY_ID), key=CASES.index)   # the suite's order
         if not cases:
             raise ValueError("Choose at least one test")
         from ..catalog import Catalog

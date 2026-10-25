@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.22.1 - 2026-10-25
+
+- **Video that ran out of memory at the very end.** In the first test run on
+  the card, Wan 2.2 5B's 5-second 720p clip sampled for about 11 minutes and
+  then ran out of memory turning the result into frames - four times. Video
+  is now decoded in tiles (512 px, the whole clip at once in time), which
+  needs a fraction of the memory.
+- **The card after a failed job.** ComfyUI then stopped answering while it
+  held the card, and no chat model could load after it: the last seven test
+  cases failed in seconds. Before a chat model loads, the Hub now makes sure
+  the card is empty - ComfyUI is told to stop its work, drop its queue and
+  free the card - and a model that did not fit is loaded once more after
+  that. A job the Hub gives up on is cancelled in ComfyUI, and a ComfyUI that
+  is slow to answer while a job runs is waited for instead of failed.
+- **No hand-over for a failure of the card.** Three failed picture, sound or
+  video calls in a row no longer hand the turn to the stronger model, which
+  would meet the same card; running out of memory tells the assistant not to
+  repeat the call but to ask for less, or say so.
+- **Tests.** The video cases run last, so a failure there cannot cost the
+  others their run. The Danish invitation is checked for a wrong weekday
+  (Qwen3.6 called Friday 20 November a Thursday). A passed "was made" check
+  names the file instead of what a failure would say, and a word Tesseract
+  read on the poster says how it was read.
+
 ## 0.22.0 - 2026-10-25
 
 - **Not finished, and Continue.** An answer that reached the most steps one

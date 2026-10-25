@@ -73,8 +73,16 @@ class Comfy:
         return (await self._get("/system_stats", timeout=10)).json()
 
     async def object_info(self, max_age: float = 300) -> dict:
+        """The nodes ComfyUI knows. A ComfyUI too busy to list them (it answered in time but this did not, in the
+        test run of 2026-10-25) is not a reason to fail a job: the last list is used while there is one."""
         if self._object_info is None or time.monotonic() - self._object_info_at > max_age:
-            self._object_info = (await self._get("/object_info", timeout=60)).json()
+            try:
+                self._object_info = (await self._get("/object_info", timeout=60)).json()
+            except ComfyError:
+                if self._object_info is None:
+                    raise
+                log.warning("ComfyUI did not list its nodes in time; using the list from before")
+                return self._object_info
             self._object_info_at = time.monotonic()
         return self._object_info
 
@@ -91,6 +99,21 @@ class Comfy:
                 await c.post(self.url + "/interrupt", json={"prompt_id": prompt_id} if prompt_id else {})
         except httpx.HTTPError:
             pass
+
+    async def clear_queue(self, prompt_id: str | None = None) -> None:
+        """Take one waiting job (or all) out of ComfyUI's queue."""
+        try:
+            async with self.client(10) as c:
+                await c.post(self.url + "/queue", json={"delete": [prompt_id]} if prompt_id else {"clear": True})
+        except httpx.HTTPError:
+            pass
+
+    async def cancel(self, prompt_id: str) -> None:
+        """A job the Hub has given up on does not go on in ComfyUI, holding the card: stopped if it runs, taken out
+        of the queue if it waits. (In the test run of 2026-10-25 a video job kept ComfyUI busy after the Hub stopped
+        waiting for it, and no chat model could load after it.)"""
+        await self.interrupt(prompt_id)
+        await self.clear_queue(prompt_id)
 
     async def upload_image(self, data: bytes, filename: str, mime: str = "image/png") -> str:
         """A file into ComfyUI's input folder - a picture, or sound for LoadAudio (ComfyUI takes both at
@@ -141,11 +164,12 @@ class Comfy:
         client_id = uuid.uuid4().hex
         prompt_id: str | None = None
         hist: dict | None = None
+        queued: dict = {}                       # the prompt id as soon as ComfyUI has the job
         try:
             if self.use_ws:
-                prompt_id = await self._run_ws(graph, client_id, on_progress, timeout)
+                prompt_id = await self._run_ws(graph, client_id, on_progress, timeout, queued)
             else:
-                prompt_id = await self.queue(graph, client_id)
+                prompt_id = queued["id"] = await self.queue(graph, client_id)
                 await self._poll(prompt_id, timeout)
             hist = await self.history(prompt_id)
             status = hist.get("status") or {}
@@ -168,13 +192,14 @@ class Comfy:
                                   "video": "the workflow finished without a video"}.get(kind,
                                                                                          "the workflow finished without a sound file"))
             return files, texts
-        except asyncio.CancelledError:
-            if prompt_id:
-                await asyncio.shield(self.interrupt(prompt_id))
+        except BaseException:
+            # Stopped, failed or given up on: whatever ComfyUI still does with the job, it stops doing.
+            if queued.get("id"):
+                await asyncio.shield(self.cancel(queued["id"]))
             raise
         finally:
             if not keep:
-                await asyncio.shield(self.forget(graph, prompt_id, hist))
+                await asyncio.shield(self.forget(graph, prompt_id or queued.get("id"), hist))
 
     async def forget(self, graph: dict, prompt_id: str | None, hist: dict | None = None) -> None:
         """Delete what ComfyUI keeps of a job: its history entry (the prompt and file names, in memory) and, with
@@ -216,40 +241,58 @@ class Comfy:
             except OSError as exc:
                 log.warning("could not delete ComfyUI's %s/%s: %s", kind, name, exc)
 
-    async def _poll(self, prompt_id: str, timeout: float) -> None:
+    async def _poll(self, prompt_id: str, timeout: float, quiet: float = 300) -> None:
+        """Until the job ends. A ComfyUI that does not answer for a while (loading a large model) is asked again;
+        one that has not answered for `quiet` seconds is given up on."""
         deadline = time.monotonic() + timeout
+        answered = time.monotonic()
         while time.monotonic() < deadline:
-            hist = await self.history(prompt_id)
+            try:
+                hist = await self.history(prompt_id)
+            except ComfyError as exc:
+                if time.monotonic() - answered > quiet:
+                    raise ComfyError(f"ComfyUI has not answered for {int(quiet)} s ({exc})") from exc
+                log.info("ComfyUI did not answer while job %s runs (%s); waiting on", prompt_id, exc)
+                await asyncio.sleep(2.0)
+                continue
+            answered = time.monotonic()
             status = hist.get("status") or {}
             if status.get("completed") or status.get("status_str") in ("success", "error"):
                 return
             await asyncio.sleep(1.0)
-        await self.interrupt(prompt_id)
         raise ComfyError(f"the ComfyUI job did not finish within {int(timeout)} s")
 
-    async def _run_ws(self, graph: dict, client_id: str, on_progress: ProgressFn | None, timeout: float) -> str:
+    async def _run_ws(self, graph: dict, client_id: str, on_progress: ProgressFn | None, timeout: float,
+                      queued: dict | None = None) -> str:
+        queued = queued if queued is not None else {}
         ws_url = self.url.replace("http://", "ws://").replace("https://", "wss://") + f"/ws?clientId={client_id}"
         try:
             ws = await ws_connect(ws_url, max_size=64 * 1024 * 1024, open_timeout=10)
         except Exception:                       # no websocket: poll instead
-            prompt_id = await self.queue(graph, client_id)
+            prompt_id = queued["id"] = await self.queue(graph, client_id)
             await self._poll(prompt_id, timeout)
             return prompt_id
         async with ws:
-            prompt_id = await self.queue(graph, client_id)
+            prompt_id = queued["id"] = await self.queue(graph, client_id)
             deadline = time.monotonic() + timeout
             while True:
                 left = deadline - time.monotonic()
                 if left <= 0:
-                    await self.interrupt(prompt_id)
                     raise ComfyError(f"the ComfyUI job did not finish within {int(timeout)} s")
                 try:
                     msg = await asyncio.wait_for(ws.recv(), timeout=min(left, 30))
                 except asyncio.TimeoutError:
-                    hist = await self.history(prompt_id)       # missed the end?
+                    try:
+                        hist = await self.history(prompt_id)   # missed the end?
+                    except ComfyError as exc:              # busy (loading a model): the socket is still open
+                        log.info("ComfyUI did not answer while job %s runs (%s); waiting on", prompt_id, exc)
+                        continue
                     if (hist.get("status") or {}).get("completed"):
                         return prompt_id
                     continue
+                except Exception as exc:                    # the socket closed: ComfyUI stopped or restarted
+                    raise ComfyError(f"ComfyUI closed the connection while the job ran "
+                                     f"({exc.__class__.__name__})") from exc
                 if isinstance(msg, bytes):
                     continue                                    # preview frames
                 try:

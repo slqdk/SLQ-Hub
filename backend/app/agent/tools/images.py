@@ -13,7 +13,7 @@ from ...catalog import Catalog
 from ...chats import store as chats
 from ...projects import blobs
 from ...projects.store import mime_of
-from .base import Tool, ToolContext, ToolResult, obj, register
+from .base import Tool, ToolContext, ToolResult, gpu_failure, obj, register
 from .shell import SandboxError, sandbox_exec
 
 IMAGE_EXT = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tif", ".tiff"}
@@ -194,7 +194,7 @@ async def image_generate(ctx: ToolContext, args: dict) -> ToolResult:
                                     negative=args.get("negative") or "", ticket=ctx.ticket,
                                     on_progress=await _progress(ctx))
     except ImageError as exc:
-        return ToolResult(f"Image generation failed: {exc}", is_error=True)
+        return gpu_failure("Image generation failed", exc)
     paths = _save_outputs(ctx, items, args.get("save_as"), prompt)
     desc = ", ".join(f"{it['width']}x{it['height']} seed {it['seed']}" for it in items)
     where = f" Saved as {', '.join(paths)}." if paths else ""
@@ -224,7 +224,7 @@ async def image_edit(ctx: ToolContext, args: dict) -> ToolResult:
                                 model=_picture_model(ctx, args), ticket=ctx.ticket, on_progress=await _progress(ctx),
                                 count=int(args.get("count") or 1))
     except ImageError as exc:
-        return ToolResult(f"Image editing failed: {exc}", is_error=True)
+        return gpu_failure("Image editing failed", exc)
     paths = _save_outputs(ctx, items, args.get("save_as"), args.get("prompt") or "edit")
     where = f" Saved as {', '.join(paths)}." if paths else ""
     return ToolResult(f"Edited image(s) ready ({len(items)}).{where}",
@@ -243,7 +243,7 @@ async def image_remove_background(ctx: ToolContext, args: dict) -> ToolResult:
     try:
         items = await pipe.remove_background(data, ticket=ctx.ticket, on_progress=await _progress(ctx))
     except ImageError as exc:
-        return ToolResult(f"Background removal failed: {exc}", is_error=True)
+        return gpu_failure("Background removal failed", exc)
     save_as = args.get("save_as") or f"{Path(name).stem}-cutout.png"
     ctx.workdir.write(save_as, blobs.read(items[0]["sha"]), "agent", "hub", f"cut out {save_as}")
     return ToolResult(f"Background removed; saved as {save_as} (PNG with transparency).",

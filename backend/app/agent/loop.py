@@ -570,8 +570,8 @@ class Engine:
         """Automatic hand-over: three failed tool calls in a row, or the same
         call three times in the last six. A call the user declined is neither:
         no means no, not "hand it to someone who will" (the cloud, perhaps)."""
-        if result.is_error and result.text.startswith(DECLINED):
-            return
+        if result.is_error and (result.text.startswith(DECLINED) or result.hub_fault):
+            return                           # the card or ComfyUI failed: a stronger model meets the same card
         self.fail_streak = self.fail_streak + 1 if result.is_error else 0
         sig = name + json.dumps(args, sort_keys=True, ensure_ascii=False)[:500]
         self.recent = (self.recent + [sig])[-6:]

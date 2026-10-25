@@ -76,6 +76,11 @@ def find(inp: dict, name: str | None = None, suffixes: tuple[str, ...] = ()) -> 
     return None
 
 
+def name_of(path: str | None) -> str:
+    """A made file's name for a check's detail ("" for none, so the detail can say what is missing)."""
+    return os.path.basename(path) if path else ""
+
+
 def output(inp: dict, kind: str) -> str | None:
     """The newest picture, sound or video the turn's tools made (their paths, from the tool results)."""
     items = [x for x in inp.get(kind, []) if os.path.isfile(x["path"])]
@@ -292,7 +297,7 @@ def _excel(inp: dict) -> None:
 @case("images.poster")
 def _poster(inp: dict) -> None:
     p = output(inp, "images")
-    if not check("a picture was made", p is not None, "no picture from the picture tools"):
+    if not check("a picture was made", p is not None, name_of(p) or "no picture from the picture tools"):
         return
     from PIL import Image
     img = Image.open(p).convert("RGB")
@@ -300,7 +305,8 @@ def _poster(inp: dict) -> None:
     words = ocr_words(img)
     for target in ("JUL", "HALLEN", "DECEMBER"):
         got = read_word(words, target)
-        check(f"Tesseract reads {target}", got is not None, f"read: {' '.join(words[:30])}"[:300], "should")
+        check(f"Tesseract reads {target}", got is not None,
+              f"read as {got}" if got else f"read: {' '.join(words[:30])}"[:300], "should")
     import numpy as np
     a = np.asarray(img, dtype=np.float32)
     h, w = a.shape[:2]
@@ -316,7 +322,7 @@ def _poster(inp: dict) -> None:
 def _edit(inp: dict) -> None:
     p = output(inp, "images")
     src = inp.get("inputs", {}).get("picture")
-    if not check("an edited picture was made", p is not None, "no picture from the picture tools"):
+    if not check("an edited picture was made", p is not None, name_of(p) or "no picture from the picture tools"):
         return
     import numpy as np
     from PIL import Image
@@ -343,7 +349,7 @@ def _edit(inp: dict) -> None:
 @case("images.cutout")
 def _cutout(inp: dict) -> None:
     p = output(inp, "images")
-    if not check("a cut-out was made", p is not None, "no picture from the picture tools"):
+    if not check("a cut-out was made", p is not None, name_of(p) or "no picture from the picture tools"):
         return
     import numpy as np
     from PIL import Image
@@ -369,7 +375,7 @@ def _cutout(inp: dict) -> None:
 
 def _sound(inp: dict, what: str) -> None:
     p = output(inp, "audio")
-    if not check(f"{what} was made", p is not None, "no sound from the sound tools"):
+    if not check(f"{what} was made", p is not None, name_of(p) or "no sound from the sound tools"):
         return
     meta = probe(p)
     secs = duration(meta)
@@ -401,7 +407,7 @@ def _effect(inp: dict) -> None:
 
 def _video(inp: dict) -> dict | None:
     p = output(inp, "video")
-    if not check("a video was made", p is not None, "no video from video_generate"):
+    if not check("a video was made", p is not None, name_of(p) or "no video from video_generate"):
         return None
     meta = probe(p)
     v = next((s for s in meta.get("streams", []) if s.get("codec_type") == "video"), {})
@@ -441,7 +447,7 @@ def _i2v(inp: dict) -> None:
 @case("code.python")
 def _roman(inp: dict) -> None:
     p = find(inp, "roman.py")
-    if not check("roman.py was written", p is not None, "no roman.py in the folder"):
+    if not check("roman.py was written", p is not None, p or "no roman.py in the folder"):
         return
     n, bad, first = unit_tests(".hub/tests/test_roman_hidden.py", os.path.dirname(p) or ".")
     check("hidden tests pass", n > 0 and bad == 0, f"{n - bad} of {n} passed" + (f"; {first}" if first else ""))

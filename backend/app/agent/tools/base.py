@@ -17,6 +17,25 @@ class ToolResult:
     images: list[dict] = field(default_factory=list)      # [{"sha", "mime"}] shown to the model and the UI
     is_error: bool = False
     display: dict | None = None                            # extra for the UI (artifact ref, generated images)
+    # The card or ComfyUI failed, not the call: it does not count towards a hand-over (a stronger model would meet
+    # the same card - the test run of 2026-10-25 handed a video turn over after three out-of-memory failures).
+    hub_fault: bool = False
+
+
+OOM_NOTE = (" The graphics card ran out of memory: the same call fails the same way, so do not repeat it - ask for "
+            "less (smaller, shorter) or tell the user.")
+
+
+def gpu_failure(what: str, exc: Exception) -> ToolResult:
+    """A picture, sound or video job that failed: `what` failed: why. A failure on the card or in ComfyUI (the
+    pipeline's error says hub=True, or it ran out of memory) is the Hub's, and running out of memory says what to
+    do instead of trying again - each try of a 720p video took eleven minutes before it ran out at the end."""
+    text = f"{what}: {exc}"
+    hub = bool(getattr(exc, "hub", False))
+    if "out of memory" in text.lower():
+        text += OOM_NOTE
+        hub = True
+    return ToolResult(text, is_error=True, hub_fault=hub)
 
 
 @dataclass

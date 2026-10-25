@@ -2,11 +2,18 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 
 from ..catalog import Catalog
 from .comfy import Comfy, ComfyError
-from .runner import AUX_PORTS, MAIN, Runner
+from .runner import AUX_PORTS, MAIN, Runner, RunnerError
+
+log = logging.getLogger("hub.gpu")
+
+FREE_BELOW_GB = 2.5          # the card counts as empty below this (the VM's own use is a fraction of a GB)
+FREE_WAIT_S = 30             # for ComfyUI's /free to take effect
+CLEAR_WAIT_S = 120           # for ComfyUI to stop a job and free the card
 
 
 class GpuBackend:
@@ -28,8 +35,18 @@ class GpuBackend:
             if not self.catalog.installed(entry):
                 raise ValueError(f"the files for {ident} are not downloaded yet (Settings -> Models)")
             name, port = MAIN
-            await self.runner.start(name, port, self.catalog.server_args(ident, self.models_dir))
-            await self.runner.wait_ready(name, port)
+            args = self.catalog.server_args(ident, self.models_dir)
+            await self._clear_card()
+            try:
+                await self.runner.start(name, port, args)
+                await self.runner.wait_ready(name, port)
+            except RunnerError as exc:
+                if "out of memory" not in str(exc).lower():
+                    raise
+                log.warning("%s did not fit on the card (%s); clearing ComfyUI and trying once more", ident, exc)
+                await self._clear_card(force=True)
+                await self.runner.start(name, port, args)
+                await self.runner.wait_ready(name, port)
         elif kind == "comfy":
             try:
                 await self.comfy.system_stats()
@@ -49,7 +66,8 @@ class GpuBackend:
             await self.runner.stop(MAIN[0])
         elif kind == "comfy":
             await self.comfy.free()
-            await self._wait_vram_free()
+            if not await self._wait_vram_free():
+                await self._clear_card(force=True)
         elif kind == "embedgpu":
             await self.runner.stop("embed-gpu")
 
@@ -97,13 +115,38 @@ class GpuBackend:
             out.append(a)
         return out + ["-ngl", "all"]
 
-    async def _wait_vram_free(self, below_gb: float = 2.5, timeout: float = 30) -> None:
+    async def _wait_vram_free(self, below_gb: float = FREE_BELOW_GB, timeout: float | None = None) -> bool:
         """ComfyUI's /free is applied by its worker a moment later; wait until
-        the card is really empty before an LLM tries to load."""
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            g = await self.runner.gpu()
-            used = g.get("vram_used")
+        the card is really empty before an LLM tries to load. False: it was not."""
+        deadline = time.monotonic() + (FREE_WAIT_S if timeout is None else timeout)
+        while True:
+            used = await self._vram_used()
             if used is None or used < below_gb * 1024**3:
-                return
+                return True
+            if time.monotonic() >= deadline:
+                return False
             await asyncio.sleep(0.5)
+
+    async def _vram_used(self) -> int | None:
+        g = await self.runner.gpu()
+        used = g.get("vram_used")
+        return int(used) if isinstance(used, (int, float)) else None
+
+    async def _clear_card(self, force: bool = False) -> None:
+        """Before a model loads, nothing else may hold the card. The scheduler has unloaded what it knows of, but
+        ComfyUI can still hold memory: a job the Hub stopped waiting for. In the test run of 2026-10-25 ComfyUI
+        stopped answering during a video, kept its memory, and every model load after it failed (out of memory) -
+        seven test cases in a row. Here ComfyUI is told to stop what it does, drop its queue and free the card,
+        and the card is watched until it is empty (or two minutes pass). `force`: even if it looks empty."""
+        used = await self._vram_used()
+        if used is None or (used < FREE_BELOW_GB * 1024**3 and not force):
+            return
+        log.warning("%.1f GB in use on the card before a model loads: stopping ComfyUI's work and freeing it",
+                    used / 1024**3)
+        await self.comfy.interrupt()
+        await self.comfy.clear_queue()
+        await self.comfy.free()
+        if not await self._wait_vram_free(timeout=CLEAR_WAIT_S):
+            left = await self._vram_used()
+            log.warning("the card still has %.1f GB in use after ComfyUI was asked to free it",
+                        (left or 0) / 1024**3)

@@ -159,6 +159,20 @@ for statistics.
    - After that a **switch is pending**: nothing new is admitted. When the
      last running job releases, the scheduler unloads (llama-server stop or
      ComfyUI `/free`), loads what the head needs, and starts it.
+   - **The card must be empty for a chat model** (0.22.1). The scheduler only
+     knows what it loaded, and ComfyUI can hold the card after a job the Hub
+     gave up on: in the first test run on the card (2026-10-25) ComfyUI
+     stopped answering during a video, kept its memory, and the next seven
+     chat model loads failed (out of memory). Before an LLM loads, and when
+     ComfyUI's `/free` leaves the card in use, the backend tells ComfyUI to
+     interrupt what it runs, clear its queue and free the card, and watches
+     the VRAM until it is under 2.5 GB (two minutes at most); a model that
+     still did not fit (llama-server's "out of memory") is tried once more
+     after that. A job the Hub stops waiting for is cancelled in ComfyUI
+     (`/interrupt` for its prompt, and out of the queue); a ComfyUI that is
+     slow to answer while a job runs (loading a large model) is waited for,
+     not failed, and its last node list stands in when it is too busy to list
+     them.
 4. A lease that asks to switch takes precedence over waiting jobs. It
    waits only for the other running jobs to finish; the lease keeps its slot.
 5. Cancelling a waiting job removes it. Cancelling a running job aborts its
@@ -782,7 +796,13 @@ the API and in the troubleshooting export.
 
 **Hand-over** (`Engine._stuck`). A turn is stuck when the loop guard trips,
 when three tool calls in a row fail, when the same call is made three times
-in six, or when the model calls `escalate`. Who takes over, in this order:
+in six, or when the model calls `escalate`. A failure of the card or ComfyUI
+(a picture, sound or video tool's `hub_fault`: ComfyUI's or the scheduler's
+error, running out of memory) does not count (0.22.1): the first test run
+handed a video turn to Qwen3.8 27B after three out-of-memory failures, which
+the stronger model then met too. Running out of memory also says, in the
+result, not to repeat the call but to ask for less. Who takes over, in this
+order:
 
 - **The stronger model on this server** (Settings → Assistant → "When the
   model gets stuck, hand over to", default Qwen3.8 27B), when it is
@@ -1267,7 +1287,7 @@ sound, with ComfyUI's own nodes only (the image is unchanged):
   templates (workflow_templates 0.11.93 for ComfyUI v0.42.3). 5B:
   `UNETLoader → ModelSamplingSD3`, `CLIPLoader` (type `wan`), `VAELoader`,
   `Wan22ImageToVideoLatent` (the picture as its first frame), `KSampler`,
-  `VAEDecode`, `CreateVideo`, `SaveVideo` (MP4, H.264). 14B: two `UNETLoader`
+  `VAEDecodeTiled` (0.22.1, below), `CreateVideo`, `SaveVideo` (MP4, H.264). 14B: two `UNETLoader`
   (each through `LoraLoaderModelOnly` when fast) → `ModelSamplingSD3`;
   `EmptyHunyuanLatentVideo` for a description, `WanImageToVideo` for a
   picture, `WanFirstLastFrameToVideo` for two; the high-noise sampler runs
@@ -1275,6 +1295,19 @@ sound, with ComfyUI's own nodes only (the image is unchanged):
   rest. Wan's own Chinese negative prompt comes first, the user's after it.
   Frames are 4n + 1 (the VAE packs four frames per latent frame, plus the
   first).
+- **Decoded in tiles** (0.22.1). The templates decode the clip whole
+  (`VAEDecode`). In the first test run on the card the 5B's 5-s 720p clip
+  then asked for 18.56 GiB in one piece with 9.3 GiB free and ran out of
+  memory - four tries, each after the whole 10 minutes of sampling, since the
+  decode comes last. ComfyUI's own fall-back sizes its tiles from its
+  estimate of the whole decode (13.4 GiB for that clip in bf16), which lets a
+  tile be 1024 px - most of the frame - and is probably why it did not save
+  it. Both graphs now end in `VAEDecodeTiled` with 512-px tiles overlapping
+  by 64, under a third of that. Time is not tiled (`temporal_size` 4096, the
+  node's largest): both Wan VAEs decode a latent frame or two at a time with
+  a cache, so a shorter time tile saves nothing and would leave a seam.
+  Measured in that run: 31-32 s a step at 1280×704 and 121 frames (20
+  steps, after about 30 s of loading), so about 11 minutes for a 5-s clip.
 - **Sizes** (`size_for`): the model's 480p or 720p pixel count in the
   picture's shape (held between 1:2.5 and 2.5:1), or landscape, portrait or
   square, rounded to 32 (5B: the 16× VAE and 2×2 patches) or 16 (14B).
@@ -1623,6 +1656,11 @@ and research and tasks (the web, a task in several steps). Their input files
 are made the same way every time (`fixtures.py`, fixed seeds), and what a
 right answer holds is worked out from them, not written by hand.
 
+The cases run in the suite's order (0.22.1): the chat model's own work
+first (chat, documents, code, research and tasks), then pictures and sound,
+which take the card from it, and video last - so a failure of the heaviest
+job cannot cost the others their run, as it did in the first run on the card.
+
 Each case is a real chat (`chats.test_run` = the run: not in the chat list,
 deleted with the run) and a real turn: the agent, the model the run chose
 (thinking as in a chat, or on or off), the tools and the sandbox - nothing is
@@ -1738,10 +1776,11 @@ whether the work lives up to what is expected.
   (chat 24) did not follow its song; whether 0.20.2's own-sound timbre and
   keep 0.5 make remakes follow, and what the codes check says on the real
   weights, is not known yet.
-- **Video** (0.19.0, §8) ran only on a CPU ComfyUI with stand-ins. Unknown on
-  the 7900 XTX: the time per clip (the 5B at 720p and 121 frames; the 14B
-  pair fast and full); whether the 5B at 720p fits in 24 GB under ComfyUI's
-  memory management; the fp8 experts on gfx1100; and the 14B pair's memory -
+- **Video** (0.19.0, §8): the first test run on the card (2026-10-25)
+  measured the 5B at 720p and 121 frames - 31-32 s a step, about 11 minutes a
+  clip - and found its decode out of memory (hence the tiles, 0.22.1, not yet
+  seen on the card, nor how they look at their seams). Unknown on
+  the 7900 XTX: the 14B pair's time, fast and full; the fp8 experts on gfx1100; and the 14B pair's memory -
   ComfyUI loads the high-noise expert, then the low-noise one (14.3 GB each),
   which with the 6.7 GB text encoder is about 35 GB of weights for the VM's
   40 GB of RAM if ComfyUI keeps them all cached. If it swaps or runs out,

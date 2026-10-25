@@ -9,7 +9,7 @@ import unicodedata
 import uuid
 from pathlib import Path
 
-from .base import Tool, ToolContext, ToolResult, obj, register
+from .base import Tool, ToolContext, ToolResult, gpu_failure, obj, register
 from .shell import SandboxError, sandbox_exec
 
 AUDIO_EXT = {".mp3", ".wav", ".flac", ".ogg", ".opus", ".m4a", ".aac", ".webm", ".mp4", ".mka", ".aiff", ".aif"}
@@ -248,7 +248,7 @@ async def speech_generate(ctx: ToolContext, args: dict) -> ToolResult:
     except FileNotFoundError as exc:
         return ToolResult(f"No such voice clip in the working folder: {exc}", is_error=True)
     except (ValueError, AudioError) as exc:
-        return ToolResult(f"Speech failed: {exc}", is_error=True)
+        return gpu_failure("Speech failed", exc)
     _save(ctx, rel, out["data"], "spoke")
     lang = LANGUAGE_NAMES.get(language, language)
     note = f" Note: {out['note']}" if out.get("note") else ""
@@ -337,7 +337,7 @@ async def music_generate(ctx: ToolContext, args: dict) -> ToolResult:
     except FileNotFoundError as exc:
         return ToolResult(f"No such file in the working folder: {exc}", is_error=True)
     except (ValueError, AudioError) as exc:
-        return ToolResult(f"Music generation failed: {exc}", is_error=True)
+        return gpu_failure("Music generation failed", exc)
     _save(ctx, rel, out["data"], "made")
     words = "instrumental" if not lyrics.strip() or lyrics.strip().lower() in ("[instrumental]", "[inst]") else \
         f"lyrics in {out['language']}"
@@ -423,7 +423,7 @@ async def music_remake(ctx: ToolContext, args: dict) -> ToolResult:
     except FileNotFoundError as exc:
         return ToolResult(f"No such file in the working folder: {exc}", is_error=True)
     except (ValueError, AudioError) as exc:
-        return ToolResult(f"The remake failed: {exc}", is_error=True)
+        return gpu_failure("The remake failed", exc)
     _save(ctx, rel, out["data"], "made")
     sound = f" with the sound of {str(args['reference']).strip()}" if reference else " with its own sound"
     words = "no lyrics given, so the words are not kept" if not lyrics.strip() else f"lyrics in {out['language']}"
@@ -530,7 +530,7 @@ async def audio_separate(ctx: ToolContext, args: dict) -> ToolResult:
     except FileNotFoundError as exc:
         return ToolResult(f"No such file in the working folder: {exc}", is_error=True)
     except (ValueError, AudioError) as exc:
-        return ToolResult(f"Separating failed: {exc}", is_error=True)
+        return gpu_failure("Separating failed", exc)
     for stem in stems:
         _save(ctx, paths[stem], out[stem], "separated")
     listed = " and ".join(f"{paths[x]} ({x})" for x in stems)
@@ -582,7 +582,7 @@ async def voice_convert(ctx: ToolContext, args: dict) -> ToolResult:
     except FileNotFoundError as exc:
         return ToolResult(f"No such file in the working folder: {exc}", is_error=True)
     except (ValueError, AudioError) as exc:
-        return ToolResult(f"Voice conversion failed: {exc}", is_error=True)
+        return gpu_failure("Voice conversion failed", exc)
     _save(ctx, paths["mix"], out["data"], "made")
     shown = [{"path": paths["mix"], "seconds": round(seconds, 1), "model": out["model"]["name"]}]
     extra = ""
@@ -670,7 +670,7 @@ async def sound_generate(ctx: ToolContext, args: dict) -> ToolResult:
                                negative=str(args.get("negative") or ""), ticket=ctx.ticket,
                                on_progress=await _progress(ctx))
     except (ValueError, AudioError) as exc:
-        return ToolResult(f"Sound generation failed: {exc}", is_error=True)
+        return gpu_failure("Sound generation failed", exc)
     _save(ctx, rel, out["data"], "made")
     return ToolResult(f"Saved {rel}: {out['seconds']:g} s, {out['model']['name']}, seed {out['seed']} "
                       f"({out['compute']:.0f} s on the card). {_reach(ctx, out['data'])} The model got: "

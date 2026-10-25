@@ -22,7 +22,9 @@ from . import workflows as W
 
 
 class ImageError(RuntimeError):
-    pass
+    def __init__(self, message: str = "", hub: bool = False):
+        super().__init__(message)
+        self.hub = hub                       # the card, ComfyUI or a service failed - not the request
 
 
 # Set for a person's chat (agent/device.py): ComfyUI keeps nothing of its jobs - no history entry, no copies of
@@ -111,7 +113,7 @@ class ImagePipeline:
         try:
             info = await self.hub.comfy.object_info()
         except ComfyError as exc:
-            raise ImageError(str(exc))
+            raise ImageError(str(exc), hub=True) from exc
         missing = sorted(W.class_types(graph) - set(info))
         if missing:
             raise ImageError(f"ComfyUI does not know these nodes: {', '.join(missing)} - update ComfyUI "
@@ -135,7 +137,7 @@ class ImagePipeline:
                 texts.update(out_texts)
             return images
         except (ComfyError, SchedulerError) as exc:
-            raise ImageError(str(exc))
+            raise ImageError(str(exc), hub=True) from exc
         finally:
             if own is not None:
                 await own.release()

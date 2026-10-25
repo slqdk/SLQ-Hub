@@ -16,8 +16,11 @@ from . import fixtures
 from .checks import (C, Turn, answer_line, bullets, json_object, language, near, numbers, only_json, plain, urls,
                      used, word_count)
 
-AREAS = (("chat", "Chat"), ("documents", "Documents"), ("images", "Images"), ("sound", "Sound"),
-         ("video", "Video"), ("code", "Code"), ("agent", "Research and tasks"))
+# In the order they run: the chat model's own work first, then what takes the card from it - and video, the
+# heaviest, last (in the first run on the card, video left ComfyUI holding the card and the seven cases after it
+# could not load the chat model).
+AREAS = (("chat", "Chat"), ("documents", "Documents"), ("code", "Code"), ("agent", "Research and tasks"),
+         ("images", "Images"), ("sound", "Sound"), ("video", "Video"))
 
 
 @dataclass
@@ -176,6 +179,8 @@ def _invite(t: Turn, e: dict) -> list[dict]:
     long = [p for p in pts if word_count(p) > 12]
     low = plain(text).lower()
     lines = [x.strip() for x in plain(text).splitlines() if x.strip()]
+    wrong = re.search(r"\b(mandag|tirsdag|onsdag|torsdag|lørdag|søndag)(?:\s+den)?\s+(?:4\.\s*december|20\.\s*november)",
+                      low)
     return [C("in Danish", lang == "da", f"Danish words {da:.0%}, English {en:.0%}"),
             C("exactly 4 points", len(pts) == 4, f"{len(pts)} points"),
             C("each point at most 12 words", bool(pts) and not long,
@@ -187,6 +192,10 @@ def _invite(t: Turn, e: dict) -> list[dict]:
               ", ".join(sorted(set(re.findall(r"\w*hyggelig\w*", low))))),
             C('a line beginning "Venlig hilsen" at the end', any(x.lower().startswith("venlig hilsen")
                                                                  for x in lines[-3:]), lines[-1][:80] if lines else "",
+              "should"),
+            # both dates are Fridays (20 November is two weeks before 4 December) - the first run's model wrote
+            # "torsdag den 20. november"
+            C("no wrong weekday for the dates (both are Fridays)", wrong is None, wrong.group(0) if wrong else "",
               "should")]
 
 
@@ -525,4 +534,5 @@ CASES: list[Case] = [
          "maximum match data.csv; the answer gives them too.", lambda t, e: [used(t, ("bash",), "ran the script")],
          needs=("code",), sandbox=True, timeout=1500),
 ]
+CASES.sort(key=lambda c: [a for a, _ in AREAS].index(c.area))
 BY_ID = {c.id: c for c in CASES}

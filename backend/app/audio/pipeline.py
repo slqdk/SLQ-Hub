@@ -16,7 +16,9 @@ from .speech import SpeechClient, SpeechError, describe_voice
 
 
 class AudioError(RuntimeError):
-    pass
+    def __init__(self, message: str = "", hub: bool = False):
+        super().__init__(message)
+        self.hub = hub                       # the card, ComfyUI or a service failed - not the request
 
 
 ABILITIES = ("music", "sound", "speech", "voice", "separate")
@@ -174,7 +176,7 @@ class AudioPipeline:
         try:
             info = await self.hub.comfy.object_info()
         except ComfyError as exc:
-            raise AudioError(str(exc))
+            raise AudioError(str(exc), hub=True) from exc
         missing = sorted(W.class_types(graph) - set(info))
         if missing and all(n.startswith("SLQ") for n in missing):
             raise AudioError(f"ComfyUI does not have the Hub's own nodes ({', '.join(missing)}): its image is older "
@@ -207,7 +209,7 @@ class AudioPipeline:
                                                         kind="audio", timeout=3600)
             return files, texts, time.monotonic() - t0
         except (ComfyError, SchedulerError) as exc:
-            raise AudioError(str(exc))
+            raise AudioError(str(exc), hub=True) from exc
         finally:
             if own is not None:
                 await own.release()
@@ -223,7 +225,7 @@ class AudioPipeline:
                 names[key] = await self.hub.comfy.upload_image(data, f"hub-{stamp}-{key}.flac", "audio/flac")
         except ComfyError as exc:
             self.hub.comfy.delete_files([("input", "", n) for n in names.values()])
-            raise AudioError(str(exc))
+            raise AudioError(str(exc), hub=True) from exc
         return names
 
     def _ace_files(self, entry: dict) -> dict:
@@ -401,7 +403,7 @@ class AudioPipeline:
         try:
             done = await self.speech.speak(body, on_progress=on_progress)
         except SpeechError as exc:
-            raise AudioError(str(exc))
+            raise AudioError(str(exc), hub=True) from exc
         pieces, capped = int(done.get("pieces") or 1), int(done.get("capped") or 0)
         if capped:
             notes.append(f"The model did not stop by itself on {capped} of {pieces} piece(s): it ran to its length "

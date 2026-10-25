@@ -4,7 +4,7 @@
 Wan 2.2 5B (video_wan2_2_5B_ti2v.json): one model makes video from a description or from a picture.
 UNETLoader -> ModelSamplingSD3 (shift 8); CLIPLoader (umt5-xxl, type "wan"); VAELoader (the Wan 2.2 VAE, 16x
 spatial); Wan22ImageToVideoLatent (1280x704, 121 frames, the picture as its first frame when there is one);
-KSampler (20 steps, cfg 5, uni_pc/simple); VAEDecode; CreateVideo (24 fps); SaveVideo.
+KSampler (20 steps, cfg 5, uni_pc/simple); VAEDecodeTiled (below); CreateVideo (24 fps); SaveVideo.
 
 Wan 2.2 14B (video_wan2_2_14B_t2v.json, _i2v.json, _flf2v.json): two experts, high noise for the first half of the
 steps and low noise for the rest, each a KSamplerAdvanced; with the lightx2v 4-step LoRAs (the templates' "fast"
@@ -12,7 +12,13 @@ switch: 4 steps split at 2, cfg 1) or without (20 steps split at 10, cfg 3.5); M
 the Wan 2.1 VAE (8x). Text: EmptyHunyuanLatentVideo. A picture: WanImageToVideo. A first and a last picture:
 WanFirstLastFrameToVideo. 16 fps, 81 frames for 5 s.
 
-All end in CreateVideo -> SaveVideo (MP4, H.264).
+All end in VAEDecodeTiled -> CreateVideo -> SaveVideo (MP4, H.264). The templates decode the whole clip at once
+(VAEDecode): on the 7900 XTX a 5-s 720p clip from the 5B then asked for 18.56 GiB in one piece and ran out of
+memory, four times, after 10 minutes of sampling each (test run, 2026-10-25). ComfyUI's own fall-back sizes its
+tiles from its estimate of the whole decode (13.4 GiB for that clip in bf16), which lets a tile be 1024 px - most
+of the frame - and is probably why it did not save it. Tiles of 512 px (overlapping by 64) are under a third of
+that. Time is not tiled: both Wan VAEs decode a latent frame or two at a time and carry a cache to the next, so a
+shorter time tile saves nothing and would show a seam where two tiles meet.
 """
 from __future__ import annotations
 
@@ -32,6 +38,13 @@ def frames(seconds: float, fps: int) -> int:
 def negative(extra: str) -> str:
     extra = (extra or "").strip()
     return f"{WAN_NEGATIVE}，{extra}" if extra else WAN_NEGATIVE
+
+
+def _decode(samples: list, vae: list) -> dict:
+    """The frames from the latent in 512-px tiles (VAEDecodeTiled's default size), each over the whole clip: the
+    node's largest temporal_size, so the clip is one tile in time (its overlap then does nothing)."""
+    return {"class_type": "VAEDecodeTiled", "inputs": {"samples": samples, "vae": vae, "tile_size": 512, "overlap": 64,
+                                                        "temporal_size": 4096, "temporal_overlap": 8}}
 
 
 def _save(video_ref: list, prefix: str) -> dict:
@@ -57,7 +70,7 @@ def wan_5b(*, prompt: str, negative_prompt: str = "", seconds: float, width: int
               "inputs": {"model": ["2", 0], "positive": ["5", 0], "negative": ["6", 0], "latent_image": ["8", 0],
                          "seed": int(seed) % 2**63, "steps": int(steps), "cfg": float(cfg), "sampler_name": sampler,
                          "scheduler": scheduler, "denoise": 1.0}},
-        "10": {"class_type": "VAEDecode", "inputs": {"samples": ["9", 0], "vae": ["4", 0]}},
+        "10": _decode(["9", 0], ["4", 0]),
         "11": {"class_type": "CreateVideo", "inputs": {"images": ["10", 0], "fps": float(fps)}},
         "12": _save(["11", 0], prefix),
     }
@@ -117,7 +130,7 @@ def wan_14b(*, prompt: str, negative_prompt: str = "", seconds: float, width: in
                    "inputs": {"model": ["6", 0], "add_noise": "disable", "noise_seed": 0, **common,
                               "latent_image": ["14", 0], "start_at_step": split, "end_at_step": 10000,
                               "return_with_leftover_noise": "disable"}}
-    graph["16"] = {"class_type": "VAEDecode", "inputs": {"samples": ["15", 0], "vae": ["8", 0]}}
+    graph["16"] = _decode(["15", 0], ["8", 0])
     graph["17"] = {"class_type": "CreateVideo", "inputs": {"images": ["16", 0], "fps": float(fps)}}
     graph["18"] = _save(["17", 0], prefix)
     return graph

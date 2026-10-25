@@ -20,7 +20,9 @@ from . import workflows as W
 
 
 class VideoError(RuntimeError):
-    pass
+    def __init__(self, message: str = "", hub: bool = False):
+        super().__init__(message)
+        self.hub = hub                       # the card, ComfyUI or a service failed - not the request
 
 
 ABILITIES = ("t2v", "i2v", "flf2v")            # from text, from a picture, from a first and a last picture
@@ -152,7 +154,7 @@ class VideoPipeline:
                 names[key] = await self.hub.comfy.upload_image(as_png(data), f"hub-{stamp}-{key}.png")
         except ComfyError as exc:
             self.hub.comfy.delete_files([("input", "", n) for n in names.values()])
-            raise VideoError(str(exc))
+            raise VideoError(str(exc), hub=True) from exc
         return names
 
     async def _run(self, graph: dict, ticket: Ticket | None, owner: str, priority: str, label: str,
@@ -176,7 +178,7 @@ class VideoPipeline:
                                                     kind="video", timeout=7200)
             return files[0][1], time.monotonic() - t0
         except (ComfyError, SchedulerError) as exc:
-            raise VideoError(str(exc))
+            raise VideoError(str(exc), hub=True) from exc
         finally:
             if own is not None:
                 await own.release()

@@ -3,7 +3,7 @@ MP4 in the working folder, where the card under the answer plays it."""
 from __future__ import annotations
 
 from .audio import _progress, slug
-from .base import Tool, ToolContext, ToolResult, obj, register
+from .base import Tool, ToolContext, ToolResult, gpu_failure, obj, register
 from .images import _image_bytes
 
 ORIENTATIONS = ("landscape", "portrait", "square")
@@ -92,7 +92,7 @@ async def video_generate(ctx: ToolContext, args: dict) -> ToolResult:
                                   quality=quality, seed=args.get("seed"), model=args.get("model") or None,
                                   ticket=ctx.ticket, on_progress=await _progress(ctx, "video_progress"))
     except (ValueError, VideoError) as exc:
-        return ToolResult(f"Video generation failed: {exc}", is_error=True)
+        return gpu_failure("Video generation failed", exc)
     ctx.workdir.write(rel, out["data"], "agent", "hub", f"made {rel}")
     source = {"t2v": "", "i2v": f" from {first}", "flf2v": f" from {first} to {last}"}[out["ability"]]
     quality_text = f", {out['quality']} quality" if out.get("quality") else ""
