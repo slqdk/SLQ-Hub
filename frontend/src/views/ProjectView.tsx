@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Download, Menu, MessageSquarePlus, Plus } from "lucide-react";
 import { api, type ChatListItem, type Library, type Project, type Revision, type Skill } from "../lib/api";
-import { ago, bytes } from "../lib/format";
+import { ago, bytes, energy, money, tokens } from "../lib/format";
 import { linkProps, navigate } from "../lib/router";
 import { useApp } from "../state";
 import { Files } from "../components/Files";
@@ -70,7 +70,14 @@ function ProjectChats({ project }: { project: Project }) {
       {project.instructions.trim() && <div className="callout"><div className="label">Instructions</div>
         <div style={{ whiteSpace: "pre-wrap" }}>{project.instructions}</div></div>}
       <div className="row">
-        <span className="grow muted small">{chats && chats.length > 0 ? `${chats.length} chat${chats.length === 1 ? "" : "s"}` : ""}</span>
+        <span className="grow muted small">{chats && chats.length > 0 ? `${chats.length} chat${chats.length === 1 ? "" : "s"}` : ""}
+          {project.usage && project.usage.turns > 0 && <span className="project-spent" title={
+            "The card's own power reading while it answered this project's chats, at the price in Settings, Usage. "
+            + "Chats deleted since stay counted."}>
+            {chats && chats.length > 0 ? " · " : ""}used {energy(project.usage.energy_wh)}, {money(project.usage.cost)} -{" "}
+            {project.usage.turns} answer{project.usage.turns === 1 ? "" : "s"}, {tokens(project.usage.tokens_in)} tokens read,
+            {" "}{tokens(project.usage.tokens_out)} written{project.usage.since ? ` since ${new Date(project.usage.since).toLocaleDateString(
+              undefined, { day: "numeric", month: "short" })}` : ""}</span>}</span>
         <button className="btn primary small" onClick={() => navigate({ name: "project-new-chat", id: project.id })}>
           <MessageSquarePlus size={15} /> New chat</button>
       </div>
@@ -81,6 +88,7 @@ function ProjectChats({ project }: { project: Project }) {
           <a key={c.id} className="list-row" style={{ color: "inherit", textDecoration: "none" }} {...linkProps({ name: "chat", id: c.id })}>
             <span className="grow ellipsis"><b>{c.title}</b></span>
             {c.running && <Lamp state="run" pulse title="Working" />}
+            {c.cost != null && <span className="meta num" title={`${energy(c.energy_wh)} on the card`}>{money(c.cost)}</span>}
             <span className="meta">{ago(c.updated_at)}</span>
           </a>
         ))}

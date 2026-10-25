@@ -19,6 +19,7 @@ from ..llm import payload as P
 from ..llm.client import LlmError
 from ..llm.messages import from_ollama, image_part, ollama_format
 from ..llm.stream import Accumulator, parse_arguments
+from ..usage import note_tokens
 from .common import Clock, acquire_llm, caller, hub_of, iso_now, ndjson, resolve_model
 
 router = APIRouter()
@@ -194,8 +195,8 @@ async def _generate(request: Request, body: dict, messages: list[dict], kind: st
         except SchedulerError as exc:
             raise LlmError(str(exc), 503)
         clock.admit()
+        acc = Accumulator()
         try:
-            acc = Accumulator()
             async for chunk in hub.llm.stream_chat(hub.main_url, pl):
                 for ev, data in acc.feed(chunk):
                     if ev == "text":
@@ -204,6 +205,7 @@ async def _generate(request: Request, body: dict, messages: list[dict], kind: st
                         await emit(piece("", data["text"]))
             res = acc.result()
         finally:
+            note_tokens(ticket, acc.usage, acc.timings)       # Settings -> Usage (0.24.0)
             await ticket.release()
         final = _final(name, res, clock, key)
         if kind == "chat" and res.get("tool_calls"):

@@ -13,6 +13,7 @@ from .config import Env, Settings
 from .gpu.aux import AuxManager
 from .gpu.backend import GpuBackend
 from .gpu.comfy import Comfy
+from .gpu.energy import EnergyMeter
 from .gpu.runner import MAIN, Runner
 from .gpu.scheduler import PRIORITY_NAME, Job, Scheduler
 from .llm.client import LlmClient
@@ -61,9 +62,10 @@ def _log_job(job: Job) -> None:
     try:
         with db.connect() as con:
             con.execute("INSERT INTO jobs_log (owner, kind, need, priority, label, enqueued_at, started_at,"
-                        " ended_at, state, error) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                        " ended_at, state, error, energy_wh) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                         (job.owner, job.kind, job.need, PRIORITY_NAME.get(job.priority, "?"), job.label[:200],
-                         job.enqueued_at, job.started_at, job.ended_at, job.state, (job.error or "")[:500] or None))
+                         job.enqueued_at, job.started_at, job.ended_at, job.state, (job.error or "")[:500] or None,
+                         round(job.energy_j / 3600, 4) if job.started_at is not None else None))
     except Exception:  # never let statistics break the queue
         log.exception("could not log job")
 
@@ -83,8 +85,31 @@ def build_hub(env: Env, transports: Transports | None = None) -> Hub:
     llm = LlmClient(transport=t.llm)
     llm.on_unreachable = scheduler.suspect
     aux = AuxManager(runner, catalog)
-    return Hub(env=env, settings=settings, catalog=catalog, runner=runner, comfy=comfy, backend=backend,
-               scheduler=scheduler, llm=llm, aux=aux, transports=t)
+    hub = Hub(env=env, settings=settings, catalog=catalog, runner=runner, comfy=comfy, backend=backend,
+              scheduler=scheduler, llm=llm, aux=aux, transports=t)
+    _meter(hub)
+    return hub
+
+
+def _meter(hub: Hub) -> None:
+    """The card's energy (0.24.0, app/gpu/energy.py): measured along every job, counted into the usage when the job
+    or its turn ends. Its readings start with the app (main.py)."""
+    from . import usage
+    meter = EnergyMeter(hub.scheduler, hub.runner.gpu)
+    try:
+        meter.other_w = max(0.0, float(hub.settings.get("costs", "other_watts") or 0))
+    except (TypeError, ValueError):
+        meter.other_w = 0.0
+    meter.on_idle = lambda joules: usage.idle(hub, joules)
+    hub.extras["energy"] = meter
+    hub.scheduler.on_change = meter.changed
+
+    def finished(job: Job) -> None:
+        meter.finished(job)                    # its last interval first: then its energy is whole
+        usage.job_finished(hub, job)
+        _log_job(job)
+
+    hub.scheduler.on_finish = finished
 
 
 def get_hub(request: Request) -> Hub:

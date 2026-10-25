@@ -4,7 +4,7 @@ import { Copy, Download, FileText, FolderOpen, Menu, MoreHorizontal, Pencil, Rot
 import { api, mediaUrl, type ArtifactRef, type Block, type ChatData, type ChatSettings, type Library, type Message,
   type ProducedFile, type RunEvent, type RunRecord, type Settings, type Skill, type Upload } from "../lib/api";
 import { clearDraftSkills, peekDraftSkills, setDraft as setMessageDraft } from "../lib/draft";
-import { seconds, tokens } from "../lib/format";
+import { energy, money, seconds, tokens } from "../lib/format";
 import { linkProps, navigate } from "../lib/router";
 import { buildTurns, isContinue, liveSegments, newLive, reduceLive, toolLabel, unfinished, waitsForAnswer, type AssistantTurn,
   type LiveRun } from "../lib/turns";
@@ -389,6 +389,7 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
           <MenuButton right className="icon-btn" label={<MoreHorizontal size={18} />} title="More">
             {(close) => (
               <>
+                <ChatSpent runs={data?.runs ?? []} />
                 <button className="menu-item" onClick={() => { close(); setRenaming(true); }}><Pencil size={15} /> Rename</button>
                 {data && data.artifacts.length > 0 && data.artifacts.map((a) => (
                   <button key={a.id} className="menu-item" onClick={() => { close(); openPanel({ kind: "artifact", chatId, id: a.id }); }}>
@@ -563,9 +564,39 @@ export function runStats(run: RunRecord | undefined, names: Record<string, strin
   if (out) parts.push(`${tokens(out)} tokens`);
   const tps = run.steps.filter((s) => s.type === "model" && s.tps).map((s) => s.tps!);
   if (tps.length) parts.push(`${Math.round(tps.reduce((a, b) => a + b, 0) / tps.length)} tokens/s`);
+  if (run.usage?.energy_wh != null) parts.push(`${energy(run.usage.energy_wh)} (${money(run.usage.cost)})`);   // 0.24.0
   if (run.status === "cancelled") parts.push("stopped");
   if (run.status === "error") parts.push("failed");
   return parts.join(", ");
+}
+
+/** What a chat's answers used of the card (0.24.0): answers counted from 0.24.0 on carry their energy. */
+export function chatTotals(runs: RunRecord[]) {
+  let wh = 0, kr = 0, read = 0, written = 0, counted = 0;
+  for (const r of runs) {
+    const u = r.usage ?? {};
+    read += Math.max(0, (u.prompt_tokens ?? 0) - (u.cached_tokens ?? 0));
+    written += u.completion_tokens ?? 0;
+    if (u.energy_wh != null) {
+      wh += u.energy_wh;
+      kr += u.cost ?? 0;
+      counted++;
+    }
+  }
+  return { wh, kr, read, written, counted, answers: runs.length };
+}
+
+/** The head of a chat's ⋯ menu: what the chat used so far. */
+export function ChatSpent({ runs }: { runs: RunRecord[] }) {
+  if (!runs.length) return null;
+  const t = chatTotals(runs);
+  return (
+    <div className="menu-head menu-spent" title="The card's own power reading while it answered this chat, at the price in Settings">
+      {t.counted ? <>This chat: {energy(t.wh)}, {money(t.kr)}</> : "This chat: from before costs were counted"}
+      <small>{t.answers} answer{t.answers === 1 ? "" : "s"} · {tokens(t.read)} tokens read, {tokens(t.written)} written
+        {t.counted < t.answers ? ` · ${t.answers - t.counted} earlier answer${t.answers - t.counted === 1 ? "" : "s"} not measured` : ""}</small>
+    </div>
+  );
 }
 
 export function TurnFoot({ turn, names, canRetry, onRetry, stats = true }: { turn: AssistantTurn; names: Record<string, string>;

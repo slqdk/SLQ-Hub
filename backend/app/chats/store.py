@@ -58,8 +58,12 @@ def get_chat(chat_id: int) -> dict | None:
 
 
 def list_chats(project_id: int | None = None, q: str = "", limit: int = 200, all_projects: bool = False) -> list[dict]:
-    sql = ("SELECT c.id, c.project_id, c.title, c.updated_at, c.created_at, p.name project_name FROM chats c"
-           " LEFT JOIN projects p ON p.id=c.project_id WHERE c.archived=0 AND c.test_run IS NULL")
+    # a project's chats come with what each used of the card (its runs' energy and cost, 0.24.0)
+    spent = (", (SELECT SUM(json_extract(r.usage, '$.energy_wh')) FROM runs r WHERE r.chat_id=c.id) energy_wh"
+             ", (SELECT SUM(json_extract(r.usage, '$.cost')) FROM runs r WHERE r.chat_id=c.id) cost"
+             if project_id is not None and not all_projects else "")
+    sql = ("SELECT c.id, c.project_id, c.title, c.updated_at, c.created_at, p.name project_name" + spent +
+           " FROM chats c LEFT JOIN projects p ON p.id=c.project_id WHERE c.archived=0 AND c.test_run IS NULL")
     params: list = []
     if not all_projects:
         if project_id is None:

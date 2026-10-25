@@ -46,6 +46,25 @@ export function tokens(n: number | null | undefined): string {
   return n >= 10000 ? `${(n / 1000).toFixed(n >= 100000 ? 0 : 1)}k` : String(n);
 }
 
+/** The card's energy (0.24.0): "0.4 Wh", "12 Wh", "1.24 kWh". */
+export function energy(wh: number | null | undefined): string {
+  const v = wh ?? 0;
+  if (v >= 1000) return `${(v / 1000).toFixed(v >= 100000 ? 0 : 2)} kWh`;
+  if (v >= 10) return `${Math.round(v)} Wh`;
+  if (v >= 0.05) return `${v.toFixed(1)} Wh`;
+  return v > 0 ? "<0.1 Wh" : "0 Wh";
+}
+
+/** What it cost, in kroner: "1.25 kr", or øre below a krone ("8.4 øre", "0.3 øre"). */
+export function money(kr: number | null | undefined): string {
+  const v = kr ?? 0;
+  if (v >= 1) return `${v.toFixed(2)} kr`;
+  const ore = v * 100;
+  if (ore >= 10) return `${Math.round(ore)} øre`;
+  if (ore >= 0.05) return `${ore.toFixed(1)} øre`;
+  return v > 0 ? "<0.1 øre" : "0 øre";
+}
+
 /** "llm:qwen3.8-27b" -> a name for people. */
 export function residencyName(need: string | null | undefined, names: Record<string, string>): string {
   if (!need) return "Nothing loaded";

@@ -20,7 +20,7 @@ import { HelpContent } from "../components/Help";
 import { GpuPlate } from "../components/Queue";
 import { Items } from "../components/Turn";
 import { Lamp, Logo, MenuButton, Modal, Toasts } from "../components/ui";
-import { LiveState, TurnFoot, UserMessage } from "../views/ChatView";
+import { ChatSpent, LiveState, TurnFoot, UserMessage } from "../views/ChatView";
 import { SkillsContent } from "../views/SkillsView";
 import { photoFromFile } from "../chat/photos";
 import * as S from "./store";
@@ -633,6 +633,7 @@ export function PersonApp() {
             <MenuButton right className="icon-btn" label={<MoreHorizontal size={18} />} title="More">
               {(close) => (
                 <>
+                  <ChatSpent runs={chat.data.runs} />
                   <button className="menu-item" onClick={() => { close(); setRenaming(true); }}><Pencil size={15} /> Rename</button>
                   {Object.values(chat.data.artifacts).map((v) => v[v.length - 1]).map((a) => (
                     <button key={a.id} className="menu-item" onClick={() => { close(); setPanel({ kind: "artifact", id: a.id }); }}>

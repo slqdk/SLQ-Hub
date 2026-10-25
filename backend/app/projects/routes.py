@@ -46,7 +46,8 @@ async def get_project(pid: int):
     p = store.get_project(pid)
     if not p:
         raise HTTPException(404, "No such project.")
-    return {**p, "head": syncstore.head(pid)}
+    from .. import usage                               # what its chats used of the card (0.24.0)
+    return {**p, "head": syncstore.head(pid), "usage": usage.project_totals(pid)}
 
 
 @router.patch("/hub/api/projects/{pid}")

@@ -130,7 +130,8 @@ export interface ChatSettings { model: string | null; thinking: boolean | null; 
 export interface Chat { id: number; project_id: number | null; title: string; settings: ChatSettings; summary?: string;
   created_at: string; updated_at: string; test_run?: string | null }
 export interface ChatListItem { id: number; project_id: number | null; title: string; updated_at: string;
-  created_at: string; project_name: string | null; running: boolean }
+  created_at: string; project_name: string | null; running: boolean;
+  energy_wh?: number | null; cost?: number | null }       // a project's chats: what each used of the card (0.24.0)
 
 /** A file an answer made or changed in the working folder (a person's: on the device). */
 export interface ProducedFile { path: string; size: number; mime: string; new?: boolean; skipped?: string }
@@ -138,8 +139,10 @@ export interface Step { type: string; step?: number; steps?: number; depth?: num
   seconds?: number; prompt_tokens?: number | null; completion_tokens?: number | null; cached_tokens?: number | null;
   tps?: number | null; prompt_tps?: number | null; reason?: string; files?: ProducedFile[] }
 export interface RunRecord { id: string; chat_id: number; status: string; model: string; started_at: string;
-  ended_at: string | null; steps: Step[]; usage: { prompt_tokens?: number; completion_tokens?: number; cached_tokens?: number };
-  error: string | null }
+  ended_at: string | null; steps: Step[]; usage: RunUsage; error: string | null }
+/** A turn's tokens and, since 0.24.0, the card's energy for it and what that cost (kr, at the price of the day). */
+export interface RunUsage { prompt_tokens?: number; completion_tokens?: number; cached_tokens?: number; energy_wh?: number;
+  cost?: number; gpu_seconds?: number }
 export interface RunInfo { id: string; chat_id: number; status: string; started: number; events: number }
 export interface Artifact { id: string; chat_id: number; version: number; title: string; type: string; content: string;
   created_at: string; latest: number }
@@ -152,7 +155,15 @@ export interface ChatData { chat: Chat; messages: Message[]; artifacts: Artifact
 export interface ProjectSettings { model: string | null; cloud_escalation: boolean; skills: string[]; libraries: number[];
   thinking: boolean | null; image_model: string | null }
 export interface Project { id: number; name: string; instructions: string; settings: ProjectSettings; created_at: string;
-  updated_at: string; archived?: number; chats?: number; head?: number }
+  updated_at: string; archived?: number; chats?: number; head?: number; usage?: UsageTotals }
+/** What was used of the card (0.24.0): answers, other jobs, tokens read / written / from the cache, energy (Wh), cost
+ *  (kr), seconds on the card; since: the first day counted. */
+export interface UsageTotals { turns: number; jobs: number; tokens_in: number; tokens_out: number; tokens_cached: number;
+  energy_wh: number; cost: number; seconds: number; since: string | null }
+export interface UsageRow extends UsageTotals { who: string; label: string;
+  kind: "owner" | "person" | "app" | "tests" | "library" | "system" | "idle" | "other" }
+export interface UsageData { period: "today" | "month" | "all"; since: string | null; price_per_kwh: number;
+  other_watts: number; power: { now_w: number; cap_w: number | null; source: string | null } | null; rows: UsageRow[] }
 
 export interface RunEvent { seq: number; type: string; t: number; data: Record<string, any> }
 

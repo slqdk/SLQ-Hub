@@ -2,8 +2,9 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { ChevronDown, ChevronUp, Copy, Download, Menu, Plus, RefreshCw, X } from "lucide-react";
 import { api, type ApiKey, type Person, type HFLookup, type HFSearchHit, type ImageLookup, type McpServerConfig, type McpStatus,
-  type MemoryFile, type ModelEntry, type Sampling, type SdxlChoices, type SdxlSettings, type Settings } from "../lib/api";
-import { ago, bytes, residencyName } from "../lib/format";
+  type MemoryFile, type ModelEntry, type Sampling, type SdxlChoices, type SdxlSettings, type Settings, type UsageData,
+  type UsageRow } from "../lib/api";
+import { ago, bytes, energy, money, residencyName, seconds, tokens } from "../lib/format";
 import { navigate } from "../lib/router";
 import { useApp, type Theme } from "../state";
 import { QueueModal, plateState } from "../components/Queue";
@@ -13,7 +14,7 @@ import { forgetSettings } from "./ChatView";
 
 const TABS = [
   { id: "models", label: "Models" }, { id: "queue", label: "Queue" }, { id: "people", label: "People" },
-  { id: "apps", label: "Apps and keys" },
+  { id: "usage", label: "Usage" }, { id: "apps", label: "Apps and keys" },
   { id: "agent", label: "Assistant" }, { id: "memory", label: "Memory" },
   { id: "mcp", label: "MCP servers" }, { id: "cloud", label: "Cloud" }, { id: "tests", label: "Tests" },
   { id: "system", label: "System" },
@@ -64,6 +65,7 @@ export function SettingsView({ tab }: { tab: string }) {
           {current === "models" && <ModelsTab s={s} />}
           {current === "queue" && <QueueTab s={s} />}
           {current === "people" && <PeopleTab />}
+          {current === "usage" && <UsageTab s={s} />}
           {current === "apps" && <AppsTab s={s} />}
           {current === "agent" && <AgentTab s={s} />}
           {current === "memory" && <MemoryTab />}
@@ -961,6 +963,93 @@ function NewPassword({ person, onClose, onSave }: { person: Person; onClose: () 
         autoComplete="off" onChange={(e) => setPw(e.target.value)} />
         <small>At least 10 characters. They are signed out on every device and sign in again with this.</small></label>
     </Modal>
+  );
+}
+
+// ------------------------------------------------------------ usage (0.24.0)
+
+const PERIODS = [{ id: "today", label: "Today" }, { id: "month", label: "This month" }, { id: "all", label: "All time" }] as const;
+
+function work(r: UsageRow): string {
+  const parts: string[] = [];
+  if (r.turns) parts.push(`${r.turns} answer${r.turns === 1 ? "" : "s"}`);
+  if (r.jobs && r.kind !== "idle") parts.push(`${r.jobs} ${r.kind === "app" ? "call" : "job"}${r.jobs === 1 ? "" : "s"}`);
+  return parts.join(", ") || (r.kind === "idle" ? "" : "-");
+}
+
+function UsageTab({ s }: { s: S }) {
+  const { toast } = useApp();
+  const [period, setPeriod] = useState<UsageData["period"]>("month");
+  const [data, setData] = useState<UsageData | null>(null);
+  const load = useCallback(async () => {
+    try {
+      setData(await api<UsageData>("/hub/api/usage", { query: { period } }));
+    } catch (e) {
+      toast((e as Error).message, "fault");
+    }
+  }, [period, toast]);
+  useEffect(() => {
+    load();
+  }, [load]);
+  useInterval(load, 15000);
+  const rows = data?.rows ?? [];
+  const sum = (k: keyof UsageRow) => rows.reduce((a, r) => a + (Number(r[k]) || 0), 0);
+  return (
+    <div>
+      <p className="lead">What each one used of the card: answers, tokens, time on the card, its energy and what that
+        cost. Each answer shows its own share under it, a chat its total in its ⋯ menu, a project on its page.</p>
+      <div className="callout row wrap" style={{ marginBottom: 18 }}>
+        <Lamp state={data?.power ? "run" : "off"} />
+        <span className="grow">{data?.power
+          ? <>The card draws <b className="num">{Math.round(data.power.now_w)} W</b> now
+            {data.power.cap_w ? <> (its limit: {Math.round(data.power.cap_w)} W)</> : null}.</>
+          : data ? "The card gives no power reading, so no energy is counted." : "Reading the card."}</span>
+        {data && <span className="muted small">{data.price_per_kwh.toFixed(2)} kr per kWh</span>}
+      </div>
+      <div className="row wrap" role="tablist" aria-label="Period" style={{ gap: 6, marginBottom: 12 }}>
+        {PERIODS.map((p) => (
+          <button key={p.id} role="tab" aria-selected={period === p.id} className="help-chip" onClick={() => setPeriod(p.id)}>
+            {p.label}</button>
+        ))}
+      </div>
+      <div className="table-scroll">
+        <table className="table usage-table">
+          <thead><tr><th>Who</th><th>Work</th><th className="r">Tokens read</th><th className="r">Written</th>
+            <th className="r">On the card</th><th className="r">Energy</th><th className="r">Cost</th></tr></thead>
+          <tbody>
+            {data === null ? <tr><td colSpan={7} className="faint">Loading</td></tr> : rows.map((r) => (
+              <tr key={r.who} className={r.kind === "idle" ? "faint" : undefined}>
+                <td><b>{r.label}</b>{r.kind === "owner" ? <span className="muted"> (you)</span> : null}
+                  {r.kind === "app" ? <span className="muted"> (app key)</span> : null}</td>
+                <td data-label="Work">{work(r)}</td>
+                <td className="r num" data-label="Tokens read">{r.kind === "idle" ? "" : tokens(r.tokens_in)}</td>
+                <td className="r num" data-label="Written">{r.kind === "idle" ? "" : tokens(r.tokens_out)}</td>
+                <td className="r num" data-label="On the card">{r.seconds ? seconds(r.seconds) : ""}</td>
+                <td className="r num" data-label="Energy">{energy(r.energy_wh)}</td>
+                <td className="r num" data-label="Cost">{money(r.cost)}</td>
+              </tr>
+            ))}
+            {rows.length > 0 && <tr className="usage-total"><td><b>All</b></td><td />
+              <td className="r num" data-label="Tokens read">{tokens(sum("tokens_in"))}</td>
+              <td className="r num" data-label="Written">{tokens(sum("tokens_out"))}</td>
+              <td className="r num" data-label="On the card">{seconds(sum("seconds"))}</td>
+              <td className="r num" data-label="Energy">{energy(sum("energy_wh"))}</td>
+              <td className="r num" data-label="Cost"><b>{money(sum("cost"))}</b></td></tr>}
+          </tbody>
+        </table>
+      </div>
+      <p className="muted small" style={{ maxWidth: "70ch" }}>Energy is the card's own power reading (amdgpu's PPT,
+        read every two seconds while it works), shared between the jobs on it at the time, plus the rest of the PC as set
+        below - not the whole PC measured at the socket. Tokens read leave out the part of the prompt the model had kept
+        from before. "The card, idle" is what it drew while nobody used it. Counted since 0.24.0.</p>
+      <SectionForm s={s} section="costs" title="Price" intro={<>Each answer keeps the cost at the price of its day.</>} fields={[
+        { key: "price_per_kwh", label: "Electricity price (kr per kWh)", type: "number", min: 0, max: 100, step: 0.01,
+          help: "A fixed price for all hours." },
+        { key: "other_watts", label: "The rest of the PC while the card works (W)", type: "number", min: 0, max: 2000,
+          help: "What the processor, memory, disks and fans draw on top of the card while it works, if you know it (a "
+            + "power meter at the socket, less the card's reading). 0 counts the card only." },
+      ]} />
+    </div>
   );
 }
 

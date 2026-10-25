@@ -12,7 +12,7 @@ token in X-Internal-Token.
     POST /start {name, port, args}    -> starts (or keeps an identical one)
     POST /stop  {name} | {all: true}  -> SIGTERM, then SIGKILL after a grace
     GET  /logs?name=main&tail=200     -> text
-    GET  /gpu                         -> VRAM numbers from amdgpu sysfs
+    GET  /gpu                         -> VRAM numbers and the card's power reading from amdgpu sysfs
 """
 from __future__ import annotations
 
@@ -38,6 +38,7 @@ NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,39}$")
 FORBIDDEN_ARGS = {"--host", "--port", "--api-key", "--api-key-file"}
 LOG_FILE_MAX = 20 * 1024 * 1024
 STOP_GRACE = float(os.environ.get("SUPERVISOR_STOP_GRACE", "15"))
+DRM = os.environ.get("SUPERVISOR_DRM", "/sys/class/drm")
 
 
 class Proc:
@@ -168,9 +169,33 @@ def stop(name: str | None = None, everything: bool = False) -> dict:
         return {"stopped": [p.name for p in targets]}
 
 
-def gpu() -> dict:
+def _read_int(path: str) -> int | None:
+    try:
+        with open(path) as f:
+            return int(f.read().strip())
+    except (OSError, ValueError):
+        return None
+
+
+def _power(dev: str) -> dict:
+    """The card's own power reading (amdgpu hwmon, in microwatts): power1_average where the card has it - the
+    RX 7900 XTX on VM 222 does, and no power1_input - else power1_input; and the limit it holds to (power1_cap)."""
+    for hw in sorted(glob.glob(os.path.join(dev, "hwmon", "hwmon*"))):
+        avg = _read_int(os.path.join(hw, "power1_average"))
+        now = avg if avg is not None else _read_int(os.path.join(hw, "power1_input"))
+        if now is None:
+            continue
+        out = {"power_w": round(now / 1e6, 1), "power_source": "power1_average" if avg is not None else "power1_input"}
+        cap = _read_int(os.path.join(hw, "power1_cap"))
+        if cap:
+            out["power_cap_w"] = round(cap / 1e6, 1)
+        return out
+    return {}
+
+
+def gpu(root: str | None = None) -> dict:
     best: dict = {}
-    for dev in glob.glob("/sys/class/drm/card*/device"):
+    for dev in glob.glob(os.path.join(root or DRM, "card*", "device")):
         try:
             total = int(open(os.path.join(dev, "mem_info_vram_total")).read())
             used = int(open(os.path.join(dev, "mem_info_vram_used")).read())
@@ -184,6 +209,7 @@ def gpu() -> dict:
                 info[key] = int(open(os.path.join(dev, fname)).read())
             except (OSError, ValueError):
                 pass
+        info.update(_power(dev))
         best = info
     return best
 

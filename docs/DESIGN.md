@@ -211,6 +211,53 @@ card switches models, and it runs. If the agent turn asks for an image
 meanwhile, it waits for FamilyLog's slot-2 call to finish, the card switches to
 ComfyUI, renders, and switches back on the agent's next model call.
 
+### Energy and cost (0.24.0)
+
+Søren asked for the total cost per chat and per project at a fixed 3 kr per
+kWh, and a token counter per person and for himself, with a usage limit for
+the children's profiles to come.
+
+**The reading.** The supervisor's `/gpu` adds the card's own power reading
+from amdgpu's hwmon (microwatts): `power1_average`, else `power1_input`, and
+the limit `power1_cap`. On VM 222 (RX 7900 XTX, read by Søren on 2026-10-25)
+there is `power1_average` - 337 W while it built code, against a 339 W cap
+(default 339, 305-350 W) - and no `power1_input`; the label is PPT. It is the
+card's figure, not the PC at the socket.
+
+**Splitting it** (`app/gpu/energy.py`, `EnergyMeter`). Time is cut at every
+change of what runs or loads (the scheduler's new `on_change`, called on each
+broadcast) and at every reading - every 2 s while something runs, every
+60 s while the card is idle (a job starting after idle reads at once). An
+interval's energy - the latest reading times its length (at most 30 s) - goes
+in equal shares to the jobs running in it (`Job.energy_j`); while an idle card
+loads for the head of the queue, to that job. Settings → Usage adds a fixed
+number of watts for the rest of the PC while the card works (`costs.other_watts`,
+0). What the card draws while nobody uses it is kept apart ("The card, idle").
+A finished job's energy goes to its run (`meta["run_id"]`): a turn can be
+several jobs (it gives the card up while it waits for an answer), and the turn
+takes the sum when it ends.
+
+**Counting it** (`app/usage.py`, table `usage_daily`: local day, who, project).
+An agent turn is counted once, when it ends (`finish_turn`): its usage gets
+`energy_wh`, `cost` (kr at the price of the day, `costs.price_per_kwh`, 3.00)
+and `gpu_seconds` - shown under the answer, and kept on the device for a
+person's - and the day's row for who ran it ("owner", "tests" or
+"user:<id>", with the project) gets the answer, its tokens (read = the prompt
+less what came from llama-server's cache, written, from the cache), energy,
+cost and seconds. Any other job is counted when it finishes (`job_finished`):
+an app's call on the model API under "key:<name>" with the tokens its handler
+noted on the job, library indexing under "library", loading models under
+"system". The queue log keeps each job's energy too. Rows stay when chats go.
+
+**Where it shows.** Under each answer: time, tokens, energy and cost. A chat's
+⋯ menu: its total (answers from before 0.24.0 carry no energy and are said to
+be unmeasured). A project's page: its total since counting began (chats
+deleted since included) and each chat's cost. Settings → Usage: the card's
+draw now and its limit, then per who for today, this month or all time -
+answers and jobs, tokens read and written, time on the card, energy, cost - with
+a total; the price and the rest of the PC's watts. `usage.who_total(who,
+period)` is what a limit for a person can read.
+
 ---
 
 ## 4. Models
@@ -1510,11 +1557,11 @@ running, amber waiting, blue your action is needed (a tool asks), red fault.
 
 Settings: models (download with progress, load, free the GPU, rename, order,
 server parameters; the sound models in their own group, each marked CPU or GPU),
-queue, apps and keys (with connection examples and CORS), assistant (agent,
-libraries, web, sandbox, images, sound: the model for music, for sound effects,
-the voice models for Danish and for other languages, and the last speech
-self-test's samples with players), memory, MCP
-servers (and the tools you always allow), cloud, tests (0.21.0, §12: the
+queue, people, usage (0.24.0, §3 "Energy and cost"), apps and keys (with
+connection examples and CORS), assistant (agent, libraries, web, sandbox,
+images, sound: the model for music, for sound effects, the voice models for
+Danish and for other languages, and the last speech self-test's samples with
+players), memory, MCP servers (and the tools you always allow), cloud, tests (0.21.0, §12: the
 model and the cases to run, a live panel while a run goes - which case, what
 it does, Open the chat, Stop - and the runs with each case's result, checks,
 time breakdown and answer, Export and Delete; a case's chat says "Test" by its

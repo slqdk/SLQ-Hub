@@ -312,6 +312,28 @@ _M007_TESTS = """
 """
 
 
+# Usage (0.24.0): per local day, per who ("owner", "user:<id>", "key:<app>", "tests", "library", "system",
+# "idle") and per project (0 = none): answers, other jobs, tokens, the card's energy (Wh), its cost at the price of
+# the day, and seconds on the card. Kept when chats go (a project's and a person's totals stay).
+_M008_USAGE = """
+        CREATE TABLE usage_daily (
+            day           TEXT NOT NULL,
+            who           TEXT NOT NULL,
+            project_id    INTEGER NOT NULL DEFAULT 0,
+            turns         INTEGER NOT NULL DEFAULT 0,
+            jobs          INTEGER NOT NULL DEFAULT 0,
+            tokens_in     INTEGER NOT NULL DEFAULT 0,
+            tokens_out    INTEGER NOT NULL DEFAULT 0,
+            tokens_cached INTEGER NOT NULL DEFAULT 0,
+            energy_wh     REAL NOT NULL DEFAULT 0,
+            cost          REAL NOT NULL DEFAULT 0,
+            seconds       REAL NOT NULL DEFAULT 0,
+            PRIMARY KEY (day, who, project_id)
+        );
+        ALTER TABLE jobs_log ADD COLUMN energy_wh REAL;
+"""
+
+
 MIGRATIONS = [
     (1, _M001_CORE),
     (2, _M002_LIBRARIES),
@@ -320,6 +342,7 @@ MIGRATIONS = [
     (5, _M005_PEOPLE),
     (6, _M006_CHAT_PERMISSIONS),
     (7, _M007_TESTS),
+    (8, _M008_USAGE),
 ]
 
 

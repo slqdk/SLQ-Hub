@@ -466,6 +466,13 @@ def main() -> None:
     t = Transports(llm=router, runner=router, comfy=router, sandbox=None if a.sandbox else router, web=router,
                    speech=router)
     app = create_app(env, t, startup=False)
+    hub = app.state.hub
+
+    async def read_power() -> None:                    # the card's power, as in production (the fake reads 280 W)
+        import asyncio
+        asyncio.get_running_loop().create_task(hub.extras["energy"].run())
+
+    hub.extras["startup_hooks"].append(read_power)
     print(f"SLQ Hub (fake services{', a real sandbox' if a.sandbox else ''}) on http://127.0.0.1:{a.port}  "
           f"data: {base}")
     uvicorn.run(app, host="127.0.0.1", port=a.port, log_level="warning", proxy_headers=False)   # as in production

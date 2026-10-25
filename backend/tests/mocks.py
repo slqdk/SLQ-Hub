@@ -45,7 +45,10 @@ def make_supervisor(state: dict) -> FastAPI:
 
     @app.get("/gpu")
     async def gpu():
-        return {"vram_total": 24 * 1024**3, "vram_used": state.get("vram_used", 1024**3)}
+        out = {"vram_total": 24 * 1024**3, "vram_used": state.get("vram_used", 1024**3)}
+        if state.get("power_w", 280.0) is not None:            # the card's own reading (0.24.0); None: none
+            out.update({"power_w": state.get("power_w", 280.0), "power_cap_w": 339.0, "power_source": "power1_average"})
+        return out
 
     @app.post("/start")
     async def start(request: Request):

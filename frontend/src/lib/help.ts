@@ -721,6 +721,22 @@ export const SECTIONS: HelpSection[] = [
         how: ["Click the plate to see the queue and stop your own jobs."],
       },
       {
+        id: "costs",
+        title: "What it costs",
+        what: "Each answer says under it how much energy the card used for it and what that cost - the card's own "
+          + "power reading at the Hub's electricity price (3 kr per kWh unless changed). A chat's ⋯ menu adds its "
+          + "answers up.",
+        how: ["Under an answer: its time, tokens, energy and cost.", "A chat's total: the ⋯ menu at the top."],
+      },
+      {
+        id: "usage",
+        title: "Who used how much",
+        what: "Settings, Usage shows, for today, this month or all time, what you, each person, each app and the "
+          + "tests used: answers, tokens, time on the card, energy and cost - and what the card drew while idle. A "
+          + "project's page shows its total. The electricity price and the rest of the PC's watts are set there.",
+        owner: true,
+      },
+      {
         id: "people",
         title: "People in the household",
         what: "Settings, People adds family members: the same chat with their own login, at home or also away. "

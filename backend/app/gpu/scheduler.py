@@ -85,6 +85,7 @@ class Job:
     switch_to: str | None = None
     switch_fut: asyncio.Future | None = None
     switch_at: float = 0.0
+    energy_j: float = 0.0              # the card's energy while this job held it (app/gpu/energy.py)
 
     def info(self, now: float, position: int | None = None) -> dict:
         return {
@@ -171,6 +172,9 @@ class Scheduler:
         self._listeners: set[asyncio.Queue] = set()
         self._timer: asyncio.TimerHandle | None = None
         self._suspect = False
+        # Called on every change of what runs or loads (before the listeners hear of it): the energy meter
+        # closes its interval there (app/gpu/energy.py).
+        self.on_change: Callable[[], None] | None = None
 
     # ------------------------------------------------------------ public
     async def acquire(self, owner: str, kind: str, need: str, priority: str | int = "normal",
@@ -292,6 +296,11 @@ class Scheduler:
         self._broadcast()
 
     def _broadcast(self) -> None:
+        if self.on_change is not None:
+            try:
+                self.on_change()
+            except Exception:  # never let accounting break the queue
+                log.exception("on_change failed")
         if not self._listeners:
             return
         snap = self.snapshot()

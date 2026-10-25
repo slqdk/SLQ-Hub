@@ -922,7 +922,8 @@ class Agent:
             ticket = await self.hub.scheduler.acquire(
                 "tests" if test else "web", "agent", self.hub.model_need(entry["id"]),
                 "background" if test else "interactive", label=chat["title"][:80],
-                lease=True, meta={"chat_id": chat["id"], "model": entry["id"], "cancel": run.task.cancel},
+                lease=True, meta={"chat_id": chat["id"], "model": entry["id"], "cancel": run.task.cancel,
+                                  "run_id": run.id},
                 on_job=lambda j: holder.setdefault("job", j))
             pos_task.cancel()
             waited = round(time.monotonic() - t0, 2)
@@ -963,9 +964,15 @@ class Agent:
                     pass
             if engine is not None and wd is not None and before is not None:
                 await self._note_files(engine, wd, before)
+            usage_now = engine.usage if engine else {}
+            try:                                          # the card's energy and its cost (0.24.0)
+                from .. import usage
+                usage.finish_turn(self.hub, run.id, usage_now, "tests" if options.get("test") else "owner",
+                                  project["id"] if project else None)
+            except Exception:  # noqa: BLE001
+                log.exception("could not count the turn's usage")
             try:
-                chats.run_finished(run.id, status, engine.steps if engine else [], engine.usage if engine else {},
-                                   error)
+                chats.run_finished(run.id, status, engine.steps if engine else [], usage_now, error)
             except Exception:  # noqa: BLE001
                 log.exception("could not store the run")
             if status == "error":

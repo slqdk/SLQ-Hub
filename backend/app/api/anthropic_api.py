@@ -15,6 +15,7 @@ from ..llm import payload as P
 from ..llm.client import LlmError
 from ..llm.messages import anthropic_tool_choice, anthropic_tools, from_anthropic, normalise_openai
 from ..llm.stream import Accumulator, parse_arguments
+from ..usage import note_tokens
 from .common import acquire_llm, caller, hub_of, resolve_model, sse
 
 router = APIRouter()
@@ -97,14 +98,15 @@ async def messages(request: Request):
             ticket = await acquire_llm(hub, who, entry["id"], label)
         except SchedulerError as exc:
             return _err(529, str(exc), "overloaded_error")
+        acc = Accumulator()
         try:
-            acc = Accumulator()
             async for chunk in hub.llm.stream_chat(hub.main_url, pl):
                 acc.feed(chunk)
             res = acc.result()
         except LlmError as exc:
             return _err(exc.status if exc.status >= 400 else 500, str(exc), "api_error")
         finally:
+            note_tokens(ticket, acc.usage, acc.timings)       # Settings -> Usage (0.24.0)
             await ticket.release()
         content: list[dict] = []
         if res.get("reasoning"):
@@ -196,6 +198,7 @@ async def messages(request: Request):
         except LlmError as exc:
             yield sse({"type": "error", "error": {"type": "api_error", "message": str(exc)}}, "error")
         finally:
+            note_tokens(ticket, acc.usage, acc.timings)
             await ticket.release()
 
     return StreamingResponse(gen(), media_type="text/event-stream",

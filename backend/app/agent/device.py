@@ -421,7 +421,8 @@ async def run_turn(hub, turn: DeviceTurn, body: dict, rows: list[dict], wd: proj
         t0 = time.monotonic()
         ticket = await hub.scheduler.acquire(
             device.name or "a person", "agent", hub.model_need(entry["id"]), "interactive", label="Chat",
-            lease=True, meta={"user_id": device.user_id, "model": entry["id"], "cancel": run.task.cancel},
+            lease=True, meta={"user_id": device.user_id, "model": entry["id"], "cancel": run.task.cancel,
+                              "run_id": run.id},
             on_job=lambda j: holder.setdefault("job", j))
         pos_task.cancel()
         waited = round(time.monotonic() - t0, 2)
@@ -468,12 +469,18 @@ async def run_turn(hub, turn: DeviceTurn, body: dict, rows: list[dict], wd: proj
         if engine is not None and turn.outputs:                  # shown under the answer, like the owner's
             engine.steps.append({"type": "files", "files": [
                 {**f, "new": f["path"] not in turn.inputs} for f in turn.outputs][:projects.PRODUCED_LIMIT]})
+        usage_now = engine.usage if engine else {}
+        try:                                                     # the card's energy and its cost (0.24.0)
+            from .. import usage
+            usage.finish_turn(hub, run.id, usage_now, f"user:{turn.user['id']}")
+        except Exception:  # noqa: BLE001
+            log.exception("could not count the turn's usage")
         turn.result = {
             "status": status, "error": error, "title": turn.title,
             "messages": [{"role": r["role"], "content": r["content"]} for r in turn.collected],
             "files": turn.outputs, "removed": gone,
             "artifacts": [{"id": k, **v} for k, v in device.artifacts.items()],
-            "steps": engine.steps if engine else [], "usage": engine.usage if engine else {},
+            "steps": engine.steps if engine else [], "usage": usage_now,
             "model": engine.model["id"] if engine else None,
         }
         run.emit("device_result", **turn.result)

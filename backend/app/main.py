@@ -53,24 +53,28 @@ def create_app(env: Env | None = None, transports: Transports | None = None, sta
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         task = asyncio.create_task(_startup(hub)) if startup else None
+        # the card's power, read while it works (tests read it themselves)
+        meter = asyncio.create_task(hub.extras["energy"].run()) if startup else None
         for hook in hub.extras.get("startup_hooks", []):
             try:
                 await hook()
             except Exception:  # noqa: BLE001
                 log.exception("startup hook failed")
         yield
-        if task and not task.done():
-            task.cancel()
+        for t in (task, meter):
+            if t and not t.done():
+                t.cancel()
 
     app = FastAPI(title="SLQ Hub", version=env.version, lifespan=lifespan, docs_url=None, redoc_url=None,
                   openapi_url=None)
     app.state.hub = hub
 
-    from .ui import auth_routes, help_routes, people_routes, system_routes
+    from .ui import auth_routes, help_routes, people_routes, system_routes, usage_routes
     app.include_router(auth_routes.router)
     app.include_router(help_routes.router)
     app.include_router(people_routes.router)
     app.include_router(system_routes.router)
+    app.include_router(usage_routes.router)
     for router in hub.extras.get("routers", []):
         app.include_router(router)
 

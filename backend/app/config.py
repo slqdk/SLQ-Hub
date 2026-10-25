@@ -188,6 +188,10 @@ DEFAULTS: dict = {
     "mcp": {
         "servers": [],                     # [{name, transport: http|stdio, url|command, headers, enabled}]
     },
+    "costs": {                             # 0.24.0: what the card's energy costs (Settings -> Usage)
+        "price_per_kwh": 3.0,              # kr per kWh, a fixed price
+        "other_watts": 0,                  # the rest of the PC while the card works (the card's reading is its own)
+    },
 }
 
 

@@ -17,6 +17,7 @@ from ..gpu.scheduler import SchedulerError
 from ..llm import payload as P
 from ..llm.client import LlmError
 from ..llm.messages import normalise_openai
+from ..usage import note_tokens
 from .common import acquire_llm, caller, hub_of, resolve_model, sse
 
 router = APIRouter()
@@ -108,11 +109,13 @@ async def chat_completions(request: Request):
             ticket = await acquire_llm(hub, who, entry["id"], label)
         except SchedulerError as exc:
             return _err(503, str(exc), "server_error", "queue")
+        out: dict = {}
         try:
             out = await hub.llm.chat(hub.main_url, pl)
         except LlmError as exc:
             return _err(exc.status if exc.status >= 400 else 500, str(exc), "server_error")
         finally:
+            note_tokens(ticket, out.get("usage"), out.get("timings"))     # Settings -> Usage (0.24.0)
             await ticket.release()
         out["model"] = name
         return out
@@ -123,14 +126,19 @@ async def chat_completions(request: Request):
         except SchedulerError as exc:
             yield sse({"error": {"message": str(exc), "type": "server_error", "code": "queue"}})
             return
+        last: dict = {}
         try:
             async for chunk in hub.llm.stream_chat(hub.main_url, pl):
+                for k in ("usage", "timings"):
+                    if chunk.get(k):
+                        last[k] = chunk[k]
                 chunk["model"] = name
                 yield sse(chunk)
             yield b"data: [DONE]\n\n"
         except LlmError as exc:
             yield sse({"error": {"message": str(exc), "type": "server_error"}})
         finally:
+            note_tokens(ticket, last.get("usage"), last.get("timings"))
             await ticket.release()
 
     return StreamingResponse(gen(), media_type="text/event-stream",

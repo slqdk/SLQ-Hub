@@ -141,10 +141,19 @@ async def put_settings(body: SettingsPatch, request: Request):
             values.pop(key)                      # unchanged secret
     if body.section == "mcp":
         values = _unmask_mcp(values, hub.settings.get("mcp"))
+    if body.section == "costs":                  # numbers, not below zero
+        for key in ("price_per_kwh", "other_watts"):
+            if key in values:
+                try:
+                    values[key] = max(0.0, round(float(values[key]), 4))
+                except (TypeError, ValueError):
+                    raise HTTPException(400, f"{key} must be a number")
     try:
         hub.settings.update(body.section, values)
     except KeyError as exc:
         raise HTTPException(400, str(exc))
+    if body.section == "costs" and "energy" in hub.extras:
+        hub.extras["energy"].other_w = float(hub.settings.get("costs", "other_watts") or 0)
     if body.section == "queue":
         q = hub.settings.get("queue")
         hub.scheduler.affinity_window = float(q.get("affinity_window_s", 20))

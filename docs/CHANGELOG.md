@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.24.0 - 2026-10-25
+
+- **What it costs.** Under each answer: the energy the card used for it and
+  what that cost, at 3.00 kr per kWh. A chat's ⋯ menu adds its answers up, and
+  a project's page shows its total and each chat's cost. The energy is the
+  graphics card's own power reading while it works for you, shared between the
+  jobs on it at the time.
+- **Settings → Usage**: for today, this month or all time, what you, each
+  person, each app key and the tests used - answers, tokens read and written,
+  time on the card, energy and cost - plus what the card drew while idle, and
+  what the card draws right now. The electricity price is set here, and so is
+  what the rest of the PC draws while the card works, if you know it (0
+  counts the card only). Usage is kept per day, so a limit for a person can be
+  added later.
+- The help's "The Hub" section tells where to find the costs.
+
 ## 0.23.0 - 2026-10-25
 
 - **Make your own skills.** Attach your material - PDF, Word, Excel,
