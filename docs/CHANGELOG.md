@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.22.3 - 2026-10-25
+
+- **The video model you set is the one used.** The assistant now keeps to
+  Settings → Assistant → Video unless you ask for a model by name, as it
+  already did for pictures. In the second test run it chose the 14B pair for
+  a picture on its own, and that job stalled for minutes.
+
 ## 0.22.2 - 2026-10-25
 
 - **Edits and cut-outs at the original's size.** A picture you edit or cut

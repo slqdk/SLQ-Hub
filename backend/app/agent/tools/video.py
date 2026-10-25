@@ -139,6 +139,8 @@ def _dynamic(ctx: ToolContext) -> tuple[str, dict]:
         w, h = size_for(e)
         can = ", ".join(WHAT[a] for a in e.get("abilities") or [] if a in WHAT)
         lines.append(f"- {e['id']}: {e['name']} - {can}; {w}x{h} at {s.get('fps', 16)} fps by default")
+    # The owner's choice stands unless the user names a model, as for pictures: the second test run's model
+    # picked the 14B pair for a picture on its own, and that job stalled for minutes (HANDOFF item 51).
     picks = [f"from {words}: {pipe.chosen(a)['name']}" for a, words in (("t2v", "a description"),
                                                                          ("i2v", "a picture")) if pipe.available(a)]
     text = (TEXT + "\n- prompt: one rich paragraph in English: the subject, what it does and how it moves, the "
@@ -149,7 +151,8 @@ def _dynamic(ctx: ToolContext) -> tuple[str, dict]:
             "first frame with image_generate (when offered) and start the video from it.\n- The video has no "
             "sound: make it with sound_generate or music_generate (when offered) and put it under the video with "
             "ffmpeg in bash: ffmpeg -i video.mp4 -i sound.mp3 -map 0:v -map 1:a -c:v copy -c:a aac -shortest "
-            "out.mp4\nModels (without model: " + "; ".join(picks) + "):\n" + "\n".join(lines))
+            "out.mp4\nWithout model: " + "; ".join(picks) + " - pick another only when the user asks for it."
+            "\nModels:\n" + "\n".join(lines))
     return text, _params([e["id"] for e in models])
 
 

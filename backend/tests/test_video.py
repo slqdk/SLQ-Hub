@@ -98,7 +98,8 @@ async def test_no_video_tool_until_a_model_is_downloaded(signed_in, app, fakes):
         in desc
     assert "- wan2.2-i2v-14b: Wan 2.2 14B picture to video - video from a picture, video from a first and a last " \
            "picture; 832x480 at 16 fps by default" in desc
-    assert "(without model: from a description: Wan 2.2 5B; from a picture: Wan 2.2 5B)" in desc
+    assert "Without model: from a description: Wan 2.2 5B; from a picture: Wan 2.2 5B - pick another only when " \
+           "the user asks for it" in desc
     assert "describe the motion and the camera" in desc and "-map 0:v -map 1:a" in desc
     assert "# Video\n- video_generate makes a short video" in system(fakes, 0)
 

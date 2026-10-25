@@ -1346,7 +1346,9 @@ sound, with ComfyUI's own nodes only (the image is unchanged):
   nothing (history and output deleted), and a file over 25 MB is said not to
   reach her device. Not in subagents. Settings → Assistant → Video chooses
   the model for a description and for a picture (first-to-last uses the
-  picture model when it can, else one that can). The two experts' steps show
+  picture model when it can, else one that can); the tool's description says
+  to name another only when the user asks for it (0.22.3 - the second test
+  run's model picked the 14B pair for a picture on its own). The two experts' steps show
   as one progress bar. The system prompt's short Video section: minutes per
   clip, so one at a time, and ask before making more.
 - **Checked here** (HANDOFF): ComfyUI v0.42.3 on CPU with stand-ins - one-block

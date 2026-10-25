@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.22.2, 2026-10-25)
+## State (0.22.3, 2026-10-25)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -127,7 +127,10 @@ flat colours after a 14B job the Hub had given up on (item 57). 0.22.2 follows
 a job by asking when ComfyUI's websocket closes (no more keepalive pings; a
 job ComfyUI no longer has ends at once), gives edits and cut-outs back at the
 original's size, and makes the checks judge results rather than the way to
-them (DESIGN §3, §7, §12).
+them (DESIGN §3, §7, §12). ComfyUI's log of that run shows the 14B job going
+on for almost five minutes after the Hub gave it up, loading its second
+expert with both staged in RAM (item 51); 0.22.3 keeps the video model to
+Settings → Assistant → Video unless the user names one.
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
 host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU
