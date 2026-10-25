@@ -279,7 +279,15 @@ class Engine:
                 schemas = self.schemas(tools)
                 self.schema_tokens = C.schema_tokens(schemas)
                 self._note_prompt(messages, tools, "escalated" if self.cloud is not None else "handed over")
-        note = f"(Stopped after {max_steps} steps - ask me to continue if there is more to do.)"
+        # The step limit (Settings -> Assistant): the turn may not be done. The UI marks it unfinished and offers
+        # Continue (POST /chats/{id}/continue, a "continue" block that tells the model why it stopped).
+        self.steps.append({"type": "limit", "steps": max_steps, "depth": self.depth})
+        if self.depth:
+            note = f"(Stopped after {max_steps} steps - ask me to continue if there is more to do.)"
+        else:
+            self.emit("step_limit", steps=max_steps)
+            note = (f"(Stopped after {max_steps} steps, the most one turn may take. Press Continue, or ask me to "
+                    "continue, if there is more to do.)")
         self.emit("text", text="\n\n" + note)
         if persist:
             await persist("assistant", [{"type": "text", "text": note}])

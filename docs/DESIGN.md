@@ -373,6 +373,28 @@ Every web chat turn is an agent task: one queue job holding a lease.
 4. Append the results and repeat until the model answers without tools,
    or a step limit is reached.
 
+**Not finished, and Continue** (0.22.0). A turn that reaches the step limit
+(Settings → Assistant → "Most steps in one turn", 60 by default) ends with a
+note in the answer, a `limit` step in the run (`{"type": "limit", "steps":
+60, "depth": 0}`) and a `step_limit` event; one the user stops ends
+`cancelled`. Either may have stopped in the middle of the work - chat 21's
+card showed the game's file as if it were done, with the game freezing at
+Start. The answer then says so: "Not finished: the turn stopped after 60
+steps" (or "it was stopped before it was done"), in the files card above the
+files ("files so far") or on its own when there are none, with **Continue**
+under the last answer. The files stay listed: the Hub cannot tell a finished
+file from a half-written one, and they are in the folder anyway. Continue
+(`POST /hub/api/chats/{id}/continue`, 409 unless the last turn is one of
+those) adds a user message with only `{"type": "continue", "reason":
+"limit"|"stopped", "steps": n}` - shown as a "Continued" mark, not as the
+user's words - and starts a turn; the model reads it as "(SLQ Hub: the user
+pressed Continue. Your last turn ended at the step limit (60 steps …) before
+the work was done. Go on from where you stopped: check the state of what you
+were making before you change it, and do not start over.)". A person's chat
+does the same on the device (the block passes the device turn's check with
+only its reason and a sane number). A turn stopped before it wrote anything
+has no answer to mark; the user's own message can be edited and sent again.
+
 **Loop guard.** Small models can get stuck repeating a step (chat 7: Ornith
 1.5 9B fetched the same two pages 52 times). Tools that only look things up
 are marked `read_only` (web_search, web_fetch, read_file, list_files,
@@ -1320,6 +1342,10 @@ running, amber waiting, blue your action is needed (a tool asks), red fault.
   thinking, tool calls as a terminal strip (one row per call, expandable to
   input and output), approvals inline, artifact cards, task lists, a summary
   line per answer, retry and edit-and-resend.
+- **Not finished** (0.22.0). An answer stopped at the step limit or by the
+  user says so in an amber bar - in its files card, or alone - with Continue
+  under the last answer; a pressed Continue shows as a "Continued" mark
+  (section 6, "Not finished, and Continue").
 - **Files from an answer** (0.12.0). A card under the answer lists the files
   it made or changed in the working folder, newest first, whatever made them
   (a tool or a command such as ffmpeg). Each file gets its kind, folder, size

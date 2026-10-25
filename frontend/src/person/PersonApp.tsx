@@ -8,13 +8,14 @@ import { api, setLocalMedia, type Artifact, type ArtifactRef, type Block, type C
   type ProducedFile, type Settings, type Skill, type Upload } from "../lib/api";
 import { bytes, dateGroup } from "../lib/format";
 import { saveText } from "../lib/download";
-import { buildTurns, liveSegments, newLive, reduceLive, type AssistantTurn, type LiveRun } from "../lib/turns";
+import { buildTurns, liveSegments, newLive, reduceLive, unfinished, type AssistantTurn, type LiveRun,
+  type Unfinished } from "../lib/turns";
 import { setDraft as setMessageDraft } from "../lib/draft";
 import type { Example } from "../lib/help";
 import { useApp } from "../state";
 import { ArtifactPanel } from "../components/ArtifactPanel";
 import { Composer, type ComposerSettings } from "../components/Composer";
-import { FilesCard, producedFiles, type FileHandlers } from "../components/FilesCard";
+import { FilesCard, producedFiles, UnfinishedNote, type FileHandlers } from "../components/FilesCard";
 import { HelpContent } from "../components/Help";
 import { GpuPlate } from "../components/Queue";
 import { Items } from "../components/Turn";
@@ -351,6 +352,21 @@ export function PersonApp() {
     }
   };
 
+  /** Continue under an unfinished turn (0.22.0): a message that tells the model why it stopped, then a new turn. */
+  const continueTurn = async (why: Unfinished) => {
+    if (!chat || busy) return;
+    const now = Date.now();
+    const id = chat.data.messages.reduce((n, m) => Math.max(n, m.id), 0) + 1;
+    const block: Block = why.reason === "limit" ? { type: "continue", reason: "limit", steps: why.steps }
+      : { type: "continue", reason: "stopped" };
+    const next: S.ChatData = { ...chat.data, messages: [...chat.data.messages, { id, role: "user", content: [block],
+      run_id: null, created_at: new Date(now).toISOString() }] };
+    const meta = { ...chat.meta, updated: now };
+    await S.saveChat(meta, next);
+    setChat({ meta, data: next });
+    void runTurn(meta, next);
+  };
+
   const again = async (data: S.ChatData, cut: number) => {
     if (!chat || busy) return;
     const kept = data.messages.slice(0, cut + 1);
@@ -616,7 +632,13 @@ export function PersonApp() {
               ) : (
                 <div className="msg-assistant" key={t.key}>
                   <Items items={t.items} actions={{ openArtifact }} />
-                  {(!t.runId || lastPart.get(t.runId) === i) && <FilesCard files={producedFiles(t.run)} handlers={fileHandlers} />}
+                  {(!t.runId || lastPart.get(t.runId) === i) && (() => {
+                    const files = producedFiles(t.run);
+                    const why = unfinished(t.run);
+                    const go = why && !busy && t === lastAssistant ? () => void continueTurn(why) : undefined;
+                    return files.length ? <FilesCard files={files} handlers={fileHandlers} unfinished={why} onContinue={go} />
+                      : why ? <UnfinishedNote why={why} onContinue={go} /> : null;
+                  })()}
                   <TurnFoot turn={t} names={modelNames} canRetry={!busy && t === lastAssistant}
                     stats={!t.runId || lastPart.get(t.runId) === i} onRetry={retry} />
                 </div>

@@ -54,7 +54,7 @@ MAX_OUT_TOTAL = 100 * 1024 * 1024
 MAX_OUT_FILES = 50
 MAX_ACTIVE = 2                         # turns one person may have running at once (a phone and a PC)
 MAX_WAITING = 4                        # finished turns of one person still waiting for their device; older go
-BLOCK_TYPES = {"text", "image", "file", "thinking", "tool_call", "tool_result"}
+BLOCK_TYPES = {"text", "image", "file", "thinking", "tool_call", "tool_result", "continue"}
 SETTING_KEYS = {"model", "thinking", "effort", "image_model"}
 LEDGERS = "device-turns"               # data/device-turns/<turn>: the stored files a turn will delete, for a sweep
                                        # after a restart (not in the turn's folder: the person's code may write there)
@@ -343,6 +343,10 @@ def prepare(turn: DeviceTurn, body: dict, wd: projects.Workdir) -> list[dict]:
                 b["images"] = [i for i in b["images"] if i.get("sha")]
             elif b["type"] == "file":
                 b = {k: v for k, v in b.items() if k != "data"}
+            elif b["type"] == "continue":                       # Continue under an unfinished turn: only why
+                steps = b.get("steps")
+                b = {"type": "continue", "reason": "limit" if b.get("reason") == "limit" else "stopped",
+                     "steps": steps if isinstance(steps, int) and 0 < steps < 10_000 else 0}
             blocks.append(b)
         row = {"id": len(rows) + 1, "role": m["role"], "content": blocks}
         if isinstance(m.get("created_at"), str):

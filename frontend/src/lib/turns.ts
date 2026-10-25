@@ -89,6 +89,22 @@ function afterResult(items: Item[], t: ToolView): void {
   }
 }
 
+/** Why a turn is not done (0.22.0): it stopped at the step limit, or the user stopped it - null when it ended by
+ *  itself. Continue goes on from there. */
+export interface Unfinished { reason: "limit" | "stopped"; steps?: number }
+
+export function unfinished(run: RunRecord | undefined): Unfinished | null {
+  if (!run) return null;
+  const limit = run.steps.find((s) => s.type === "limit" && !s.depth);
+  if (limit) return { reason: "limit", steps: limit.steps };
+  return run.status === "cancelled" ? { reason: "stopped" } : null;
+}
+
+/** A message that only says Continue (shown as a mark, not as the user's words). */
+export function isContinue(m: Message): boolean {
+  return m.content.length > 0 && m.content.every((b) => b.type === "continue");
+}
+
 /** Stored messages -> turns. */
 export function buildTurns(messages: Message[], runs: RunRecord[], skipRun?: string | null): Turn[] {
   const byRun = new Map(runs.map((r) => [r.id, r]));

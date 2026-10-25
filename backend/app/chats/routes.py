@@ -208,6 +208,37 @@ async def retry(chat_id: int, body: RetryIn, request: Request):
     return {"run_id": _start(request, chat_id, body.options)}
 
 
+def unfinished(run: dict | None) -> dict | None:
+    """Why a turn is not done (0.22.0): it stopped at the step limit, or the user stopped it. None: it ended by
+    itself (with an answer, or an error - that one is answered again, not continued)."""
+    if not run:
+        return None
+    limit = next((s for s in run.get("steps") or [] if s.get("type") == "limit" and not s.get("depth")), None)
+    if limit:
+        return {"reason": "limit", "steps": int(limit.get("steps") or 0)}
+    if run.get("status") == "cancelled":
+        return {"reason": "stopped"}
+    return None
+
+
+class ContinueIn(BaseModel):
+    options: dict = {}                   # model, thinking, effort for this turn
+
+
+@router.post("/chats/{chat_id}/continue")
+async def continue_turn(chat_id: int, body: ContinueIn, request: Request):
+    """Continue under an unfinished turn: a message that tells the model why it stopped, then a new turn."""
+    _chat_or_404(chat_id)
+    if _agent(request).runs.active_for_chat(chat_id):
+        raise HTTPException(409, "this chat is already working on an answer")
+    runs = store.runs_for_chat(chat_id)
+    why = unfinished(runs[-1] if runs else None)
+    if why is None:
+        raise HTTPException(409, "The last answer is finished - write what you want next")
+    msg = store.add_message(chat_id, "user", [{"type": "continue", **why}])
+    return {"message": msg, "run_id": _start(request, chat_id, body.options)}
+
+
 class EditIn(BaseModel):
     message_id: int
     text: str

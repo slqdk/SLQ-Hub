@@ -3,9 +3,11 @@
 // owner's chats (files in the working folder) and a person's (files on the device).
 import { useEffect, useState, type ReactNode } from "react";
 import { Check, Download, ExternalLink, File as FileIcon, FileArchive, FileAudio, FileCode, FileImage, FileSpreadsheet,
-  FileText, FileVideo, FolderOpen, MessageSquarePlus } from "lucide-react";
+  FileText, FileVideo, FolderOpen, MessageSquarePlus, Play } from "lucide-react";
 import type { ProducedFile, RunRecord } from "../lib/api";
 import { bytes } from "../lib/format";
+import type { Unfinished } from "../lib/turns";
+import { Lamp } from "./ui";
 
 const SHOWN = 6;                            // rows before "Show all"
 
@@ -45,14 +47,35 @@ const ICON: Record<Kind, ReactNode> = {
   sheet: <FileSpreadsheet size={18} />, archive: <FileArchive size={18} />, other: <FileIcon size={18} />,
 };
 
-export function FilesCard({ files, handlers }: { files: ProducedFile[]; handlers: FileHandlers }) {
+/** A turn that is not done (0.22.0): why, and Continue - which goes on from there in a new turn. */
+export function UnfinishedLine({ why, onContinue }: { why: Unfinished; onContinue?: () => void }) {
+  return (
+    <div className="unfinished-line" role="status">
+      <Lamp state="wait" />
+      <span className="grow">{why.reason === "limit"
+        ? <><b>Not finished:</b> the turn stopped after {why.steps} steps, the most one turn may take.</>
+        : <><b>Not finished:</b> it was stopped before it was done.</>}</span>
+      {onContinue && <button className="btn small primary" onClick={onContinue}><Play size={14} /> Continue</button>}
+    </div>
+  );
+}
+
+/** The same for an answer that made no files. */
+export function UnfinishedNote({ why, onContinue }: { why: Unfinished; onContinue?: () => void }) {
+  return <div className="unfinished-note"><UnfinishedLine why={why} onContinue={onContinue} /></div>;
+}
+
+export function FilesCard({ files, handlers, unfinished, onContinue }: { files: ProducedFile[]; handlers: FileHandlers;
+  unfinished?: Unfinished | null; onContinue?: () => void }) {
   const [all, setAll] = useState(false);
   if (!files.length) return null;
   const shown = all || files.length <= SHOWN ? files : files.slice(0, SHOWN - 1);
   return (
-    <section className="files-card" aria-label="Files from this answer">
+    <section className={`files-card${unfinished ? " unfinished" : ""}`} aria-label="Files from this answer">
+      {unfinished && <UnfinishedLine why={unfinished} onContinue={onContinue} />}
       <div className="files-card-head">
-        {files.length === 1 ? "File from this answer" : `${files.length} files from this answer`}
+        {unfinished ? (files.length === 1 ? "The file so far" : `${files.length} files so far`)
+          : files.length === 1 ? "File from this answer" : `${files.length} files from this answer`}
       </div>
       {shown.map((f) => <FileRow key={f.path} file={f} handlers={handlers} />)}
       {shown.length < files.length && (

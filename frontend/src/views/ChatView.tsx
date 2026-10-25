@@ -5,10 +5,11 @@ import { api, mediaUrl, type ArtifactRef, type Block, type ChatData, type ChatSe
   type ProducedFile, type RunEvent, type RunRecord, type Settings, type Skill, type Upload } from "../lib/api";
 import { seconds, tokens } from "../lib/format";
 import { linkProps, navigate } from "../lib/router";
-import { buildTurns, liveSegments, newLive, reduceLive, toolLabel, waitsForAnswer, type AssistantTurn, type LiveRun } from "../lib/turns";
+import { buildTurns, isContinue, liveSegments, newLive, reduceLive, toolLabel, unfinished, waitsForAnswer, type AssistantTurn,
+  type LiveRun } from "../lib/turns";
 import { useApp } from "../state";
 import { Composer, type ComposerSettings } from "../components/Composer";
-import { FilesCard, producedFiles, type FileHandlers } from "../components/FilesCard";
+import { FilesCard, producedFiles, UnfinishedNote, type FileHandlers } from "../components/FilesCard";
 import { Items } from "../components/Turn";
 import { copyText, Lamp, MenuButton, Modal } from "../components/ui";
 import { download } from "../lib/download";
@@ -278,6 +279,16 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
     }
   };
 
+  const continueTurn = async () => {
+    try {
+      const r = await api<{ run_id: string }>(`/hub/api/chats/${chatId}/continue`, { body: {} });
+      await load();
+      attach(r.run_id);
+    } catch (e) {
+      toast((e as Error).message, "fault");
+    }
+  };
+
   const saveEdit = async (messageId: number, text: string) => {
     try {
       const r = await api<{ run_id: string }>(`/hub/api/chats/${chatId}/edit`, { body: { message_id: messageId, text } });
@@ -410,8 +421,13 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
             ) : (
               <div className="msg-assistant" key={t.key}>
                 <Items items={t.items} actions={{ openArtifact }} />
-                {folder && (!t.runId || lastPart.get(t.runId) === i) && <FilesCard files={producedFiles(t.run)}
-                  handlers={fileHandlers} />}
+                {(!t.runId || lastPart.get(t.runId) === i) && (() => {
+                  const files = folder ? producedFiles(t.run) : [];
+                  const why = unfinished(t.run);
+                  const go = why && !running && t === lastAssistant ? continueTurn : undefined;
+                  return files.length ? <FilesCard files={files} handlers={fileHandlers} unfinished={why} onContinue={go} />
+                    : why ? <UnfinishedNote why={why} onContinue={go} /> : null;
+                })()}
                 <TurnFoot turn={t} names={modelNames} canRetry={!running && t === lastAssistant}
                   stats={!t.runId || lastPart.get(t.runId) === i} onRetry={() => retry()} />
               </div>
@@ -462,6 +478,7 @@ export function UserMessage({ message, editing, canEdit, onEdit, onCancel, onSav
   const files = message.content.filter((b) => b.type === "image" || b.type === "file" || b.type === "file_ref");
   const whileWorking = message.content.some((b) => b.type === "text" && b.while_working);
   const [value, setValue] = useState(text);
+  if (isContinue(message)) return <div className="msg-continued" role="note">Continued</div>;
   return (
     <div className="msg-user">
       {whileWorking && <div className="msg-note">Sent while it worked</div>}

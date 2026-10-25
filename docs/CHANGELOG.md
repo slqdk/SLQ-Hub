@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.22.0 - 2026-10-25
+
+- **Not finished, and Continue.** An answer that reached the most steps one
+  turn may take (Settings → Assistant, 60 by default), or that you stopped,
+  now says so: "Not finished" in an amber bar in its files card - the files
+  stay listed as "files so far", since they may be whole or half-written -
+  or on its own when it made no files. **Continue** under the last answer
+  goes on from there: the assistant is told why it stopped and to check what
+  it has made instead of starting over, and the chat shows a small
+  "Continued" mark rather than a message from you. The same in people's
+  chats. In chat 21 the card showed the game's file as if it were done.
+
 ## 0.21.0 - 2026-10-25
 
 - **Tests.** Settings → Tests gives the assistant 24 hard tasks in every

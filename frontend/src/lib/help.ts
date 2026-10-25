@@ -147,6 +147,8 @@ export const SECTIONS: HelpSection[] = [
         how: [
           "Write while it works: it reads your message after the step it is on.",
           "The square button stops it.",
+          "An answer that was stopped, or reached the most steps one turn may take, says Not finished: Continue goes "
+            + "on from where it stopped, with what it has made so far.",
           "Under the last answer: copy it, or the circular arrow for a new answer.",
           "The pencil under a message you sent changes it and sends it again; the chat goes on from there.",
           "Search your chats from the sidebar.",

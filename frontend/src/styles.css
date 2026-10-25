@@ -443,6 +443,13 @@ button.file-chip:disabled { cursor: default; }
 .files-card-head { padding: 6px 12px; font-family: var(--font-plate); font-weight: 600; font-size: 13px; letter-spacing: 0.02em; color: var(--ink-2); background: var(--paper); border-bottom: 1px solid var(--rule-2); }
 .files-card-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 12px; align-items: start; padding: 10px 12px; border-top: 1px solid var(--rule-2); }
 .files-card-head + .files-card-row { border-top: 0; }
+/* a turn that is not done (0.21.1): why, and Continue - in the files card, or alone under an answer without files */
+.files-card.unfinished { border-color: color-mix(in srgb, var(--wait) 55%, var(--rule)); }
+.unfinished-line { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px; padding: 8px 12px; font-size: 14px; background: color-mix(in srgb, var(--wait) 12%, var(--sheet)); }
+.files-card .unfinished-line { border-bottom: 1px solid color-mix(in srgb, var(--wait) 35%, var(--rule-2)); }
+.unfinished-note { width: 100%; max-width: 46rem; border: 1px solid color-mix(in srgb, var(--wait) 55%, var(--rule)); border-radius: 8px; overflow: hidden; }
+.msg-continued { display: flex; align-items: center; gap: 10px; margin: 4px 0; color: var(--ink-3); font-size: 12.5px; font-family: var(--font-plate); font-weight: 600; letter-spacing: 0.02em; }
+.msg-continued::before, .msg-continued::after { content: ""; flex: 1; border-top: 1px solid var(--rule-2); }
 .files-card-row .kind { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 6px; background: var(--cabinet); color: var(--ink-2); }
 .files-card-main { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .files-card-name { display: flex; gap: 8px; align-items: baseline; min-width: 0; font-family: var(--font-plate); font-weight: 600; font-size: 15px; }

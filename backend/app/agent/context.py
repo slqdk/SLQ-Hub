@@ -33,6 +33,17 @@ def _size(n: int) -> str:
     return ""
 
 
+def continue_text(block: dict) -> str:
+    """What the model is told when the user presses Continue under an unfinished turn (0.22.0): why it stopped."""
+    if block.get("reason") == "limit":
+        why = (f"Your last turn ended at the step limit ({int(block.get('steps') or 0)} steps, the most one turn may "
+               "take) before the work was done.")
+    else:
+        why = "They stopped your last turn before it was done."
+    return (f"(SLQ Hub: the user pressed Continue. {why} Go on from where you stopped: check the state of what you "
+            "were making before you change it, and do not start over.)")
+
+
 def _file_ref(block: dict, fresh: bool) -> str:
     """A file of the working folder that the user put in a message: its text
     as it was then (while the message is recent), else where to read it."""
@@ -115,6 +126,8 @@ def to_model_messages(rows: list[dict], current_run: str | None = None, keep_ima
                                                           f"({b.get('size', 0)} bytes) - read it with read_file]"})
                 elif t == "file_ref":
                     docs.append({"type": "text", "text": _file_ref(b, fresh)})
+                elif t == "continue":
+                    parts.append({"type": "text", "text": continue_text(b)})
             parts = docs + parts
             if not parts:
                 continue

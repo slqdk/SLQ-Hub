@@ -101,7 +101,9 @@ export type Block =
       inline?: boolean }
   | { type: "tool_call"; id: string; name: string; arguments: string }
   | { type: "tool_result"; tool_call_id: string; name: string; text: string; images?: ImageRef[]; is_error?: boolean;
-      display?: Display | null };
+      display?: Display | null }
+  /** Continue under an unfinished turn (0.22.0): the model is told why it stopped. */
+  | { type: "continue"; reason: "limit" | "stopped"; steps?: number };
 
 export interface ImageRef { sha: string; mime?: string; caption?: string }
 export interface ArtifactRef { id: string; version: number; title: string; type: string; language?: string | null }
@@ -131,7 +133,7 @@ export interface ChatListItem { id: number; project_id: number | null; title: st
 
 /** A file an answer made or changed in the working folder (a person's: on the device). */
 export interface ProducedFile { path: string; size: number; mime: string; new?: boolean; skipped?: string }
-export interface Step { type: string; step?: number; depth?: number; model?: string; name?: string; ok?: boolean;
+export interface Step { type: string; step?: number; steps?: number; depth?: number; model?: string; name?: string; ok?: boolean;
   seconds?: number; prompt_tokens?: number | null; completion_tokens?: number | null; cached_tokens?: number | null;
   tps?: number | null; prompt_tps?: number | null; reason?: string; files?: ProducedFile[] }
 export interface RunRecord { id: string; chat_id: number; status: string; model: string; started_at: string;

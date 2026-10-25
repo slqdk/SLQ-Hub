@@ -8,8 +8,9 @@ internet), "read dr.dk" (web_fetch), "jingle" (a command makes a
 sound, a PDF and notes: the card under the answer), "announce" (speech),
 "song" (music), "horn" (a sound effect), "video" (Wan 2.2 5B: ffmpeg's test
 pattern when ffmpeg is installed), "game" (slow steps, to try
-sending a message while it works), "page" (makes an artifact), a test case of Settings -> Tests (tests/dev_evals.py),
-"think" (reasons first), "search" (web search), "web picture" (a picture
+sending a message while it works), "page" (makes an artifact), a test case of
+Settings -> Tests (tests/dev_evals.py), "endless" (a file each step until the
+step limit: the answer is marked unfinished, with Continue), "think" (reasons first), "search" (web search), "web picture" (a picture
 from the web in the answer), "picture" (an image),
 "loop" (repeats the same searches until the Hub makes it answer), "window" (writes a
 Windows Forms program and looks at it with windows_app: needs --sandbox), or anything else (a short markdown
@@ -138,6 +139,9 @@ def responder(body: dict) -> dict:
     scripted = dev_evals.answer(text, msgs, tools_done)          # Settings -> Tests: each case answered well
     if scripted is not None:
         return scripted
+    if "endless" in low:              # never done: one more file each step, until the step limit (then Continue)
+        return {"content": f"Part {tools_done + 1}.", "tool_calls": [{"name": "write_file", "arguments": {
+            "path": f"endless/part{tools_done + 1}.txt", "content": f"part {tools_done + 1}\n"}}]}
     if "window" in low:                                 # a Windows program on the virtual screen (a real sandbox)
         if tools_done == 0:
             return {"content": "I will write a small Windows Forms program.", "tool_calls": [{"name": "write_file",

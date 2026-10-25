@@ -193,6 +193,9 @@ def transcript(chat: dict, project: dict | None, rows: list[dict], runs: list[di
                 out.extend(["", "*Files from this turn: " + ", ".join(
                     f"`{f['path']}` ({'new' if f.get('new', True) else 'changed'}, {f.get('size', 0)} bytes)"
                     for f in made) + ".*"])
+            limit = next((s for s in steps if s.get("type") == "limit" and not s.get("depth")), None)
+            if limit:
+                out.extend(["", f"*Not finished: the turn stopped at the step limit ({limit.get('steps')} steps).*"])
             if r.get("error"):
                 out.extend(["", f"**Error:** {r['error']}"])
         section = None
@@ -215,6 +218,9 @@ def transcript(chat: dict, project: dict | None, rows: list[dict], runs: list[di
                 elif t == "file_ref":
                     extra = f"{b['lines']} lines" if b.get("lines") else _size(int(b.get("size") or 0))
                     out += [f"*(file from the folder: {b.get('path')}, {extra})*", ""]
+                elif t == "continue":
+                    why = f"the step limit, {b.get('steps')} steps" if b.get("reason") == "limit" else "stopped"
+                    out += [f"*(pressed Continue: the last turn was not done - {why})*", ""]
             continue
         if row.get("run_id") != section or section is None:
             close_section()
