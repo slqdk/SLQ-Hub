@@ -257,30 +257,48 @@ class AudioPipeline:
                 "time_signature": node["timesignature"], "language": node["language"], "format": fmt}
 
     async def remake(self, *, song: bytes, seconds: float, prompt: str, lyrics: str = "",
-                     reference: bytes | None = None, keep: float = 0.5, bpm: int | None = None, key: str | None = None,
+                     reference: bytes | None = None, keep: float = 0.6, bpm: int | None = None, key: str | None = None,
                      time_signature: int | None = None, language: str = "en", seed: int | None = None,
-                     model: str | None = None, fmt: str = "mp3", ticket: Ticket | None = None, owner: str = "web",
-                     priority: str = "interactive", on_progress=None) -> dict:
+                     model: str | None = None, fmt: str = "mp3", keep_vocals: bool = False,
+                     ticket: Ticket | None = None, owner: str = "web", priority: str = "interactive",
+                     on_progress=None) -> dict:
         """A new version of a song (FLAC): its melody, rhythm and structure (ACE-Step's codes of it), the sound
         from the prompt and a reference clip - or the song's own; keep > 0 starts from the song itself instead of
-        noise. "codes" is SLQAceStepReference's check of the song's codes against ACE-Step's own tokenizer."""
+        noise. "codes" is SLQAceStepReference's check of the song's codes against ACE-Step's own tokenizer,
+        "beats" SLQBeatCheck's measure of whether the new version kept the song's tempo, key and beat.
+        keep_vocals: the song's own vocals over a new band (the separation model splits it first); "data" is the
+        mix, "band" the new band alone."""
         entry = self.chosen("music", model)
         if fmt not in COMFY_FORMATS:
             raise AudioError(f"music can be saved as {', '.join(COMFY_FORMATS)}")
+        sep = self.installed("separate") if keep_vocals else []
+        if keep_vocals and not sep:
+            raise AudioError("keeping the song's own vocals needs the vocal separation model: download Mel-Band "
+                             "RoFormer vocals (Settings -> Models -> Sound, music and speech)")
         sd = int(seed) if seed is not None else random.randint(1, 2**31 - 1)
         files = self._ace_files(entry)
+        if sep:
+            files.update(separator=models_path(sep[0], "separator"),
+                         separator_config=str((sep[0].get("settings") or {}).get("config") or ""))
         names = await self._upload({"song": song, **({"reference": reference} if reference else {})})
         graph = W.ace_remake(song=names["song"], reference=names.get("reference"), caption=prompt, lyrics=lyrics,
                              seconds=seconds, seed=sd, bpm=bpm, key=key, time_signature=time_signature,
                              language=(language or "en").lower(), keep=keep, fmt=fmt, **files)
         files, texts, took = await self._run_all(graph, ticket, owner, priority, f"remake: {prompt[:60]}",
                                                  on_progress)
+        if sep:
+            data, band = output(files, "hub-mix"), output(files, "hub-band")
+            if data is None or band is None:
+                raise AudioError("the remake finished without the mix or the new band")
+        else:
+            data, band = files[0][1], None
         enc = graph["5"]["inputs"]
-        return {"data": files[0][1], "seconds": round(float(enc["duration"]), 1), "compute": round(took, 1),
+        return {"data": data, "band": band, "seconds": round(float(enc["duration"]), 1), "compute": round(took, 1),
                 "model": entry, "seed": sd, "bpm": enc["bpm"] or None, "key": enc["keyscale"] or None,
                 "time_signature": int(enc["timesignature"]) if enc["timesignature"] else None,
                 "language": enc["language"], "keep": 1.0 - float(graph["8"]["inputs"]["denoise"]), "format": fmt,
-                "own_sound": not reference, "codes": node_text(texts, "15")}
+                "own_sound": not reference, "codes": node_text(texts, "15"), "beats": node_text(texts, "30"),
+                "separator": sep[0] if sep else None}
 
     async def separate(self, *, audio: bytes, stems: tuple[str, ...] = ("vocals", "accompaniment"),
                        model: str | None = None, fmt: str = "mp3", ticket: Ticket | None = None, owner: str = "web",

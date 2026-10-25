@@ -8,6 +8,7 @@ from typing_extensions import override
 from comfy_api.latest import ComfyExtension, IO
 
 from .ace import AceStepEncode, AceStepReference
+from .beats import BeatCheck
 from .seedvc import SeedVC
 from .separate import SeparateVocals
 
@@ -15,7 +16,7 @@ from .separate import SeparateVocals
 class SlqAudio(ComfyExtension):
     @override
     async def get_node_list(self) -> list[type[IO.ComfyNode]]:
-        return [AceStepReference, AceStepEncode, SeparateVocals, SeedVC]
+        return [AceStepReference, AceStepEncode, SeparateVocals, SeedVC, BeatCheck]
 
 
 async def comfy_entrypoint() -> SlqAudio:

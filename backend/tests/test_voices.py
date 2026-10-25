@@ -143,23 +143,31 @@ async def test_a_song_remade_with_the_sound_of_another(signed_in, app, fakes):
     g = fakes.comfy["prompts"][1]
     assert (g["5"]["inputs"]["bpm"], g["5"]["inputs"]["keyscale"], g["5"]["inputs"]["timesignature"]) == \
         (92, "F# minor", "3")
-    # 0.20.2 (chat 24: keep 0 and silence for a timbre came back in another key and tempo): keep 0.5 by default,
-    # and without a clip the song's own sound - 10 s of its start, middle and end, as ACE-Step prepares a reference
-    assert g["8"]["inputs"]["denoise"] == 0.5 and g["15"]["inputs"]["timbre"] == ["21", 0]
+    # 0.20.2 (chat 24: keep 0 and silence for a timbre came back in another key and tempo): without a clip the
+    # song's own sound - 10 s of its start, middle and end, as ACE-Step prepares a reference; 0.28.0 (chat 76: 0.6-0.85
+    # kept the song's tempo, key and beat, 0.4-0.5 lost them): keep 0.6 by default
+    assert g["8"]["inputs"]["denoise"] == 0.4 and g["15"]["inputs"]["timbre"] == ["21", 0]
     assert [(n["inputs"]["audio"], n["inputs"]["start_index"], n["inputs"]["duration"])
             for n in (g["16"], g["17"], g["18"])] == [(["11", 0], 0.0, 10.0), (["11", 0], 145.0, 10.0),
                                                       (["11", 0], 290.0, 10.0)]
     assert g["19"]["inputs"] == {"audio1": ["16", 0], "audio2": ["17", 0], "direction": "after"}
     assert g["20"]["inputs"] == {"audio1": ["19", 0], "audio2": ["18", 0], "direction": "after"}
     assert g["21"] == {"class_type": "VAEEncodeAudio", "inputs": {"audio": ["20", 0], "vae": ["4", 0]}}
-    assert "a new version of lang.wav with its own sound, 300 s" in res["text"] and "keep 0.5" in res["text"]
+    assert "a new version of lang.wav with its own sound, 300 s" in res["text"] and "keep 0.6" in res["text"]
     assert "no lyrics given, so the words are not kept, 92 BPM, F# minor, 3/4" in res["text"]
     assert "Only the first 5:00 of the song (6:40) were used." in res["text"]
     assert res["text"].endswith("Check: the song's codes agree with ACE-Step's own tokenizer for 99.8% of it.")
     assert "music_remake re-performs an existing song" in system(fakes, 0)
     assert "For the same recording only live" in system(fakes, 0)
     desc = tools_offered(fakes, 0)["music_remake"]["description"]
-    assert "0.5 (default) stays close to the song" in desc and "afir=wet=10,volume=2" in desc
+    assert "starts from (default 0.6)" in desc and "afir=wet=10,volume=2" in desc
+    # every remake measures whether it kept the song's time (SLQBeatCheck), and says so
+    assert g["30"] == {"class_type": "SLQBeatCheck", "inputs": {"song": ["11", 0], "result": ["9", 0]}}
+    assert "Beat check (measured, not heard): the new version keeps the song's time - the song about 97 BPM, F# minor; " \
+           "the new version about 97 BPM, F# minor; 99% of the beats line up." in res["text"]
+    assert "vocals" not in tools_offered(fakes, 0)["music_remake"]["parameters"]["properties"]   # no separation model
+    assert "needs the vocal separation model (Mel-Band RoFormer vocals, Settings -> Models), which is not " \
+           "downloaded" in desc
     # codes that do not agree with ACE-Step's tokenizer are said so - the user is told
     fakes.comfy["ace_check"] = json.dumps({"timbre_frames": 750, "codes": 1295, "agree": 0.41, "cosine_mean": 0.62})
     res = await call(app, signed_in, c["id"], fakes, "music_remake", {"audio": "sang.wav", "prompt": "lo-fi"})
@@ -182,10 +190,97 @@ async def test_chat_76_an_attachment_by_its_name_the_keep_as_given_and_no_sound_
     assert "keep 0.75," in res["text"]
     assert "You cannot hear it: tell the user what you asked for, not how it sounds" in res["text"]
     desc = tools_offered(fakes, 0)["music_remake"]["description"]
-    assert "0.45 and 0.5 lost its rhythm" in desc and "try 0.6-0.7" in desc
-    assert "Keep the singing, change the band" in desc and "amix=inputs=2:duration=first:normalize=0" in desc
+    assert "0.4-0.5 lost the beat (about 150 BPM against the song's 97, another key)" in desc
+    assert "Keep the singing, change the band" in desc
     res = await call(app, signed_in, c["id"], fakes, "music_remake", {"audio": "nope.mp3", "prompt": "rock"})
     assert not res["ok"] and "No such file in the working folder: nope.mp3" in res["text"]
+
+
+async def test_chat_76_the_songs_own_vocals_over_a_new_band(signed_in, app, fakes):
+    """Chat 76, the second try: the model separated the song, remade the accompaniment and mixed the vocals back
+    itself - at 0.3, then halved again by amix's normalising: 11 dB under the new band (measured). Now one call does
+    it: only the band is remade, the original vocals go back over it at their own level, both files are kept."""
+    install(app, "ace-step-1.5-turbo", "mel-band-roformer-vocals")
+    c = await new_chat(signed_in)
+    files_in(app, c["id"], ".hub/attachments/I Want It That Way.mp3")
+    seen, fakes.sandbox["handler"] = sandbox_ffmpeg(app, {"I Want It That Way.mp3": 214.0})
+    res = await call(app, signed_in, c["id"], fakes, "music_remake", {
+        "audio": "I Want It That Way.mp3", "prompt": "heavy metal, distorted guitars, heavy drums",
+        "lyrics": "[verse]\nYou are my fire", "vocals": "original", "save_as": "metal.mp3"})
+    assert res["ok"], res
+    g = fakes.comfy["prompts"][0]
+    assert g["31"] == {"class_type": "SLQSeparateVocals", "inputs": {
+        "audio": ["11", 0], "model": "separation/MelBandRoformer.ckpt",
+        "config": "configs/KimberleyJensen/config_vocals_mel_band_roformer_kj.yaml", "overlap": 2, "batch": 2}}
+    assert g["12"]["inputs"]["audio"] == ["31", 1]                       # the band is remade from the accompaniment
+    assert g["15"]["inputs"] == {"model": ["2", 0], "source": ["12", 0], "timbre": ["21", 0]}
+    assert {g[n]["inputs"]["audio"][0] for n in ("16", "17", "18")} == {"31"}    # its own sound: the band's
+    assert g["5"]["inputs"]["lyrics"] == "[Instrumental]" and g["8"]["inputs"]["denoise"] == 0.4
+    assert g["32"] == {"class_type": "AudioMerge",
+                       "inputs": {"audio1": ["9", 0], "audio2": ["31", 0], "merge_method": "add"}}   # at their level
+    assert g["10"]["inputs"]["audio"] == ["32", 0] and g["10"]["inputs"]["filename_prefix"] == "audio/hub-mix"
+    assert g["33"]["inputs"]["audio"] == ["9", 0] and g["33"]["inputs"]["filename_prefix"] == "audio/hub-band"
+    assert g["30"] == {"class_type": "SLQBeatCheck", "inputs": {"song": ["31", 1], "result": ["9", 0]}}
+    d = chat_dir(app, c["id"])
+    assert (d / "metal.mp3").is_file() and (d / "metal-band.mp3").is_file()
+    assert res["text"].startswith(
+        "Saved metal.mp3: I Want It That Way.mp3's own vocals, exactly as recorded, over a new band - its "
+        "accompaniment remade with its own sound as an instrumental (Mel-Band RoFormer vocals split the song), 214 s, "
+        "ACE-Step 1.5 Turbo, keep 0.6, seed ")
+    assert "; the new band alone: metal-band.mp3. The user can play it under your answer." in res["text"]
+    assert "Beat check (measured, not heard): the new band keeps the song's time, so the vocals sit on it - the song " \
+           "about 97 BPM, F# minor; the new band about 97 BPM, F# minor; 99% of the beats line up." in \
+           res["text"]
+    assert [a["path"] for a in res["display"]["audio"]] == ["metal.mp3", "metal-band.mp3"]
+    offered = tools_offered(fakes, 0)["music_remake"]
+    assert offered["parameters"]["properties"]["vocals"]["enum"] == ["remake", "original"]
+    assert 'vocals "original" - the song\'s own vocals stay exactly as recorded' in offered["description"]
+    assert "[1:a]volume=1.0[v];[0:a][v]amix=inputs=2:duration=first:normalize=0" in offered["description"]
+    assert 'To keep the song\'s own singing and change only the band, give it vocals "original".' in system(fakes, 0)
+    # a band that lost the beat: said so before the user listens, and that the vocals will not sit on it
+    fakes.comfy["beat_check"] = json.dumps({"song_bpm": 97, "new_bpm": 150, "song_key": "F# minor",
+                                            "new_key": "C# major", "on_beat": 0.243, "covered": 0.375,
+                                            "chance": 0.228, "verdict": "lost"})
+    res = await call(app, signed_in, c["id"], fakes, "music_remake", {
+        "audio": "I Want It That Way.mp3", "prompt": "heavy metal", "vocals": "original", "keep": 0.45})
+    assert res["ok"], res
+    assert "Warning - beat check (measured, not heard): the new band does not keep the song's time - the song about " \
+           "97 BPM, F# minor; the new band about 150 BPM, C# major; only 24% of its beats land on the song's (23% " \
+           "would by chance). The vocals will not sit on this band. Tell the user before they listen; a higher keep " \
+           "holds the beat (0.6 and up did in chat 76)." in res["text"]
+    fakes.comfy["beat_check"] = json.dumps({"song_bpm": 97, "new_bpm": 97, "on_beat": 0.62, "chance": 0.228,
+                                            "verdict": "partly"})
+    res = await call(app, signed_in, c["id"], fakes, "music_remake", {"audio": "I Want It That Way.mp3",
+                                                                     "prompt": "punk"})
+    assert "the new version keeps the song's time only in part - the song about 97 BPM; the new version about 97 " \
+           "BPM; 62% of its beats land on the song's (23% would by chance)" in res["text"]
+    assert "-band" not in json.dumps(res["display"])                       # a whole remake: one file
+    # a measure only: when it cannot tell, or failed in ComfyUI, the remake is still there and says so
+    for check, said in (({"verdict": "unknown"}, "Beat check: too few beats to tell whether it keeps the song's time."),
+                        ({"verdict": "unknown", "error": "RuntimeError: boom"},
+                         "Beat check: it could not be measured (RuntimeError: boom).")):
+        fakes.comfy["beat_check"] = json.dumps(check)
+        res = await call(app, signed_in, c["id"], fakes, "music_remake", {"audio": "I Want It That Way.mp3",
+                                                                         "prompt": "punk"})
+        assert res["ok"] and said in res["text"], res["text"]
+    # nonsense is refused before anything runs
+    n = len(fakes.comfy["prompts"])
+    res = await call(app, signed_in, c["id"], fakes, "music_remake", {"audio": "I Want It That Way.mp3",
+                                                                     "prompt": "rock", "vocals": "karaoke"})
+    assert not res["ok"] and "vocals must be remake" in res["text"] and len(fakes.comfy["prompts"]) == n
+
+
+async def test_keeping_the_vocals_needs_the_separation_model(signed_in, app, fakes):
+    install(app, "ace-step-1.5-turbo")
+    c = await new_chat(signed_in)
+    files_in(app, c["id"], "sang.mp3")
+    seen, fakes.sandbox["handler"] = sandbox_ffmpeg(app, {"sang.mp3": 120.0})
+    res = await call(app, signed_in, c["id"], fakes, "music_remake", {"audio": "sang.mp3", "prompt": "metal",
+                                                                     "vocals": "original"})
+    assert not res["ok"] and "keeping the song's own vocals needs the vocal separation model: download Mel-Band " \
+                             "RoFormer vocals" in res["text"]
+    assert not fakes.comfy["prompts"] and not fakes.comfy["uploads"]
+    assert "give it vocals" not in system(fakes, 0)
 
 
 # ---------------------------------------------------------------- stems
@@ -359,13 +454,20 @@ def test_graphs():
     # a song under 30 s is its own timbre whole; a clip replaces the song's own sound
     short = W.ace_remake(song="s.flac", caption="c", lyrics="", seconds=20, seed=1, bpm=None, key=None,
                          time_signature=None, language="en", unet="u", text_encoder="t", planner="p", vae="v")
-    assert short["8"]["inputs"]["denoise"] == 0.5 and short["15"]["inputs"]["timbre"] == ["21", 0]
+    assert short["8"]["inputs"]["denoise"] == 0.4 and short["15"]["inputs"]["timbre"] == ["21", 0]
     assert short["21"]["inputs"]["audio"] == ["11", 0] and "16" not in short and "TrimAudioDuration" not in \
         W.class_types(short)
     clip = W.ace_remake(song="s.flac", caption="c", lyrics="", seconds=200, seed=1, bpm=None, key=None,
                         time_signature=None, language="en", unet="u", text_encoder="t", planner="p", vae="v",
                         reference="r.flac")
     assert clip["15"]["inputs"]["timbre"] == ["14", 0] and not {"16", "21"} & set(clip)
+    band = W.ace_remake(song="s.flac", caption="c", lyrics="[verse]\nsung", seconds=200, seed=1, bpm=None, key=None,
+                        time_signature=None, language="en", unet="u", text_encoder="t", planner="p", vae="v",
+                        reference="r.flac", separator="separation/m.ckpt", separator_config="cfg.yaml", fmt="ogg")
+    assert band["5"]["inputs"]["lyrics"] == "[Instrumental]" and band["15"]["inputs"]["timbre"] == ["14", 0]
+    assert band["31"]["inputs"]["model"] == "separation/m.ckpt" and band["31"]["inputs"]["config"] == "cfg.yaml"
+    assert band["10"]["inputs"]["format"] == band["33"]["inputs"]["format"] == "opus" and not {"16", "21"} & set(band)
+    assert clip["30"]["inputs"] == {"song": ["11", 0], "result": ["9", 0]} and "31" not in clip
     s = W.separate(audio="a.flac", model="m", config="c", stems=("accompaniment",), fmt="ogg")
     assert set(s) == {"1", "2", "4"} and s["4"]["inputs"]["format"] == "opus"
     with pytest.raises(ValueError, match="needs the vocal separation model"):
@@ -396,6 +498,35 @@ def test_the_live_recipe_runs(tmp_path):
     assert float(re.search(r"max_volume: (-?[\d.]+) dB", stats).group(1)) <= 0.0
 
 
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="needs ffmpeg")
+def test_the_mix_recipe_keeps_the_vocals_at_their_level(tmp_path):
+    """The recipe the remake tool gives for changing the balance afterwards: vocals (44.1 kHz, as the separation
+    makes them) over a band (48 kHz, as ACE-Step makes it), as long as the band, nothing clipping - and the vocals
+    as loud as they were (chat 76's own mix had them 11 dB under the band)."""
+    from app.agent.tools.audio import MIX_RECIPE
+    run = lambda *a: subprocess.run(["ffmpeg", "-nostdin", "-loglevel", "error", "-y", *a], cwd=tmp_path,  # noqa: E731
+                                    check=True, capture_output=True, text=True)
+    run("-f", "lavfi", "-i", "sine=frequency=220:duration=6:sample_rate=48000", "-af", "volume=0.6", "-ac", "2",
+        "band.mp3")
+    run("-f", "lavfi", "-i", "sine=frequency=1760:duration=6.5:sample_rate=44100", "-af", "volume=0.6", "-ac", "2",
+        "vocals.mp3")
+    cmd = shlex.split(MIX_RECIPE)
+    assert cmd[0] == "ffmpeg" and "volume=1.0[v]" in MIX_RECIPE
+    subprocess.run(["ffmpeg", "-nostdin", "-loglevel", "error", "-y", *cmd[1:]], cwd=tmp_path, check=True)
+    probe = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0",
+                            str(tmp_path / "mix.mp3")], capture_output=True, text=True, check=True)
+    assert float(probe.stdout) == pytest.approx(6.0, abs=0.1)
+
+    def level(name: str, af: str = "anull") -> tuple[float, float]:
+        out = subprocess.run(["ffmpeg", "-nostdin", "-hide_banner", "-i", str(tmp_path / name), "-af",
+                              f"{af},volumedetect", "-f", "null", "-"], capture_output=True, text=True).stderr
+        return (float(re.search(r"mean_volume: (-?[\d.]+) dB", out).group(1)),
+                float(re.search(r"max_volume: (-?[\d.]+) dB", out).group(1)))
+    assert level("mix.mp3")[1] <= 0.0
+    voice = "highpass=f=1200,highpass=f=1200,highpass=f=1200"            # the 1760 Hz "singing" alone
+    assert level("mix.mp3", voice)[0] == pytest.approx(level("vocals.mp3", voice)[0], abs=1.0)
+
+
 def _node_ids() -> set[str]:
     ids = set()
     for p in NODES.glob("*.py"):
@@ -415,7 +546,8 @@ def test_the_hubs_nodes_are_the_ones_its_graphs_use():
               W.seed_vc(audio="a", voice="v", dit="d", config="c", whisper="w", vocoder="o", separator="s", music=True,
                         vocals_only=True)):
         used |= {c for c in W.class_types(g) if c.startswith("SLQ")}
-    assert used == _node_ids() == {"SLQAceStepReference", "SLQAceStepEncode", "SLQSeparateVocals", "SLQSeedVC"}
+    assert used == _node_ids() == {"SLQAceStepReference", "SLQAceStepEncode", "SLQSeparateVocals", "SLQSeedVC",
+                                   "SLQBeatCheck"}
 
 
 def test_the_catalog_the_nodes_and_the_image_agree():

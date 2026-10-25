@@ -1459,6 +1459,37 @@ Hub's own (`services/comfyui/nodes/slq_audio`, installed by the ComfyUI image):
   result now says it cannot hear the file. A sound input given by an
   attachment's name is found in `.hub/attachments/`, and keep is written as
   given (0.75 was shown as 0.8).
+  **0.28.0 (chat 76 again, measured):** Søren tried the stems way, keep 0.7
+  and 0.6, still on 0.26.0. The model mixed the vocals at 0.3 and let `amix`
+  halve both: 11 dB under the new band where they sing (in the song they are
+  level with it, -0.4 dB). The new band was in time - 98-100 % of its beats
+  within 70 ms of the accompaniment's, 97 BPM and F# minor like the song -
+  but its long-term spectrum (1/3-octave bands) moved from the accompaniment's
+  only 1.1-1.4 dB, as far as the 0.75 and 0.85 remakes ("a lot like" and
+  "almost exactly like the original") moved from the song (0.45-0.5: 2.0-2.4
+  dB). Over all six remakes of the song, 0.6-0.85 kept its tempo, key and
+  beat and 0.4-0.5 lost all three (about 150 BPM against 97): keep alone does
+  not give a new sound on the old beat. So `music_remake` takes `vocals: "original"`
+  (offered when the separation model is downloaded): one graph separates the
+  song, remakes only its accompaniment (lyrics `[Instrumental]`; the
+  accompaniment's own sound unless a clip is given), adds the original vocals
+  back with `AudioMerge` (unity gain; it divides by the peak only when the sum
+  passes full scale) and saves the mix and the band alone - no ffmpeg written
+  by the model (`MIX_RECIPE`, now with a level for the vocals, stays for
+  changing the balance afterwards). Every remake graph ends in
+  `SLQBeatCheck`: librosa's beat tracker on the song (its accompaniment, for
+  a band) and on the result, the tempo from a line through the beats, the key
+  from the CQT chroma (Krumhansl-Kessler profiles), and the share of the
+  result's beats within 70 ms of the song's and the reverse (a double or half
+  tempo on the same beat counts); 80 % or more follows, under chance plus 20
+  points (at least 45 %) lost, between partly. The tool's result gives it as
+  measured, not heard, with a warning to tell the user when the beat is lost.
+  On chat 76's files: 91-100 % for the six in time, 24-25 % for the two that
+  were not (chance 23 %). Keep defaults to 0.6. Two ways to move the sound
+  further while the beat stays are described but not yet tried on the card:
+  below 0.6 with the song's bpm and key as the beat check measured them
+  (without them ACE-Step chose about 150 BPM, as in chat 24), and a reference
+  clip in the new style.
 - **Stems** (`audio_separate`): vocals and accompaniment, for karaoke,
   remixes, or one part alone. `SLQSeparateVocals` runs Kimberley Jensen's
   Mel-Band RoFormer vocal model (SDR 10.98 on MVSEP's multisong set, the one

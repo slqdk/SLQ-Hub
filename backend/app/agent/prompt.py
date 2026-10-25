@@ -118,6 +118,8 @@ REMAKE = """
 - music_remake re-performs an existing song with another sound - described in its prompt and/or taken from a \
 reference clip (another song, a live recording with its audience and room). For the same recording only live (a \
 hall, an audience), effects keep it exactly: its description shows how."""
+# 0.28.0 (chat 76): "the same vocals, a heavier band" - one call, with the separation model.
+REMAKE_VOCALS = """ To keep the song's own singing and change only the band, give it vocals "original"."""
 SOUND_TOOLS = {"speech": ("speech_generate",), "music": ("music_generate", "music_remake"),
                "sound": ("sound_generate",), "voice": ("voice_convert",), "separate": ("audio_separate",)}
 
@@ -146,7 +148,8 @@ def sound_text(abilities: list[str]) -> str:
         how.append(f"{what[0].upper() + what[1:]} run{'s' if len(gpu) == 1 else ''} on the GPU: seconds for an "
                    "effect, a few minutes for a song.")
     names = tools[0] if len(tools) == 1 else ", ".join(tools[:-1]) + " and " + tools[-1]
-    extra = (ONE_PIECE if "music" in abilities else "") + (REMAKE if "music" in abilities else "") + \
+    remake = REMAKE + (REMAKE_VOCALS if "separate" in abilities else "")
+    extra = (ONE_PIECE if "music" in abilities else "") + (remake if "music" in abilities else "") + \
         (VOICE if "voice" in abilities else "")
     return SOUND.format(tools=names, make="makes" if len(tools) == 1 else "make", how=" ".join(how), music=extra)
 

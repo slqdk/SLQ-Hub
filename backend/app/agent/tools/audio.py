@@ -405,8 +405,13 @@ async def music_remake(ctx: ToolContext, args: dict) -> ToolResult:
     prompt = str(args.get("prompt") or "").strip()
     if not prompt:
         return ToolResult("prompt is required: the sound of the new version", is_error=True)
+    vocals = str(args.get("vocals") or "remake").strip().lower()
+    if vocals not in ("remake", "original"):
+        return ToolResult("vocals must be remake (the whole recording is played again) or original (the song's own "
+                          "vocals stay, only the band is new)", is_error=True)
+    keep_vocals = vocals == "original"
     from ...audio.pipeline import AudioError
-    lyrics = str(args.get("lyrics") or "")
+    lyrics = "" if keep_vocals else str(args.get("lyrics") or "")
     try:
         song, seconds, total = await _sound_input(ctx, str(args.get("audio") or ""), REMAKE_S, "audio")
         note = _cut_note(seconds, total, "the song")
@@ -422,22 +427,63 @@ async def music_remake(ctx: ToolContext, args: dict) -> ToolResult:
         out = await pipe.remake(song=song, seconds=seconds, prompt=prompt, lyrics=lyrics, reference=reference,
                                 keep=_number(args, "keep", KEEP_DEFAULT, 0.0, 0.9), bpm=bpm, key=args.get("key") or None,
                                 time_signature=ts, language=str(args.get("language") or "en"), seed=args.get("seed"),
-                                model=args.get("model") or None, fmt=fmt, ticket=ctx.ticket,
+                                model=args.get("model") or None, fmt=fmt, keep_vocals=keep_vocals, ticket=ctx.ticket,
                                 on_progress=await _progress(ctx))
     except FileNotFoundError as exc:
         return ToolResult(f"No such file in the working folder: {exc}", is_error=True)
     except (ValueError, AudioError) as exc:
         return gpu_failure("The remake failed", exc)
     _save(ctx, rel, out["data"], "made")
+    shown = [{"path": rel, "seconds": out["seconds"], "model": out["model"]["name"]}]
     sound = f" with the sound of {str(args['reference']).strip()}" if reference else " with its own sound"
-    words = "no lyrics given, so the words are not kept" if not lyrics.strip() else f"lyrics in {out['language']}"
     meta = ", ".join(x for x in (f"{out['bpm']} BPM" if out["bpm"] else "", out["key"] or "",
                                   f"{out['time_signature']}/4" if out["time_signature"] else "") if x)
-    return ToolResult(f"Saved {rel}: a new version of {str(args.get('audio')).strip()}{sound}, {out['seconds']:.0f} s, "
-                      f"{out['model']['name']}, keep {_keep_text(out['keep'])}, {words}"
-                      f"{', ' + meta if meta else ''}, seed {out['seed']} ({out['compute']:.0f} s on the card). "
-                      f"{_reach(ctx, out['data'])}{note}{_codes_note(out.get('codes') or {})}",
-                      display={"audio": [{"path": rel, "seconds": out["seconds"], "model": out["model"]["name"]}]})
+    name = str(args.get("audio")).strip()
+    run = f"{out['seconds']:.0f} s, {out['model']['name']}, keep {_keep_text(out['keep'])}"
+    done = f"seed {out['seed']} ({out['compute']:.0f} s on the card)"
+    if keep_vocals:
+        band = f"{rel[: -len(Path(rel).suffix)]}-band.{fmt}"
+        _save(ctx, band, out["band"], "made")
+        shown.append({"path": band, "seconds": out["seconds"], "model": out["model"]["name"]})
+        head = (f"Saved {rel}: {name}'s own vocals, exactly as recorded, over a new band - its accompaniment remade"
+                f"{sound} as an instrumental ({out['separator']['name']} split the song), {run}"
+                f"{', ' + meta if meta else ''}, {done}; the new band alone: {band}. ")
+    else:
+        words = "no lyrics given, so the words are not kept" if not lyrics.strip() else f"lyrics in {out['language']}"
+        head = f"Saved {rel}: a new version of {name}{sound}, {run}, {words}{', ' + meta if meta else ''}, {done}. "
+    return ToolResult(f"{head}{_reach(ctx, out['data'])}{note}{_beats_note(out.get('beats') or {}, keep_vocals)}"
+                      f"{_codes_note(out.get('codes') or {})}", display={"audio": shown})
+
+
+def _beats_note(check: dict, band: bool) -> str:
+    """SLQBeatCheck's measure (0.28.0): did the new version keep the song's tempo, key and beat? Measured, so the
+    assistant can say so before the user listens - in chat 76 only the user's ears told."""
+    verdict = check.get("verdict")
+    if not verdict:
+        return ""
+    if check.get("error"):
+        return f" Beat check: it could not be measured ({str(check['error'])[:200]})."
+    it = "the new band" if band else "the new version"
+    sb, nb, sk, nk = (check.get(k) for k in ("song_bpm", "new_bpm", "song_key", "new_key"))
+    song = ", ".join(x for x in (f"about {sb} BPM" if sb else "", sk or "") if x)
+    new = ", ".join(x for x in (f"about {nb} BPM" if nb else "", nk or "") if x)
+    both = f" - the song {song}; {it} {new}" if song and new else ""
+    share = float(check.get("on_beat") or 0.0)
+    chance = float(check.get("chance") or 0.0)
+    if verdict == "follows":                     # a double or half tempo on the same beat follows too
+        sits = ", so the vocals sit on it" if band else ""
+        best = max(share, float(check.get("covered") or 0.0))
+        return f" Beat check (measured, not heard): {it} keeps the song's time{sits}{both}; {best:.0%} of the beats " \
+               "line up."
+    if verdict == "partly":
+        return f" Beat check (measured, not heard): {it} keeps the song's time only in part{both}; {share:.0%} of its " \
+               f"beats land on the song's ({chance:.0%} would by chance). Tell the user to listen for where it drifts."
+    if verdict == "lost":
+        off = " The vocals will not sit on this band." if band else ""
+        return f" Warning - beat check (measured, not heard): {it} does not keep the song's time{both}; only " \
+               f"{share:.0%} of its beats land on the song's ({chance:.0%} would by chance).{off} Tell the user " \
+               "before they listen; a higher keep holds the beat (0.6 and up did in chat 76)."
+    return " Beat check: too few beats to tell whether it keeps the song's time."
 
 
 def _keep_text(keep: float) -> str:
@@ -458,35 +504,44 @@ def _codes_note(check: dict) -> str:
             "troubleshooting).")
 
 
-def _remake_params(models: list[str]) -> dict:
+def _remake_params(models: list[str], vocals: bool = False) -> dict:
     model: dict = {"type": "string", "enum": models} if models else {"type": "string"}
-    return obj({"audio": {"type": "string", "description": "The song: a sound file in the working folder."},
-                "prompt": {"type": "string", "description": "The sound of the new version: genre, instruments, "
-                                                            "singer, production, room, live or studio."},
-                "lyrics": {"type": "string", "description": "The song's words with [verse]/[chorus] tags, as sung; "
-                                                            "empty: the words are not kept."},
-                "reference": {"type": "string", "description": "Optional: a clip in the working folder whose "
-                                                               "sound to take (5-30 s)."},
-                "keep": {"type": "number", "description": f"0-0.9, default {KEEP_DEFAULT}: how much of the "
-                                                         "recording the new version starts from."},
-                "bpm": {"type": "integer"}, "key": {"type": "string"},
-                "time_signature": {"type": "integer", "description": "2, 3, 4 or 6."},
-                "language": {"type": "string", "description": "Language of the lyrics (ISO code, default en)."},
-                "model": model, "seed": {"type": "integer"},
-                "save_as": {"type": "string", "description": "Path in the working folder: .mp3 (default), .flac or "
-                                                             ".ogg"}}, ["audio", "prompt"])
+    params = {"audio": {"type": "string", "description": "The song: a sound file in the working folder."},
+              "prompt": {"type": "string", "description": "The sound of the new version: genre, instruments, "
+                                                          "singer, production, room, live or studio."},
+              "lyrics": {"type": "string", "description": "The song's words with [verse]/[chorus] tags, as sung; "
+                                                          "empty: the words are not kept."},
+              "reference": {"type": "string", "description": "Optional: a clip in the working folder whose "
+                                                             "sound to take (5-30 s)."},
+              "keep": {"type": "number", "description": f"0-0.9, default {KEEP_DEFAULT}: how much of the "
+                                                       "recording the new version starts from."},
+              "bpm": {"type": "integer"}, "key": {"type": "string"},
+              "time_signature": {"type": "integer", "description": "2, 3, 4 or 6."},
+              "language": {"type": "string", "description": "Language of the lyrics (ISO code, default en)."},
+              "model": model, "seed": {"type": "integer"},
+              "save_as": {"type": "string", "description": "Path in the working folder: .mp3 (default), .flac or "
+                                                           ".ogg"}}
+    if vocals:
+        params["vocals"] = {"type": "string", "enum": ["remake", "original"],
+                            "description": "remake (default): the whole recording is played again, voices too. "
+                                           "original: the song's own vocals stay exactly as recorded and only the "
+                                           "band is new (the new band alone is saved too)."}
+    return obj(params, ["audio", "prompt"])
 
 
 REMAKE_TEXT = ("Make a new version of a song in the working folder: its melody, rhythm and structure re-performed "
                "with another sound - a style described in the prompt and/or the sound of a reference clip (another "
                "song, a live recording with its audience, room and reverb). Runs on the graphics card.")
-KEEP_DEFAULT = 0.5          # 0.20.2: keep 0 (chat 24) came back in another key and tempo - a new song
+# 0.20.2: keep 0 (chat 24) came back in another key and tempo - a new song. 0.28.0: chat 76 measured six remakes of
+# one song - 0.6-0.85 kept its tempo, key and beat, 0.4-0.5 lost all three.
+KEEP_DEFAULT = 0.6
 CODES_AGREE = 0.9
 # The same recording, only live: effects keep it exactly. Tried with this Hub's ffmpeg (6.1): the hall at about
 # 5 dB under the song (afir's peak-normalised IR needs wet=10 and volume=2 to be heard), the crowd looped under.
-# Original vocals over a remade backing (0.27.1): stems of one song have its length, and so does its remake.
-MIX_RECIPE = ('ffmpeg -i backing.mp3 -i vocals.mp3 -filter_complex "[0:a][1:a]amix=inputs=2:duration=first:'
-              'normalize=0,alimiter=limit=0.95[out]" -map "[out]" -c:a libmp3lame -q:a 2 mix.mp3')
+# Vocals over a band made from the same song (0.27.1; 0.28.0 with a level for the vocals): stems of one song have
+# its length, and so does its remake. Chat 76's own mix put the vocals at 0.3 and let amix halve both: 11 dB under.
+MIX_RECIPE = ('ffmpeg -i band.mp3 -i vocals.mp3 -filter_complex "[1:a]volume=1.0[v];[0:a][v]amix=inputs=2:'
+              'duration=first:normalize=0,alimiter=limit=0.95[out]" -map "[out]" -c:a libmp3lame -q:a 2 mix.mp3')
 LIVE_RECIPE = ('ffmpeg -i song.mp3 -f lavfi -i "anoisesrc=c=pink:r=44100:a=0.5:d=2.5,afade=t=out:st=0:d=2.5:curve=exp,'
                'highpass=f=150,lowpass=f=7000,aformat=sample_fmts=fltp:channel_layouts=stereo" -stream_loop -1 -i '
                'crowd.mp3 -filter_complex "[0:a]aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo,'
@@ -500,6 +555,18 @@ def _remake_dynamic(ctx: ToolContext) -> tuple[str, dict]:
     models = pipe.installed("music")
     if not models:
         return REMAKE_TEXT, _remake_params([])
+    vocals = pipe.available("separate")
+    if vocals:
+        band = ("- Keep the singing, change the band (\"the same vocals, a heavier band\"): vocals \"original\" - "
+                "the song's own vocals stay exactly as recorded; only the band is remade (from its accompaniment, as "
+                "an instrumental: no lyrics needed) and the vocals are laid back over it at their own level. The new "
+                "band alone is saved beside it. To change the balance afterwards, audio_separate the song and mix its "
+                "vocals over the band with ffmpeg in bash: " + MIX_RECIPE + " (volume= on the vocals: 1.4 louder, "
+                "0.7 quieter). Without it a remake plays the whole recording again, voices too.\n")
+    else:
+        band = ("- Keep the singing, change the band: a remake plays the whole recording again, voices too. Keeping "
+                "the song's own vocals needs the vocal separation model (Mel-Band RoFormer vocals, Settings -> "
+                "Models), which is not downloaded.\n")
     text = (REMAKE_TEXT + f" Songs up to {REMAKE_S // 60} minutes (longer ones are cut).\n- prompt: the new sound "
             "as rich tags - genre, instruments, singer, "
             "production, \"live concert recording, cheering audience, big arena reverb\". The model hears the "
@@ -508,24 +575,25 @@ def _remake_dynamic(ctx: ToolContext) -> tuple[str, dict]:
             "words as they are sung, with section tags, in language. Ask the user when you do not know them; "
             "without them the singing loses its words.\n- Without a reference the song's own sound is used (10 s "
             "of its start, middle and end): describe in the prompt what should change.\n- keep: how much of the "
-            f"recording the new version starts from. {KEEP_DEFAULT} (default) stays close to the song while its sound "
-            "changes; 0.7-0.9 keeps nearly the recording and changes mostly its sound; 0-0.3 is a new performance "
-            "that only follows the song's codes and can come out in another key, tempo and genre. Measured on a pop "
-            "song (chat 76): 0.75 and 0.85 came back sounding almost like the original, rhythm and all; 0.45 and 0.5 "
-            "lost its rhythm (another tempo). When the sound must change but the rhythm stay, try 0.6-0.7, and tell "
-            "the user which keep you used.\n- Keep the singing, change the band (\"the same vocals, a heavier "
-            "band\"): a remake plays the whole recording again, voices too. Instead: audio_separate the song (both "
-            "stems), music_remake only the accompaniment (no lyrics; the prompt describes the new band; keep "
-            "0.6-0.7), then lay the original vocals over the new backing with ffmpeg in bash: " + MIX_RECIPE + ". "
-            "Both come from the same song, so they line up.\n- bpm, key and "
-            "time_signature: give them when you know them, else leave them out.\n- The same recording, only "
-            "live: when the user wants this very recording to sound live (a hall, an audience) rather than played "
-            "anew, effects keep it exactly - a crowd from sound_generate (\"concert crowd cheering and applauding in "
-            "a big hall, no music\", when offered) and a hall, with ffmpeg in bash: " + LIVE_RECIPE + " (more hall: "
-            "a higher volume= after afir; without a crowd leave out its input and the last amix).\n"
-            "Only recordings the user has the right to use. Models: " +
+            f"recording the new version starts from (default {KEEP_DEFAULT}). Measured on a pop song (chat 76, six "
+            "remakes): 0.6-0.85 kept its tempo, key and beat - and much of its sound: at 0.8 the user heard \"almost "
+            "exactly the original\", and 0.6-0.7 changed the band little more; 0.4-0.5 lost the beat (about 150 BPM "
+            "against the song's 97, another key) - \"the rhythm was way off\". 0-0.3 is a new performance that only "
+            "follows the song's codes. Tell the user which keep you used.\n- Every result has a beat check, "
+            "measured, not heard: whether the new version kept the song's tempo, key and beat, with the song's own "
+            "tempo and key. When it did not, tell the user before they listen.\n" + band +
+            "- When the sound must move further than 0.6 takes it while the beat stays - two ways, not yet tried on "
+            "the card: below 0.6, give bpm and key as a beat check measured them on the song (without them ACE-Step "
+            "picks a tempo of its own); or a reference clip in the new style (30 s of a song the user has, or an "
+            "instrumental from music_generate). The beat check tells whether the beat held.\n- bpm, key and "
+            "time_signature: give them when you know them (from the user or a beat check), else leave them out.\n"
+            "- The same recording, only live: when the user wants this very recording to sound live (a hall, an "
+            "audience) rather than played anew, effects keep it exactly - a crowd from sound_generate (\"concert "
+            "crowd cheering and applauding in a big hall, no music\", when offered) and a hall, with ffmpeg in bash: "
+            + LIVE_RECIPE + " (more hall: a higher volume= after afir; without a crowd leave out its input and the "
+            "last amix).\nOnly recordings the user has the right to use. Models: " +
             ", ".join(f"{e['id']} ({e['name']})" for e in models))
-    return text, _remake_params([e["id"] for e in models])
+    return text, _remake_params([e["id"] for e in models], vocals)
 
 
 # ---------------------------------------------------------------- stems

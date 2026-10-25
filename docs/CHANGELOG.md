@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.28.0 - 2026-10-25
+
+- **The same vocals, a new band - in one go.** Chat 76's second try split the
+  song, remade the music and mixed the vocals back - but the assistant's own
+  mix put the vocals 11 dB under the band. Now a remake can keep the song's
+  own vocals itself: it splits the song, remakes only the band, lays the
+  original vocals back over it at their own level, and saves the new band
+  alone as well. Needs Mel-Band RoFormer vocals (Settings → Models).
+- **Every remake says whether it kept the beat.** The assistant cannot hear,
+  so the Hub measures it: the song's and the new version's tempo and key, and
+  how many beats line up - and the assistant tells you before you listen
+  when the beat was lost. On chat 76's six remakes: keep 0.6-0.85 kept the
+  beat, 0.4-0.5 did not.
+- **Keep is 0.6 by default** (0.5 lost the song's tempo and key in chat 76).
+- update.sh rebuilds the ComfyUI image: it has a new node for the beat check.
+
 ## 0.27.1 - 2026-10-25
 
 - **Remakes, after chat 76.** A remake plays the whole recording again, the

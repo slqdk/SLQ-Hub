@@ -10,6 +10,7 @@ remakes".
 | `SLQAceStepEncode` | `TextEncodeAceStepAudio1.5` without the planner, with bpm, key and time signature optional (`N/A` when unknown) - for covers. |
 | `SLQSeparateVocals` | Vocals and accompaniment with a Mel-Band RoFormer vocal model, chunked and overlapped as MSST does. |
 | `SLQSeedVC` | Seed-VC v1 voice conversion: speech (22.05 kHz) or singing with F0 (44.1 kHz), the reference trimmed to its voiced parts, whole-octave auto shift, loudness matched. Reports what it did as JSON text. |
+| `SLQBeatCheck` | Whether a remake kept its song's time: tempo and key of both (librosa's beat tracker, CQT chroma) and the share of the new version's beats within 70 ms of the song's, as JSON text (`rhythm.py`, plain numpy and librosa). |
 
 Third-party code, loaded when a node runs (never at ComfyUI's start):
 

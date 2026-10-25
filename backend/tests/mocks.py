@@ -363,7 +363,7 @@ def make_comfy(state: dict) -> FastAPI:
                  "CheckpointLoaderSimple", "CLIPSetLastLayer", "DualCLIPLoader", "TextEncodeAceStepAudio1.5",
                  "EmptyAceStep1.5LatentAudio", "VAEDecodeAudio", "SaveAudioAdvanced", "EmptyLatentAudio", "LoadAudio",
                  "VAEEncodeAudio", "AudioMerge", "SLQAceStepReference", "SLQAceStepEncode", "SLQSeparateVocals",
-                 "SLQSeedVC", "ModelSamplingSD3", "Wan22ImageToVideoLatent", "WanImageToVideo",
+                 "SLQSeedVC", "SLQBeatCheck", "ModelSamplingSD3", "Wan22ImageToVideoLatent", "WanImageToVideo",
                  "WanFirstLastFrameToVideo", "EmptyHunyuanLatentVideo", "KSamplerAdvanced", "LoraLoaderModelOnly",
                  "CreateVideo", "SaveVideo", "TrimAudioDuration", "AudioConcat", "VAEDecodeTiled"]
         names = [n for n in names if n not in state.get("missing_nodes", ())]
@@ -453,6 +453,10 @@ def make_comfy(state: dict) -> FastAPI:
                 outputs[node_id] = {"text": [state.get("ace_check", json.dumps(          # its check of the codes
                     {"timbre_frames": 750, "codes": 1295, "agree": 0.998, "cosine_mean": 0.9993,
                      "cosine_min": 0.97, "distinct": 811}))]}
+            if node.get("class_type") == "SLQBeatCheck":      # whether a remake kept its song's time
+                outputs[node_id] = {"text": [state.get("beat_check", json.dumps(
+                    {"song_bpm": 97, "new_bpm": 97, "song_key": "F# minor", "new_key": "F# minor", "on_beat": 0.99,
+                     "covered": 0.98, "chance": 0.228, "verdict": "follows"}))]}
             if node.get("class_type") == "SLQSeedVC":         # what the conversion did, as the node reports it
                 outputs[node_id] = {"text": [state.get("vc_text", json.dumps(
                     {"semitones": 12, "reference_seconds": 18.5, "seconds": 61.0, "rate": 44100}))]}

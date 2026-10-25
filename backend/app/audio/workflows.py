@@ -20,7 +20,8 @@ SLQ Hub's own nodes (services/comfyui/nodes/slq_audio) add four graphs:
   the sampler starts from (denoise 1 - keep), with a style clip as timbre - or, without one, the song itself: 10 s
   from its start, middle and end, as ACE-Step's own pipeline prepares a reference (0.20.2: chat 24's remake had
   silence for a timbre and kept neither the key nor the tempo); SLQAceStepEncode leaves the planner out and unknown
-  metadata as N/A;
+  metadata as N/A; SLQBeatCheck measures whether the new version kept the song's tempo, key and beat; with the
+  separator only the accompaniment is remade and the song's own vocals are added back (0.28.0, chat 76);
 - stems (separate): SLQSeparateVocals (Mel-Band RoFormer) -> vocals and accompaniment;
 - another voice (seed_vc): the vocals separated when there is music, SLQSeedVC with the separated reference, the
   accompaniment added back with AudioMerge.
@@ -106,15 +107,23 @@ def _encoded(first: str, audio: str) -> dict:
 
 def ace_remake(*, song: str, caption: str, lyrics: str, seconds: float, seed: int, bpm: int | None, key: str | None,
                time_signature: int | None, language: str, unet: str, text_encoder: str, planner: str, vae: str,
-               keep: float = 0.5, reference: str | None = None, steps: int = 8, cfg: float = 1.0, shift: float = 3.0,
-               fmt: str = "mp3", prefix: str = "audio/hub") -> dict:
+               keep: float = 0.6, reference: str | None = None, steps: int = 8, cfg: float = 1.0, shift: float = 3.0,
+               fmt: str = "mp3", prefix: str = "audio/hub", separator: str | None = None,
+               separator_config: str = "") -> dict:
     """A new version of a song (a file in ComfyUI's input folder): its codes are the structure, the sampler starts
     from it (keep 0: from noise; up to 0.9: from the song itself), a reference clip gives the sound - else the
-    song's own (timbre_parts)."""
+    song's own (timbre_parts). SLQBeatCheck (node 30) measures whether the new version kept the song's tempo, key
+    and beat.
+
+    With a separator the song's own vocals stay exactly (0.28.0, after chat 76): SLQSeparateVocals splits it, only
+    the accompaniment is remade (an instrumental), and the original vocals are added back over the new band with
+    AudioMerge - saved as prefix-mix, the new band alone as prefix-band."""
     seconds = float(max(5.0, min(600.0, seconds)))
     lang = language if language in ACE_LANGUAGES else "unknown"
     ts = str(time_signature) if str(time_signature or "") in ACE_TIME_SIGNATURES else ""
     keep = max(0.0, min(0.9, float(keep)))
+    if separator:
+        lyrics = "[Instrumental]"                         # the band only: the singing is the song's own
     graph = {
         "1": {"class_type": "UNETLoader", "inputs": {"unet_name": unet, "weight_dtype": "default"}},
         "2": {"class_type": "ModelSamplingAuraFlow", "inputs": {"model": ["1", 0], "shift": float(shift)}},
@@ -135,11 +144,21 @@ def ace_remake(*, song: str, caption: str, lyrics: str, seconds: float, seed: in
         "9": {"class_type": "VAEDecodeAudio", "inputs": {"samples": ["8", 0], "vae": ["4", 0]}},
         "10": _save(["9", 0], fmt, prefix),
     }
+    source = ["11", 0]                                    # what is remade: the song, or its accompaniment
+    if separator:
+        graph["31"] = _separate(["11", 0], separator, separator_config)
+        source = ["31", 1]
+        graph["12"]["inputs"]["audio"] = source
+        graph["32"] = {"class_type": "AudioMerge",
+                       "inputs": {"audio1": ["9", 0], "audio2": ["31", 0], "merge_method": "add"}}
+        graph["10"] = _save(["32", 0], fmt, f"{prefix}-mix")
+        graph["33"] = _save(["9", 0], fmt, f"{prefix}-band")
+    graph["30"] = {"class_type": "SLQBeatCheck", "inputs": {"song": source, "result": ["9", 0]}}
     if reference:
         graph.update(_encoded("13", reference))
         graph["15"]["inputs"]["timbre"] = ["14", 0]
     else:
-        graph.update(timbre_parts(["11", 0], seconds, first=16))
+        graph.update(timbre_parts(source, seconds, first=16))
         graph["15"]["inputs"]["timbre"] = ["21", 0]
     return graph
 
