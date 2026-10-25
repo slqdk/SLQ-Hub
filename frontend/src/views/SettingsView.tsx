@@ -8,13 +8,15 @@ import { navigate } from "../lib/router";
 import { useApp, type Theme } from "../state";
 import { QueueModal, plateState } from "../components/Queue";
 import { ConfirmButton, Empty, Lamp, Modal, Switch, SwitchRow, Tabs, copyText, useInterval, type LampState } from "../components/ui";
+import { TestsTab } from "../components/TestsTab";
 import { forgetSettings } from "./ChatView";
 
 const TABS = [
   { id: "models", label: "Models" }, { id: "queue", label: "Queue" }, { id: "people", label: "People" },
   { id: "apps", label: "Apps and keys" },
   { id: "agent", label: "Assistant" }, { id: "skills", label: "Skills" }, { id: "memory", label: "Memory" },
-  { id: "mcp", label: "MCP servers" }, { id: "cloud", label: "Cloud" }, { id: "system", label: "System" },
+  { id: "mcp", label: "MCP servers" }, { id: "cloud", label: "Cloud" }, { id: "tests", label: "Tests" },
+  { id: "system", label: "System" },
 ];
 
 function useSettings() {
@@ -68,6 +70,7 @@ export function SettingsView({ tab }: { tab: string }) {
           {current === "memory" && <MemoryTab />}
           {current === "mcp" && <McpTab s={s} />}
           {current === "cloud" && <CloudTab s={s} />}
+          {current === "tests" && <TestsTab />}
           {current === "system" && <SystemTab />}
         </div>
       </div>

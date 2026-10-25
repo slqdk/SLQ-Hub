@@ -295,6 +295,23 @@ _M006_CHAT_PERMISSIONS = """
 """
 
 
+# Tests (0.21.0, Settings -> Tests): a run of test cases, each a real chat of its own. Its chats carry the run's id
+# and are left out of the chat list; they go with the run.
+_M007_TESTS = """
+        CREATE TABLE test_runs (
+            id         TEXT PRIMARY KEY,
+            created_at TEXT NOT NULL,
+            ended_at   TEXT,
+            status     TEXT NOT NULL,
+            model      TEXT NOT NULL DEFAULT '',
+            options    TEXT NOT NULL DEFAULT '{}',
+            cases      TEXT NOT NULL DEFAULT '[]',
+            results    TEXT NOT NULL DEFAULT '[]'
+        );
+        ALTER TABLE chats ADD COLUMN test_run TEXT;
+"""
+
+
 MIGRATIONS = [
     (1, _M001_CORE),
     (2, _M002_LIBRARIES),
@@ -302,6 +319,7 @@ MIGRATIONS = [
     (4, _M004_KEYS_AWAY),
     (5, _M005_PEOPLE),
     (6, _M006_CHAT_PERMISSIONS),
+    (7, _M007_TESTS),
 ]
 
 

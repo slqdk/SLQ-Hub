@@ -407,6 +407,16 @@ can, else `{"_not_valid_json": "<their first 300 characters>..."}` - within a
 turn and from a stored chat alike. The stored blocks keep what the model sent,
 for the UI and the export.
 
+**A part that would replace the file** (0.21.0). Chat 21's next turn wrote the
+game in parts, and twice sent the next part without `append: true`: the part
+replaced the 18 KB written so far, and the model spent 12 of its 60 steps
+building the file again (the turn then ended at the step limit with the game
+unfinished). A file the turn has added to with `append` is no longer replaced
+by a `write_file` without it: the call is refused, its result giving the
+sizes and the two ways on - `append: true` for the next part, `replace: true`
+to start over. A file written whole may still be written whole again (the
+turn's own record, `ToolContext.state["written_in_parts"]`).
+
 The UI receives every event as it happens over SSE
 (`GET /hub/api/runs/{id}/events`): `queued` (with the position), `started`,
 `step`, `thinking`, `text`, `tool_start`, `tool_args`, `tool_call`,
@@ -1335,9 +1345,12 @@ queue, apps and keys (with connection examples and CORS), assistant (agent,
 libraries, web, sandbox, images, sound: the model for music, for sound effects,
 the voice models for Danish and for other languages, and the last speech
 self-test's samples with players), skills, memory, MCP
-servers (and the tools you always allow), cloud, system (services - the speech
-service with its threads and loaded models - VRAM, disk, logs, theme,
-password).
+servers (and the tools you always allow), cloud, tests (0.21.0, §12: the
+model and the cases to run, a live panel while a run goes - which case, what
+it does, Open the chat, Stop - and the runs with each case's result, checks,
+time breakdown and answer, Export and Delete; a case's chat says "Test" by its
+title), system (services - the speech service with its threads and loaded
+models - VRAM, disk, logs, theme, password).
 
 On mobile it shows one column, and the panels become overlays. It is an
 installable PWA (manifest, icons, a service worker that caches only the app
@@ -1475,6 +1488,14 @@ assistant made), each sent with every message.
   each site and code that goes online wait for the user's answer, and runs
   other code without TCP connections. HTML and React artifacts load nothing
   from the web then (their own policy; the page's `frame-src 'self'`).
+- **Test runs** (0.21.0) answer their turns' questions themselves, as the
+  owner who started them: Allow once (never Always or the chat) only for the
+  web case's searches and pages, and for code the sandbox cannot keep offline
+  when the call does not ask for the internet; anything else Deny. Each answer
+  is in the case's result. The checks that open the turn's files or run its
+  code run in the sandbox, offline where it can be; the Hub writes the check
+  files into the case's folder without following links (`Workdir.write`) and
+  reads them back for the export only from inside it.
 - **Windows programs** (0.16.0). They run in the sandbox under Wine as the
   sandbox user, like any command (offline while asking first, the same
   firewall); Wine needs no privileges, and its X server listens on no TCP
@@ -1561,6 +1582,51 @@ clock times), the tail of llama-server's log, the chat's pictures and
 attachments, and (0.13.5) the files its turns made or changed, as the folder
 has them now - a song, a mix, a script that failed - newest turn first, up to
 60 MB in all. The phone page exports its chats as JSON from the device.
+
+**Tests** (0.21.0, Settings → Tests, `app/evals/`). The self-test says the
+services answer; this says how well the assistant does the work. 24 cases, a
+hard task in each area (`suite.py`): chat (a logic puzzle checked to have one
+solution, a word problem in English, ten fields from an e-mail as JSON, Danish
+under five rules), documents (a year of sales in Danish Excel format, a fact
+a 12-page manual changes on a later page, a needle in a 3,600-line log, a Word
+report, a budget with formulas), images (a poster with text, an edit, a
+cut-out, reading and counting in a picture), sound (Danish speech, music, an
+effect), video (from a description, from a picture), code (a Python module
+against hidden tests, four bugs to find, a C# program, an interactive page)
+and research and tasks (the web, a task in several steps). Their input files
+are made the same way every time (`fixtures.py`, fixed seeds), and what a
+right answer holds is worked out from them, not written by hand.
+
+Each case is a real chat (`chats.test_run` = the run: not in the chat list,
+deleted with the run) and a real turn: the agent, the model the run chose
+(thinking as in a chat, or on or off), the tools and the sandbox - nothing is
+faked or shortened. Its turns queue as `tests` at background priority, so a
+person's chats go first. A question the turn asks is answered as a careful
+user would: Allow once for the web case's searches, and for code the sandbox
+cannot keep offline unless the call asks for the internet; everything else is
+answered Deny (recorded in the result). A case has a time limit (15 minutes to
+an hour), and Stop ends the run after cancelling the turn at work.
+
+Then the checks. The Hub checks the answer (`checks.py`: a line it was asked to
+end with, numbers in Danish or English writing, JSON, Danish, bullet points,
+the tools used). What the turn made is checked in the sandbox, offline where
+it can be, in the case's folder (`check_lib.py`, copied to `.hub/tests/` with
+the hidden tests and the pictures the tools made): the chart, the .docx and
+.xlsx (python-docx, openpyxl), the pictures' colours and transparency, the
+poster's text (Tesseract), the sound's length and loudness and the video's
+length, size and motion (ffprobe, ffmpeg), hidden unittest tests on the
+Python, `dotnet run` on a text the C# program has not seen. The Hub never opens
+the model's files or runs its code itself. A check is a must (the case fails
+without it), a should (it passes in part) or a measurement; each case also
+says what only a person can judge. A result keeps the answer, the checks, the
+tools, what was asked and answered, and where the time went (queue, loading,
+the model's steps and tokens/s, the tools).
+
+**Export** (`export.py`): `summary.md` (the run, a table, then each case: the
+question, what a good answer does, the checks, the answer), `results.json`,
+and per case its result, answer, the turn's events, what the sandbox's checks
+got and the chat's troubleshooting export - for a closer look (by Claude) at
+whether the work lives up to what is expected.
 
 ---
 

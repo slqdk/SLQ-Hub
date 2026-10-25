@@ -8,7 +8,7 @@ internet), "read dr.dk" (web_fetch), "jingle" (a command makes a
 sound, a PDF and notes: the card under the answer), "announce" (speech),
 "song" (music), "horn" (a sound effect), "video" (Wan 2.2 5B: ffmpeg's test
 pattern when ffmpeg is installed), "game" (slow steps, to try
-sending a message while it works), "page" (makes an artifact),
+sending a message while it works), "page" (makes an artifact), a test case of Settings -> Tests (tests/dev_evals.py),
 "think" (reasons first), "search" (web search), "web picture" (a picture
 from the web in the answer), "picture" (an image),
 "loop" (repeats the same searches until the Hub makes it answer), "window" (writes a
@@ -36,6 +36,7 @@ from app.config import Env, _networks
 from app.main import create_app
 from app.state import Transports
 
+from . import dev_evals
 from .conftest import _install_fake_models
 from .mocks import (HostRouter, float_wav, make_civitai, make_civitai_delivery, make_comfy, make_hf, make_llama,
                     make_mcp_http, make_sandbox, make_searxng, make_speech, make_supervisor, silent_mp3)
@@ -134,6 +135,9 @@ def responder(body: dict) -> dict:
         return {"content": text.split("starts with:")[-1].strip()[:40].title() or "Chat"}
     if "condense the conversation" in low:
         return {"content": "Summary of the chat so far."}
+    scripted = dev_evals.answer(text, msgs, tools_done)          # Settings -> Tests: each case answered well
+    if scripted is not None:
+        return scripted
     if "window" in low:                                 # a Windows program on the virtual screen (a real sandbox)
         if tools_done == 0:
             return {"content": "I will write a small Windows Forms program.", "tool_calls": [{"name": "write_file",

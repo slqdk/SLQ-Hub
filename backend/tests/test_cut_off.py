@@ -142,6 +142,42 @@ async def test_write_file_appends(signed_in, app, fakes):
     assert texts[3] == "dir is a folder, not a file"
 
 
+async def test_a_file_written_in_parts_is_not_replaced_by_a_part(signed_in, app, fakes):
+    """Chat 21 (0.20.2): the third part came without append: true and replaced the game - twice in one turn. Now a
+    file the turn is writing in parts is not replaced unless the call says replace: true; a file written whole may
+    still be written whole again."""
+    w = "write_file"
+    fakes.llama["replies"] = [
+        {"tool_calls": [{"name": w, "arguments": {"path": "game/index.html", "content": "<html>\n"}}]},
+        {"tool_calls": [{"name": w, "arguments": {"path": "game/index.html", "content": "<p>part 2</p>\n",
+                                                  "append": True}}]},
+        {"tool_calls": [{"name": w, "arguments": {"path": "/workspace/chats/{chat}/game/index.html",
+                                                  "content": "<p>part 3</p>\n"}}]},
+        {"tool_calls": [{"name": w, "arguments": {"path": "game/index.html", "content": "<p>part 3</p>\n",
+                                                  "append": True}}]},
+        {"tool_calls": [{"name": w, "arguments": {"path": "notes.txt", "content": "one"}}]},
+        {"tool_calls": [{"name": w, "arguments": {"path": "notes.txt", "content": "two"}}]},
+        {"tool_calls": [{"name": w, "arguments": {"path": "game/index.html", "content": "<html>new</html>\n",
+                                                  "replace": True}}]},
+        {"content": "Done."},
+        {"content": "Parts"},
+    ]
+    c = await new_chat(signed_in)
+    third = fakes.llama["replies"][2]["tool_calls"][0]["arguments"]
+    third["path"] = third["path"].format(chat=c["id"])            # the sandbox path, as chat 21's model wrote it
+    run = await finish(app, await say(signed_in, c["id"], "Make the game in parts"))
+    assert run.status == "done", run.events[-1]
+    texts = [e["data"]["text"] for e in run.events if e["type"] == "tool_result"]
+    assert texts[2].startswith("Not written: you are writing /workspace/chats/") and "21 bytes there with these 14" \
+        in texts[2] and "append: true" in texts[2] and "replace: true" in texts[2]
+    assert texts[3] == "Added 14 bytes to game/index.html (now 35 bytes, 4 lines)."
+    assert texts[5] == "Overwrote notes.txt (3 bytes, 1 lines)."       # written whole, then whole again: fine
+    assert texts[6] == "Overwrote game/index.html (17 bytes, 2 lines)."
+    folder = app.state.hub.env.workspace_dir / "chats" / str(c["id"])
+    assert (folder / "game" / "index.html").read_text() == "<html>new</html>\n"
+    assert (folder / "notes.txt").read_text() == "two"
+
+
 def test_the_prompt_and_the_tool_say_to_write_long_files_in_parts():
     from app.agent import prompt
     from app.agent.tools import REGISTRY

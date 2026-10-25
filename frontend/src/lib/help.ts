@@ -711,6 +711,17 @@ export const SECTIONS: HelpSection[] = [
           + "services, the card's memory and the logs.",
         owner: true,
       },
+      {
+        id: "tests",
+        title: "Test what the assistant can do",
+        what: "Settings, Tests gives the assistant hard tasks in every area - a logic puzzle, a sales file, a manual, "
+          + "a poster, speech, music, a video, Python and C# - each as a real chat on this Hub. What a machine can "
+          + "check is checked; Export makes a ZIP with the answers, the files and each chat's troubleshooting export.",
+        how: ["Choose the chat model and the tests, then Run. Your own chats go first in the queue meanwhile.",
+          "Run it again after an update or with another model, and compare.",
+          "Delete a run to remove its chats and files."],
+        owner: true,
+      },
     ],
   },
 ];

@@ -108,6 +108,12 @@ async def write_file(ctx: ToolContext, args: dict) -> ToolResult:
         return ToolResult("content must be a string", is_error=True)
     p = ctx.workdir.resolve(rel)
     existed = p.exists()
+    # Files this turn writes in parts. Chat 21 (0.20.2): twice the model left out append: true for the next part,
+    # replaced the whole game with it and spent 12 of its 60 steps building the file again.
+    in_parts = ctx.state.setdefault("written_in_parts", set())
+    key = ctx.workdir.rel(p)
+    if args.get("append") is True:
+        in_parts.add(key)
     if args.get("append") is True and existed:       # the next part of a long file (0.16.2)
         if not p.is_file():
             return ToolResult(f"{rel} is a folder, not a file", is_error=True)
@@ -115,6 +121,11 @@ async def write_file(ctx: ToolContext, args: dict) -> ToolResult:
         ctx.workdir.write(rel, data, "agent", "hub", f"agent added to {rel}")
         lines = data.count(b"\n") + 1
         return ToolResult(f"Added {len(content.encode())} bytes to {rel} (now {len(data)} bytes, {lines} lines).")
+    if existed and key in in_parts and args.get("replace") is not True and p.is_file():
+        return ToolResult(f"Not written: you are writing {rel} in parts in this turn, and this call has no append: "
+                          f"true - it would replace the {p.stat().st_size:,} bytes there with these "
+                          f"{len(content.encode()):,}. If this is the next part, call write_file again with append: "
+                          "true. To replace the whole file, call it with replace: true.", is_error=True)
     ctx.workdir.write(rel, content, "agent", "hub", f"agent wrote {rel}")
     return ToolResult(f"{'Overwrote' if existed else 'Created'} {rel} ({len(content.encode())} bytes, "
                       f"{content.count(chr(10)) + 1} lines).")
@@ -208,7 +219,9 @@ register(Tool("write_file", "Create or overwrite a text file in the working fold
               obj({"path": {"type": "string"},
                    "content": {"type": "string", "description": "The whole file - or with append, the next part"},
                    "append": {"type": "boolean", "description": "Add content at the end of the file (it is created "
-                                                                "if it does not exist)"}},
+                                                                "if it does not exist)"},
+                   "replace": {"type": "boolean", "description": "Start over: replace a file you are writing in "
+                                                                 "parts in this turn (without it, that is refused)"}},
                   ["path", "content"]), write_file))
 register(Tool("edit_file", "Replace exact text in a file. old_string must match the file exactly (whitespace "
               "included) and be unique unless replace_all is true. Read the file first.",

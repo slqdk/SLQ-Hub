@@ -125,7 +125,7 @@ export interface Message { id: number; chat_id: number; role: "user" | "assistan
 export interface ChatSettings { model: string | null; thinking: boolean | null; effort: string | null; skills: string[];
   libraries: number[]; image_model: string | null }
 export interface Chat { id: number; project_id: number | null; title: string; settings: ChatSettings; summary?: string;
-  created_at: string; updated_at: string }
+  created_at: string; updated_at: string; test_run?: string | null }
 export interface ChatListItem { id: number; project_id: number | null; title: string; updated_at: string;
   created_at: string; project_name: string | null; running: boolean }
 

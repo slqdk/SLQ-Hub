@@ -19,6 +19,7 @@ MODULES = [
     "app.audio.feature",
     "app.video.feature",
     "app.rag.feature",
+    "app.evals.feature",
 ]
 
 

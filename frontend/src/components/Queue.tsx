@@ -31,6 +31,7 @@ export function ownerName(owner: string): string {
   if (owner === "web") return "web chat";
   if (owner === "system") return "the Hub";
   if (owner === "library") return "library indexing";
+  if (owner === "tests") return "a test run";
   return owner;
 }
 

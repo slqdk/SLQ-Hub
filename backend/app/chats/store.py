@@ -39,11 +39,15 @@ def _chat(r) -> dict:
     return d
 
 
-def create_chat(project_id: int | None = None, title: str = "New chat", settings: dict | None = None) -> dict:
+def create_chat(project_id: int | None = None, title: str = "New chat", settings: dict | None = None,
+                test_run: str | None = None) -> dict:
+    """test_run: a test case's chat (Settings -> Tests) - not in the chat list, gone with its run."""
     now = db.utcnow()
     with db.connect() as con:
-        cur = con.execute("INSERT INTO chats (project_id, title, settings, created_at, updated_at) VALUES (?,?,?,?,?)",
-                          (project_id, title[:200], json.dumps({**CHAT_DEFAULTS, **(settings or {})}), now, now))
+        cur = con.execute("INSERT INTO chats (project_id, title, settings, created_at, updated_at, test_run)"
+                          " VALUES (?,?,?,?,?,?)",
+                          (project_id, title[:200], json.dumps({**CHAT_DEFAULTS, **(settings or {})}), now, now,
+                           test_run))
     return get_chat(cur.lastrowid)
 
 
@@ -55,7 +59,7 @@ def get_chat(chat_id: int) -> dict | None:
 
 def list_chats(project_id: int | None = None, q: str = "", limit: int = 200, all_projects: bool = False) -> list[dict]:
     sql = ("SELECT c.id, c.project_id, c.title, c.updated_at, c.created_at, p.name project_name FROM chats c"
-           " LEFT JOIN projects p ON p.id=c.project_id WHERE c.archived=0")
+           " LEFT JOIN projects p ON p.id=c.project_id WHERE c.archived=0 AND c.test_run IS NULL")
     params: list = []
     if not all_projects:
         if project_id is None:

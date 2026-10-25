@@ -24,8 +24,20 @@ def _handover(hub) -> bool:
 
 @router.get("/hub/api/help")
 async def help_caps(request: Request):
-    hub = get_hub(request)
-    user = getattr(request.state, "user", None)
+    return await capabilities(get_hub(request), getattr(request.state, "user", None))
+
+
+def has(caps: dict, need: str) -> bool:
+    """As the help page reads a need (frontend/src/lib/help.ts has()): "video.t2v" or "code"."""
+    group, _, key = need.partition(".")
+    value = caps.get(group)
+    if key:
+        return bool((value or {}).get(key)) if isinstance(value, dict) else False
+    return value > 0 if isinstance(value, int) and not isinstance(value, bool) else bool(value)
+
+
+async def capabilities(hub, user) -> dict:
+    """What works on this Hub now, for this user (the owner when user is None). Settings -> Tests asks too."""
     member = auth.is_member(user)
     images, audio, video = (hub.extras.get(k) for k in ("images", "audio", "video"))
     if member:                                       # as a device turn decides it (agent/device.py)

@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.21.0 - 2026-10-25
+
+- **Tests.** Settings → Tests gives the assistant 24 hard tasks in every
+  area, each run as a real chat on your Hub - the same models, queue, tools
+  and sandbox as your own chats, at a lower priority so your chats go first:
+  a logic puzzle, a word problem, JSON from an e-mail, Danish under strict
+  rules, a year of sales figures in Danish number format, a fact a manual
+  changes on a later page, a needle in a server log, a Word report, a budget
+  with formulas, a poster with text, a picture to edit, one to cut out, a
+  sign to read, Danish speech, music, a sound effect, two videos, a Python
+  module, four bugs to find, a C# program, an interactive page, research on
+  the web and a task in several steps. Choose the chat model, thinking and
+  the tests; tests whose model is not downloaded say what they need.
+- Each answer is checked where a machine can: the answer's numbers and
+  wording, the tools it used, and - in the sandbox - what it made: the chart,
+  the Word and Excel files, the pictures' colours and transparency, the
+  poster's text, the sound's length and loudness, the video's motion, and
+  hidden tests run on its code. A result shows passed, in part or failed,
+  with every check, where the time went and what to look at yourself.
+  **Export** makes a ZIP with an overview, every answer and file, and each
+  test chat's troubleshooting export - send it to Claude for a closer look.
+  The test chats are not in the chat list; open them from the results. A run
+  is kept until you delete it, with its chats and files.
+- **A file written in parts is not replaced by mistake.** In chat 21 the
+  model twice sent the next part of the game without adding it to the end,
+  replaced the whole file with it, and spent 12 of its 60 steps building it
+  again. That call is now refused with an explanation, unless the model says
+  it wants to start over.
+
 ## 0.20.2 - 2026-10-25
 
 - **Remakes stay closer to the original.** Chat 24's live remake of "Breakfast

@@ -355,6 +355,8 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
           <h1 className="ellipsis" onDoubleClick={() => chatId && setRenaming(true)}>{title}</h1>
         )}
         {project && <a className="tag" {...linkProps({ name: "project", id: project.id })}>{project.name}</a>}
+        {data?.chat.test_run && <a className="tag" {...linkProps({ name: "settings", tab: "tests" })}
+          title="A test case's chat: not in the chat list, deleted with its run">Test</a>}
         <span className="grow" />
         {folder && <button className="btn quiet small" onClick={() => showFiles()}>
           <FolderOpen size={15} /> Files</button>}

@@ -903,8 +903,10 @@ class Agent:
             run.emit("queued", position=None, current=self.hub.scheduler.current)
             pos_task = asyncio.get_running_loop().create_task(self._report_position(run, holder))
             t0 = time.monotonic()
+            test = bool(options.get("test"))              # a test run's turn (Settings -> Tests) lets chats go first
             ticket = await self.hub.scheduler.acquire(
-                "web", "agent", self.hub.model_need(entry["id"]), "interactive", label=chat["title"][:80],
+                "tests" if test else "web", "agent", self.hub.model_need(entry["id"]),
+                "background" if test else "interactive", label=chat["title"][:80],
                 lease=True, meta={"chat_id": chat["id"], "model": entry["id"], "cancel": run.task.cancel},
                 on_job=lambda j: holder.setdefault("job", j))
             pos_task.cancel()
