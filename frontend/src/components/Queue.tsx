@@ -4,7 +4,7 @@ import { api, type QueueJob, type QueueSnapshot } from "../lib/api";
 import { residencyName, seconds } from "../lib/format";
 import { navigate } from "../lib/router";
 import { useApp } from "../state";
-import { Lamp, Modal, type LampState } from "./ui";
+import { Lamp, Modal, useInterval, type LampState } from "./ui";
 
 function slotsFor(snap: QueueSnapshot | null, slotsByModel: Record<string, number>): number {
   const cur = snap?.current ?? "";
@@ -60,9 +60,12 @@ export function GpuPlate() {
   );
 }
 
-function JobRow({ job, onCancel }: { job: QueueJob; onCancel: (id: number) => void }) {
+function JobRow({ job, onCancel, since }: { job: QueueJob; onCancel: (id: number) => void; since: number }) {
   const { modelNames, auth } = useApp();
   const running = job.state === "running";
+  // The queue is sent when something changes, so its times are those of that moment: they count on from there
+  // (0.24.1 - a turn that had worked for minutes said "running 0 ms").
+  const later = Math.max(0, (Date.now() - since) / 1000);
   const what = residencyName(job.switching_to ?? job.need, modelNames);
   // A person may stop only their own jobs; the others are shown without owner or title.
   const mine = auth?.user?.role !== "member" || job.meta?.user_id === auth.user.id;
@@ -74,7 +77,7 @@ function JobRow({ job, onCancel }: { job: QueueJob; onCancel: (id: number) => vo
       <div className="job-meta">
         {job.owner ? `${ownerName(job.owner)}, ` : ""}{job.priority}, {what}
         {job.lease ? ", holds the card for the whole task" : ""}
-        {running ? `, running ${seconds(job.running_s)}` : `, waited ${seconds(job.waited_s)}`}
+        {running ? `, running ${seconds((job.running_s ?? 0) + later)}` : `, waited ${seconds((job.waited_s ?? 0) + later)}`}
         {job.position ? `, number ${job.position} in line` : ""}
       </div>
     </div>
@@ -84,6 +87,9 @@ function JobRow({ job, onCancel }: { job: QueueJob; onCancel: (id: number) => vo
 export function QueueModal({ onClose }: { onClose: () => void }) {
   const { queue, modelNames, toast, auth } = useApp();
   const member = auth?.user?.role === "member";
+  const [, tick] = useState(0);
+  useInterval(() => tick((t) => t + 1), (queue?.running.length || queue?.pending.length) ? 1000 : null);
+  const since = queue?.received ?? Date.now();
   const cancel = async (id: number) => {
     try {
       await api(`/hub/api/queue/${id}/cancel`, { method: "POST" });
@@ -106,14 +112,14 @@ export function QueueModal({ onClose }: { onClose: () => void }) {
       <div>
         <div className="label" style={{ marginBottom: 6 }}>Working</div>
         <div className="queue-list">
-          {queue?.running.length ? queue.running.map((j) => <JobRow key={j.id} job={j} onCancel={cancel} />)
+          {queue?.running.length ? queue.running.map((j) => <JobRow key={j.id} job={j} onCancel={cancel} since={since} />)
             : <div className="muted small">Nothing is running.</div>}
         </div>
       </div>
       <div>
         <div className="label" style={{ marginBottom: 6 }}>Waiting</div>
         <div className="queue-list">
-          {queue?.pending.length ? queue.pending.map((j) => <JobRow key={j.id} job={j} onCancel={cancel} />)
+          {queue?.pending.length ? queue.pending.map((j) => <JobRow key={j.id} job={j} onCancel={cancel} since={since} />)
             : <div className="muted small">Nobody is waiting.</div>}
         </div>
       </div>

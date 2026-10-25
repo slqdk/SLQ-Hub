@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.24.0, 2026-10-25)
+## State (0.24.1, 2026-10-25)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -148,7 +148,9 @@ there, and in Settings → Usage per person, for the owner, per app key, for
 the tests and for the card while idle, with tokens read and written and the
 time on the card, per day (a limit for the children can build on it). Not
 the PC at the socket: a "rest of the PC" setting in watts adds that if known
-(item 59).
+(item 59). 0.24.1 makes the queue dialog's running and waiting times count up
+(they stayed at the queue's last change: "running 0 ms" in Søren's screenshot
+of a working turn).
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
 host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU
@@ -672,17 +674,17 @@ the host if the VM ever stops by itself.
     skill and a question the manual answers. Not seen either: a skill
     downloaded here imported in Claude, one from Claude imported here, and
     the composer's "/" list with a phone's keyboard.
-59. **Energy on the card** (0.24.0): (a) the supervisor reads hwmon inside the
-    `llm` container as it reads the VRAM there - Settings → Usage should say
-    "The card draws N W now" after the update; if it says there is no
-    reading, `compose exec llm cat /sys/class/drm/card*/device/hwmon/hwmon*/power1_average`
-    tells why. (b) The idle draw: Søren read 65 W idle on the VM
-    (2026-10-25, right after the 0.24.0 update - the default chat model
-    preloaded), about 4.68 kr a day; "The card draws" on an idle Hub should
-    say about the same. Not measured yet: the idle draw with nothing loaded
-    (Settings → Models, Free the GPU, then the same `power1_average` after
-    half a minute) - if it is much lower, unloading the model after a while
-    without work would save that difference. (c) How quickly
+59. **Energy on the card** (0.24.0): (a) seen: the supervisor reads hwmon
+    inside the `llm` container - Settings → Usage on Søren's phone said "The
+    card draws 5 W now (its limit: 339 W)" (2026-10-25 16:09). (b) The idle
+    draw, two readings that do not agree yet: 65 W on the VM at 16:00, right
+    after the 0.24.0 update (the default chat model loading or just loaded),
+    which Søren called idle - about 4.68 kr a day - and 5 W at 16:09, a minute
+    before his queue showed a web chat holding the card (perhaps between two
+    model steps, with the model loaded). Next: Settings → Usage after a minute
+    with nothing running, with the model loaded (the sidebar's plate names
+    it), then after Settings → Models, Free the GPU. The "The card, idle" row
+    gives the day's real figure either way. (c) How quickly
     `power1_average` follows the load (the SMU's averaging): a short answer
     may be counted at the draw from just before it; long turns, pictures and
     videos are what the numbers are for. (d) Two jobs on the card at once

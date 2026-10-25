@@ -174,7 +174,8 @@ export interface QueueJob { id: number; owner: string; kind: string; need: strin
   lease: boolean; state: string; position: number | null; waited_s: number; running_s: number | null;
   switching_to: string | null; meta: { chat_id?: number; model?: string; user_id?: number } }
 export interface QueueSnapshot { current: string | null; switching: string | null; last_error: string | null;
-  running: QueueJob[]; pending: QueueJob[] }
+  running: QueueJob[]; pending: QueueJob[];
+  received?: number }          // when the page got it (Date.now()): the times in it count on from there
 
 export interface DownloadState { model: string; dest: string; status: string; done: number; total: number; rate: number;
   error: string | null }

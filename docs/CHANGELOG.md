@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.24.1 - 2026-10-25
+
+- **The queue's times count up.** The GPU queue showed each job's running or
+  waiting time as it was at the queue's last change - a turn that had worked
+  for minutes said "running 0 ms". The times now count on while it is open.
+
 ## 0.24.0 - 2026-10-25
 
 - **What it costs.** Under each answer: the energy the card used for it and

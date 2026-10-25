@@ -147,7 +147,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     es.addEventListener("queue", (e) => {
       setQueueLive(true);
       try {
-        setQueue(JSON.parse((e as MessageEvent).data));
+        setQueue({ ...JSON.parse((e as MessageEvent).data), received: Date.now() });
       } catch {
         /* a broken frame: the next one fixes it */
       }
