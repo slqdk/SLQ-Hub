@@ -79,7 +79,8 @@ def _reach(ctx: ToolContext, data: bytes) -> str:
         return (f"But it is {len(data) / 2**20:.1f} MB, more than the {MAX_OUT_FILE / 2**20:g} MB a file may have to "
                 "reach the user's device in this chat, so it will not get there: make it again as .mp3 or .ogg, or "
                 "shorter.")
-    return "The user can play it under your answer."
+    return ("The user can play it under your answer. You cannot hear it: tell the user what you asked for, not how "
+            "it sounds, and ask them to listen.")             # chat 76: "heavy guitar riffs" that were not there
 
 
 async def _progress(ctx: ToolContext, kind: str = "audio_progress"):
@@ -161,8 +162,11 @@ async def _sound_input(ctx: ToolContext, path: str, max_seconds: int, what: str)
         raise ValueError(f"{what} is required: the path of a sound file in the working folder")
     wd = ctx.workdir
     p = wd.resolve(v)
-    if not p.is_file():
-        raise FileNotFoundError(v)
+    if not p.is_file():                       # an attachment by its name (chat 76 copied it out and back each turn)
+        attached = wd.resolve(f".hub/attachments/{Path(v).name}")
+        if not attached.is_file():
+            raise FileNotFoundError(v)
+        p = attached
     if p.stat().st_size > MAX_CLIP_BYTES:
         raise ValueError(f"{what} is over 200 MB")
     tmp = f".hub/sound-{uuid.uuid4().hex[:12]}.flac"
@@ -430,10 +434,15 @@ async def music_remake(ctx: ToolContext, args: dict) -> ToolResult:
     meta = ", ".join(x for x in (f"{out['bpm']} BPM" if out["bpm"] else "", out["key"] or "",
                                   f"{out['time_signature']}/4" if out["time_signature"] else "") if x)
     return ToolResult(f"Saved {rel}: a new version of {str(args.get('audio')).strip()}{sound}, {out['seconds']:.0f} s, "
-                      f"{out['model']['name']}, keep {out['keep']:.1f}, {words}"
+                      f"{out['model']['name']}, keep {_keep_text(out['keep'])}, {words}"
                       f"{', ' + meta if meta else ''}, seed {out['seed']} ({out['compute']:.0f} s on the card). "
                       f"{_reach(ctx, out['data'])}{note}{_codes_note(out.get('codes') or {})}",
                       display={"audio": [{"path": rel, "seconds": out["seconds"], "model": out["model"]["name"]}]})
+
+
+def _keep_text(keep: float) -> str:
+    """0.75 as 0.75, not 0.8: chat 76's model read its 0.75 and 0.85 back as 0.8 and thought them the same."""
+    return f"{float(keep):.2f}".rstrip("0").rstrip(".") or "0"
 
 
 def _codes_note(check: dict) -> str:
@@ -475,6 +484,9 @@ KEEP_DEFAULT = 0.5          # 0.20.2: keep 0 (chat 24) came back in another key 
 CODES_AGREE = 0.9
 # The same recording, only live: effects keep it exactly. Tried with this Hub's ffmpeg (6.1): the hall at about
 # 5 dB under the song (afir's peak-normalised IR needs wet=10 and volume=2 to be heard), the crowd looped under.
+# Original vocals over a remade backing (0.27.1): stems of one song have its length, and so does its remake.
+MIX_RECIPE = ('ffmpeg -i backing.mp3 -i vocals.mp3 -filter_complex "[0:a][1:a]amix=inputs=2:duration=first:'
+              'normalize=0,alimiter=limit=0.95[out]" -map "[out]" -c:a libmp3lame -q:a 2 mix.mp3')
 LIVE_RECIPE = ('ffmpeg -i song.mp3 -f lavfi -i "anoisesrc=c=pink:r=44100:a=0.5:d=2.5,afade=t=out:st=0:d=2.5:curve=exp,'
                'highpass=f=150,lowpass=f=7000,aformat=sample_fmts=fltp:channel_layouts=stereo" -stream_loop -1 -i '
                'crowd.mp3 -filter_complex "[0:a]aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo,'
@@ -498,7 +510,14 @@ def _remake_dynamic(ctx: ToolContext) -> tuple[str, dict]:
             "of its start, middle and end): describe in the prompt what should change.\n- keep: how much of the "
             f"recording the new version starts from. {KEEP_DEFAULT} (default) stays close to the song while its sound "
             "changes; 0.7-0.9 keeps nearly the recording and changes mostly its sound; 0-0.3 is a new performance "
-            "that only follows the song's codes and can come out in another key, tempo and genre.\n- bpm, key and "
+            "that only follows the song's codes and can come out in another key, tempo and genre. Measured on a pop "
+            "song (chat 76): 0.75 and 0.85 came back sounding almost like the original, rhythm and all; 0.45 and 0.5 "
+            "lost its rhythm (another tempo). When the sound must change but the rhythm stay, try 0.6-0.7, and tell "
+            "the user which keep you used.\n- Keep the singing, change the band (\"the same vocals, a heavier "
+            "band\"): a remake plays the whole recording again, voices too. Instead: audio_separate the song (both "
+            "stems), music_remake only the accompaniment (no lyrics; the prompt describes the new band; keep "
+            "0.6-0.7), then lay the original vocals over the new backing with ffmpeg in bash: " + MIX_RECIPE + ". "
+            "Both come from the same song, so they line up.\n- bpm, key and "
             "time_signature: give them when you know them, else leave them out.\n- The same recording, only "
             "live: when the user wants this very recording to sound live (a hall, an audience) rather than played "
             "anew, effects keep it exactly - a crowd from sound_generate (\"concert crowd cheering and applauding in "

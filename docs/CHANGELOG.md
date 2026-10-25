@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.27.1 - 2026-10-25
+
+- **Remakes, after chat 76.** A remake plays the whole recording again, the
+  voices too, and its one setting (keep) turned out to have a cliff: 0.75 and
+  0.85 sounded like the original, 0.45 and 0.5 lost the rhythm. The assistant
+  is now told what was measured, to try 0.6-0.7, and how to keep the voices
+  exactly while only the band changes: split the song, remake the music
+  alone, and lay the original vocals back on top.
+- The sound tools find an attached file by its name, and the assistant is
+  reminded that it cannot hear what it made: no more descriptions of guitars
+  that are not there.
+
 ## 0.27.0 - 2026-10-25
 
 - **Long chats stay sharp.** Older answers' tool output is kept short (the

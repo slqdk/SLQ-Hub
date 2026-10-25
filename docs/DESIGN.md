@@ -1442,6 +1442,23 @@ Hub's own (`services/comfyui/nodes/slq_audio`, installed by the ComfyUI image):
   impulse response; `afir` normalises it to its peak, so it needs `wet=10` and
   `volume=2` to sit about 5 dB under the song) and a crowd from
   `sound_generate`, mixed under with ffmpeg.
+  **0.27.1 (chat 76, measured):** "the same song, rock instead of pop, the
+  voices as they are" - four remakes of a 214-s pop song (ACE-Step 1.5 XL
+  Turbo, its own sound, codes 83-84 % in agreement). Keep 0.75 and 0.85: the
+  mel spectra 0.97-0.976 alike (cosine, frame by frame) and the onsets locked
+  to the song's (correlation 0.66-0.68 at a 0-s lag, in every 30-s window) -
+  the user heard the original. Keep 0.45 and 0.5: onsets uncorrelated
+  (0.02-0.05), another tempo - "the rhythm was way off". Between them (0.6,
+  0.7) nothing was tried. A remake plays the whole recording again, voices
+  too, so "keep the voices" cannot be had from it; the tool's description now
+  says so, with what was measured, and gives the way that keeps the singing
+  exactly: `audio_separate`, a remake of the accompaniment alone, and the
+  original vocals laid over it with ffmpeg (`MIX_RECIPE`: `amix` without
+  normalising, a limiter; stems and remakes keep the song's length). The
+  model had also described guitars it could not hear: every sound tool's
+  result now says it cannot hear the file. A sound input given by an
+  attachment's name is found in `.hub/attachments/`, and keep is written as
+  given (0.75 was shown as 0.8).
 - **Stems** (`audio_separate`): vocals and accompaniment, for karaoke,
   remixes, or one part alone. `SLQSeparateVocals` runs Kimberley Jensen's
   Mel-Band RoFormer vocal model (SDR 10.98 on MVSEP's multisong set, the one

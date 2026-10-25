@@ -167,6 +167,27 @@ async def test_a_song_remade_with_the_sound_of_another(signed_in, app, fakes):
                          "the new version may not follow the song. Tell the user" in res["text"]
 
 
+async def test_chat_76_an_attachment_by_its_name_the_keep_as_given_and_no_sound_it_did_not_hear(signed_in, app, fakes):
+    """Chat 76: the model gave the attachment's name (refused: it copied the file out and deleted it every turn),
+    read its 0.75 and 0.85 back as 0.8, and described guitars it could not hear. Measured there: 0.75-0.85 sounded
+    like the original, 0.45-0.5 lost the rhythm - the tool says so, and how to keep the vocals and change the band."""
+    install(app, "ace-step-1.5-turbo")
+    c = await new_chat(signed_in)
+    files_in(app, c["id"], ".hub/attachments/I Want It That Way.mp3")
+    seen, fakes.sandbox["handler"] = sandbox_ffmpeg(app, {"I Want It That Way.mp3": 214.0})
+    res = await call(app, signed_in, c["id"], fakes, "music_remake", {
+        "audio": "I Want It That Way.mp3", "prompt": "heavy metal, distorted guitars", "keep": 0.75})
+    assert res["ok"], res
+    assert "/.hub/attachments/I Want It That Way.mp3" in seen[0]["cmd"]                 # found where it is
+    assert "keep 0.75," in res["text"]
+    assert "You cannot hear it: tell the user what you asked for, not how it sounds" in res["text"]
+    desc = tools_offered(fakes, 0)["music_remake"]["description"]
+    assert "0.45 and 0.5 lost its rhythm" in desc and "try 0.6-0.7" in desc
+    assert "Keep the singing, change the band" in desc and "amix=inputs=2:duration=first:normalize=0" in desc
+    res = await call(app, signed_in, c["id"], fakes, "music_remake", {"audio": "nope.mp3", "prompt": "rock"})
+    assert not res["ok"] and "No such file in the working folder: nope.mp3" in res["text"]
+
+
 # ---------------------------------------------------------------- stems
 
 async def test_a_song_taken_apart(signed_in, app, fakes):
