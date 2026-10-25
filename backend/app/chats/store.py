@@ -148,6 +148,16 @@ def messages(chat_id: int, after_id: int = 0) -> list[dict]:
     return out
 
 
+def count_runs(chat_id: int) -> int:
+    with db.connect() as con:
+        return con.execute("SELECT COUNT(*) FROM runs WHERE chat_id=?", (chat_id,)).fetchone()[0]
+
+
+def count_messages(chat_id: int) -> int:
+    with db.connect() as con:
+        return con.execute("SELECT COUNT(*) FROM messages WHERE chat_id=?", (chat_id,)).fetchone()[0]
+
+
 def delete_messages_after(chat_id: int, message_id: int) -> int:
     with db.connect() as con:
         return con.execute("DELETE FROM messages WHERE chat_id=? AND id>?", (chat_id, message_id)).rowcount

@@ -19,7 +19,7 @@ direct and concise - no filler, no flattery.
 up instead of guessing, read files before changing them, run code to check a result.
 - Never invent file contents, URLs, numbers, quotes or facts. If you are unsure, say so or find out.
 - When you use web results, end with a short "Sources:" list of the pages you relied on (title and URL).
-- For work with several steps, keep a task list with todo_write and work through it item by item.
+- For work with several steps, keep a task list with todo_write and work through it item by item.{big_reads}
 - When a tool call fails, read the error, fix the cause and try again differently - do not repeat the same \
 failing call. If something is impossible, say so plainly.
 - When you are done with a task, finish with a short summary of what you did and anything the user must know.
@@ -44,6 +44,12 @@ page or small app (html, or react: one component with a default export, styled w
 styles, importing only from "react"), a diagram (mermaid or svg), a document (markdown) or longer code. Keep \
 the chat reply short when the content is in an artifact. Update an existing artifact (same id) instead of \
 creating a new one when the user asks for changes."""
+
+# 0.27.0: what a subagent is for - a long chat stays sharp when big reads happen in a context of their own.
+BIG_READS = """
+- To go through a lot of material - big or many files, long pages or logs, hex dumps - give it to a subagent \
+(task tool) with a precise question: it reads in a context of its own and returns only what you asked for, \
+which keeps this conversation short and your answers sharp."""
 
 MEMORY = """
 
@@ -208,7 +214,8 @@ def system_prompt(*, user: str, model_name: str, folder_text: str, sandbox_path:
                   if code else NO_CODE_LINE) + ((INTERNET_ASKS if code else INTERNET_ASKS_NO_CODE) if internet_asks
                                                 else "")
     text = BASE.format(user=user, model=model_name, date=now.strftime("%A %d %B %Y"), folder=folder_text,
-                       tools_line=tools_line, image_gen=IMAGE_GEN if images_available else "")
+                       tools_line=tools_line, image_gen=IMAGE_GEN if images_available else "",
+                       big_reads="" if subagent else BIG_READS)
     text += sound_text(sound or [])
     if video:
         text += VIDEO
@@ -234,11 +241,12 @@ def system_prompt(*, user: str, model_name: str, folder_text: str, sandbox_path:
         if (project.get("instructions") or "").strip():
             text += "\nInstructions for this project (follow them):\n" + project["instructions"].strip()
     if summary:
-        text += ("\n\n# Earlier in this conversation\nThe earlier part of this chat was condensed into this "
-                 "summary:\n" + summary.strip())
+        text += ("\n\n# Notes on this conversation\nThe earlier part of this chat was condensed into these notes "
+                 "(the user can read and correct them); chat_history looks up what they leave out:\n"
+                 + summary.strip())
     if dropped:
         text += (f"\n\n# Earlier in this conversation\nThe first {dropped} messages of this chat were left out to "
-                 "fit your context.")
+                 "fit your context; chat_history finds what was said in them.")
     if subagent:
         text += ("\n\n# You are a subagent\nAnother agent gave you one focused task. Do it with the tools you "
                  "have, then answer with a complete, self-contained report of what you found or did - that "

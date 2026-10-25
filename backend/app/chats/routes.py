@@ -1,10 +1,15 @@
 """Chats, messages, runs (live over SSE), uploads and artifacts."""
 from __future__ import annotations
 
+import asyncio
 import json
 import mimetypes
+import os
+import re
 import secrets
 import shutil
+import tempfile
+from pathlib import Path
 
 from fastapi import APIRouter, File, Header, HTTPException, Request, UploadFile
 from fastapi.responses import Response, StreamingResponse
@@ -58,15 +63,37 @@ class ChatCreate(BaseModel):
 async def create_chat(body: ChatCreate):
     if body.project_id is not None and not projects.get_project(body.project_id):
         raise HTTPException(404, "no such project")
-    return store.create_chat(body.project_id, body.title or "New chat", body.settings)
+    settings = {k: v for k, v in (body.settings or {}).items() if k in store.CHAT_DEFAULTS}   # not continued_from
+    return store.create_chat(body.project_id, body.title or "New chat", settings)
+
+
+def context_use(hub, chat: dict, runs: list[dict]) -> dict:
+    """How full the chat's last request was (0.27.0): a long chat is offered Continue in a new chat. The notes a
+    continued chat starts with were written from the old one: their request says nothing about the new chat."""
+    used, model = 0, None
+    for r in reversed(runs):
+        steps = [s for s in r.get("steps") or [] if s.get("type") == "model" and not s.get("depth")
+                 and not s.get("handover")]
+        if steps:
+            used, model = int(steps[-1].get("prompt_tokens") or 0), steps[-1].get("model") or r.get("model")
+            break
+    try:
+        entry = hub.catalog.get_llm(model or "") or hub.catalog.get_llm(chat["settings"].get("model") or "") or \
+            hub.catalog.get_llm(hub.settings.get("models", "default") or "")
+        limit = hub.catalog.context_per_request(entry["id"]) if entry else 0
+    except Exception:  # noqa: BLE001 - only a hint
+        limit = 0
+    return {"used": used, "limit": limit, "condensed": bool(chat.get("summary_upto"))}
 
 
 @router.get("/chats/{chat_id}")
 async def get_chat(chat_id: int, request: Request):
     chat = _chat_or_404(chat_id)
     agent = _agent(request)
+    runs = store.runs_for_chat(chat_id)
     return {"chat": chat, "messages": store.messages(chat_id), "artifacts": store.list_artifacts(chat_id),
-            "runs": store.runs_for_chat(chat_id), "run": _run_info(agent.runs.active_for_chat(chat_id)),
+            "runs": runs, "run": _run_info(agent.runs.active_for_chat(chat_id)),
+            "context": context_use(get_hub(request), chat, runs),
             "project": projects.get_project(chat["project_id"]) if chat.get("project_id") else None,
             "allowed": store.chat_permissions(chat_id)}
 
@@ -88,6 +115,24 @@ class ChatPatch(BaseModel):
 async def patch_chat(chat_id: int, body: ChatPatch):
     _chat_or_404(chat_id)
     return store.update_chat(chat_id, title=body.title, settings=body.settings)
+
+
+class NotesIn(BaseModel):
+    text: str
+
+
+@router.put("/chats/{chat_id}/notes")
+async def put_notes(chat_id: int, body: NotesIn, request: Request):
+    """The notes the earlier part of the chat was condensed into (0.27.0): the user reads and corrects them in the
+    chat's menu; the model gets them in its system prompt."""
+    from ..agent.context import MAX_NOTES
+    _chat_or_404(chat_id)
+    if _agent(request).runs.active_for_chat(chat_id):     # it may be condensing: the correction would be lost
+        raise HTTPException(409, "The chat is working on an answer - correct the notes when it is done.")
+    text = body.text.strip()
+    if len(text) > MAX_NOTES:
+        raise HTTPException(400, f"The notes can be at most {MAX_NOTES} characters.")
+    return store.update_chat(chat_id, summary=text)
 
 
 @router.get("/chats/{chat_id}/export")
@@ -129,6 +174,7 @@ class MessageIn(BaseModel):
 
 
 def _start(request: Request, chat_id: int, options: dict) -> str:
+    options = {k: v for k, v in (options or {}).items() if k != "handover_from"}     # only the handover route's
     try:
         return _agent(request).start(chat_id, options).id
     except RuntimeError as exc:
@@ -205,6 +251,12 @@ async def retry(chat_id: int, body: RetryIn, request: Request):
         raise HTTPException(404, "no user message to answer again")
     store.delete_messages_after(chat_id, target["id"])
     _reset_summary_if(chat, target["id"])
+    hand = next((b for b in target["content"] if b.get("type") == "handover"), None)
+    if hand is not None:                     # the notes of a continued chat, written again
+        try:
+            return {"run_id": _agent(request).start(chat_id, {"handover_from": int(hand["chat_id"])}).id}
+        except RuntimeError as exc:
+            raise HTTPException(409, str(exc))
     return {"run_id": _start(request, chat_id, body.options)}
 
 
@@ -237,6 +289,77 @@ async def continue_turn(chat_id: int, body: ContinueIn, request: Request):
         raise HTTPException(409, "The last answer is finished - write what you want next")
     msg = store.add_message(chat_id, "user", [{"type": "continue", **why}])
     return {"message": msg, "run_id": _start(request, chat_id, body.options)}
+
+
+HANDOVER_SKIP = {"skills", "dotnet", "tmp", "home"}      # under .hub: made again, or not needed
+HANDOVER_MAX = 2 * 1024 ** 3
+
+
+def _copy_into_new(src: Path, workspace: Path, chat_id: int) -> None:
+    """A chat's own folder into the chat that continues it (a project's chats share the project's folder): into a
+    fresh folder first, then renamed into place - never into whatever is at the new chat's path already (code in
+    the sandbox could have planted chats/<id>/.hub -> /data there). Gone again when the copy fails."""
+    chats_dir = projects.real_dir(workspace, "chats")
+    dst = chats_dir / str(chat_id)
+    tmp = Path(tempfile.mkdtemp(prefix=f".handover-{chat_id}-", dir=chats_dir))
+
+    def ignore(d, names):
+        return [n for n in names if Path(d) == src / ".hub" and n in HANDOVER_SKIP]
+    try:
+        shutil.copytree(src, tmp, ignore=ignore, dirs_exist_ok=True, symlinks=True)
+        if dst.is_symlink() or (dst.exists() and not dst.is_dir()):
+            dst.unlink()
+        elif dst.exists():
+            shutil.rmtree(dst)                     # (rmtree removes links inside, it never follows them)
+        os.rename(tmp, dst)
+    except BaseException:
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise
+
+
+def _folder_size(root: Path) -> int:
+    total = 0
+    for p in Path(root).rglob("*"):
+        rel = p.relative_to(root).parts
+        if len(rel) > 1 and rel[0] == ".hub" and rel[1] in HANDOVER_SKIP:
+            continue
+        if p.is_file() and not p.is_symlink():
+            total += p.stat().st_size
+    return total
+
+
+def next_title(title: str) -> str:
+    m = re.match(r"^(.*) \((\d+)\)$", title)
+    return f"{m.group(1)} ({int(m.group(2)) + 1})" if m else f"{title} (2)"
+
+
+@router.post("/chats/{chat_id}/handover")
+async def handover(chat_id: int, request: Request):
+    """Continue in a new chat (0.27.0): a new chat with the same project, settings and files, whose first answer is
+    the notes the work goes on from - a fresh context answers better than a very long one."""
+    old = _chat_or_404(chat_id)
+    agent = _agent(request)
+    if agent.runs.active_for_chat(chat_id):
+        raise HTTPException(409, "This chat is working on an answer - wait for it, or stop it.")
+    if not store.count_messages(chat_id):
+        raise HTTPException(409, "There is nothing to carry over yet.")
+    old_dir = None if old.get("project_id") else agent.workdir(old).root
+    if old_dir is not None:
+        size = await asyncio.to_thread(_folder_size, old_dir)
+        if size > HANDOVER_MAX:
+            raise HTTPException(413, f"This chat's files take {size / 1024 ** 3:.1f} GB - too much to copy to a new "
+                                     "chat. Delete what you no longer need from its Files first.")
+    settings = {k: v for k, v in old["settings"].items() if k in store.CHAT_DEFAULTS}
+    new = store.create_chat(old.get("project_id"), next_title(old["title"]), {**settings, "continued_from": chat_id})
+    if old_dir is not None:
+        try:
+            await asyncio.to_thread(_copy_into_new, old_dir, agent.hub.env.workspace_dir, new["id"])
+        except OSError as exc:
+            store.delete_chat(new["id"])
+            raise HTTPException(507, f"Could not copy the chat's files: {exc}")
+    store.add_message(new["id"], "user", [{"type": "handover", "chat_id": chat_id, "title": old["title"]}])
+    run = agent.start(new["id"], {"handover_from": chat_id})
+    return {"chat": store.get_chat(new["id"]), "run_id": run.id}
 
 
 class EditIn(BaseModel):

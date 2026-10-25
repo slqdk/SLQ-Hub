@@ -337,6 +337,18 @@ running server's size from its refusal (§6 "The real token count"). Null for
 the context, the slots or the RAM cache means the card's value again; a slot
 count below one is refused.
 
+**Delete files** (0.27.0). A downloaded model from the Hub's own list (any
+group) can give its disk space back: `DELETE /hub/api/models/{id}/files`
+deletes the files that no other model uses - downloaded or being downloaded,
+its own files and those of the models it requires (Wan's text encoder serves
+the 5B, the Turbo and the 14B pair; Qwen-Image 2.1 Turbo requires the base) -
+and Download fetches them again. Refused while it is in use: on the card,
+waited for by a queued job, the chat model, the apps' fallback, the hand-over
+model, chosen under Assistant (Images, Sound, Video), ComfyUI working, or a
+library reading with the helpers. The list says what it would give back
+(`freeable`); with nothing to give, the button is off. A model the owner
+added goes with Remove, as before.
+
 Searching by name (Add from Hugging Face): the Hub asks
 `/api/models?search=<longest word>&filter=gguf&sort=downloads` and keeps the
 repositories whose id contains every word of the query; owner/name or a link
@@ -845,8 +857,14 @@ overthink, so the default effort is `medium`.
 **Compaction.** At 75% of the model's context (Settings → Assistant) -
 counting the tool definitions, which are not in the messages - old tool
 outputs are shortened first; if that is not enough, everything before the
-latest user message is summarised by the model into the chat's summary, which
-goes into the system prompt from then on. The UI shows a notice. The summary
+latest user message is condensed by the model into the chat's notes, which
+go into the system prompt from then on. The UI shows a notice. Since 0.27.0
+the notes are structured (Goal, Decisions and facts, Files, Done, Open
+questions, Next) and each condensing replaces them - given the old notes, the
+model carries over what still matters; appended, the summary grew with every
+condensing until it left room for nothing else. The user reads and corrects
+them in the chat's ⋯ menu (Notes; `PUT /hub/api/chats/{id}/notes`, refused
+while the chat works, at most 20,000 characters). The summary
 request itself must fit: old tool outputs are cut to their start, then long
 answers, then the oldest messages are left out (with a note). Within one long
 turn there is nothing before the user's message to fold, so the turn's own
@@ -872,6 +890,58 @@ keeps its instruction). A step's `sent` keeps `token_ratio` when it was above
 than 1,000 estimated tokens of old messages is not extended: folding would
 move `summary_upto` past messages it never read, so the turn is shortened
 instead.
+
+**A lean context** (0.27.0). A model answers worse in a long context well
+before it runs out, so the context is kept small all along, not only at 75%:
+
+- Tool output from turns before the previous one keeps its first 400
+  characters (when longer than 1,500), with how much is left out and where
+  to get it (`.hub/outputs/…` when the result was stored there, else
+  chat_history or calling the tool again). The previous turn keeps its
+  output whole - a follow-up often asks about it. The same rows are
+  shortened the same way every turn, so llama-server's prompt cache holds.
+- Within a turn, once a request passes half the context, all tool results
+  but the newest four are cleared to their start in one go - only when that
+  frees at least 15% of the context, since every change to an older message
+  makes llama-server read the request again from there. A shortened result
+  shortened again stays exactly the same unless it is cut deeper, and keeps
+  its count and pointer. The results of the last step stay whole in every
+  stage (the model has not read them) except the very last resort. After a
+  cut the loop guard's epoch moves on, so a cleared look-up may be repeated.
+- The main agent's prompt says what a subagent is for: big or many files,
+  long pages or logs, hex dumps go to `task` with a precise question, and
+  only the answer comes back.
+
+**chat_history** (0.27.0, `app/agent/tools/history.py`). Search (BM25 over
+each message's text, tool calls and results; Danish letters are word
+letters; the whole query as a phrase counts extra) and read, over the whole
+chat - the condensed part, older turns' full output, what was cleared in
+this turn - and the chats it continues from (`settings.continued_from`, five
+back). A person's turn searches the conversation her device sent, the
+messages left out of the context included; nothing of it is stored. The
+search leaves out its own calls and the message that started the turn, and
+runs off the event loop. Offered only when there is more than the model sees:
+condensed, continued, cleared in this turn, two earlier turns, or 20
+messages; a person's turn when messages were left out or are shortened. A
+cut or a condensing in the middle of a turn offers it from the next step.
+
+**Continue in a new chat** (0.27.0). `POST /hub/api/chats/{id}/handover`
+(the ⋯ menu, or the hint under the last answer of a chat that was condensed
+or whose last request was 60% full - `context` in `GET /chats/{id}`, the
+notes' own request not counted): a new chat in the same project with the
+same settings, titled "… (2)", and `continued_from`. A plain chat's folder is
+copied (not `.hub/skills`, `dotnet`, `tmp`, `home`; at most 2 GB) into a fresh
+folder that is then renamed into place - never into whatever sits at the new
+chat's path. Its first message is a `handover` block, and a run with
+`handover_from` writes the notes from the old chat's notes and messages
+(`HANDOVER_PROMPT`, the same headings, no thinking) as its first answer,
+streamed like any answer. The model later reads "(SLQ Hub: this chat
+continues the chat "…"…your notes from it follow…)" - without "notes follow"
+when writing them was stopped. Retry under the notes writes them again; a
+message sent meanwhile is answered after them; options from the browser
+cannot start a handover. The old chat stays as it was; the new one links
+back to it and searches it with chat_history. Not in people's chats (their
+chats live on their devices).
 
 **Messages while it works.** A message sent while a turn runs does not wait
 for the end: it goes into the run's inbox (event `user_queued`), and the
@@ -1707,6 +1777,18 @@ assistant made), each sent with every message.
 ---
 
 ## 11. Security
+
+- **Links planted in the workspace** (0.27.0). Code in the owner's sandbox
+  sees the whole workspace, and the Hub sees more of the disk than the
+  sandbox: a symlink planted where a folder belongs (`chats/7 -> /data`,
+  `.hub/skills -> /data`) would have the Hub read or delete its own files -
+  the skills cleanup would empty the link's target, and read_file in a chat
+  whose folder is a link would read settings and keys. Chat and project
+  folders are made with `real_dir` (a link in the way is removed, never
+  followed, and the folder must resolve inside the workspace), a working
+  folder replaced by a link during a turn is refused on every path the
+  tools resolve, the skills cleanup removes links instead of following
+  them, and Continue in a new chat copies into a fresh folder.
 
 - **Login.** The owner and the people the owner adds use scrypt password
   hashes. Sessions are HttpOnly cookies that last 30 days, and are `Secure`

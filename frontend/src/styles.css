@@ -451,6 +451,12 @@ button.file-chip:disabled { cursor: default; }
 .unfinished-note { width: 100%; max-width: 46rem; border: 1px solid color-mix(in srgb, var(--wait) 55%, var(--rule)); border-radius: 8px; overflow: hidden; }
 .msg-continued { display: flex; align-items: center; gap: 10px; margin: 4px 0; color: var(--ink-3); font-size: 12.5px; font-family: var(--font-plate); font-weight: 600; letter-spacing: 0.02em; }
 .msg-continued::before, .msg-continued::after { content: ""; flex: 1; border-top: 1px solid var(--rule-2); }
+.msg-handover a { color: var(--ink-2); text-decoration: underline; text-underline-offset: 2px; }
+.long-hint { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 6px 0 2px; padding: 8px 12px;
+  border: 1px dashed var(--rule-2); border-radius: 8px; color: var(--ink-2); font-size: 13.5px; }
+.long-hint > span { flex: 1 1 220px; }
+.notes-text { max-height: 60vh; overflow: auto; }
+.notes-edit { width: 100%; min-height: 50vh; resize: vertical; font-size: 13px; line-height: 1.5; }
 .files-card-row .kind { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 6px; background: var(--cabinet); color: var(--ink-2); }
 .files-card-main { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .files-card-name { display: flex; gap: 8px; align-items: baseline; min-width: 0; font-family: var(--font-plate); font-weight: 600; font-size: 15px; }

@@ -1,6 +1,7 @@
 // A chat: history, the live turn, and the composer.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
-import { Copy, Download, FileText, FolderOpen, Menu, MoreHorizontal, Pencil, RotateCcw, ShieldCheck, Trash2 } from "lucide-react";
+import { Copy, Download, FileText, FolderOpen, Menu, MessageSquarePlus, MoreHorizontal, NotebookPen, Pencil, RotateCcw, ShieldCheck,
+  Trash2 } from "lucide-react";
 import { api, mediaUrl, type ArtifactRef, type Block, type ChatData, type ChatSettings, type Library, type Message,
   type ProducedFile, type RunEvent, type RunRecord, type Settings, type Skill, type Upload } from "../lib/api";
 import { clearDraftSkills, peekDraftSkills, setDraft as setMessageDraft } from "../lib/draft";
@@ -12,6 +13,7 @@ import { useApp } from "../state";
 import { Composer, type ComposerSettings } from "../components/Composer";
 import { FilesCard, producedFiles, UnfinishedNote, type FileHandlers } from "../components/FilesCard";
 import { Items } from "../components/Turn";
+import { Markdown } from "../components/Markdown";
 import { copyText, Lamp, MenuButton, Modal } from "../components/ui";
 import { download } from "../lib/download";
 import type { PanelState } from "../App";
@@ -49,6 +51,7 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
   const [editing, setEditing] = useState<number | null>(null);
   const [renaming, setRenaming] = useState(false);
   const [showAllowed, setShowAllowed] = useState(false);
+  const [showNotes, setShowNotes] = useState(false);
   const scroller = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
   const seenArtifacts = useRef(0);
@@ -321,6 +324,18 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
     }
   };
 
+  // Continue in a new chat (0.27.0): the new chat's first answer is the notes, written while it opens.
+  const handover = async () => {
+    if (!chatId) return;
+    try {
+      const r = await api<{ chat: ChatData["chat"]; run_id: string }>(`/hub/api/chats/${chatId}/handover`, { body: {} });
+      refreshLists();
+      navigate({ name: "chat", id: r.chat.id });
+    } catch (e) {
+      toast((e as Error).message, "fault");
+    }
+  };
+
   const remove = async () => {
     if (!chatId) return;
     try {
@@ -397,6 +412,11 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
                 ))}
                 {(data?.allowed?.length ?? 0) > 0 && <button className="menu-item" onClick={() => { close(); setShowAllowed(true); }}>
                   <ShieldCheck size={15} /><span>Allowed in this chat<small>{data!.allowed!.map((p) => allowedLabel(p.tool)).join(", ")}</small></span></button>}
+                {!!(data?.chat.summary || data?.chat.summary_upto) && <button className="menu-item" onClick={() => { close(); setShowNotes(true); }}>
+                  <NotebookPen size={15} /><span>Notes<small>What the earlier part of the chat was condensed into</small></span></button>}
+                {(data?.messages.length ?? 0) > 0 && <button className="menu-item" disabled={running}
+                  onClick={() => { close(); handover(); }}>
+                  <MessageSquarePlus size={15} /><span>Continue in a new chat<small>A fresh chat with notes from this one, and its files</small></span></button>}
                 <div className="menu-sep" />
                 <button className="menu-item" onClick={() => { close(); download(`/hub/api/chats/${chatId}/export?format=md`); }}>
                   <FileText size={15} /> Export as Markdown</button>
@@ -413,6 +433,8 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
 
       {showAllowed && chatId && <AllowedInChat chatId={chatId} allowed={data?.allowed ?? []}
         onChange={(allowed) => setData((d) => (d ? { ...d, allowed } : d))} onClose={() => setShowAllowed(false)} />}
+      {showNotes && chatId && data && <ChatNotes chatId={chatId} notes={data.chat.summary ?? ""}
+        onSaved={(chat) => setData((d) => (d ? { ...d, chat } : d))} onClose={() => setShowNotes(false)} />}
 
       <div className="scroll" ref={scroller} onScroll={(e) => {
         const el = e.currentTarget;
@@ -445,6 +467,7 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
                 })()}
                 <TurnFoot turn={t} names={modelNames} canRetry={!running && t === lastAssistant}
                   stats={!t.runId || lastPart.get(t.runId) === i} onRetry={() => retry()} />
+                {!running && t === lastAssistant && isLong(data?.context) && <LongChatHint onContinue={handover} />}
               </div>
             ))}
             {live && (() => {
@@ -487,6 +510,53 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
   );
 }
 
+/** Long enough that a fresh chat would answer better (0.27.0): condensed, or its last request over 60 % full. */
+export function isLong(ctx: ChatData["context"]): boolean {
+  return !!ctx && (ctx.condensed || (ctx.limit > 0 && ctx.used >= 0.6 * ctx.limit));
+}
+
+function LongChatHint({ onContinue }: { onContinue: () => void }) {
+  return (
+    <div className="long-hint" role="note">
+      <span>This chat is getting long - a fresh chat answers better.</span>
+      <button className="btn small" onClick={onContinue}><MessageSquarePlus size={14} /> Continue in a new chat</button>
+    </div>
+  );
+}
+
+/** The notes the earlier part of the chat was condensed into (0.27.0): read, and corrected by the user. */
+function ChatNotes({ chatId, notes, onSaved, onClose }: { chatId: number; notes: string;
+  onSaved: (chat: ChatData["chat"]) => void; onClose: () => void }) {
+  const { toast } = useApp();
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState(notes);
+  const save = async () => {
+    try {
+      const chat = await api<ChatData["chat"]>(`/hub/api/chats/${chatId}/notes`, { method: "PUT", body: { text } });
+      onSaved(chat);
+      setEditing(false);
+      toast("Notes saved - the assistant reads them from the next answer on", "run");
+    } catch (e) {
+      toast((e as Error).message, "fault");
+    }
+  };
+  return (
+    <Modal wide title="Notes on this chat" onClose={onClose} footer={editing ? <>
+      <button className="btn" onClick={() => { setEditing(false); setText(notes); }}>Cancel</button>
+      <button className="btn primary" onClick={save}>Save</button></> : <>
+      <button className="btn" onClick={() => setEditing(true)}><Pencil size={14} /> Edit</button>
+      <button className="btn primary" onClick={onClose}>Close</button></>}>
+      <p className="small muted" style={{ marginTop: 0 }}>The earlier part of this chat was condensed into these notes to
+        make room; the assistant reads them with every answer, and can still look up anything from before. Correct them if
+        something is wrong or missing.</p>
+      {editing
+        ? <textarea className="input mono notes-edit" value={text} onChange={(e) => setText(e.target.value)} autoFocus
+            aria-label="Notes" />
+        : <div className="notes-text"><Markdown text={notes} /></div>}
+    </Modal>
+  );
+}
+
 export function UserMessage({ message, editing, canEdit, onEdit, onCancel, onSave, onOpenFile }: { message: Message;
   editing: boolean; canEdit: boolean; onEdit: () => void; onCancel: () => void; onSave: (text: string) => void;
   onOpenFile?: (path: string) => void }) {
@@ -495,6 +565,12 @@ export function UserMessage({ message, editing, canEdit, onEdit, onCancel, onSav
   const whileWorking = message.content.some((b) => b.type === "text" && b.while_working);
   const [value, setValue] = useState(text);
   if (isContinue(message)) return <div className="msg-continued" role="note">Continued</div>;
+  const from = message.content.find((b) => b.type === "handover") as { chat_id: number; title: string } | undefined;
+  if (from) return (
+    <div className="msg-continued msg-handover" role="note">
+      <span>Continued from <a {...linkProps({ name: "chat", id: from.chat_id })}>{from.title}</a></span>
+    </div>
+  );
   return (
     <div className="msg-user">
       {whileWorking && <div className="msg-note">Sent while it worked</div>}

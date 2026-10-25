@@ -71,6 +71,7 @@ class DeviceInfo:
     name: str
     code: bool
     dropped: int = 0
+    history: list = field(default_factory=list)       # the conversation the device sent (chat_history searches it)
     artifacts: dict = field(default_factory=dict)     # id -> {"title", "type", "version", "content"}
     shas: set = field(default_factory=set)            # stored files of this turn (tools may use these only)
 
@@ -402,7 +403,8 @@ async def run_turn(hub, turn: DeviceTurn, body: dict, rows: list[dict], wd: proj
     listening = chats.upload_listener.set(turn.listen)
     ephemeral = images.EPHEMERAL.set(True)               # ComfyUI keeps no copy of this chat's pictures
     status, error, engine, ticket, pos_task = "done", None, None, None, None
-    device = DeviceInfo(user_id=turn.user["id"], name=auth.display_name(turn.user), code=False, shas=turn.shas)
+    device = DeviceInfo(user_id=turn.user["id"], name=auth.display_name(turn.user), code=False, shas=turn.shas,
+                        history=rows)
     for a in body.get("artifacts") or []:
         if isinstance(a, dict) and isinstance(a.get("id"), str) and isinstance(a.get("content"), str):
             device.artifacts[a["id"]] = {"title": str(a.get("title") or a["id"]), "type": str(a.get("type") or "html"),
@@ -503,7 +505,8 @@ def _fit(agent, chat: dict, wd, entry: dict, engine, device: DeviceInfo, rows: l
         device.dropped = len(rows) - len(keep)
         keep_from = keep[-12]["id"] if len(keep) > 12 else 0
         system = agent.system_for(chat, None, wd, entry, handover_to=engine.handover_label(), device=device)
-        msgs = [{"role": "system", "content": system}, *C.to_model_messages(keep, None, keep_from, vision=sees)]
+        msgs = [{"role": "system", "content": system},
+                *C.to_model_messages(keep, None, keep_from, vision=sees, keep_results_from=C.results_from(keep, None))]
         if C.estimate_tokens(msgs) + schema <= budget or len(keep) <= 1:
             return msgs
         keep = keep[1:]

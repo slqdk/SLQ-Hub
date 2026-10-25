@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.27.0 - 2026-10-25
+
+- **Long chats stay sharp.** Older answers' tool output is kept short (the
+  previous answer's stays whole), and in a long turn the old results are
+  cleared in one go at half of the model's context, long before it runs out.
+  When a chat is condensed, it now becomes structured notes - the goal,
+  decisions and facts, files, what is done, open questions, what is next -
+  that replace the old ones instead of piling up.
+- **Notes** in a chat's ⋯ menu: read what the earlier part of the chat was
+  condensed into, and correct it.
+- **The assistant can look anything up in the whole chat**, also what was
+  condensed or cleared, and in the chat it continues from - in people's chats
+  too, where it searches the conversation their phone sent.
+- **Continue in a new chat** (⋯ menu, or the hint under a long chat's last
+  answer): the assistant writes notes from the chat, and a new chat starts
+  from them with the same files and settings. The old chat stays as it was,
+  and the new one links back to it.
+- Big reads - many files, long logs, hex dumps - go to a helper that reads
+  in its own context and reports back.
+- **Delete files** for downloaded built-in models under Settings → Models:
+  the disk space back, and Download fetches them again. Files another
+  downloaded model uses stay.
+- Security: links that code in the sandbox could plant in the workspace are
+  no longer followed by the Hub (they could have let a cleanup delete the
+  Hub's own data, or a chat read its settings).
+
 ## 0.26.0 - 2026-10-25
 
 - **Updates wait until nobody uses the Hub.** `sudo bash update.sh` can be

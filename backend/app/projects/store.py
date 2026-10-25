@@ -99,16 +99,28 @@ def delete_project(pid: int, workspace: Path, trash: Path) -> bool:
 
 # ---------------------------------------------------------------- folders
 
-def project_dir(workspace: Path, pid: int) -> Path:
-    d = workspace / "projects" / str(pid)
-    d.mkdir(parents=True, exist_ok=True)
+def real_dir(base: Path, *parts: str) -> Path:
+    """base/parts... as real folders inside base (0.27.0). Code in the sandbox sees the whole workspace and may plant
+    a symlink where a folder belongs - chats/7 -> /data - which the Hub, with more of the disk in view, would follow:
+    a link in the way is removed, never followed."""
+    base.mkdir(parents=True, exist_ok=True)
+    d = base
+    for part in parts:
+        d = d / part
+        if d.is_symlink() or (d.exists() and not d.is_dir()):
+            d.unlink()
+        d.mkdir(exist_ok=True)
+    if not d.resolve().is_relative_to(base.resolve()):
+        raise ValueError(f"{d} is not a folder of {base}")
     return d
+
+
+def project_dir(workspace: Path, pid: int) -> Path:
+    return real_dir(workspace, "projects", str(pid))
 
 
 def chat_dir(workspace: Path, chat_id: int) -> Path:
-    d = workspace / "chats" / str(chat_id)
-    d.mkdir(parents=True, exist_ok=True)
-    return d
+    return real_dir(workspace, "chats", str(chat_id))
 
 
 @dataclass
@@ -132,6 +144,8 @@ class Workdir:
             rel = rel.lstrip("/")
         p = (self.root / rel).resolve()
         root = self.root.resolve()
+        if self.root.is_symlink() or not root.is_relative_to(self.workspace.resolve()):
+            raise ValueError("the working folder was replaced by a link")      # planted while the turn ran
         if p != root and root not in p.parents:
             raise ValueError(f"{rel} is outside the working folder")
         return p

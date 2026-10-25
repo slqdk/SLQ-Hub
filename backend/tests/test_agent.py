@@ -1042,6 +1042,70 @@ async def test_no_room_to_condense_leaves_the_history_alone(signed_in, app, fake
     assert chat["summary"] == "S" * 22000 and not chat["summary_upto"]
 
 
+# ---------------------------------------------------------------- keeping the context lean (0.27.0)
+
+def _old_turn(chat_id: int, run_id: str, question: str, result: str) -> None:
+    chats.run_started(run_id, chat_id, "qwen3.8-27b")
+    chats.add_message(chat_id, "user", [{"type": "text", "text": question}])
+    chats.add_message(chat_id, "assistant", [{"type": "tool_call", "id": f"{run_id}_c", "name": "read_file",
+                                              "arguments": json.dumps({"path": "x.txt"})}], run_id)
+    chats.add_message(chat_id, "tool", [{"type": "tool_result", "tool_call_id": f"{run_id}_c", "name": "read_file",
+                                         "text": result}], run_id)
+    chats.add_message(chat_id, "assistant", [{"type": "text", "text": "Read it."}], run_id)
+    chats.run_finished(run_id, "done", [], {})
+
+
+async def test_tool_output_from_older_turns_is_kept_short(signed_in, app, fakes):
+    """The turn before this one keeps its tool output whole (a follow-up often asks about it); older ones keep
+    their start and say how to get the rest - the same way every turn, so the prompt cache holds."""
+    c = await new_chat(signed_in)
+    _old_turn(c["id"], "run_a", "First", "AAAA " * 1000)
+    _old_turn(c["id"], "run_b", "Second", "BBBB " * 1000)
+    long_saved = "CCCC " * 3000 + "\n\n(The full output is in .hub/outputs/x.txt - read it with read_file and offset/limit.)"
+    _old_turn(c["id"], "run_c", "Third", long_saved)
+    _old_turn(c["id"], "run_d", "Fourth", "DDDD " * 1000)
+    fakes.llama["replies"] = [{"content": "Fine."}]
+    await finish(app, await say(signed_in, c["id"], "And now?"))
+    first = fakes.llama["requests"][0]["messages"]
+    results = [m["content"] for m in first if m["role"] == "tool"]
+    assert results[0].startswith("AAAA") and len(results[0]) < 600
+    assert "more characters - a result from an earlier turn; look it up whole with chat_history, or call the tool " \
+        "again" in results[0]
+    assert "the whole output is in .hub/outputs/x.txt" in results[2]          # where a long one was kept
+    assert results[3] == "DDDD " * 1000                                       # the turn before: whole
+    await finish(app, await say(signed_in, c["id"], "Again?"))
+    again = [m["content"] for m in fakes.llama["requests"][-1]["messages"] if m["role"] == "tool"]
+    assert again[:3] == results[:3]                                           # shortened the same way again
+    assert len(again[3]) < 600                                                # now two turns back
+
+
+async def test_old_tool_output_is_cleared_at_half_the_context(signed_in, app, fakes, monkeypatch):
+    """A long turn far from the end of the context: its older results are cleared in one go at half of it, when
+    that frees a good share - not a little at every step, which would make llama-server read it all again."""
+    from app.agent import context as C
+    hub = app.state.hub
+    monkeypatch.setattr(hub.catalog, "context_per_request", lambda model_id: 40000)
+    c = await new_chat(signed_in)
+    wd = hub.extras["agent"].workdir(chats.get_chat(c["id"]))
+    for i in range(9):
+        wd.write(f"page{i}.txt", f"page {i}\n" + "w" * 9000 + "\n", author="test", origin="test", message="page")
+    fakes.llama["replies"] = [{"content": f"Page {i}.", "tool_calls": [{"name": "read_file",
+                                                                        "arguments": {"path": f"page{i}.txt"}}]}
+                              for i in range(9)] + [{"content": "All read."}, {"content": "Pages"}]
+    run = await finish(app, await say(signed_in, c["id"], "Read every page"))
+    assert run.status == "done", run.events[-1]
+    steps = chats.runs_for_chat(c["id"])[0]["steps"]
+    cleared = [s for s in steps if s["type"] == "cleared"]
+    assert len(cleared) == 1 and cleared[0]["before"] > 20000 and cleared[0]["before"] - cleared[0]["after"] >= 6000
+    main = [b for b in fakes.llama["requests"] if "short title" not in last_user(b)]
+    sizes = [C.estimate_tokens(b["messages"]) + C.schema_tokens(b.get("tools")) for b in main]
+    assert max(sizes) <= 30000 and not any(e["type"] == "compacted" for e in run.events)
+    after = next(b for b in main if any("cleared to keep the conversation short" in (m.get("content") or "")
+                                        for m in b["messages"] if m["role"] == "tool"))
+    whole = [m for m in after["messages"] if m["role"] == "tool" and "cleared" not in m["content"]]
+    assert len(whole) == 4                                                    # the newest four stay whole
+
+
 # ---------------------------------------------------------------- skills and memory
 
 async def test_memory_files_are_listed_in_the_prompt(signed_in, app, fakes):

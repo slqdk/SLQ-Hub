@@ -489,19 +489,27 @@ def turn_skills(store: Skills, chat: dict | None, project: dict | None, device=N
 def materialize(store: Skills, skills: list[dict], root: Path, device=None) -> None:
     """The chosen skills into <working folder>/.hub/skills/<dir>/, for code to read and run and for the skill maker
     to improve one (sync and the files card leave .hub alone); skills no longer chosen leave it."""
-    base = root / ".hub" / "skills"
     want = {s["dir"]: s for s in skills}
-    if base.is_dir():
-        for d in base.iterdir():
-            if d.name not in want:
-                shutil.rmtree(d, ignore_errors=True) if d.is_dir() else d.unlink(missing_ok=True)
+    if not want and not (root / ".hub" / "skills").exists() and not (root / ".hub" / "skills").is_symlink():
+        return
+    # Never through a link: code in the sandbox may plant .hub/skills -> /data, and the cleanup below would empty
+    # whatever it points at (0.27.0).
+    from ..projects.store import real_dir
+    base = real_dir(root, ".hub", "skills")
+    for d in list(base.iterdir()):
+        if d.name not in want:
+            if d.is_symlink() or not d.is_dir():
+                d.unlink(missing_ok=True)
+            else:
+                shutil.rmtree(d, ignore_errors=True)
     for dirname, s in want.items():
         src = store.path(who_of(device), s["ref"])
         dst = base / dirname
+        if dst.is_symlink() or (dst.exists() and not dst.is_dir()):
+            dst.unlink()
         if _same_tree(src, dst):
             continue
         shutil.rmtree(dst, ignore_errors=True)
-        dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copytree(src, dst, ignore=shutil.ignore_patterns(".*"))
 
 

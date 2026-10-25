@@ -173,11 +173,14 @@ async def models(request: Request):
     for f in downloads["files"]:
         by_model.setdefault(f["model"], []).append(f)
     out = {}
+    users = file_users(hub)
     for group in GROUPS:
         out[group] = []
         for e in hub.catalog.entries(group):
             row = {**e, "installed": hub.catalog.installed(e), "downloads": by_model.get(e["id"], []),
                    "loaded": group == "llm" and hub.loaded_model() == e["id"]}
+            if row["installed"] and not e.get("custom"):  # what Delete files would give back (0.27.0)
+                row["freeable"] = sum(_size_of(hub.catalog.path(f)) for f in own_files(e, users))
             if group == "llm":                       # what one chat may use now, and what the model was trained for
                 row["context_per_chat"] = hub.catalog.context_per_request(e["id"])
                 row["context_native"] = hub.catalog.native_context(e)
@@ -365,6 +368,102 @@ async def image_update(model_id: str, body: ImagePatch, request: Request):
         except sources.SourceError as exc:
             raise HTTPException(exc.status, str(exc))
     return {"model": hub.catalog.update_custom(model_id, changes)}
+
+
+def file_users(hub) -> dict[str, set[str]]:
+    """Each model file (its dest) -> the models that use it - downloaded ones, and ones being downloaded - their
+    own files and those of the models they require (Qwen-Image 2.1 Turbo runs on the base's text encoder and VAE;
+    Wan's text encoder serves four video models)."""
+    entries = {e["id"]: e for g in GROUPS for e in hub.catalog.entries(g)}
+    fetching = {f["model"] for f in hub.extras["downloads"].snapshot()["files"]
+                if f.get("status") in ("downloading", "queued")}
+    out: dict[str, set[str]] = {}
+    for e in entries.values():
+        if not (hub.catalog.installed(e) or e["id"] in fetching):
+            continue
+        for part in [e, *(entries[r] for r in e.get("requires", []) if r in entries)]:
+            for f in part.get("files", []):
+                out.setdefault(f["dest"], set()).add(e["id"])
+    return out
+
+
+def own_files(entry: dict, users: dict[str, set[str]]) -> list[dict]:
+    """The model's files that no other downloaded model uses."""
+    return [f for f in entry.get("files", []) if not users.get(f["dest"], set()) - {entry["id"]}]
+
+
+def _size_of(p) -> int:
+    try:
+        return p.stat().st_size if p.is_file() else 0
+    except OSError:
+        return 0
+
+
+def in_use(hub, entry: dict, group: str) -> str:
+    """Why the model's files may not go now ("" when they may)."""
+    mid, st = entry["id"], hub.settings
+    snap = hub.scheduler.snapshot()
+    if group == "llm":
+        if hub.loaded_model() == mid:
+            return "It is on the card now. Free the GPU first."
+        if any(j["need"] == hub.model_need(mid) for j in snap["running"] + snap["pending"]):
+            return "A chat is waiting to use it. Try again when the queue is empty."
+        if st.get("models", "default") == mid:
+            return "It is the model for chats. Choose another one first (Defaults, above)."
+        if st.get("models", "fallback_alias") == mid:
+            return "Unknown model names from apps go to it. Choose another model for them first (Defaults, above)."
+        if st.get("agent", "escalate_to") == mid:
+            return "Stuck turns are handed over to it. Choose another model first (Assistant, When the model gets stuck)."
+    chosen = {"comfy": [("images", "model", "Assistant, Images")],
+              "audio": [("sound", k, "Assistant, Sound") for k in ("music_model", "sound_model", "speech_model_da",
+                                                                   "speech_model")],
+              "video": [("video", k, "Assistant, Video") for k in ("t2v_model", "i2v_model")]}.get(group, [])
+    for section, key, where in chosen:
+        if st.get(section, key) == mid:
+            return f"It is chosen under {where}. Choose another model there first."
+    if group in ("comfy", "audio", "video") and any(j["need"] == "comfy" for j in snap["running"]):
+        return "The card is making a picture, a sound or a video now. Wait for it to finish."
+    libraries = hub.extras.get("libraries")
+    if group == "aux" and libraries is not None and getattr(libraries, "current", None):
+        return "A library is reading a document with the helpers now. Wait for it to finish."
+    return ""
+
+
+@router.delete("/hub/api/models/{model_id}/files")
+async def delete_model_files(model_id: str, request: Request):
+    """The files of a downloaded model from the Hub's own list (0.27.0): the disk space back, and Download fetches
+    them again. A file another downloaded model uses stays (Wan's text encoder serves the 5B, the Turbo and the
+    14B pair)."""
+    hub = get_hub(request)
+    found = next(((e, g) for g in GROUPS for e in hub.catalog.entries(g) if e["id"] == model_id), None)
+    if found is None:
+        raise HTTPException(404, "No such model.")
+    entry, group = found
+    if entry.get("custom"):
+        raise HTTPException(400, "A model you added goes with Remove, files and all.")
+    why = in_use(hub, entry, group)
+    if why:
+        raise HTTPException(409, why)
+    hub.extras["downloads"].cancel(model_id)
+    users = file_users(hub)
+    mine = {f["dest"] for f in own_files(entry, users)}
+    root = hub.env.models_dir.resolve()
+    deleted, kept, freed = [], [], 0
+    for f in entry.get("files", []):
+        if f["dest"] not in mine and users.get(f["dest"]):
+            kept.append(f["dest"])
+            continue
+        p = hub.catalog.path(f)
+        for q in (p, p.with_name(p.name + ".part")):
+            try:
+                if q.resolve().is_relative_to(root) and q.is_file():
+                    size = q.stat().st_size
+                    q.unlink()
+                    freed += size
+                    deleted.append(str(q.relative_to(hub.env.models_dir)))
+            except (OSError, ValueError):
+                pass
+    return {"deleted": deleted, "kept": kept, "freed": freed}
 
 
 @router.delete("/hub/api/models/{model_id}")

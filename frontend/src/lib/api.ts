@@ -103,7 +103,9 @@ export type Block =
   | { type: "tool_result"; tool_call_id: string; name: string; text: string; images?: ImageRef[]; is_error?: boolean;
       display?: Display | null }
   /** Continue under an unfinished turn (0.22.0): the model is told why it stopped. */
-  | { type: "continue"; reason: "limit" | "stopped"; steps?: number };
+  | { type: "continue"; reason: "limit" | "stopped"; steps?: number }
+  /** The first message of a chat that continues another (0.27.0, Continue in a new chat). */
+  | { type: "handover"; chat_id: number; title: string };
 
 export interface ImageRef { sha: string; mime?: string; caption?: string }
 export interface ArtifactRef { id: string; version: number; title: string; type: string; language?: string | null }
@@ -128,6 +130,7 @@ export interface Message { id: number; chat_id: number; role: "user" | "assistan
 export interface ChatSettings { model: string | null; thinking: boolean | null; effort: string | null; skills: string[];
   libraries: number[]; image_model: string | null }
 export interface Chat { id: number; project_id: number | null; title: string; settings: ChatSettings; summary?: string;
+  summary_upto?: number;
   created_at: string; updated_at: string; test_run?: string | null }
 export interface ChatListItem { id: number; project_id: number | null; title: string; updated_at: string;
   created_at: string; project_name: string | null; running: boolean;
@@ -150,6 +153,8 @@ export interface ArtifactListItem { id: string; title: string; type: string; ver
 
 export interface ChatData { chat: Chat; messages: Message[]; artifacts: ArtifactListItem[]; runs: RunRecord[];
   run: RunInfo | null; project: Project | null;
+  /** How full the last request was, and whether the chat was condensed (0.27.0: the long-chat hint). */
+  context?: { used: number; limit: number; condensed: boolean };
   allowed?: { tool: string; created_at: string }[] }      // "Allow in this chat" answers
 
 export interface ProjectSettings { model: string | null; cloud_escalation: boolean; skills: string[]; libraries: number[];
@@ -193,7 +198,9 @@ export interface ModelEntry { id: string; name: string; name_card?: string; desc
   server?: Record<string, unknown>; thinking?: { efforts?: string[]; default_effort?: string; default?: boolean };
   context_per_request?: number;
   /** Language models: what one chat may use now (Settings or the card), and what the model was trained for. */
-  context_per_chat?: number; context_native?: number | null; parameter_size?: string; quantization?: string; aliases?: string[]; requires?: string[];
+  context_per_chat?: number; context_native?: number | null; parameter_size?: string;
+  /** A downloaded model from the Hub's own list: the bytes Delete files gives back (files no other model uses). */
+  freeable?: number; quantization?: string; aliases?: string[]; requires?: string[];
   custom?: boolean; family?: string; abilities?: string[]; sdxl?: SdxlSettings; architecture?: string;
   /** Sound models: where they run (the card through ComfyUI, or the CPU speech service) and what they speak. */
   engine?: "comfy" | "speech"; languages?: string[];

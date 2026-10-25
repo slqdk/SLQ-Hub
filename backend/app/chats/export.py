@@ -221,6 +221,8 @@ def transcript(chat: dict, project: dict | None, rows: list[dict], runs: list[di
                 elif t == "continue":
                     why = f"the step limit, {b.get('steps')} steps" if b.get("reason") == "limit" else "stopped"
                     out += [f"*(pressed Continue: the last turn was not done - {why})*", ""]
+                elif t == "handover":
+                    out += [f"*(continued from the chat \"{b.get('title') or ''}\")*", ""]
             continue
         if row.get("run_id") != section or section is None:
             close_section()
@@ -382,7 +384,8 @@ def _context(hub, agent, chat: dict, project: dict | None) -> dict:
     rows = store.messages(chat["id"], after_id=int(chat.get("summary_upto") or 0))
     keep_from = rows[-12]["id"] if len(rows) > 12 else 0
     messages = [{"role": "system", "content": system},
-                *C.to_model_messages(rows, None, keep_from, vision=vision(entry))]
+                *C.to_model_messages(rows, None, keep_from, vision=vision(entry),
+                                     keep_results_from=C.results_from(rows, None))]
     tools = engine.tools()
     schemas = engine.schemas(tools)
     ctx = hub.catalog.context_per_request(entry["id"])

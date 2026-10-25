@@ -169,6 +169,31 @@ export const SECTIONS: HelpSection[] = [
         ],
       },
       {
+        id: "long",
+        tools: ["chat_history"],
+        title: "Long chats",
+        what: "A long chat stays sharp: older tool output is kept short, and near the model's limit the earlier part "
+          + "is condensed into notes - the goal, decisions, files, what is done and what is next. Anything from "
+          + "before can still be looked up: the assistant searches the whole chat when it needs a detail.",
+        examples: [
+          { text: "What did we decide about the jump height earlier in this chat?" },
+          { text: "Find the error message from the first build and explain it again" },
+        ],
+      },
+      {
+        id: "long-owner",
+        title: "Notes, and continuing in a new chat",
+        what: "A fresh chat answers better than a very long one. You can start one that carries the work on.",
+        how: [
+          "The ⋯ menu at the top of a chat: Notes shows what the earlier part was condensed into - correct it there "
+            + "if something is wrong or missing.",
+          "Continue in a new chat (the ⋯ menu, or the hint under a long chat's last answer): the assistant writes "
+            + "notes from this chat, and a new chat starts from them, with the same files and settings. The old chat "
+            + "stays as it is, and the new one can still look things up in it.",
+        ],
+        owner: true,
+      },
+      {
         id: "handover",
         tools: ["escalate"],
         title: "A stronger model when it gets stuck",

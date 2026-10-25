@@ -61,7 +61,7 @@ def loop_notice(reason: str) -> str:
 
 
 def _ensure_tools_loaded() -> None:
-    from .tools import audio, files, images, knowledge, shell, video, web, windows  # noqa: F401 - registration
+    from .tools import audio, files, history, images, knowledge, shell, video, web, windows  # noqa: F401 - registration
     from . import meta_tools  # noqa: F401
 
 
@@ -103,6 +103,8 @@ class Engine:
         self.kept: set[str] = set()          # calls the end of the context cut off whose file was kept
         self.ctx_limit = hub.catalog.context_per_request(model["id"])
         self.schema_tokens = 0               # the tool definitions take room in every request too
+        self.cleared_any = False             # tool output of this turn was shortened (chat_history finds it whole)
+        self._tools_stale = False            # condensed or cleared: which tools are offered may have changed
         # Real tokens per estimated token, as the last model step measured (at least 1): the estimate counts
         # characters, and hex dumps or binary text cost far more tokens a character than prose - chat 74's last
         # request was 45,004 tokens by the estimate and 62,286 real, so it was not condensed and ran out of room.
@@ -204,6 +206,12 @@ class Engine:
             self._step = step
             await self._inbox(messages, persist)
             messages = await self._fit(messages, compact)
+            if self._tools_stale:                 # condensed or cleared: chat_history may be offered now
+                self._tools_stale = False
+                tools = self.tools()
+                by_name = {t.name: t for t in tools}
+                schemas = self.schemas(tools)
+                self.schema_tokens = C.schema_tokens(schemas)
             forced = bool(self.must_answer)
             if forced:                            # stuck in a loop: no tools this time, only an answer
                 messages.append({"role": "user", "content": MUST_ANSWER})
@@ -337,11 +345,34 @@ class Engine:
     async def _fit(self, messages: list[dict], compact) -> list[dict]:
         if self.cloud is not None:
             return messages                       # cloud models have room; we do not summarise for them
+        given = messages
+        fitted = await self._fit_inner(messages, compact)
+        if len(fitted) != len(given) or any(a is not b for a, b in zip(fitted, given)):
+            # Something was cut or condensed: a look-up the model made earlier may be needed again (the loop guard
+            # refuses a repeat within one epoch), and chat_history may be offered now.
+            self.epoch += 1
+            self.cleared_any = True
+            self._tools_stale = True
+        return fitted
+
+    async def _fit_inner(self, messages: list[dict], compact) -> list[dict]:
         budget = int(self.ctx_limit * float(self.hub.settings.get("agent", "compact_at") or 0.75))
 
         def size(msgs: list[dict]) -> int:
             return self._tokens(msgs)
 
+        now = size(messages)
+        if now > self.ctx_limit * CLEAR_AT:
+            # Old tool output, cleared in one go long before the context is full (0.27.0): a model answers worse
+            # in a long context well before it runs out. Only when it frees a good share - every change to an
+            # older message makes llama-server read the request again from there.
+            cleared = C.trim_tool_results(messages, keep_last=KEEP_RESULTS, limit=C.OLD_RESULT_HEAD,
+                                          why="cleared to keep the conversation short")
+            after = size(cleared)
+            if now - after >= self.ctx_limit * CLEAR_GAIN:
+                self.steps.append({"type": "cleared", "before": now, "after": after, "depth": self.depth})
+                self.emit("cleared", before=now, after=after)
+                messages, self.last_prompt_tokens = cleared, 0     # the last real count was of the longer one
         if max(self.last_prompt_tokens, size(messages)) <= budget:
             return messages
         messages = C.trim_tool_results(messages)
@@ -358,6 +389,11 @@ class Engine:
             messages = C.trim_assistant(messages, keep_last=4, limit=400)
         if size(messages) > budget:               # a small context: only the newest result and answer stay whole
             messages = C.trim_assistant(C.trim_tool_results(messages, keep_last=1, limit=400), keep_last=1, limit=400)
+        if size(messages) > budget:               # still too long (a long turn of many steps): older results become a
+            messages = C.trim_assistant(           # line each, older answers a sentence
+                C.trim_tool_results(messages, keep_last=1, limit=0, why="left out to make room"), keep_last=1, limit=120)
+        if size(messages) > budget:               # the last step's results do not fit together: all but its last
+            messages = C.trim_tool_results(messages, keep_last=1, limit=400, why="left out to make room", unread=True)
         self.last_prompt_tokens = 0
         return messages
 
@@ -723,6 +759,9 @@ def refused_size(exc: Exception) -> tuple[int, int | None] | None:
 
 
 MIN_SUMMARY_ROOM = 1000             # estimated tokens of old messages a summary request must at least take in
+CLEAR_AT = 0.5                      # of the context: old tool output is cleared (all but the newest results) ...
+CLEAR_GAIN = 0.15                   # ... when that frees at least this share of it
+KEEP_RESULTS = 4                    # the newest tool results kept whole when clearing
 
 
 def token_ratio(real: int, estimated: int) -> float:
@@ -869,7 +908,8 @@ class Agent:
         rows = chats.messages(chat["id"], after_id=int(chat.get("summary_upto") or 0))
         keep_from = rows[-12]["id"] if len(rows) > 12 else 0
         return [{"role": "system", "content": sp},
-                *C.to_model_messages(rows, run.id, keep_from, vision=vision(entry))]
+                *C.to_model_messages(rows, run.id, keep_from, vision=vision(entry),
+                                     keep_results_from=C.results_from(rows, run.id))]
 
     async def _compact(self, chat_id: int, engine: Engine, run: Run, messages: list[dict]) -> list[dict]:
         """Fold everything before the latest user message into the chat's
@@ -883,7 +923,8 @@ class Agent:
         old = [r for r in rows if r["id"] <= split]
         head = [{"role": "system", "content": "You condense conversations into notes."}]
         if chat.get("summary"):
-            head += [{"role": "user", "content": "Summary of what came before:\n" + chat["summary"]},
+            head += [{"role": "user", "content": "The notes so far, from earlier in the conversation:\n"
+                                                 + chat["summary"]},
                      {"role": "assistant", "content": "Noted."}]
         tail = [{"role": "user", "content": C.SUMMARY_PROMPT}]
         # The request must fit the context: room for the notes it writes, a margin for the tokenizer.
@@ -902,13 +943,39 @@ class Agent:
         async for chunk in self.hub.llm.stream_chat(self.hub.main_url, pl):
             acc.feed(chunk)
         summary = acc.result()["content"].strip()
-        if summary:
-            merged = (chat["summary"] + "\n\n" + summary).strip() if chat.get("summary") else summary
-            chats.update_chat(chat_id, summary=merged, summary_upto=split)
+        if summary:                                   # the new notes replace the old ones (which they took in)
+            chats.update_chat(chat_id, summary=summary, summary_upto=split)
         chat = chats.get_chat(chat_id)
         engine.chat = chat
         return self.build_messages(chat, engine.project, engine.workdir, engine.model, run, engine.handover_label(),
                                    engine.handed_over_from)
+
+    async def _write_handover(self, engine: Engine, old_id: int, persist) -> None:
+        """The first answer of a chat that continues another: the notes the work goes on from, written from the
+        old chat's notes and what came after them - streamed like any answer, kept as the new chat's first one."""
+        old = chats.get_chat(old_id)
+        if old is None:
+            raise RuntimeError("the chat to continue from was deleted")
+        rows = chats.messages(old_id, after_id=int(old.get("summary_upto") or 0))
+        engine.thinking = False
+        engine.token_ratio = last_token_ratio(chats.runs_for_chat(old_id))
+        head = [{"role": "system", "content": "You write the notes a conversation continues from in a new chat."}]
+        if old.get("summary"):
+            head += [{"role": "user", "content": "The notes so far, from earlier in the conversation:\n"
+                                                 + old["summary"]},
+                     {"role": "assistant", "content": "Noted."}]
+        tail = [{"role": "user", "content": C.HANDOVER_PROMPT}]
+        notes = min(2000, engine.ctx_limit // 4)
+        room = int((engine.ctx_limit * 0.8 - notes) / engine.token_ratio) - C.estimate_tokens(head + tail)
+        body = C.shrink_for_summary(C.to_model_messages(rows, None, keep_images_from=10**12, vision=False,
+                                                        keep_results_from=C.results_from(rows, None)),
+                                    room) if room >= MIN_SUMMARY_ROOM else []
+        res = await engine._model_step([*head, *body, *tail], [], 1)
+        engine.last_step["handover"] = True            # not a measure of how full the new chat is
+        text = (res.get("content") or "").strip()
+        if not text:
+            raise RuntimeError("the model wrote no notes - try again")
+        await persist("assistant", [{"type": "text", "text": text}])
 
     async def _note_files(self, engine: Engine, wd: projects.Workdir, before: dict) -> None:
         """The files this turn made or changed in the working folder: a step of the run, shown under the answer."""
@@ -1006,11 +1073,14 @@ class Agent:
                 run.emit("message_saved", id=m["id"], role=role)
                 return m
 
-            messages = self.build_messages(chat, project, wd, entry, run, engine.handover_label())
-            max_steps = int(self.hub.settings.get("agent", "max_steps") or 60)
-            await engine.loop(messages, persist, max_steps=max_steps,
-                              compact=lambda msgs: self._compact(chat["id"], engine, run, msgs))
-            await self._title(chat, engine)
+            if options.get("handover_from"):              # Continue in a new chat (0.27.0): the notes, nothing else
+                await self._write_handover(engine, int(options["handover_from"]), persist)
+            else:
+                messages = self.build_messages(chat, project, wd, entry, run, engine.handover_label())
+                max_steps = int(self.hub.settings.get("agent", "max_steps") or 60)
+                await engine.loop(messages, persist, max_steps=max_steps,
+                                  compact=lambda msgs: self._compact(chat["id"], engine, run, msgs))
+                await self._title(chat, engine)
         except asyncio.CancelledError:
             status = "cancelled"
         except (SchedulerError, LlmError, RuntimeError) as exc:
@@ -1055,8 +1125,8 @@ class Agent:
                     chats.add_message(run.chat_id, "user", [{k: v for k, v in b.items() if k != "while_working"}
                                                             for b in item["blocks"]])
                 if status != "error":
-                    try:
-                        self.start(run.chat_id, options)
+                    try:                                  # (never another handover: the notes were this run's)
+                        self.start(run.chat_id, {k: v for k, v in options.items() if k != "handover_from"})
                     except RuntimeError:
                         pass
 

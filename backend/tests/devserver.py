@@ -12,7 +12,8 @@ sending a message while it works), "page" (makes an artifact), a test case of
 Settings -> Tests (tests/dev_evals.py), "endless" (a file each step until the
 step limit: the answer is marked unfinished, with Continue), "think" (reasons first), "search" (web search), "web picture" (a picture
 from the web in the answer), "picture" (an image),
-"loop" (repeats the same searches until the Hub makes it answer), "make a skill" (writes a skill and shows its
+"loop" (repeats the same searches until the Hub makes it answer), "long chat" (a long answer with a big
+tool result, to fill the context: Continue in a new chat is offered), "make a skill" (writes a skill and shows its
 card with Add skill), "window" (writes a
 Windows Forms program and looks at it with windows_app: needs --sandbox), or anything else (a short markdown
 answer). --sandbox http://IP:7000 sends the sandbox's work to a real sandbox daemon (token "tok") that mounts
@@ -150,7 +151,10 @@ def responder(body: dict) -> dict:
     if "short title" in low:
         return {"content": text.split("starts with:")[-1].strip()[:40].title() or "Chat"}
     if "condense the conversation" in low:
-        return {"content": "Summary of the chat so far."}
+        return {"content": "## Goal\n- The chat so far, condensed.\n## Next\n- Go on."}
+    if "continues in a new chat" in low:      # Continue in a new chat (0.27.0): the notes, slowly enough to watch
+        return {"content": "## Goal\n- Carry on with the work of the chat before.\n## Decisions and facts\n"
+                           "- Everything that mattered there.\n## Next\n- The next step.", "delay": 1.5}
     scripted = dev_evals.answer(text, msgs, tools_done)          # Settings -> Tests: each case answered well
     if scripted is not None:
         return scripted
@@ -228,6 +232,9 @@ def responder(body: dict) -> dict:
                                                                       "title": "Remote things", "type": "html",
                                                                       "content": REMOTE_PAGE}}]}
         return {"content": "The page is open on the right."}
+    if "long chat" in low:                            # the request was 70 % of the context: the long-chat hint
+        return {"content": "Here is a long answer about the game's physics.\n\n" + "Detail. " * 60,
+                "usage": {"prompt_tokens": 46000, "completion_tokens": 400, "total_tokens": 46400}}
     if "page" in low:
         if tools_done == 0:
             return {"tool_calls": [{"name": "todo_write", "arguments": {"todos": [

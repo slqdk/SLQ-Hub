@@ -153,6 +153,19 @@ function ModelsTab({ s }: { s: S }) {
     await api(`/hub/api/models/${m.id}`, { method: "DELETE" });
     toast(`Removed ${m.name} and its files`, "run");
   });
+  // A downloaded model from the Hub's own list (0.27.0): its files go, the entry stays to download again.
+  const deleteFiles = (m: ModelEntry) => act(`del-${m.id}`, async () => {
+    const r = await api<{ freed: number; kept: string[] }>(`/hub/api/models/${encodeURIComponent(m.id)}/files`,
+      { method: "DELETE" });
+    toast(`Deleted ${m.name}'s files: ${bytes(r.freed)} free again`
+      + (r.kept.length ? ` (kept ${r.kept.length} that other models use)` : ""), "run");
+  });
+  const deleteButton = (m: ModelEntry) => !m.installed || m.custom ? null : m.freeable === 0 ? (
+    <button className="btn quiet small" disabled title="Its files are used by another downloaded model">Delete files</button>
+  ) : (
+    <ConfirmButton className="btn quiet small" disabled={!!busy || m.loaded}
+      confirmText={`Delete its files${m.freeable ? ` (${bytes(m.freeable)})` : ""}? Download gets them back.`}
+      onConfirm={() => deleteFiles(m)}>Delete files</ConfirmButton>);
   // The owner's order (0.17.0): the chat's model choices, people's chats and the phone page list them so.
   const move = (group: "llm" | "comfy", items: ModelEntry[], i: number, by: -1 | 1) => act(`move-${group}`, async () => {
     const ids = items.map((m) => m.id);
@@ -193,9 +206,10 @@ function ModelsTab({ s }: { s: S }) {
           {m.installed && <button className="btn quiet small" onClick={() => setAdvanced(m)}>Settings</button>}
           {m.custom && <ConfirmButton className="btn quiet small" confirmText="Remove it and its files?"
             disabled={!!busy || m.loaded} onConfirm={() => remove(m)}>Remove</ConfirmButton>}
+          {deleteButton(m)}
         </>} />
       <ModelGroup title="Helpers for libraries" items={models.aux} busy={busy} onDownload={download} onCancel={cancel}
-        note="Run on the CPU (the image embedder can use the GPU, see Assistant, Libraries)." />
+        note="Run on the CPU (the image embedder can use the GPU, see Assistant, Libraries)." extra={deleteButton} />
       <ModelGroup title="Image models (ComfyUI)" items={models.comfy} busy={busy} onDownload={download} onCancel={cancel}
         onMove={(i, by) => move("comfy", models.comfy, i, by)}
         action={models.sdxl && <button className="btn small" onClick={() => setAddingImage(true)}><Plus size={14} /> Add image model</button>}
@@ -204,15 +218,16 @@ function ModelsTab({ s }: { s: S }) {
           {m.custom && m.sdxl && <button className="btn quiet small" onClick={() => setImageSettings(m)}>Settings</button>}
           {m.custom && <ConfirmButton className="btn quiet small" confirmText="Remove it and its file?" disabled={!!busy}
             onConfirm={() => remove(m)}>Remove</ConfirmButton>}
+          {deleteButton(m)}
         </>} />
       {!!models.audio?.length && <ModelGroup title="Sound, music and speech" items={models.audio} busy={busy}
         onDownload={download} onCancel={cancel}
         note="Speech runs on the CPU, so the chat model stays loaded; music, sound effects, stems and other voices run on the card through ComfyUI. Once one is downloaded, ask for it in any chat - with a sound file attached for a remake, stems or another voice."
-        extra={(m) => <span className="tag">{m.engine === "speech" ? "CPU" : "GPU"}</span>} />}
+        extra={(m) => <><span className="tag">{m.engine === "speech" ? "CPU" : "GPU"}</span>{deleteButton(m)}</>} />}
       {!!models.video?.length && <ModelGroup title="Video models" items={models.video} busy={busy}
         onDownload={download} onCancel={cancel}
         note="Run on the card through ComfyUI and take minutes per clip. Once one is downloaded, ask for a video in any chat - from a description, or with a picture attached to start from. Choose which one is used in Assistant, Video."
-        extra={() => <span className="tag">GPU</span>} />}
+        extra={(m) => <><span className="tag">GPU</span>{deleteButton(m)}</>} />}
       {advanced && <ModelSettings model={advanced} thinkingInChats={!!s.data?.settings.agent?.thinking_in_chats}
         onClose={() => setAdvanced(null)} onSaved={() => { setAdvanced(null); refreshModels(); }} />}
       {addingHF && <AddFromHF onClose={() => setAddingHF(false)} onAdded={() => { setAddingHF(false); refreshModels(); }} />}
