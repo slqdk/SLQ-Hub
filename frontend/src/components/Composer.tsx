@@ -1,11 +1,12 @@
 // Where messages are written: text, attachments (pick, paste, drop), files
-// of the chat's folder, the model, how hard it thinks, and the libraries and
-// skills for this chat.
-import { useEffect, useRef, useState } from "react";
-import { ArrowUp, BookOpen, Brain, Check, Cpu, FileText, FolderOpen, Image as ImageIcon, Paperclip, Plus, Sparkles, Square,
-  X } from "lucide-react";
+// of the chat's folder, the model, how hard it thinks, the libraries and the
+// skills for this chat (0.23.0: picked by hand - the Skills button, or / and a
+// skill's name in the message box).
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ArrowUp, BookOpen, Brain, Check, Cpu, FileText, FolderOpen, Image as ImageIcon, Paperclip, Plus, Settings2,
+  Sparkles, Square, Wand2, X } from "lucide-react";
 import { upload, type ModelEntry, type Skill, type Upload } from "../lib/api";
-import { clearDraft, peekDraft } from "../lib/draft";
+import { clearDraft, NEW_SKILL_TEXT, peekDraft, SKILL_MAKER } from "../lib/draft";
 import { bytes } from "../lib/format";
 import { Lamp, MenuButton } from "./ui";
 
@@ -28,7 +29,7 @@ const shortPath = (p: string) => p.split("/").slice(-2).join("/");
 
 export function Composer({ running, onSend, onStop, settings, onSettings, models, pictureModels = [], pictureDefault,
   libraries, skills, placeholder, autoFocus, refs = [], onRemoveRef, onOpenRef, onBrowseFiles, browseLabel,
-  uploader = upload, showLibraries = true }: {
+  uploader = upload, showLibraries = true, onManageSkills }: {
   running: boolean;
   onSend: (text: string, uploads: Upload[]) => Promise<boolean>;
   onStop: () => void;
@@ -48,6 +49,7 @@ export function Composer({ running, onSend, onStop, settings, onSettings, models
   browseLabel?: string;
   uploader?: (file: File, name: string) => Promise<Upload>;   // a person's chat keeps attachments on the device
   showLibraries?: boolean;
+  onManageSkills?: () => void;      // the Skills page
 }) {
   const [text, setText] = useState(peekDraft);      // an example from the help page, to change and send
   const [pending, setPending] = useState<Pending[]>([]);
@@ -56,6 +58,52 @@ export function Composer({ running, onSend, onStop, settings, onSettings, models
   const ta = useRef<HTMLTextAreaElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const seq = useRef(0);
+  // "/" and a skill's name at the cursor: a list of skills to choose from (0.23.0).
+  const [slash, setSlash] = useState<{ query: string; start: number; end: number } | null>(null);
+  const [slashAt, setSlashAt] = useState(0);
+  const chosen = useMemo(() => settings.skills.map((ref) => skills.find((k) => k.ref === ref)
+    ?? { ref, title: ref.split("/").pop() ?? ref, description: "", mine: false, builtin: false } as Skill),
+  [settings.skills, skills]);
+  const matches = useMemo(() => {
+    if (!slash) return [];
+    const q = slash.query;
+    return skills.filter((k) => !settings.skills.includes(k.ref)
+      && (!q || `${k.title} ${k.name} ${k.description}`.toLowerCase().includes(q))).slice(0, 8);
+  }, [slash, skills, settings.skills]);
+  const findSlash = (value: string, caret: number) => {
+    const m = value.slice(0, caret).match(/(?:^|\s)\/([\p{L}\p{N}._-]*)$/u);
+    return m ? { query: m[1].toLowerCase(), start: caret - m[1].length - 1, end: caret } : null;
+  };
+  const pickSkill = (k: Skill) => {
+    if (!slash) return;
+    const next = text.slice(0, slash.start) + text.slice(slash.end);
+    setText(next);
+    setSlash(null);
+    onSettings({ skills: [...settings.skills, k.ref] });
+    requestAnimationFrame(() => {
+      const el = ta.current;
+      if (el) {
+        el.focus();
+        el.setSelectionRange(slash.start, slash.start);
+      }
+    });
+  };
+  const toggleSkill = (ref: string) => onSettings({ skills: settings.skills.includes(ref)
+    ? settings.skills.filter((x) => x !== ref) : [...settings.skills, ref] });
+  // Make a skill: the skill maker joins the chat, and an empty message box gets the start of the request.
+  const makeSkill = () => {
+    if (!settings.skills.includes(SKILL_MAKER)) onSettings({ skills: [...settings.skills, SKILL_MAKER] });
+    const next = text.trim() ? text : NEW_SKILL_TEXT;
+    setText(next);
+    requestAnimationFrame(() => {
+      const el = ta.current;
+      if (el) {
+        el.focus();
+        el.setSelectionRange(next.length, next.length);
+      }
+    });
+  };
+  const canMake = skills.some((k) => k.ref === SKILL_MAKER);
 
   useEffect(() => {
     const el = ta.current;
@@ -112,7 +160,9 @@ export function Composer({ running, onSend, onStop, settings, onSettings, models
   const efforts = model?.thinking?.efforts ?? [];
   const canThink = (model?.capabilities ?? []).includes("thinking");
   const thinkLabel = !canThink || !settings.thinking ? "No thinking" : EFFORT_LABEL[settings.effort] ?? "Think";
-  const extras = settings.libraries.length + settings.skills.length;
+  const extras = settings.libraries.length;
+  const groups: [string, Skill[]][] = [["Yours", skills.filter((k) => k.mine)],
+    ["Shared by the family", skills.filter((k) => !k.mine && !k.builtin)], ["From SLQ Hub", skills.filter((k) => k.builtin)]];
   const pictureId = settings.image_model ?? pictureDefault;
   const picture = pictureModels.find((m) => m.id === pictureId) ?? pictureModels[0];
   const pictureDefaultName = pictureModels.find((m) => m.id === pictureDefault)?.name ?? pictureDefault;
@@ -122,8 +172,28 @@ export function Composer({ running, onSend, onStop, settings, onSettings, models
       onDragOver={(e) => { if (e.dataTransfer.types.includes("Files")) { e.preventDefault(); setDrag(true); } }}
       onDragLeave={() => setDrag(false)}
       onDrop={(e) => { e.preventDefault(); setDrag(false); if (e.dataTransfer.files.length) add(e.dataTransfer.files); }}>
-      {(pending.length > 0 || refs.length > 0) && (
+      {slash && matches.length > 0 && (
+        <div className="slash-menu" role="listbox" aria-label="Skills">
+          <div className="menu-head">Use a skill in this chat</div>
+          {matches.map((k, i) => (
+            <button key={k.ref} role="option" aria-selected={i === slashAt} className="menu-item"
+              onMouseDown={(e) => { e.preventDefault(); pickSkill(k); }} onMouseEnter={() => setSlashAt(i)}>
+              <Sparkles size={15} />
+              <span>{k.title}<small className="clamp-2">{k.mine ? "" : `${k.by} · `}{k.description}</small></span>
+            </button>
+          ))}
+        </div>
+      )}
+      {(pending.length > 0 || refs.length > 0 || chosen.length > 0) && (
         <div className="pending">
+          {chosen.map((k) => (
+            <div className="pending-item skill" key={`skill:${k.ref}`} title={k.description || k.title}>
+              <Sparkles size={14} />
+              <span className="ellipsis">{k.title}</span>
+              <button className="icon-btn small x" aria-label={`Stop using the skill ${k.title} in this chat`}
+                onClick={() => toggleSkill(k.ref)}><X size={13} /></button>
+            </div>
+          ))}
           {refs.map((path) => (
             <div className="pending-item ref" key={`ref:${path}`} title={path}>
               <FileText size={14} />
@@ -145,9 +215,37 @@ export function Composer({ running, onSend, onStop, settings, onSettings, models
         </div>
       )}
       <textarea ref={ta} value={text} rows={1} placeholder={placeholder ?? "Write to the assistant"}
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => {
+          setText(e.target.value);
+          // (the list shows once there are skills that match: also when the list of skills arrives after the "/")
+          const found = findSlash(e.target.value, e.target.selectionStart ?? e.target.value.length);
+          setSlash(found);
+          if (found?.query !== slash?.query) setSlashAt(0);
+        }}
+        onSelect={(e) => {
+          const el = e.currentTarget;
+          if (slash && (el.selectionStart !== slash.end || el.selectionEnd !== slash.end)) setSlash(findSlash(el.value, el.selectionStart));
+        }}
+        onBlur={() => setSlash(null)}
         onPaste={(e) => { if (e.clipboardData.files.length) { e.preventDefault(); add(e.clipboardData.files); } }}
         onKeyDown={(e) => {
+          if (slash && matches.length > 0) {                 // the skills list after "/"
+            if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+              e.preventDefault();
+              setSlashAt((i) => (i + (e.key === "ArrowDown" ? 1 : matches.length - 1)) % matches.length);
+              return;
+            }
+            if ((e.key === "Enter" || e.key === "Tab") && !e.shiftKey && !e.nativeEvent.isComposing) {
+              e.preventDefault();
+              pickSkill(matches[Math.min(slashAt, matches.length - 1)]);
+              return;
+            }
+            if (e.key === "Escape") {
+              e.preventDefault();
+              setSlash(null);
+              return;
+            }
+          }
           if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && window.matchMedia("(pointer: fine)").matches) {
             e.preventDefault();
             send();
@@ -156,7 +254,7 @@ export function Composer({ running, onSend, onStop, settings, onSettings, models
       <div className="composer-bar">
         <input ref={fileInput} type="file" multiple hidden onChange={(e) => { if (e.target.files) add(e.target.files); e.target.value = ""; }} />
         <MenuButton up label={<><Plus size={16} />{extras > 0 && <span className="num">{extras}</span>}</>}
-          title="Attach, libraries and skills">
+          title={showLibraries ? "Attach and libraries" : "Attach files"}>
           {(close) => (
             <>
               <button className="menu-item" onClick={() => { close(); fileInput.current?.click(); }}>
@@ -179,20 +277,38 @@ export function Composer({ running, onSend, onStop, settings, onSettings, models
                   </button>
                 );
               })}
-              {skills.some((s) => !s.enabled) && <>
-                <div className="menu-sep" />
-                <div className="menu-head">Extra skills for this chat</div>
-                {skills.filter((s) => !s.enabled).map((s) => {
-                  const on = settings.skills.includes(s.name);
-                  return (
-                    <button key={s.name} className="menu-item" role="menuitemcheckbox" aria-checked={on}
-                      onClick={() => onSettings({ skills: on ? settings.skills.filter((x) => x !== s.name) : [...settings.skills, s.name] })}>
-                      {on ? <Check size={15} /> : <Sparkles size={15} />}
-                      <span>{s.title}<small>{s.description.slice(0, 90)}</small></span>
-                    </button>
-                  );
-                })}
-              </>}
+            </>
+          )}
+        </MenuButton>
+        <MenuButton up className={`picker${chosen.length ? " on" : ""}`} menuClassName="wide"
+          label={<><Sparkles size={15} /> <span className="hide-narrow">Skills</span>
+            {chosen.length > 0 && <span className="num">{chosen.length}</span>}</>}
+          title={chosen.length ? `Skills in this chat: ${chosen.map((k) => k.title).join(", ")}` : "Skills for this chat"}>
+          {(close) => (
+            <>
+              <div className="menu-head">Skills for this chat</div>
+              {skills.length === 0 && <div className="menu-item faint" style={{ cursor: "default" }}>No skills yet</div>}
+              {groups.filter(([, list]) => list.length > 0).map(([label, list]) => (
+                <div key={label}>
+                  <div className="menu-sub">{label}</div>
+                  {list.map((k) => {
+                    const on = settings.skills.includes(k.ref);
+                    return (
+                      <button key={k.ref} className="menu-item" role="menuitemcheckbox" aria-checked={on}
+                        onClick={() => toggleSkill(k.ref)}>
+                        {on ? <Check size={15} /> : <Sparkles size={15} />}
+                        <span>{k.title}<small className="clamp-2">{k.mine || k.builtin ? "" : `${k.by} · `}{k.description}</small></span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ))}
+              {(canMake || onManageSkills) && <div className="menu-sep" />}
+              {canMake && <button className="menu-item" onClick={() => { close(); makeSkill(); }}><Wand2 size={15} />
+                <span>Make a skill<small>Attach your files and say what it is for; the assistant writes it</small></span></button>}
+              {onManageSkills && <button className="menu-item" onClick={() => { close(); onManageSkills(); }}>
+                <Settings2 size={15} /> All skills</button>}
+              <div className="menu-foot faint small">Tip: type / in the message to pick a skill.</div>
             </>
           )}
         </MenuButton>

@@ -15,6 +15,7 @@ log = logging.getLogger("hub.agent")
 
 def install(hub: Hub) -> None:
     hub.extras["skills"] = Skills(hub.env.data_dir / "skills")
+    hub.extras["skills"].sweep_drafts()                   # drafts nobody added, after two weeks
     hub.extras["memory"] = Memory(hub.env.data_dir / "memory")
     hub.extras["mcp"] = McpManager(hub)
     hub.extras["agent"] = Agent(hub)

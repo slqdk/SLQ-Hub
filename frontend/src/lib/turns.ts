@@ -1,6 +1,6 @@
 // One view model for an assistant turn, built either from stored messages
 // (history) or from a run's live events - so both render the same way.
-import type { ArtifactRef, Block, Display, ImageRef, Message, RunEvent, RunRecord, Todo } from "./api";
+import type { ArtifactRef, Block, Display, ImageRef, Message, RunEvent, RunRecord, SkillCardData, Todo } from "./api";
 
 export type ToolState = "streaming" | "running" | "approval" | "done" | "error";
 
@@ -33,6 +33,7 @@ export type Item =
   | { kind: "text"; text: string }
   | { kind: "tools"; tools: ToolView[] }
   | { kind: "artifact"; ref: ArtifactRef }
+  | { kind: "skill"; card: SkillCardData }               // a skill the assistant made (skill_propose), to add
   | { kind: "todos"; items: Todo[] }
   | { kind: "notice"; text: string; tone: "info" | "fault" | "wait" }
   | { kind: "user"; message: Message; id: string };      // written while the turn worked, now read by the model
@@ -82,6 +83,7 @@ export function findTool(items: Item[], id: string): ToolView | undefined {
 function afterResult(items: Item[], t: ToolView): void {
   const d = t.display;
   if (d?.artifact) items.push({ kind: "artifact", ref: d.artifact });
+  if (t.name === "skill_propose" && d?.skill) items.push({ kind: "skill", card: d.skill as SkillCardData });
   if (t.name === "todo_write" && d?.todos) {
     const prev = items.findIndex((i) => i.kind === "todos");
     if (prev >= 0) items.splice(prev, 1);                // one list per turn: the latest

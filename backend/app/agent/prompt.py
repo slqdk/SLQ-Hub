@@ -169,6 +169,33 @@ def sent_stamp(created_at) -> str:
     return f"[{WEEKDAYS[t.weekday()]} {t.day} {MONTHS[t.month - 1]} {t.year} {t:%H:%M}]"
 
 
+INLINE_SKILL_CHARS = 40_000       # chosen skills' SKILL.md text in the prompt, together; a longer one is loaded
+
+
+def skills_text(skills: list[dict]) -> str:
+    """The skills the user chose for the chat (0.23.0: picked by hand, nothing offered on its own): their SKILL.md
+    in full while they fit, and where their other files are."""
+    if not skills:
+        return ""
+    out = ["\n\n# Skills\nThe user chose these skills for this chat. Follow them where they apply."]
+    room = INLINE_SKILL_CHARS
+    for s in skills:
+        files = s.get("files") or []
+        where = f"\nIts folder, for code or to improve it: .hub/skills/{s['dir']}/ in the working folder."
+        if files:
+            shown = ", ".join(files[:30]) + (", ..." if len(files) > 30 else "")
+            where = (f"\nIts other files: {shown}. Read one with skill(name=\"{s['ref']}\", file=\"...\"); its "
+                     f"folder, for code or to improve it: .hub/skills/{s['dir']}/ in the working folder.")
+        body = s.get("body") or ""
+        if len(body) <= room:
+            out.append(f"\n## Skill: {s['title']} ({s['ref']})\n{body}{where}")
+            room -= len(body)
+        else:
+            out.append(f"\n## Skill: {s['title']} ({s['ref']})\n{s['description']}\nIts instructions are long: load "
+                       f"them with skill(name=\"{s['ref']}\") before you start.{where}")
+    return "\n".join(out)
+
+
 def system_prompt(*, user: str, model_name: str, folder_text: str, sandbox_path: str, memory_index: list,
                   skills: list[dict], project: dict | None, summary: str = "", images_available: bool = True,
                   tz: str | None = None, handover_to: str = "", subagent: bool = False,
@@ -189,10 +216,7 @@ def system_prompt(*, user: str, model_name: str, folder_text: str, sandbox_path:
         mem = ("Memory files:\n" + "\n".join(f"- {p}: {d}" for p, d in memory_index)) if memory_index else \
             "There are no memory files yet."
         text += MEMORY.format(memory_index=mem)
-    if skills:
-        lines = "\n".join(f"- {s['name']}: {s['description']}" for s in skills)
-        text += ("\n\n# Skills\nThese skills are enabled. When a task matches one, load it with the skill tool "
-                 "first and follow it:\n" + lines)
+    text += skills_text(skills)
     if handover_to:
         text += ("\n\n# Help\nIf a task is clearly beyond you (you keep failing, or it needs knowledge or "
                  f"reasoning you lack), call escalate with a short reason; {handover_to} takes over this turn. "

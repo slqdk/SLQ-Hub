@@ -9,7 +9,7 @@ import { useApp } from "../state";
 export function HelpView({ section }: { section?: string }) {
   const { setSidebarOpen, toast } = useApp();
   const tryIt = (e: Example) => {
-    setDraft(e.text);
+    setDraft(e.text, e.skills);
     navigate("/");
     if (e.attach) toast(`Attach ${e.attach} with the + under the message box, then send.`, "run");
   };

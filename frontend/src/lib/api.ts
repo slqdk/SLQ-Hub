@@ -117,6 +117,7 @@ export interface Display {
   mcp?: { server: string; tool: string };
   audio?: { path: string; seconds: number; model: string }[];
   video?: { path: string; seconds: number; model: string }[];
+  skill?: SkillCardData;
   [k: string]: unknown;
 }
 export interface Todo { content: string; status: "pending" | "in_progress" | "completed" }
@@ -215,7 +216,15 @@ export interface ModelsData { llm: ModelEntry[]; aux: ModelEntry[]; comfy: Model
 export interface ApiKey { id: number; name: string; prefix: string; priority: string; allowed_ips: string;
   away: number; created_at: string; last_used: string | null; enabled: number }
 
-export interface Skill { name: string; title: string; description: string; files: string[]; enabled: boolean }
+/** A skill (0.23.0): yours, one the family shared, or the Hub's own; named by its ref ("<name>", "@<id>/<name>",
+ *  "hub/<name>"). */
+export interface Skill { ref: string; name: string; title: string; description: string; files: string[]; size: number;
+  kind: "owner" | "person" | "hub"; owner_id: number | null; mine: boolean; shared: boolean; builtin: boolean;
+  updated: string; by: string }
+/** What skill_propose shows in the chat: a skill the assistant made, to add with Add skill. */
+export interface SkillCardData { draft: string; name: string; title: string; description: string; files: string[];
+  size: number; replaces: boolean; ref: string }
+export interface SkillDraft extends SkillCardData { text: string; added: number | null; expires: number }
 export interface MemoryFile { path: string; title: string; size: number }
 export interface McpStatus { name: string; transport: string; enabled: boolean; trusted: boolean; status: string;
   error: string; server: { name?: string; version?: string };

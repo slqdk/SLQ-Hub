@@ -66,6 +66,75 @@ def _docx_text(data: bytes) -> str:
     return "\n".join(out)
 
 
+MAX_SHEET_ROWS = 2000
+
+
+def _xlsx_text(data: bytes) -> str:
+    """Every sheet as rows of cells separated by |, each cell's value and - where it is one - its formula (0.23.0:
+    skills are made from Excel files too, also by people whose chats run no code)."""
+    import openpyxl
+    values = openpyxl.load_workbook(io.BytesIO(data), data_only=True, read_only=True)
+    formulas = openpyxl.load_workbook(io.BytesIO(data), data_only=False, read_only=True)
+    out = []
+    for ws_v, ws_f in zip(values.worksheets, formulas.worksheets):
+        out.append(f"--- sheet {ws_v.title} ---")
+        shown = 0
+        for row_v, row_f in zip(ws_v.iter_rows(), ws_f.iter_rows()):
+            cells = []
+            for cv, cf in zip(row_v, row_f):
+                v, f = cv.value, cf.value
+                text = "" if v is None else str(v)
+                if isinstance(f, str) and f.startswith("="):
+                    text = f"{text} ({f})" if text else f
+                cells.append(text)
+            while cells and not cells[-1]:
+                cells.pop()
+            if not cells:
+                continue
+            if shown >= MAX_SHEET_ROWS:
+                out.append(f"(more rows - the sheet goes on past row {row_v[0].row - 1})")
+                break
+            out.append(f"{row_v[0].row}: " + " | ".join(cells))
+            shown += 1
+    return "\n".join(out)
+
+
+def _pptx_text(data: bytes) -> str:
+    """Every slide's text, its tables and the speaker notes."""
+    from pptx import Presentation
+    deck = Presentation(io.BytesIO(data))
+    out = []
+    for i, slide in enumerate(deck.slides, start=1):
+        out.append(f"--- slide {i} ---")
+        for shape in slide.shapes:
+            if getattr(shape, "has_text_frame", False) and shape.text_frame.text.strip():
+                out.append(shape.text_frame.text.strip())
+            if getattr(shape, "has_table", False):
+                for row in shape.table.rows:
+                    out.append(" | ".join(c.text.strip() for c in row.cells))
+        if slide.has_notes_slide and slide.notes_slide.notes_text_frame is not None:
+            notes = slide.notes_slide.notes_text_frame.text.strip()
+            if notes:
+                out.append(f"Notes: {notes}")
+    return "\n".join(out)
+
+
+DOCUMENTS = {".docx": ("Word document", _docx_text), ".xlsx": ("Excel workbook", _xlsx_text),
+             ".xlsm": ("Excel workbook", _xlsx_text), ".pptx": ("PowerPoint presentation", _pptx_text)}
+
+
+def document_text(name: str, data: bytes) -> tuple[str, str] | None:
+    """(what it is, its text) for a Word, Excel or PowerPoint file; None for other files. A file that cannot be
+    read says so instead of raising."""
+    kind = DOCUMENTS.get(Path(name).suffix.lower())
+    if kind is None:
+        return None
+    try:
+        return kind[0], kind[1](data)
+    except Exception as exc:  # noqa: BLE001 - a damaged or protected file
+        return kind[0], f"(could not be read: {exc.__class__.__name__}: {str(exc)[:200]})"
+
+
 async def read_file(ctx: ToolContext, args: dict) -> ToolResult:
     rel = args.get("path") or ""
     p = ctx.workdir.resolve(rel)
@@ -82,9 +151,10 @@ async def read_file(ctx: ToolContext, args: dict) -> ToolResult:
         text, n = _pdf_text(data, first, int(args["limit"]) + first - 1 if args.get("limit") else None)
         text, cut = clip(text, MAX_READ_CHARS)
         return ToolResult(f"{rel}: PDF with {n} pages (offset/limit select pages).\n{text}")
-    if ext == ".docx":
-        text, cut = clip(_docx_text(data), MAX_READ_CHARS)
-        return ToolResult(f"{rel} (Word document text):\n{text}")
+    doc = document_text(p.name, data)
+    if doc is not None:
+        text, cut = clip(doc[1], MAX_READ_CHARS)
+        return ToolResult(f"{rel} ({doc[0]} text):\n{text}")
     if not is_text(data):
         return ToolResult(f"{rel} is a binary file ({_fmt_size(len(data))}, {mime_of(p.name)}). "
                           "Use bash with a suitable tool to inspect it.", is_error=True)
@@ -209,8 +279,8 @@ register(Tool("list_files", "List the files in the working folder (the project, 
                    "depth": {"type": "integer", "description": "How many levels deep (default 3)"}}),
               list_files, read_only=True))
 register(Tool("read_file", "Read a file from the working folder. Text comes back with line numbers; "
-              "images are shown to you; PDFs and Word files are read as text. Use offset/limit for long files "
-              "(lines; pages for PDFs).",
+              "images are shown to you; PDF, Word, Excel (every sheet, values and formulas) and PowerPoint (slides "
+              "and notes) are read as text. Use offset/limit for long files (lines; pages for PDFs).",
               obj({"path": {"type": "string"}, "offset": {"type": "integer"}, "limit": {"type": "integer"}},
                   ["path"]), read_file, read_only=True))
 register(Tool("write_file", "Create or overwrite a text file in the working folder, or with append: true add to "

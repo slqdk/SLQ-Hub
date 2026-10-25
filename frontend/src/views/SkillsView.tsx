@@ -1,0 +1,174 @@
+// Skills (0.23.0): yours, the family's shared ones and the Hub's own. Make one with the assistant from your own files,
+// import one from Claude, download one for Claude, share yours with the family. A chat uses a skill only when it is
+// chosen for it (the Skills button by the message box, or / and its name).
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Download, Menu, MessageSquarePlus, MoreHorizontal, Pencil, Sparkles, Trash2, Upload as UploadIcon,
+  Wand2 } from "lucide-react";
+import { api, type Skill } from "../lib/api";
+import { ago, bytes } from "../lib/format";
+import { NEW_SKILL_TEXT, SKILL_MAKER } from "../lib/draft";
+import { useApp } from "../state";
+import { Empty, MenuButton, Modal, Switch } from "../components/ui";
+
+/** The owner's Skills page (a person's app shows SkillsContent in its own frame). */
+export function SkillsView({ onNewChat }: { onNewChat: (text: string, skills: string[]) => void }) {
+  const { setSidebarOpen } = useApp();
+  return (
+    <div className="main">
+      <div className="topbar">
+        <button className="icon-btn menu-btn" onClick={() => setSidebarOpen(true)} aria-label="Open the menu"><Menu size={18} /></button>
+        <h1>Skills</h1>
+      </div>
+      <div className="scroll"><div className="page"><SkillsContent onNewChat={onNewChat} /></div></div>
+    </div>
+  );
+}
+
+export function SkillsContent({ onNewChat }: { onNewChat: (text: string, skills: string[]) => void }) {
+  const { toast } = useApp();
+  const [skills, setSkills] = useState<Skill[] | null>(null);
+  const [view, setView] = useState<{ skill: Skill; text: string; edit: boolean } | null>(null);
+  const input = useRef<HTMLInputElement>(null);
+  const load = useCallback(async () => {
+    try {
+      setSkills(await api<Skill[]>("/hub/api/skills"));
+    } catch (e) {
+      toast((e as Error).message, "fault");
+    }
+  }, [toast]);
+  useEffect(() => {
+    load();
+    const on = () => load();
+    window.addEventListener("hub:skills", on);
+    return () => window.removeEventListener("hub:skills", on);
+  }, [load]);
+  const changed = () => {
+    load();
+    window.dispatchEvent(new Event("hub:skills"));
+  };
+
+  const importFile = async (f: File) => {
+    const fd = new FormData();
+    fd.append("file", f, f.name);
+    try {
+      const r = await api<{ ref: string; name: string }>("/hub/api/skills", { form: fd });
+      toast(`${r.name} is among your skills now`, "run");
+      changed();
+    } catch (e) {
+      toast((e as Error).message, "fault");
+    }
+  };
+  const open = async (skill: Skill, edit: boolean) => {
+    try {
+      const r = await api<{ text: string }>("/hub/api/skills/one", { query: { ref: skill.ref } });
+      setView({ skill, text: r.text, edit });
+    } catch (e) {
+      toast((e as Error).message, "fault");
+    }
+  };
+  const save = async () => {
+    if (!view) return;
+    try {
+      await api("/hub/api/skills/one", { method: "PUT", query: { ref: view.skill.ref }, body: { text: view.text } });
+      setView(null);
+      changed();
+    } catch (e) {
+      toast((e as Error).message, "fault");
+    }
+  };
+  const share = async (skill: Skill, shared: boolean) => {
+    try {
+      await api("/hub/api/skills/one", { method: "PATCH", query: { ref: skill.ref }, body: { shared } });
+      toast(shared ? `${skill.title} is shared with the family` : `${skill.title} is yours alone again`, "run");
+      changed();
+    } catch (e) {
+      toast((e as Error).message, "fault");
+    }
+  };
+  const remove = async (skill: Skill) => {
+    try {
+      await api("/hub/api/skills/one", { method: "DELETE", query: { ref: skill.ref } });
+      changed();
+    } catch (e) {
+      toast((e as Error).message, "fault");
+    }
+  };
+
+  const mine = (skills ?? []).filter((k) => k.mine);
+  const family = (skills ?? []).filter((k) => !k.mine && !k.builtin);
+  const builtin = (skills ?? []).filter((k) => k.builtin);
+  const row = (k: Skill) => (
+    <div className="list-row skill-row" key={k.ref}>
+      <span className="kind"><Sparkles size={16} /></span>
+      <div className="grow">
+        <b>{k.title}</b>
+        <div className="meta skill-desc">{k.description || "No description"}</div>
+        <div className="meta">{k.mine ? (k.shared ? "Shared with the family" : "Only you") : `By ${k.by}`}
+          {` · ${k.files.length + 1} file${k.files.length ? "s" : ""}, ${bytes(k.size)}`}
+          {!k.builtin && k.updated ? ` · changed ${ago(k.updated)}` : ""}</div>
+      </div>
+      {k.mine && <span className="skill-share" title={k.shared ? "Shared with the family" : "Share it with the family"}>
+        <Switch checked={k.shared} label={`Share ${k.title} with the family`} onChange={(v) => share(k, v)} />
+        <span className="small muted hide-narrow">Shared</span></span>}
+      <button className="btn small" onClick={() => onNewChat("", [k.ref])} title="A new chat with this skill">
+        <MessageSquarePlus size={14} /> <span className="hide-narrow">Use</span></button>
+      <MenuButton right className="icon-btn" label={<MoreHorizontal size={18} />} title={`More for ${k.title}`}>
+        {(close) => (
+          <>
+            {k.mine && <button className="menu-item" onClick={() => { close(); onNewChat(`Improve the skill ${k.title}: `,
+              [SKILL_MAKER, k.ref]); }}><Wand2 size={15} />
+              <span>Improve with the assistant<small>A chat with the skill maker and this skill</small></span></button>}
+            <button className="menu-item" onClick={() => { close(); open(k, k.mine); }}>
+              <Pencil size={15} /> {k.mine ? "Edit SKILL.md" : "Read SKILL.md"}</button>
+            <a className="menu-item" href={`/hub/api/skills/zip?ref=${encodeURIComponent(k.ref)}`} download={`${k.name}.zip`}
+              onClick={() => close()}><Download size={15} />
+              <span>Download .zip<small>The format Claude takes, to use it there too</small></span></a>
+            {k.mine && <>
+              <div className="menu-sep" />
+              <button className="menu-item danger" onClick={() => { close(); remove(k); }}><Trash2 size={15} /> Delete</button>
+            </>}
+          </>
+        )}
+      </MenuButton>
+    </div>
+  );
+
+  return (
+    <div>
+      <p className="lead">A skill is a set of instructions, with the knowledge that goes with them, for one kind of task.
+        A chat uses a skill only when you choose it there: the <b>Skills</b> button by the message box, or type <b>/</b> and
+        its name. Skills are in the format Claude uses, so they move between the two.</p>
+      <div className="row wrap" style={{ marginBottom: 16, gap: 8 }}>
+        <button className="btn primary" onClick={() => onNewChat(NEW_SKILL_TEXT, [SKILL_MAKER])}><Wand2 size={15} /> New skill</button>
+        <button className="btn" onClick={() => input.current?.click()}><UploadIcon size={15} /> Import</button>
+        <span className="muted small">New skill: give the assistant your files and say what the skill should do. Import: a
+          .zip or .skill (e.g. from Claude), or a SKILL.md.</span>
+        <input ref={input} type="file" hidden accept=".zip,.skill,.md"
+          onChange={(e) => { const f = e.target.files?.[0]; if (f) importFile(f); e.target.value = ""; }} />
+      </div>
+
+      <h2 className="section-title">Yours</h2>
+      <div className="list">
+        {skills === null ? <Empty>Loading</Empty> : mine.length === 0
+          ? <Empty>No skills of your own yet. Make one with the assistant from your own files, or import one.</Empty>
+          : mine.map(row)}
+      </div>
+      {family.length > 0 && <>
+        <h2 className="section-title">Shared by the family</h2>
+        <div className="list">{family.map(row)}</div>
+      </>}
+      {builtin.length > 0 && <>
+        <h2 className="section-title">From SLQ Hub</h2>
+        <div className="list">{builtin.map(row)}</div>
+      </>}
+
+      {view && <Modal title={view.edit ? `Edit ${view.skill.title}` : view.skill.title} onClose={() => setView(null)} wide
+        footer={view.edit ? <><button className="btn" onClick={() => setView(null)}>Cancel</button>
+          <button className="btn primary" onClick={save}>Save</button></> : <button className="btn" onClick={() => setView(null)}>Close</button>}>
+        {view.skill.files.length > 0 && <p className="small muted">Its other files: {view.skill.files.join(", ")}</p>}
+        <textarea className="textarea mono" rows={22} value={view.text} readOnly={!view.edit} aria-label="SKILL.md"
+          onChange={(e) => setView({ ...view, text: e.target.value })} />
+      </Modal>}
+    </div>
+  );
+}

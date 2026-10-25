@@ -12,7 +12,8 @@ sending a message while it works), "page" (makes an artifact), a test case of
 Settings -> Tests (tests/dev_evals.py), "endless" (a file each step until the
 step limit: the answer is marked unfinished, with Continue), "think" (reasons first), "search" (web search), "web picture" (a picture
 from the web in the answer), "picture" (an image),
-"loop" (repeats the same searches until the Hub makes it answer), "window" (writes a
+"loop" (repeats the same searches until the Hub makes it answer), "make a skill" (writes a skill and shows its
+card with Add skill), "window" (writes a
 Windows Forms program and looks at it with windows_app: needs --sandbox), or anything else (a short markdown
 answer). --sandbox http://IP:7000 sends the sandbox's work to a real sandbox daemon (token "tok") that mounts
 this Hub's data/workspace as /workspace. The built UI (frontend/dist) is
@@ -116,6 +117,20 @@ fetch("https://api.example.com/data").then(function () { document.getElementById
 <a id="go" href="https://example.com/elsewhere">go elsewhere</a>"""
 
 
+SKILL_MD = """---
+name: pump-alarms
+description: Explains the alarm codes of the demo pumps and the first thing to check for each. Use it when someone \
+asks what a pump alarm or error code means.
+---
+
+# Pump alarms
+
+1. Find the code in references/codes.md.
+2. Say what it means, then the first thing to check.
+3. When the code is not in the list, say so - do not guess.
+"""
+
+
 def responder(body: dict) -> dict:
     msgs = body["messages"]
 
@@ -139,6 +154,18 @@ def responder(body: dict) -> dict:
     scripted = dev_evals.answer(text, msgs, tools_done)          # Settings -> Tests: each case answered well
     if scripted is not None:
         return scripted
+    if "make a skill" in low:         # the skill maker: the skill's folder, then its card (Add skill)
+        if tools_done == 0:
+            return {"content": "I will write the skill.", "tool_calls": [{"name": "write_file", "arguments": {
+                "path": "skills/pump-alarms/SKILL.md", "content": SKILL_MD}}]}
+        if tools_done == 1:
+            return {"tool_calls": [{"name": "write_file", "arguments": {
+                "path": "skills/pump-alarms/references/codes.md",
+                "content": "| Code | Meaning | Check first |\n|---|---|---|\n| E12 | Dry run | The inlet valve |\n"
+                           "| E31 | Motor too hot | The fan and the filter |\n"}}]}
+        if tools_done == 2:
+            return {"tool_calls": [{"name": "skill_propose", "arguments": {"path": "skills/pump-alarms"}}]}
+        return {"content": "The skill **pump-alarms** is ready. Press **Add skill** on the card to keep it."}
     if "endless" in low:              # never done: one more file each step, until the step limit (then Continue)
         return {"content": f"Part {tools_done + 1}.", "tool_calls": [{"name": "write_file", "arguments": {
             "path": f"endless/part{tools_done + 1}.txt", "content": f"part {tools_done + 1}\n"}}]}

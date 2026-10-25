@@ -160,11 +160,13 @@ function ProjectSettings({ project, onSaved }: { project: Project; onSaved: (p: 
           <div className="row wrap">{libraries.map((l) => (
             <label key={l.id} className="check"><input type="checkbox" checked={s.libraries.includes(l.id)}
               onChange={() => setS({ ...s, libraries: toggle(s.libraries, l.id) })} /> {l.name}</label>))}</div>}</div>
-      {skills.some((k) => !k.enabled) && <div className="field"><span>Extra skills for this project</span>
-        <small>Skills that are switched on in Settings are always offered; these are the others.</small>
-        <div className="row wrap">{skills.filter((k) => !k.enabled).map((k) => (
-          <label key={k.name} className="check"><input type="checkbox" checked={s.skills.includes(k.name)}
-            onChange={() => setS({ ...s, skills: toggle(s.skills, k.name) })} /> {k.title}</label>))}</div></div>}
+      <div className="field"><span>Skills in every chat of this project</span>
+        {skills.length === 0 ? <small>No skills yet (Skills in the sidebar).</small> : <>
+          <small>Chats here use these as well as the ones chosen in the chat itself.</small>
+          <div className="row wrap">{skills.map((k) => (
+            <label key={k.ref} className="check" title={k.description}><input type="checkbox" checked={s.skills.includes(k.ref)}
+              onChange={() => setS({ ...s, skills: toggle(s.skills, k.ref) })} /> {k.title}
+              {!k.mine && !k.builtin && <span className="faint"> ({k.by})</span>}</label>))}</div></>}</div>
       <div className="row"><button className="btn primary" onClick={save}>Save changes</button><span className="grow" />
         <ConfirmButton onConfirm={remove} confirmText="Delete the project and its chats?">Delete project</ConfirmButton></div>
     </div>

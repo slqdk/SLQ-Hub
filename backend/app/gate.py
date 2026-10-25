@@ -31,6 +31,9 @@ PATH_KEY = re.compile(r"^/k/(slqhub_[A-Za-z0-9_\-]{10,})(/.*)?$")
 # What a person (role member) may use of the UI API; everything else is the owner's.
 MEMBER_ROUTES = [
     ({"GET"}, re.compile(r"^/hub/api/(models|settings|skills|events|queue|help)$")),
+    # her own skills (0.23.0): made with the assistant, imported, shared with the family; the routes keep to hers
+    ({"GET", "POST", "PUT", "PATCH", "DELETE"},
+     re.compile(r"^/hub/api/skills(/(one|zip|drafts/[0-9a-f]{16}(/(add|zip))?))?$")),
     ({"POST"}, re.compile(r"^/hub/api/queue/\d+/cancel$")),
     ({"POST"}, re.compile(r"^/hub/api/auth/password$")),
     ({"POST"}, re.compile(r"^/hub/api/device/turns$")),

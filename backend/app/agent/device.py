@@ -267,7 +267,9 @@ def _decode(data: str) -> bytes:
 
 def _settings(raw) -> dict:
     s = {k: v for k, v in (raw or {}).items() if k in SETTING_KEYS} if isinstance(raw, dict) else {}
-    s["skills"] = []                     # the skills the owner switched on, no others
+    # the skills she chose for the chat: her own, the family's shared ones and the Hub's (turn_skills drops others)
+    s["skills"] = [r for r in (raw or {}).get("skills") or [] if isinstance(r, str)][:20] if isinstance(raw, dict) \
+        else []
     s["libraries"] = []
     return s
 
@@ -410,6 +412,9 @@ async def run_turn(hub, turn: DeviceTurn, body: dict, rows: list[dict], wd: proj
                 "settings": _settings(body.get("settings")), "summary": ""}
         entry, thinking, effort = agent.resolve(chat, None, {})
         device.code = bool(turn.user.get("may_run_code")) and await hub.extras["device"].can_confine()
+        from .skills import materialize                    # her chosen skills' files, for code (.hub/skills/)
+        await asyncio.to_thread(materialize, hub.extras["skills"], agent.skills_for(chat, None, device), wd.root,
+                                device)
         holder: dict = {}
         run.emit("queued", position=None, current=hub.scheduler.current)
         pos_task = asyncio.get_running_loop().create_task(agent._report_position(run, holder))

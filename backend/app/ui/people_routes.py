@@ -69,8 +69,12 @@ async def sign_out(user_id: int, request: Request):
 
 @router.delete("/hub/api/people/{user_id}")
 async def remove_person(user_id: int, request: Request):
-    """Their chats are on their own devices; the Hub keeps nothing of theirs but the account."""
+    """Their chats are on their own devices; the Hub keeps nothing of theirs but the account and their skills,
+    which go with it."""
     _owner(request)
     if not auth.delete_person(user_id):
         raise HTTPException(404, "No such person.")
+    skills = request.app.state.hub.extras.get("skills")
+    if skills is not None:
+        skills.forget_person(user_id)
     return {"ok": True}

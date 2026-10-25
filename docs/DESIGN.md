@@ -7,7 +7,8 @@ It is also the **only owner of that GPU**: every other app on the network
 queue decides what runs when.
 
 Nothing in it is TwinCAT-specific. Domain knowledge arrives as skills
-(SKILL.md bundles) that are added later.
+(SKILL.md bundles, the format Claude uses): imported, or made in the Hub with
+the assistant from the user's own material (§6 "Skills").
 
 Decided 2026-10-21 in eight rounds of questions. This file records what was
 decided and how the pieces fit; `docs/INSTALL.md` is the step-by-step guide.
@@ -478,7 +479,9 @@ stopped or crashed turn keeps what it did.
 1. Base instructions with the date, the working folder and its sandbox path,
    images and artifacts guidance.
 2. The memory index (file names and first lines).
-3. The skills on offer (name + description only).
+3. The skills chosen for the chat and its project (0.23.0): their SKILL.md
+   text, up to 40,000 characters together; longer ones are named with their
+   description and loaded with `skill` (§6 "Skills").
 4. Who takes over when the model is stuck (a stronger local model, or the
    cloud where escalation is on) - or, after a hand-over, that the turn came
    from a smaller model whose steps should be checked rather than trusted.
@@ -513,7 +516,8 @@ message's time with the conversation.
 | `view_image`, `image_transform`, `image_ocr` | Look at an image; crop, resize, rotate, convert and compress (Pillow); Tesseract OCR (dan+eng). |
 | `image_generate`, `image_edit`, `image_remove_background` | ComfyUI through the queue (the lease switches residency). |
 | `speech_generate`, `music_generate`, `sound_generate` | Audio files in the working folder (0.13.0, section 8): speech on the CPU (the speech service), music and sound effects in ComfyUI through the queue. Offered when a model for them is downloaded. |
-| `skill` | Loads a skill's SKILL.md, or one of its other files (`skill(name, file)`). |
+| `skill` | Reads one of the chosen skills: its SKILL.md, or one of its other files (`skill(name, file)`; PDF, Word, Excel and PowerPoint as text, pictures shown). Offered when the chat has skills. |
+| `skill_propose` | The skill the assistant made in the working folder: checked against the format, kept as a draft and shown as a card with Add skill (0.23.0, §6 "Skills"). Not in subagents. |
 | `memory` | One tool with commands: view, create, str_replace, insert, delete, rename. Global memory (`/memories`) plus per-project memory (`/memories/project`). |
 | `library_search` | Present when the chat or project has libraries: text and page-image search, with page images for the vision model. |
 | `artifact` | Create or update an HTML, React, SVG, Mermaid, Markdown or code artifact, with versions. Shown in the side panel in a sandboxed iframe. React and Babel are served locally, so it works offline. |
@@ -860,7 +864,8 @@ chats in the browser. Each answer is a **device turn**
    libraries, no MCP, no cloud escalation (a hand-over to the stronger local
    model is fine; it gets the person's prompt too - before 0.15.0 it got the
    owner's, memory index and all), bash only when allowed, artifacts kept in the turn
-   (`DeviceInfo`), only the skills the owner switched on. Without a stored
+   (`DeviceInfo`), the skills she chose for the chat (hers, the family's
+   shared ones, the Hub's; 0.23.0). Without a stored
    summary to fold old messages into, the oldest are left out until the
    context fits (the system prompt says how many).
 3. Events stream from `/events`. The result carries the new messages, the
@@ -885,14 +890,94 @@ the Hub deletes its history entry and, through the mounted folders
 (`HUB_COMFY_FILES`), the output and input pictures and sounds. The speech
 service keeps no voice prompt from a person's clip (`cache_voice` false). What
 does stay: the queue log's row for each answer (the person's name, "Chat",
-the model, the times).
+the model, the times), and her skills - with the drafts the assistant made for
+her, for two weeks - which live on the Hub (0.23.0, below).
+
+### Skills (0.23.0)
+
+Søren asked to make skills from his own material - PDFs, Excel sheets and the
+like - with instructions, to keep and use them, for the family too, in the
+format Claude uses, chosen "in a clever place". Decided with him: each
+person's skills are private on the Hub and can be shared with the whole
+family; a chat uses only the skills chosen for it (nothing is offered on its
+own); a skill is made with the assistant; the library is a Skills page in the
+sidebar, by Projects.
+
+**Format.** A skill is a folder with `SKILL.md` - YAML front matter with
+`name` (1-64 characters, a-z, 0-9 and single hyphens, the folder's name) and
+`description` (1-1024 characters: what it does and when to use it), optional
+`license`, `compatibility`, `metadata` and `allowed-tools` - then the
+instructions, with `references/`, `assets/` and `scripts/` as needed (the
+Agent Skills format, agentskills.io). `check_skill_md` applies Claude's rules
+as well (no "claude" or "anthropic" in the name, no XML tags in the name or
+description), so a skill made here imports in Claude. Import takes a .zip or
+.skill (one top folder, or SKILL.md at the root) or a single SKILL.md;
+Download gives the .zip Claude takes. At most 50 MB and 500 files.
+
+**Where they live** (`app/agent/skills.py`, `Skills`). The owner's in
+`data/skills/<name>/`, a person's in `data/skills/@<user id>/<name>/`, the
+Hub's own in `app/agent/builtin_skills/` (today `skill-creator`). A skill is
+named by its ref: `<name>`, `@<id>/<name>` or `hub/<name>`. The owner's skills
+that are not shared are listed in `data/skills/.disabled.json` - the file of
+the old "switched off" list, so a skill that was switched on before 0.23.0 is
+shared - and a person's shared ones in `@<id>/.shared.json`. New and imported
+skills are private; replacing one keeps its sharing. Everyone sees their own
+skills, the others' shared ones (with who made them) and the Hub's; only the
+maker changes, shares or deletes a skill. A removed person's skills go with
+them.
+
+**Choosing.** A chat's `settings.skills` and its project's hold refs (a
+person's device chat sends hers with each turn). `turn_skills` resolves them
+for whoever runs the turn, drops refs that are gone or not theirs to see,
+and gives each skill a folder name. Their SKILL.md text goes into the system
+prompt (`skills_text`: "The user chose these skills for this chat"), up to
+40,000 characters together; a longer one is named with its description, to
+load with `skill(name)`. Each chosen skill is copied to `.hub/skills/<dir>/`
+in the working folder before the turn (`materialize`, which also removes the
+ones no longer chosen), for code to read and run and for the skill maker to
+improve it; the prompt names the folder. Sync and the files card leave `.hub`
+alone. The `skill` tool reads only the chosen skills. In the
+composer: a Skills button (yours, shared by the family, from SLQ Hub; Make a
+skill; All skills), a chip for each chosen skill, and "/" with a name in the
+message for a list to pick from (arrows, Enter or Tab, Escape). A project's
+Settings lists every skill to use in all its chats.
+
+**Making one.** Make a skill (the Skills button, the Skills page's New
+skill, the help's examples) chooses the built-in `skill-creator` for the chat
+and starts the message with "Make a skill that ". Its instructions: know what
+the skill is for (one question when it is unclear), read all the material
+(`read_file` gives PDF, Word, Excel - every sheet, values and formulas, 2,000
+rows a sheet - and PowerPoint - slides, tables, notes - as text), write
+`skills/<name>/` in the working folder (SKILL.md, references for long
+material, assets kept as they are, scripts only where code helps), in the
+user's language, try it once, then call `skill_propose`. That checks the
+folder (the format's rules and the limits; the model gets the problems and
+fixes them), copies the files named in `include` (attachments) into
+`assets/`, and keeps the skill as a draft for two weeks
+(`data/skills/.drafts/<id>/`). The chat shows a card: name, description,
+files, Show SKILL.md, .zip, and **Add skill** ("Add skill (replaces the old
+one)" when one of that name exists), which makes it one of the user's skills;
+then the card says so and offers Use in a new chat. A draft belongs to whoever
+made it. Improve (the Skills page) opens a chat with the skill maker and the
+skill chosen; the model copies it from `.hub/skills/` to `skills/<name>/`,
+changes it and proposes it under the same name. In a project the working
+folder is the project's, so the skill's files become project files (synced,
+with revisions) until deleted.
+
+**The Skills page** (`/skills`; a person's app has it in its sidebar too):
+Yours (a Shared switch, Use - a new chat with the skill chosen -, Improve with
+the assistant, Edit SKILL.md, Download .zip, Delete), Shared by the family
+(who made it; Read SKILL.md, Download), From SLQ Hub; New skill and Import.
+The routes (`/hub/api/skills`, `/skills/one?ref=`, `/skills/zip`,
+`/skills/drafts/<id>` with `/add` and `/zip`) are open to a person for what
+is theirs to see. Settings → Skills is gone; its address opens this page.
 
 ---
 
 ## 7. Projects and files (SLQ Sync)
 
-A project is a set of instructions, files, chats, enabled skills, memory and
-settings (default model, cloud escalation). Its files live in
+A project is a set of instructions, files, chats, skills used in all its chats,
+memory and settings (default model, cloud escalation). Its files live in
 `data/workspace/projects/<id>/`, which the sandbox sees as
 `/workspace/projects/<id>`. A chat outside a project has its own scratch folder,
 `data/workspace/chats/<id>/` (deleted with the chat). Attachments and long tool
@@ -1412,7 +1497,8 @@ running, amber waiting, blue your action is needed (a tool asks), red fault.
   rest folds away. A person's card reads the files from the device.
 - **Composer.** Attach, paste or drop files, files of the project (or the
   chat's folder) to put in the message, the model, the picture model,
-  thinking (off, a little, normal, hard), libraries and extra skills.
+  thinking (off, a little, normal, hard), libraries; the Skills button and
+  "/" in the message for the chat's skills (0.23.0, §6 "Skills").
 - **Side panel.** Artifacts (sandboxed iframe, versions, source, save to the
   folder) or the folder's files, with a search and a + on each file that
   puts it in the next message. It shows pictures, plays sound and video, and
@@ -1427,7 +1513,7 @@ server parameters; the sound models in their own group, each marked CPU or GPU),
 queue, apps and keys (with connection examples and CORS), assistant (agent,
 libraries, web, sandbox, images, sound: the model for music, for sound effects,
 the voice models for Danish and for other languages, and the last speech
-self-test's samples with players), skills, memory, MCP
+self-test's samples with players), memory, MCP
 servers (and the tools you always allow), cloud, tests (0.21.0, §12: the
 model and the cases to run, a live panel while a run goes - which case, what
 it does, Open the chat, Stop - and the runs with each case's result, checks,
@@ -1506,7 +1592,7 @@ proxy) and "May run code". The list has New password (it signs them out
 everywhere), Sign out everywhere and Remove. A person who signs in gets
 `PersonApp` (`frontend/src/person/`): the owner's chat components (composer
 with model, picture model, thinking levels and skills; the turn view; the
-artifact panel; the queue plate) over IndexedDB (`slq-hub-<user name>`:
+artifact panel; the queue plate; her Skills page) over IndexedDB (`slq-hub-<user name>`:
 chats, per-chat data, files, pictures). Pictures are made by asking; there is
 no Picture button. The account menu has Export all chats / Import chats (one
 JSON file with pictures and files), Change password and Sign out. A Files

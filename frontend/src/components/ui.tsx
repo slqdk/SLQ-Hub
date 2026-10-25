@@ -45,9 +45,9 @@ export function Modal({ title, onClose, children, footer, wide }: { title: strin
 }
 
 /** A button with a drop-down menu; the menu closes on any click outside or on an item. */
-export function MenuButton({ label, children, up, right, className, title, disabled, anchorClassName }: { label: ReactNode;
-  children: (close: () => void) => ReactNode; up?: boolean; right?: boolean; className?: string; title?: string;
-  disabled?: boolean; anchorClassName?: string }) {
+export function MenuButton({ label, children, up, right, className, title, disabled, anchorClassName, menuClassName }: {
+  label: ReactNode; children: (close: () => void) => ReactNode; up?: boolean; right?: boolean; className?: string;
+  title?: string; disabled?: boolean; anchorClassName?: string; menuClassName?: string }) {
   const [open, setOpen] = useState(false);
   const [shift, setShift] = useState(0);
   const ref = useRef<HTMLDivElement>(null);
@@ -85,7 +85,7 @@ export function MenuButton({ label, children, up, right, className, title, disab
         aria-expanded={open} title={title} disabled={disabled}>
         {label}
       </button>
-      {open && <div ref={menu} className={`menu ${up ? "up" : "down"} ${right ? "right" : ""}`} role="menu"
+      {open && <div ref={menu} className={`menu ${up ? "up" : "down"} ${right ? "right" : ""} ${menuClassName ?? ""}`} role="menu"
         style={shift ? { transform: `translateX(${shift}px)` } : undefined}>
         {children(() => setOpen(false))}
       </div>}

@@ -3,14 +3,14 @@
 // and their files kept on this device. The Hub only answers.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CircleHelp, Download, FileText, FolderOpen, KeyRound, LogOut, Menu, MessageSquarePlus, MoreHorizontal, Pencil,
-  Search, Trash2, Upload as UploadIcon, User as UserIcon, X } from "lucide-react";
+  Search, Sparkles, Trash2, Upload as UploadIcon, User as UserIcon, X } from "lucide-react";
 import { api, setLocalMedia, type Artifact, type ArtifactRef, type Block, type ChatSettings, type Message, type ModelEntry,
   type ProducedFile, type Settings, type Skill, type Upload } from "../lib/api";
 import { bytes, dateGroup } from "../lib/format";
 import { saveText } from "../lib/download";
 import { buildTurns, liveSegments, newLive, reduceLive, unfinished, type AssistantTurn, type LiveRun,
   type Unfinished } from "../lib/turns";
-import { setDraft as setMessageDraft } from "../lib/draft";
+import { clearDraftSkills, peekDraftSkills, setDraft as setMessageDraft } from "../lib/draft";
 import type { Example } from "../lib/help";
 import { useApp } from "../state";
 import { ArtifactPanel } from "../components/ArtifactPanel";
@@ -21,6 +21,7 @@ import { GpuPlate } from "../components/Queue";
 import { Items } from "../components/Turn";
 import { Lamp, Logo, MenuButton, Modal, Toasts } from "../components/ui";
 import { LiveState, TurnFoot, UserMessage } from "../views/ChatView";
+import { SkillsContent } from "../views/SkillsView";
 import { photoFromFile } from "../chat/photos";
 import * as S from "./store";
 import * as T from "./turns";
@@ -67,6 +68,7 @@ export function PersonApp() {
   const liveArtifacts = useRef(new Map<string, Artifact>());
   const [panel, setPanel] = useState<Panel>(null);
   const [help, setHelp] = useState<string | null>(null);   // the help page's section, instead of the chat
+  const [skillsPage, setSkillsPage] = useState(false);     // her skills, instead of the chat (0.23.0)
   const [draft, setDraft] = useState<Partial<ChatSettings>>({});
   const [settings, setSettings] = useState<Settings | null>(null);
   const [skills, setSkills] = useState<Skill[]>([]);
@@ -121,8 +123,14 @@ export function PersonApp() {
     if (!ok) return;
     refreshChats();
     api<{ settings: Settings }>("/hub/api/settings").then((r) => setSettings(r.settings), () => undefined);
-    api<Skill[]>("/hub/api/skills").then(setSkills, () => undefined);
   }, [ok, refreshChats]);
+  useEffect(() => {
+    if (!ok) return;
+    const loadSkills = () => api<Skill[]>("/hub/api/skills").then(setSkills, () => undefined);
+    loadSkills();
+    window.addEventListener("hub:skills", loadSkills);       // one was added, shared or changed
+    return () => window.removeEventListener("hub:skills", loadSkills);
+  }, [ok]);
 
   // ---- which chat is open (#c=<id>)
   useEffect(() => {
@@ -133,6 +141,7 @@ export function PersonApp() {
   const openChat = (id: string | null) => {
     setSidebarOpen(false);
     setHelp(null);
+    setSkillsPage(false);
     setPanel(null);
     setEditing(null);
     if (id) location.hash = `c=${id}`;
@@ -145,7 +154,9 @@ export function PersonApp() {
     let alive = true;
     if (!chatId) {
       setChat(null);
-      setDraft({});
+      const picked = peekDraftSkills();                     // a new chat from the Skills page or a skill card
+      clearDraftSkills();
+      setDraft(picked ? { skills: picked } : {});
       return;
     }
     S.getChat(chatId).then(async (c) => {
@@ -404,6 +415,17 @@ export function PersonApp() {
     }
   };
 
+  // A new chat with a message to start from and skills chosen: the Skills page, a skill card, a help example.
+  const newChatWith = (text: string, refs: string[] = []) => {
+    setMessageDraft(text, refs);
+    const already = !chatId;
+    openChat(null);
+    if (already && refs.length) {                      // the chat does not change, so the effect above does not run
+      clearDraftSkills();
+      setDraft((d) => ({ ...d, skills: refs }));
+    }
+  };
+
   const remove = async (id: string) => {
     if (busy?.chat === id) await stop();
     await S.deleteChat(id);
@@ -496,6 +518,7 @@ export function PersonApp() {
   const lastAssistant = [...turns].reverse().find((t) => t.type === "assistant") as AssistantTurn | undefined;
   const running = !!liveHere && liveHere.status !== "done" && liveHere.status !== "error" && liveHere.status !== "cancelled";
   const openArtifact = (ref: ArtifactRef) => setPanel({ kind: "artifact", id: ref.id, version: ref.version });
+  const chatWithSkill = (ref: string) => newChatWith("", [ref]);
   const shown = q.trim() ? chats.filter((c) => c.title.toLowerCase().includes(q.trim().toLowerCase())) : chats;
   const groups: { label: string; items: S.ChatMeta[] }[] = [];
   for (const c of shown) {
@@ -522,6 +545,10 @@ export function PersonApp() {
             <input className="input" placeholder="Search your chats" value={q} onChange={(e) => setQ(e.target.value)} /></label>
         </div>
         <div className="sidebar-scroll">
+          <div className="side-group side-places">
+            <button className="side-item" onClick={() => { setSidebarOpen(false); setPanel(null); setHelp(null); setSkillsPage(true); }}
+              aria-current={skillsPage ? "page" : undefined}><Sparkles size={15} /> Skills</button>
+          </div>
           {chats.length === 0 && <div className="side-more" style={{ padding: "2px 16px" }}>Your chats are kept on this device.</div>}
           {groups.map((g) => (
             <div className="side-group" key={g.label}>
@@ -553,7 +580,7 @@ export function PersonApp() {
                 </>
               )}
             </MenuButton>
-            <button className="side-item" onClick={() => { setSidebarOpen(false); setPanel(null); setHelp("chat"); }}
+            <button className="side-item" onClick={() => { setSidebarOpen(false); setPanel(null); setSkillsPage(false); setHelp("chat"); }}
               aria-current={help !== null ? "page" : undefined}><CircleHelp size={15} /> Help</button>
             <input ref={importInput} type="file" accept="application/json,.json" hidden
               onChange={(e) => { importAll(e.target.files?.[0]); e.target.value = ""; }} />
@@ -573,12 +600,21 @@ export function PersonApp() {
           <div className="scroll">
             <div className="page">
               <HelpContent section={help} onSection={setHelp} onTry={(e: Example) => {
-                setMessageDraft(e.text);
-                openChat(null);
+                newChatWith(e.text, e.skills);
                 if (e.attach) toast(`Attach ${e.attach} with the + under the message box, then send.`, "run");
               }} />
             </div>
           </div>
+        </div>
+      ) : skillsPage ? (
+        <div className="main">
+          <div className="topbar">
+            <button className="icon-btn menu-btn" onClick={() => setSidebarOpen(true)} aria-label="Open the menu"><Menu size={18} /></button>
+            <h1>Skills</h1>
+            <span className="grow" />
+            <button className="btn quiet small" onClick={() => setSkillsPage(false)}><X size={15} /> Back to the chat</button>
+          </div>
+          <div className="scroll"><div className="page"><SkillsContent onNewChat={newChatWith} /></div></div>
         </div>
       ) : (
       <div className="main">
@@ -631,7 +667,7 @@ export function PersonApp() {
                   onSave={(text) => saveEdit(t.message.id, text)} />
               ) : (
                 <div className="msg-assistant" key={t.key}>
-                  <Items items={t.items} actions={{ openArtifact }} />
+                  <Items items={t.items} actions={{ openArtifact, chatWithSkill }} />
                   {(!t.runId || lastPart.get(t.runId) === i) && (() => {
                     const files = producedFiles(t.run);
                     const why = unfinished(t.run);
@@ -649,7 +685,7 @@ export function PersonApp() {
                 return <>
                   {segs.map((seg, i) => seg.kind === "assistant" ? (
                     <div className="msg-assistant" key={`la${i}`}>
-                      <Items items={seg.items} actions={{ openArtifact, live: true,
+                      <Items items={seg.items} actions={{ openArtifact, chatWithSkill, live: true,
                         // when the turn asks first (internet), she answers once: "always" is the owner's
                         approve: (callId, decision) => api(`/hub/api/device/turns/${liveHere.runId}/approve`,
                           { body: { call_id: callId, decision: decision === "deny" ? "deny" : "allow" } }) }} />
@@ -669,6 +705,7 @@ export function PersonApp() {
             <Composer running={running} onSend={send} onStop={stop} settings={effective} onSettings={changeSettings}
               models={llms} pictureModels={pictureModels} pictureDefault={pictureDefault} libraries={[]} skills={skills}
               autoFocus showLibraries={false} uploader={uploader}
+              onManageSkills={() => { setPanel(null); setHelp(null); setSkillsPage(true); }}
               placeholder={busy ? "Wait for the answer, or stop it" : undefined} />
             <div className="hint">{running ? "The square stops it."
               : "Enter sends, Shift+Enter makes a new line. Paste or drop files to attach them."}</div>

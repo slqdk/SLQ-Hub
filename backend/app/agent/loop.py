@@ -767,10 +767,15 @@ class Agent:
         effort = options.get("effort") or cs.get("effort") or s.get("agent", "effort")
         return entry, thinking, effort
 
+    def skills_for(self, chat: dict | None, project: dict | None, device=None) -> list[dict]:
+        """The skills the user chose for the chat and its project (0.23.0: picked by hand)."""
+        from .skills import turn_skills
+        return turn_skills(self.hub.extras["skills"], chat, project, device)
+
     def system_for(self, chat: dict, project: dict | None, wd: projects.Workdir, entry: dict, *,
                    handover_to: str = "", subagent: bool = False, cloud_model: str = "",
                    taken_over_from: str = "", device=None) -> str:
-        skills = self.hub.extras["skills"].chosen(chat, project)
+        skills = self.skills_for(chat, project, device)
         images = self.hub.extras.get("images")
         audio = self.hub.extras.get("audio")
         sound = [a for a in ("speech", "music", "sound", "voice", "separate") if audio and audio.available(a)] \
@@ -900,6 +905,8 @@ class Agent:
             chats.run_started(run.id, chat["id"], entry["id"])
             wd = self.workdir(chat)
             before = await asyncio.to_thread(projects.snapshot, wd.root)     # what the turn makes is shown after it
+            from .skills import materialize                # the chosen skills' files, for code (.hub/skills/)
+            await asyncio.to_thread(materialize, self.hub.extras["skills"], self.skills_for(chat, project), wd.root)
             escalation = bool(project and project["settings"].get("cloud_escalation")
                               and cloudmod.configured(self.hub.settings))
             mcp = self.hub.extras.get("mcp")

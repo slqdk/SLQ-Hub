@@ -3,6 +3,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { Copy, Download, FileText, FolderOpen, Menu, MoreHorizontal, Pencil, RotateCcw, ShieldCheck, Trash2 } from "lucide-react";
 import { api, mediaUrl, type ArtifactRef, type Block, type ChatData, type ChatSettings, type Library, type Message,
   type ProducedFile, type RunEvent, type RunRecord, type Settings, type Skill, type Upload } from "../lib/api";
+import { clearDraftSkills, peekDraftSkills, setDraft as setMessageDraft } from "../lib/draft";
 import { seconds, tokens } from "../lib/format";
 import { linkProps, navigate } from "../lib/router";
 import { buildTurns, isContinue, liveSegments, newLive, reduceLive, toolLabel, unfinished, waitsForAnswer, type AssistantTurn,
@@ -40,7 +41,11 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
   const [settings, setSettings] = useState<Settings | null>(settingsCache);
   const [libraries, setLibraries] = useState<Library[]>([]);
   const [skills, setSkills] = useState<Skill[]>([]);
-  const [draft, setDraft] = useState<Partial<ChatSettings>>({});
+  // A new chat's settings until it is saved; the Skills page's Use and New skill start it with skills chosen.
+  const [draft, setDraft] = useState<Partial<ChatSettings>>(() => {
+    const picked = chatId ? null : peekDraftSkills();
+    return picked ? { skills: picked } : {};
+  });
   const [editing, setEditing] = useState<number | null>(null);
   const [renaming, setRenaming] = useState(false);
   const [showAllowed, setShowAllowed] = useState(false);
@@ -58,8 +63,12 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
   useEffect(() => {
     loadSettings().then(setSettings, () => undefined);
     api<{ libraries: Library[] }>("/hub/api/libraries").then((r) => setLibraries(r.libraries), () => undefined);
-    api<Skill[]>("/hub/api/skills").then(setSkills, () => undefined);
-  }, []);
+    const loadSkills = () => api<Skill[]>("/hub/api/skills").then(setSkills, () => undefined);
+    loadSkills();
+    if (!chatId) clearDraftSkills();                   // taken by this new chat (above)
+    window.addEventListener("hub:skills", loadSkills);   // one was added, shared or changed
+    return () => window.removeEventListener("hub:skills", loadSkills);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const detach = useCallback(() => {
     esRef.current?.close();
@@ -324,6 +333,11 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
   };
 
   const openArtifact = (ref: ArtifactRef) => chatId && openPanel({ kind: "artifact", chatId, id: ref.id, version: ref.version });
+  // The skill card's "Use in a new chat": a new chat with that skill chosen.
+  const chatWithSkill = (ref: string) => {
+    setMessageDraft("", [ref]);
+    navigate(project ? { name: "project-new-chat", id: project.id } : "/");
+  };
   const turns = useMemo(() => (data ? buildTurns(data.messages, data.runs, live?.runId) : []), [data, live?.runId]);
   // A note written while a turn worked splits it in parts: the run's summary goes under the last part.
   const lastPart = useMemo(() => {
@@ -420,7 +434,7 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
                 onSave={(text) => saveEdit(t.message.id, text)} onOpenFile={folder ? showFiles : undefined} />
             ) : (
               <div className="msg-assistant" key={t.key}>
-                <Items items={t.items} actions={{ openArtifact }} />
+                <Items items={t.items} actions={{ openArtifact, chatWithSkill }} />
                 {(!t.runId || lastPart.get(t.runId) === i) && (() => {
                   const files = folder ? producedFiles(t.run) : [];
                   const why = unfinished(t.run);
@@ -443,7 +457,7 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
                     onOpenFile={folder ? showFiles : undefined} />
                 ) : (
                   <div className="msg-assistant" key={`la${i}`}>
-                    <Items items={seg.items} actions={{ openArtifact, runId: live.runId, live: true }} />
+                    <Items items={seg.items} actions={{ openArtifact, chatWithSkill, runId: live.runId, live: true }} />
                     {i === tail && state}
                   </div>
                 ))}
@@ -461,7 +475,8 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
             models={llms} pictureModels={pictureModels} pictureDefault={pictureDefault} libraries={libraries} skills={skills} autoFocus
             placeholder={running ? "Add something while it works" : project ? `Ask about ${project.name}, or give it a task` : undefined}
             refs={folder ? refs : []} onRemoveRef={(p) => onRefs((r) => r.filter((x) => x !== p))} onOpenRef={(p) => showFiles(p)}
-            onBrowseFiles={folder ? () => showFiles() : undefined} browseLabel={project ? "Project files" : "This chat's files"} />
+            onBrowseFiles={folder ? () => showFiles() : undefined} browseLabel={project ? "Project files" : "This chat's files"}
+            onManageSkills={() => navigate({ name: "skills" })} />
           <div className="hint">{running ? "What you send now is read after the step it is working on. The square stops it."
             : <>Enter sends, Shift+Enter makes a new line. Paste or drop files to attach them
             {folder ? <>, or put {project ? "project" : "the chat's"} files in the message from <b>Files</b>.</> : "."}</>}</div>

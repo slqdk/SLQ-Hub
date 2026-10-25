@@ -1,8 +1,8 @@
-// Settings: models, the queue, apps and keys, the agent, skills, memory, MCP, cloud, system.
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ChevronDown, ChevronUp, Copy, Download, Menu, Plus, RefreshCw, Upload as UploadIcon, X } from "lucide-react";
+// Settings: models, the queue, apps and keys, the agent, memory, MCP, cloud, system (skills have their own page).
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { ChevronDown, ChevronUp, Copy, Download, Menu, Plus, RefreshCw, X } from "lucide-react";
 import { api, type ApiKey, type Person, type HFLookup, type HFSearchHit, type ImageLookup, type McpServerConfig, type McpStatus,
-  type MemoryFile, type ModelEntry, type Sampling, type SdxlChoices, type SdxlSettings, type Settings, type Skill } from "../lib/api";
+  type MemoryFile, type ModelEntry, type Sampling, type SdxlChoices, type SdxlSettings, type Settings } from "../lib/api";
 import { ago, bytes, residencyName } from "../lib/format";
 import { navigate } from "../lib/router";
 import { useApp, type Theme } from "../state";
@@ -14,7 +14,7 @@ import { forgetSettings } from "./ChatView";
 const TABS = [
   { id: "models", label: "Models" }, { id: "queue", label: "Queue" }, { id: "people", label: "People" },
   { id: "apps", label: "Apps and keys" },
-  { id: "agent", label: "Assistant" }, { id: "skills", label: "Skills" }, { id: "memory", label: "Memory" },
+  { id: "agent", label: "Assistant" }, { id: "memory", label: "Memory" },
   { id: "mcp", label: "MCP servers" }, { id: "cloud", label: "Cloud" }, { id: "tests", label: "Tests" },
   { id: "system", label: "System" },
 ];
@@ -66,7 +66,6 @@ export function SettingsView({ tab }: { tab: string }) {
           {current === "people" && <PeopleTab />}
           {current === "apps" && <AppsTab s={s} />}
           {current === "agent" && <AgentTab s={s} />}
-          {current === "skills" && <SkillsTab />}
           {current === "memory" && <MemoryTab />}
           {current === "mcp" && <McpTab s={s} />}
           {current === "cloud" && <CloudTab s={s} />}
@@ -1305,87 +1304,6 @@ function InternetAllowed({ asking }: { asking: boolean }) {
 }
 
 // ------------------------------------------------------------ skills
-
-function SkillsTab() {
-  const { toast } = useApp();
-  const [skills, setSkills] = useState<Skill[] | null>(null);
-  const [edit, setEdit] = useState<{ name: string; text: string } | null>(null);
-  const input = useRef<HTMLInputElement>(null);
-  const load = useCallback(async () => {
-    try {
-      setSkills(await api<Skill[]>("/hub/api/skills"));
-    } catch (e) {
-      toast((e as Error).message, "fault");
-    }
-  }, [toast]);
-  useEffect(() => {
-    load();
-  }, [load]);
-  const install = async (f: File) => {
-    const fd = new FormData();
-    fd.append("file", f, f.name);
-    try {
-      const r = await api<{ name: string }>("/hub/api/skills", { form: fd });
-      toast(`Installed ${r.name}`, "run");
-      load();
-    } catch (e) {
-      toast((e as Error).message, "fault");
-    }
-  };
-  const open = async (name: string) => {
-    try {
-      const r = await api<{ text: string }>(`/hub/api/skills/${name}`);
-      setEdit({ name, text: r.text });
-    } catch (e) {
-      toast((e as Error).message, "fault");
-    }
-  };
-  const save = async () => {
-    if (!edit) return;
-    try {
-      await api(`/hub/api/skills/${edit.name}`, { method: "PUT", body: { text: edit.text } });
-      setEdit(null);
-      load();
-    } catch (e) {
-      toast((e as Error).message, "fault");
-    }
-  };
-  return (
-    <div>
-      <p className="lead">A skill is a folder with a SKILL.md: instructions (and files) for one kind of task. The assistant
-        sees each skill's name and description and loads the rest when a task matches. The same format as Claude's skills.</p>
-      <div className="row" style={{ marginBottom: 10 }}>
-        <button className="btn primary" onClick={() => input.current?.click()}><UploadIcon size={15} /> Install a skill</button>
-        <span className="muted small">A .zip or .skill bundle, or a single SKILL.md.</span>
-        <input ref={input} type="file" hidden accept=".zip,.skill,.md" onChange={(e) => { const f = e.target.files?.[0]; if (f) install(f); e.target.value = ""; }} />
-      </div>
-      <div className="list">
-        {skills === null ? <Empty>Loading</Empty> : skills.length === 0 ? <Empty>No skills installed.</Empty> : skills.map((k) => (
-          <div className="list-row" key={k.name} style={{ alignItems: "flex-start" }}>
-            <Switch checked={k.enabled} label={`Offer ${k.title}`} onChange={async (v) => {
-              try {
-                await api(`/hub/api/skills/${k.name}`, { method: "PATCH", body: { enabled: v } });
-                load();
-              } catch (e) {
-                toast((e as Error).message, "fault");
-              }
-            }} />
-            <div className="grow"><b>{k.title}</b><div className="meta">{k.description}</div>
-              {k.files.length > 0 && <div className="meta">{k.files.length} more file{k.files.length === 1 ? "" : "s"}</div>}</div>
-            <button className="btn quiet small" onClick={() => open(k.name)}>Edit</button>
-            <ConfirmButton onConfirm={async () => { await api(`/hub/api/skills/${k.name}`, { method: "DELETE" }); load(); }}
-              confirmText="Delete?">Delete</ConfirmButton>
-          </div>
-        ))}
-      </div>
-      <p className="muted small">Switched off: not offered in every chat, but a project or a chat can still add it.</p>
-      {edit && <Modal title={`Edit ${edit.name}`} onClose={() => setEdit(null)} wide footer={<>
-        <button className="btn" onClick={() => setEdit(null)}>Cancel</button><button className="btn primary" onClick={save}>Save</button></>}>
-        <textarea className="textarea mono" rows={22} value={edit.text} onChange={(e) => setEdit({ ...edit, text: e.target.value })} />
-      </Modal>}
-    </div>
-  );
-}
 
 // ------------------------------------------------------------ memory
 

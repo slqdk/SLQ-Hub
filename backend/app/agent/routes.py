@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 
-from fastapi import APIRouter, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, File, HTTPException, Request, Response, UploadFile
 from pydantic import BaseModel
 
 from .. import auth, db
@@ -14,72 +14,143 @@ router = APIRouter(prefix="/hub/api")
 
 
 # ---------------------------------------------------------------- skills
+# Everyone's (0.23.0): the owner and each person has their own skills, shares some with the family and sees the
+# shared ones and the Hub's. A skill is named by its ref ("<name>", "@<person id>/<name>", "hub/<name>"), given as
+# ?ref= since it holds a slash.
+
+def _who(request: Request) -> dict | None:
+    return getattr(request.state, "user", None)
+
+
+def _store(request: Request):
+    return get_hub(request).extras["skills"]
+
+
+def _owner_name(request: Request) -> str:
+    hub = get_hub(request)
+    return hub.settings.get("agent", "user_name") or (hub.env.admin_user or "the owner").title()
+
+
+def _by(request: Request, s: dict) -> str:
+    if s["builtin"]:
+        return "SLQ Hub"
+    if s["owner_id"] is None:
+        return _owner_name(request)
+    return auth.display_name(auth.get_person(s["owner_id"])) or "someone"
+
+
+def _out(request: Request, s: dict) -> dict:
+    return {**{k: v for k, v in s.items() if k != "body"}, "by": _by(request, s)}
+
+
+def _fail(exc: Exception):
+    if isinstance(exc, PermissionError):
+        raise HTTPException(403, str(exc))
+    if isinstance(exc, (FileNotFoundError, KeyError)):
+        raise HTTPException(404, "no such skill")
+    raise HTTPException(400, str(exc))
+
 
 @router.get("/skills")
 async def list_skills(request: Request):
-    skills = get_hub(request).extras["skills"].list()
-    if auth.is_member(getattr(request.state, "user", None)):     # people see (and get) only the ones switched on
-        skills = [s for s in skills if s["enabled"]]
-    return skills
+    return [_out(request, s) for s in _store(request).visible(_who(request))]
 
 
 @router.post("/skills")
 async def install_skill(request: Request, file: UploadFile = File(...)):
+    """A skill from Claude or elsewhere: a .zip or .skill bundle, or a SKILL.md - into your skills, not shared."""
     data = await file.read()
     try:
-        name = get_hub(request).extras["skills"].install(data, file.filename or "SKILL.md")
+        ref = _store(request).install(_who(request), data, file.filename or "SKILL.md")
     except (ValueError, OSError) as exc:
         raise HTTPException(400, str(exc))
-    return {"name": name}
+    return {"ref": ref, "name": ref.split("/")[-1]}
 
 
-@router.get("/skills/{name}")
-async def get_skill(name: str, request: Request):
-    store = get_hub(request).extras["skills"]
+@router.get("/skills/one")
+async def get_skill(ref: str, request: Request):
+    store = _store(request)
     try:
-        text = store.get(name)
-    except (FileNotFoundError, ValueError):
-        raise HTTPException(404, "no such skill")
-    meta = next((s for s in store.list() if s["name"] == name), {})
-    return {**meta, "text": text}
+        return {**_out(request, store.entry(_who(request), ref)), "text": store.get(_who(request), ref)}
+    except (FileNotFoundError, ValueError) as exc:
+        _fail(exc)
 
 
 class SkillText(BaseModel):
     text: str
 
 
-@router.put("/skills/{name}")
-async def put_skill(name: str, body: SkillText, request: Request):
-    store = get_hub(request).extras["skills"]
+@router.put("/skills/one")
+async def put_skill(ref: str, body: SkillText, request: Request):
     try:
-        store.get(name)
-    except (FileNotFoundError, ValueError):
-        raise HTTPException(404, "no such skill")
-    (store.root / name / "SKILL.md").write_text(body.text, encoding="utf-8")
+        _store(request).put_text(_who(request), ref, body.text)
+    except (FileNotFoundError, PermissionError, ValueError) as exc:
+        _fail(exc)
     return {"ok": True}
 
 
 class SkillPatch(BaseModel):
-    enabled: bool
+    shared: bool
 
 
-@router.patch("/skills/{name}")
-async def patch_skill(name: str, body: SkillPatch, request: Request):
+@router.patch("/skills/one")
+async def patch_skill(ref: str, body: SkillPatch, request: Request):
+    """Share one of your skills with the family, or take it back."""
     try:
-        get_hub(request).extras["skills"].set_enabled(name, body.enabled)
-    except (FileNotFoundError, ValueError):
-        raise HTTPException(404, "no such skill")
+        _store(request).set_shared(_who(request), ref, body.shared)
+    except (FileNotFoundError, PermissionError, ValueError) as exc:
+        _fail(exc)
     return {"ok": True}
 
 
-@router.delete("/skills/{name}")
-async def delete_skill(name: str, request: Request):
+@router.delete("/skills/one")
+async def delete_skill(ref: str, request: Request):
     try:
-        if not get_hub(request).extras["skills"].delete(name):
-            raise HTTPException(404, "no such skill")
-    except ValueError:
-        raise HTTPException(404, "no such skill")
+        _store(request).delete(_who(request), ref)
+    except (FileNotFoundError, PermissionError, ValueError) as exc:
+        _fail(exc)
     return {"ok": True}
+
+
+def _zip_response(name: str, data: bytes) -> Response:
+    return Response(data, media_type="application/zip",
+                    headers={"Content-Disposition": f'attachment; filename="{name}.zip"'})
+
+
+@router.get("/skills/zip")
+async def skill_zip(ref: str, request: Request):
+    """The skill as a .zip in the shape Claude takes (Settings -> Capabilities -> Skills there)."""
+    try:
+        return _zip_response(*_store(request).zip(_who(request), ref))
+    except (FileNotFoundError, ValueError) as exc:
+        _fail(exc)
+
+
+@router.get("/skills/drafts/{draft_id}")
+async def get_draft(draft_id: str, request: Request):
+    """A skill the assistant made (skill_propose): what the card shows, and whether it was added."""
+    try:
+        return _store(request).draft(_who(request), draft_id)
+    except FileNotFoundError:
+        raise HTTPException(404, "This draft is gone - drafts are kept for two weeks.")
+
+
+@router.post("/skills/drafts/{draft_id}/add")
+async def add_draft(draft_id: str, request: Request):
+    """The card's Add skill."""
+    try:
+        ref = _store(request).add_draft(_who(request), draft_id)
+    except FileNotFoundError:
+        raise HTTPException(404, "This draft is gone - drafts are kept for two weeks.")
+    return {"ref": ref, "skill": _out(request, _store(request).entry(_who(request), ref))}
+
+
+@router.get("/skills/drafts/{draft_id}/zip")
+async def draft_zip(draft_id: str, request: Request):
+    try:
+        return _zip_response(*_store(request).draft_zip(_who(request), draft_id))
+    except FileNotFoundError:
+        raise HTTPException(404, "This draft is gone - drafts are kept for two weeks.")
 
 
 # ---------------------------------------------------------------- memory

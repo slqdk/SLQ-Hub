@@ -341,28 +341,6 @@ async def test_turns_are_private_and_requests_checked(signed_in, app, fakes):
                        for t in app.state.hub.extras["device"].turns.values())
 
 
-async def test_only_the_skills_the_owner_switched_on(signed_in, app, fakes):
-    for name in ("haiku-writer", "plc-secrets"):
-        skill = f"---\nname: {name}\ndescription: The {name} skill.\n---\nThe {name} instructions.\n".encode()
-        await signed_in.post("/hub/api/skills", files={"file": ("SKILL.md", skill, "text/markdown")},
-                             headers={"Origin": "http://hub"})
-    await signed_in.patch("/hub/api/skills/plc-secrets", json={"enabled": False}, headers={"Origin": "http://hub"})
-    await add_person(signed_in)
-    fakes.llama["replies"] = [{"tool_calls": [{"name": "skill", "arguments": {"name": "plc-secrets"}}]},
-                              {"tool_calls": [{"name": "skill", "arguments": {"name": "haiku-writer"}}]},
-                              {"content": "Done."}]
-    async with client_from(app) as phone:
-        await sign_in(phone)
-        assert [x["name"] for x in (await phone.get("/hub/api/skills")).json()] == ["haiku-writer"]
-        res = await turn(app, phone, {"title": "S", "settings": {"skills": ["plc-secrets"]},
-                                      "messages": [user_msg("Use the skills")]})
-    system = fakes.llama["requests"][0]["messages"][0]["content"]
-    assert "haiku-writer" in system and "plc-secrets" not in system
-    results = [b for m in res["messages"] for b in m["content"] if b["type"] == "tool_result"]
-    text = json.dumps(results)
-    assert "The plc-secrets instructions" not in text and "The haiku-writer instructions" in text
-
-
 async def test_a_device_that_never_comes_back_cannot_pile_up_turns(signed_in, app, fakes):
     hub = app.state.hub
     await add_person(signed_in)

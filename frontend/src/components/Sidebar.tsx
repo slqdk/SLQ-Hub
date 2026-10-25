@@ -1,6 +1,6 @@
 // The cabinet-grey rail: new chat, search, projects, recent chats, and the GPU plate.
 import { useEffect, useMemo, useState } from "react";
-import { BookOpen, CircleHelp, FolderClosed, MessageSquarePlus, Plus, Search, Settings, X } from "lucide-react";
+import { BookOpen, CircleHelp, FolderClosed, MessageSquarePlus, Plus, Search, Settings, Sparkles, X } from "lucide-react";
 import { api, type ChatListItem } from "../lib/api";
 import { dateGroup } from "../lib/format";
 import { linkProps, navigate, type Route } from "../lib/router";
@@ -74,6 +74,12 @@ export function Sidebar({ route }: { route: Route }) {
           </div>
         )}
         <div className="sidebar-scroll">
+          {!found && (
+            <div className="side-group side-places">
+              <a className="side-item" {...linkProps("/skills")} onClickCapture={close}
+                aria-current={route.name === "skills" ? "page" : undefined}><Sparkles size={15} /> Skills</a>
+            </div>
+          )}
           {!found && (
             <div className="side-group">
               <div className="side-group-head">

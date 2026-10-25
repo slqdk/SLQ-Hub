@@ -4,7 +4,8 @@ import { ArtifactPanel } from "./components/ArtifactPanel";
 import { Files, type Folder } from "./components/Files";
 import { Sidebar } from "./components/Sidebar";
 import { Toasts } from "./components/ui";
-import { useRoute } from "./lib/router";
+import { setDraft } from "./lib/draft";
+import { navigate, useRoute } from "./lib/router";
 import { useApp } from "./state";
 import { PersonApp } from "./person/PersonApp";
 import { ChatView } from "./views/ChatView";
@@ -13,6 +14,7 @@ import { LibrariesView } from "./views/LibrariesView";
 import { Login } from "./views/Login";
 import { ProjectView } from "./views/ProjectView";
 import { SettingsView } from "./views/SettingsView";
+import { SkillsView } from "./views/SkillsView";
 
 export type PanelState =
   | { kind: "artifact"; chatId: number; id: string; version?: number }
@@ -61,6 +63,9 @@ export function App() {
       break;
     case "libraries":
       main = <LibrariesView id={route.id} />;
+      break;
+    case "skills":
+      main = <SkillsView onNewChat={(text, skills) => { setDraft(text, skills); navigate("/"); }} />;
       break;
     case "settings":
       main = <SettingsView tab={route.tab} />;

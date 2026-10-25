@@ -1,8 +1,9 @@
 // An assistant turn: thinking, text, the strip of tool calls, artifacts.
-import { useState, type ReactNode } from "react";
-import { AppWindow, Brain, ChevronDown, ChevronRight, Code2, FileText, GitBranch, Image as ImageIcon, Shapes } from "lucide-react";
-import { api, mediaUrl, type ArtifactRef } from "../lib/api";
-import { seconds } from "../lib/format";
+import { useEffect, useState, type ReactNode } from "react";
+import { AppWindow, Brain, Check, ChevronDown, ChevronRight, Code2, Download, FileText, GitBranch, Image as ImageIcon, Shapes,
+  Sparkles } from "lucide-react";
+import { api, mediaUrl, type ArtifactRef, type Skill, type SkillCardData, type SkillDraft } from "../lib/api";
+import { bytes, seconds } from "../lib/format";
 import { toolLabel, toolSummary, type Decision, type Item, type ToolView } from "../lib/turns";
 import { useApp } from "../state";
 import { Markdown } from "./Markdown";
@@ -14,6 +15,8 @@ export interface TurnActions {
   live?: boolean;
   /** Answer a call that waits for the user (a person's chat: its device turn); default: the run's approve. */
   approve?: (callId: string, decision: Decision) => Promise<unknown>;
+  /** A new chat with this skill chosen (the skill card, once the skill is added). */
+  chatWithSkill?: (ref: string) => void;
 }
 
 export function Items({ items, actions }: { items: Item[]; actions: TurnActions }) {
@@ -36,6 +39,8 @@ export function Items({ items, actions }: { items: Item[]; actions: TurnActions 
           }
           case "artifact":
             return <ArtifactCard key={i} refx={it.ref} onOpen={() => actions.openArtifact(it.ref)} />;
+          case "skill":
+            return <SkillCard key={i} card={it.card} onUse={actions.chatWithSkill} />;
           case "user":
             return null;
           case "todos":
@@ -184,6 +189,70 @@ const KIND_ICON: Record<string, ReactNode> = {
 };
 const KIND_NAME: Record<string, string> = { html: "Web page", react: "React app", svg: "SVG drawing", mermaid: "Diagram",
   markdown: "Document", code: "Code" };
+
+/** A skill the assistant made (skill_propose, 0.23.0): what it is, and Add skill - nothing is added until then. */
+function SkillCard({ card, onUse }: { card: SkillCardData; onUse?: (ref: string) => void }) {
+  const { toast } = useApp();
+  const [state, setState] = useState<"ready" | "adding" | "added" | "gone">("ready");
+  const [text, setText] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
+  useEffect(() => {                                   // an older card: added already, or gone after two weeks
+    let stop = false;
+    api<SkillDraft>(`/hub/api/skills/drafts/${card.draft}`).then(
+      (d) => { if (!stop) { setText(d.text); if (d.added) setState("added"); } },
+      () => { if (!stop) setState("gone"); });
+    return () => { stop = true; };
+  }, [card.draft]);
+  const add = async () => {
+    setState("adding");
+    try {
+      await api<{ ref: string; skill: Skill }>(`/hub/api/skills/drafts/${card.draft}/add`, { method: "POST" });
+      setState("added");
+      toast(`${card.title} is among your skills now`, "run");
+      window.dispatchEvent(new Event("hub:skills"));     // the composer's list
+    } catch (e) {
+      setState("ready");
+      toast((e as Error).message, "fault");
+    }
+  };
+  const files = card.files.length + 1;
+  return (
+    <div className="skill-card" aria-label={`Skill ${card.title}`}>
+      <div className="skill-card-head">
+        <span className="kind"><Sparkles size={18} /></span>
+        <span className="grow"><b>{card.title}</b>
+          <span className="small muted">{card.replaces ? "A new version of your skill" : "A new skill"} · {files} file{files === 1 ? "" : "s"}
+            , {bytes(card.size)}</span></span>
+      </div>
+      <p className="skill-card-desc">{card.description}</p>
+      {open && (
+        <div className="skill-card-files">
+          <pre className="skill-card-text">{text ?? "Loading"}</pre>
+          {card.files.length > 0 && <div className="small muted">Its other files: {card.files.join(", ")}</div>}
+        </div>
+      )}
+      <div className="skill-card-actions">
+        {state === "added" ? (
+          <>
+            <span className="tag ok"><Check size={13} /> Added to your skills</span>
+            {onUse && <button className="btn small" onClick={() => onUse(card.ref)}>Use in a new chat</button>}
+          </>
+        ) : state === "gone" ? (
+          <span className="small muted">This draft is gone - drafts are kept for two weeks. Ask for the skill again.</span>
+        ) : (
+          <button className="btn primary small" onClick={add} disabled={state === "adding"}>
+            <Sparkles size={14} /> {card.replaces ? "Add skill (replaces the old one)" : "Add skill"}</button>
+        )}
+        {state !== "gone" && <>
+          <button className="btn quiet small" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+            {open ? "Hide" : "Show"} SKILL.md</button>
+          <a className="btn quiet small" href={`/hub/api/skills/drafts/${card.draft}/zip`} download={`${card.name}.zip`}>
+            <Download size={14} /> .zip</a>
+        </>}
+      </div>
+    </div>
+  );
+}
 
 function ArtifactCard({ refx, onOpen }: { refx: ArtifactRef; onOpen: () => void }) {
   return (

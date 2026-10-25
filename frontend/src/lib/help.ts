@@ -1,6 +1,7 @@
 // The help page's text (0.20.0): what you can ask the assistant for, section by section, with examples to try.
 // Whether each thing works on this Hub right now comes from GET /hub/api/help (backend/app/ui/help_routes.py),
 // which uses the same checks that decide which tools a turn is offered. Keep this in step with the tools.
+import { SKILL_MAKER } from "./draft";
 
 export interface HelpCaps {
   member: boolean;
@@ -25,6 +26,7 @@ export type Need = "code" | "windows" | "libraries" | "mcp" | "handover"
 export interface Example {
   text: string;
   attach?: string;            // what to attach before sending ("a picture", "a song and a voice clip")
+  skills?: string[];          // chosen for the new chat Try opens (0.23.0: the skill maker)
 }
 
 export interface HelpItem {
@@ -642,8 +644,8 @@ export const SECTIONS: HelpSection[] = [
     id: "memory",
     title: "Memory and skills",
     memberTitle: "Skills",
-    intro: "What the assistant knows about you across chats, and the instructions it follows for particular kinds "
-      + "of work.",
+    intro: "What the assistant knows about you across chats, and skills: instructions for particular kinds of work, "
+      + "which you make with the assistant, share with the family and choose for a chat.",
     items: [
       {
         id: "remember",
@@ -659,16 +661,42 @@ export const SECTIONS: HelpSection[] = [
         owner: true,
       },
       {
-        id: "skills",
-        tools: ["skill"],
-        title: "Skills",
-        what: "A skill is a set of instructions for a kind of task, such as a house style or a way of working. "
-          + "Skills switched on under Settings, Skills are used by themselves when a task fits; the + under the "
-          + "message box adds others to one chat.",
+        id: "skills-make",
+        tools: ["skill_propose"],
+        title: "Make a skill",
+        what: "A skill is a set of instructions, with the knowledge that goes with them, for one kind of task: "
+          + "answering from a manual, a house style, a report done your way. Give the assistant your material - PDF, "
+          + "Word, Excel, PowerPoint, notes - and say what the skill should do: it writes the skill in the format "
+          + "Claude uses, tries it, and shows a card. Add skill on the card puts it among your skills.",
         examples: [
-          { text: "Which skills do you have, and when do you use them?" },
-          { text: "Use the [skill name] skill for this" },
+          { text: "Make a skill from this manual that answers questions about the machine's error codes",
+            attach: "the manual (PDF)", skills: [SKILL_MAKER] },
+          { text: "Make a skill that writes our monthly report the way this one does", attach: "a report (Word)",
+            skills: [SKILL_MAKER] },
+          { text: "Make a skill that checks a budget against the rules in this sheet", attach: "the sheet (Excel)",
+            skills: [SKILL_MAKER] },
         ],
+        how: ["The Skills page in the sidebar: New skill opens a chat with the skill maker chosen.",
+          "In a chat: the Skills button by the message box, Make a skill."],
+        tips: ["Say what a good result looks like - the answer, the file, the format - and the skill will aim for it."],
+      },
+      {
+        id: "skills-use",
+        tools: ["skill"],
+        title: "Use a skill",
+        what: "A skill is used only in the chats you choose it for - nothing is picked on its own. The assistant then "
+          + "follows it, and reads its files when it needs them.",
+        how: ["Type / in the message box and the skill's name, or press the Skills button by the message box.",
+          "A project's skills (its page, Settings) are used in all the project's chats."],
+        tips: ["Two or three skills at a time are plenty: each one takes room in what the assistant reads."],
+      },
+      {
+        id: "skills-share",
+        title: "Share, improve and bring skills",
+        what: "Your skills are yours until you share them with the family; then everyone can choose them, and they "
+          + "see who made them. Skills from Claude come in as they are, and yours go to Claude the same way.",
+        how: ["The Skills page: Share with the family, Improve (a chat with the skill maker and the skill), "
+          + "Download (a .zip Claude takes), Import (a .zip, .skill or SKILL.md, e.g. from Claude), Delete."],
       },
       {
         id: "instructions",

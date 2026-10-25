@@ -7,6 +7,7 @@ export type Route =
   | { name: "project"; id: number; tab?: string }
   | { name: "project-new-chat"; id: number }
   | { name: "libraries"; id?: number }
+  | { name: "skills" }
   | { name: "settings"; tab: string }
   | { name: "help"; section?: string };
 
@@ -19,6 +20,7 @@ export function parse(path: string): Route {
   if (m) return { name: "project", id: Number(m[1]), tab: m[2] };
   m = path.match(/^\/libraries(?:\/(\d+))?\/?$/);
   if (m) return { name: "libraries", id: m[1] ? Number(m[1]) : undefined };
+  if (/^\/(settings\/)?skills\/?$/.test(path)) return { name: "skills" };    // skills were under Settings before 0.23.0
   m = path.match(/^\/settings(?:\/([\w-]+))?\/?$/);
   if (m) return { name: "settings", tab: m[1] ?? "models" };
   m = path.match(/^\/help(?:\/([\w-]+))?\/?$/);
@@ -33,6 +35,7 @@ export function href(r: Route): string {
     case "project": return r.tab ? `/p/${r.id}/${r.tab}` : `/p/${r.id}`;
     case "project-new-chat": return `/p/${r.id}/new`;
     case "libraries": return r.id ? `/libraries/${r.id}` : "/libraries";
+    case "skills": return "/skills";
     case "settings": return `/settings/${r.tab}`;
     case "help": return r.section ? `/help/${r.section}` : "/help";
   }

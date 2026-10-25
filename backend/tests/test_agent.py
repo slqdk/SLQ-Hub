@@ -891,32 +891,6 @@ async def test_a_long_turn_stays_inside_the_context(signed_in, app, fakes, monke
 
 # ---------------------------------------------------------------- skills and memory
 
-async def test_skills_are_offered_loaded_and_can_be_switched_off(signed_in, app, fakes):
-    skill = b"---\nname: haiku-writer\ndescription: Write haiku in 5-7-5.\n---\nCount the syllables.\n"
-    r = await signed_in.post("/hub/api/skills", files={"file": ("SKILL.md", skill, "text/markdown")})
-    assert r.json() == {"name": "haiku-writer"}
-    assert (await signed_in.get("/hub/api/skills")).json()[0]["enabled"] is True
-    fakes.llama["replies"] = [{"tool_calls": [{"name": "skill", "arguments": {"name": "haiku-writer"}}]},
-                              {"content": "Autumn moon..."}, {"content": "Haiku"}]
-    c = await new_chat(signed_in)
-    await finish(app, await say(signed_in, c["id"], "a haiku please"))
-    first = fakes.llama["requests"][0]
-    assert "haiku-writer: Write haiku in 5-7-5." in first["messages"][0]["content"]
-    assert "Count the syllables." in fakes.llama["requests"][1]["messages"][-1]["content"]
-    await signed_in.patch("/hub/api/skills/haiku-writer", json={"enabled": False})
-    fakes.llama["requests"].clear()
-    fakes.llama["replies"] = [{"content": "ok"}]
-    await finish(app, await say(signed_in, c["id"], "again"))
-    req = fakes.llama["requests"][0]
-    assert "haiku-writer" not in req["messages"][0]["content"]
-    assert "skill" not in {t["function"]["name"] for t in req["tools"]}
-    # A chat can still add it.
-    await signed_in.patch(f"/hub/api/chats/{c['id']}", json={"settings": {"skills": ["haiku-writer"]}})
-    fakes.llama["requests"].clear()
-    await finish(app, await say(signed_in, c["id"], "once more"))
-    assert "haiku-writer" in fakes.llama["requests"][0]["messages"][0]["content"]
-
-
 async def test_memory_files_are_listed_in_the_prompt(signed_in, app, fakes):
     r = await signed_in.put("/hub/api/memory/file", json={"path": "/memories/user.md",
                                                          "content": "# Prefers short answers\nDanish or English."})

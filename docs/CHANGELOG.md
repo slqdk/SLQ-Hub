@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.23.0 - 2026-10-25
+
+- **Make your own skills.** Attach your material - PDF, Word, Excel,
+  PowerPoint - and say what the skill should do: the assistant reads it all,
+  writes the skill in the format Claude uses, tries it and shows a card with
+  **Add skill**. Start one from the Skills button by the message box (Make a
+  skill), the Skills page (New skill) or the help's examples. Excel files are
+  read sheet by sheet, values and formulas, and PowerPoint files slide by
+  slide, also in chats that run no code.
+- **A Skills page** in the sidebar, by Projects: your skills, the ones the
+  family shares and the Hub's own. Share a skill with the family or keep it
+  to yourself, improve it with the assistant, edit its SKILL.md, download it
+  as a .zip for Claude, import one from Claude (.zip, .skill or SKILL.md), or
+  delete it. Everyone the owner added has their own skills too. Settings →
+  Skills is gone; its address opens the new page.
+- **You choose the skills for each chat.** The Skills button lists them, or
+  type / and a skill's name in the message. The chosen ones show above the
+  message and the assistant follows them; a project's settings can choose
+  skills for all its chats. Before, the skills switched on in Settings were
+  offered in every chat for the assistant to pick from.
+- The help's "Memory and skills" section tells how to make, use and share
+  skills.
+
 ## 0.22.3 - 2026-10-25
 
 - **The video model you set is the one used.** The assistant now keeps to
