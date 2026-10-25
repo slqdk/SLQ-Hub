@@ -276,9 +276,11 @@ the host if the VM ever stops by itself.
    (low/medium/xhigh), `enable_thinking`. The Hub also parses text tool calls
    (Qwen3-Coder XML and Hermes JSON) as a fallback.
 4. **ComfyUI on the card**: FLUX.2 klein 4B generates and Qwen-Image 2.1
-   edits on the card (chat 9, above), and the LLM loads again after it. Not
-   seen yet: Qwen-Image 2.1 generating (and whether its int8 kernels or the
-   bf16 fallback ran), the self-test's image line (`sudo bash
+   edits on the card (chat 9, above), and the LLM loads again after it.
+   Qwen-Image 2.1 generated in the first test run (an 800×1408 poster with
+   its text right, 39 s in the tool with the swap; an edit and a cut-out
+   1 min 13-14 s each). Not seen yet: whether its int8 kernels or the bf16
+   fallback ran (ComfyUI's log says), the self-test's image line (`sudo bash
    /opt/slq-hub/update.sh compose exec hub python -m app.cli selftest
    --images`).
    ERNIE-Image is untried too: whether the prompt enhancer answers in English
@@ -421,7 +423,9 @@ the host if the VM ever stops by itself.
     and the LLM's file is mapped, in a 40 GB VM. Watch `free -h` and the
     kernel log for OOM kills the first time both run.
 32. **ACE-Step 1.5 and Stable Audio 3 on the card**: both ran in chat 15,
-    10 s each (8.5 s and 18.8 s, mostly loading and ACE-Step's planner).
+    10 s each (8.5 s and 18.8 s, mostly loading and ACE-Step's planner); in
+    the first test run XL Turbo made 30 s of music in 23 s and Stable Audio 3
+    Medium 6 s of a sound effect in 7 s (after 11 and 6 s of loading).
     Not seen: VRAM (XL Turbo with its 4B planner about 20 GB), a 2-3 minute
     song's time (the planner's share grows with the length), how they sound,
     how Danish lyrics sound. ACE-Step 1.5 Turbo is the lighter choice if XL
@@ -701,6 +705,8 @@ the host if the VM ever stops by itself.
   a Unicode packet: its KeyDown sees `VK_PACKET`, as on Windows.
 - The run's live events are kept in memory for an hour; the stored messages
   are permanent.
-- No custom ComfyUI workflows yet; no video. Speech, music and sound effects
-  are one file per call (no voice conversion, no editing of a song; ffmpeg in
-  bash mixes and cuts).
+- No custom ComfyUI workflows yet: pictures, sound and video come from the
+  Hub's own graphs. Speech, music, sound effects and video are one file per
+  call (a video 10 s at most); a remake re-performs a song from its start
+  (5 minutes at most), not a chosen part of it; ffmpeg in bash mixes and
+  cuts.
