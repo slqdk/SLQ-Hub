@@ -344,9 +344,25 @@
   ],
   "video": [
     {
+      "id": "wan2.2-5b-turbo",
+      "name": "Wan 2.2 5B Turbo",
+      "description": "The 5B in 4 steps instead of 20, without the second (guidance) pass: a tenth of its sampling, so a clip takes minutes instead of a quarter of an hour; decoding the frames takes as long as before. A little less detail and motion - ask for full quality to get the 5B's 20 steps. Video from a description or from a picture, 5 s at 720p, 24 frames a second. Wan 2.2 5B with the Turbo distillation (quanhaol, as Kijai's LoRA): shares its files with Wan 2.2 5B and adds 332 MB. Turbo: CC BY-NC-SA 4.0, not for commercial use; Wan 2.2: Apache 2.0.",
+      "default": false,
+      "engine": "comfy",
+      "family": "wan2.2-5b",
+      "abilities": ["t2v", "i2v"],
+      "settings": {"steps": 4, "cfg": 1.0, "shift": 5.0, "sampler": "uni_pc_bh2", "scheduler": "simple", "lora_strength": 1.0, "full_model": "wan2.2-5b", "fps": 24, "sizes": {"480p": [832, 480], "720p": [1280, 704]}, "size": "720p", "multiple": 32},
+      "files": [
+        {"repo": "Comfy-Org/Wan_2.2_ComfyUI_Repackaged", "path": "split_files/diffusion_models/wan2.2_ti2v_5B_fp16.safetensors", "dest": "comfy/diffusion_models/wan2.2_ti2v_5B_fp16.safetensors", "size": 10000000000, "role": "unet"},
+        {"repo": "Kijai/WanVideo_comfy", "path": "LoRAs/Wan22-Turbo/Wan22_TI2V_5B_Turbo_lora_rank_64_fp16.safetensors", "dest": "comfy/loras/Wan22_TI2V_5B_Turbo_lora_rank_64_fp16.safetensors", "size": 332000000, "role": "lora"},
+        {"repo": "Comfy-Org/Wan_2.1_ComfyUI_repackaged", "path": "split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors", "dest": "comfy/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors", "size": 6735906897, "role": "text_encoder"},
+        {"repo": "Comfy-Org/Wan_2.2_ComfyUI_Repackaged", "path": "split_files/vae/wan2.2_vae.safetensors", "dest": "comfy/vae/wan2.2_vae.safetensors", "size": 1409400000, "role": "vae"}
+      ]
+    },
+    {
       "id": "wan2.2-5b",
       "name": "Wan 2.2 5B",
-      "description": "Video from a description or from a picture - one model does both: 5 s at 720p (1280x704), 24 frames a second. Alibaba's Wan 2.2 TI2V, the lighter Wan. Apache 2.0 licence.",
+      "description": "Video from a description or from a picture - one model does both: 5 s at 720p (1280x704), 24 frames a second, in 20 steps (about a quarter of an hour on a 7900 XTX). Alibaba's Wan 2.2 TI2V, the lighter Wan. Wan 2.2 5B Turbo makes the same in a tenth of the steps. Apache 2.0 licence.",
       "default": false,
       "engine": "comfy",
       "family": "wan2.2-5b",

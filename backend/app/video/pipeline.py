@@ -193,10 +193,13 @@ class VideoPipeline:
             raise VideoError("a last picture needs a first one")
         ability = "flf2v" if last_image is not None else "i2v" if image is not None else "t2v"
         entry = self.chosen(ability, model)
+        quality = quality if quality in QUALITIES else "fast"
+        full = self.entry(str((entry.get("settings") or {}).get("full_model") or ""))
+        if quality == "full" and full and ability in abilities(full) and self.hub.catalog.installed(full):
+            entry = full                         # Wan 2.2 5B Turbo's full quality: the 5B's own 20 steps (0.25.0)
         s = entry.get("settings") or {}
         fps = int(s.get("fps") or 16)
         seconds = max(1.0, min(MAX_SECONDS, float(seconds)))
-        quality = quality if quality in QUALITIES else "fast"
         picture = None
         for data in (image, last_image):
             if data is not None:
@@ -210,6 +213,8 @@ class VideoPipeline:
         if family == "wan2.2-5b":
             files = {"unet": comfy_name(entry, "unet"), "text_encoder": comfy_name(entry, "text_encoder"),
                      "vae": comfy_name(entry, "vae")}
+            if any(f.get("role") == "lora" for f in entry.get("files") or []):
+                files["lora"] = comfy_name(entry, "lora")                   # the Turbo
         elif family == "wan2.2-14b":
             fast = quality == "fast"
             files = {"high": comfy_name(entry, "unet_high"), "low": comfy_name(entry, "unet_low"),
@@ -223,7 +228,8 @@ class VideoPipeline:
                       fps=fps, start_image=names.get("start"), sampler=str(s.get("sampler") or "euler"),
                       scheduler=str(s.get("scheduler") or "simple"), shift=float(s.get("shift") or 5.0))
         if family == "wan2.2-5b":
-            graph = W.wan_5b(steps=int(s.get("steps") or 20), cfg=float(s.get("cfg") or 5.0), **common, **files)
+            graph = W.wan_5b(steps=int(s.get("steps") or 20), cfg=float(s.get("cfg") or 5.0),
+                             lora_strength=float(s.get("lora_strength") or 1.0), **common, **files)
         else:
             # the template's steps, split and cfg for fast or full - and its own for an ability that differs (the
             # first-to-last-frame template runs full quality at shift 8 and cfg 4)

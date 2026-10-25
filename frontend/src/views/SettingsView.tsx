@@ -1340,7 +1340,9 @@ function AgentTab({ s }: { s: S }) {
           help: "A 3B model in the image workflow turns the prompt into a detailed description first. The chat shows what it wrote." },
       ]} />
       {videoModels.length > 0 && <SectionForm s={s} section="video" title="Video" fields={[
-        { key: "t2v_model", label: "Model for a video from a description", type: "select", options: videoOptions("t2v") },
+        { key: "t2v_model", label: "Model for a video from a description", type: "select", options: videoOptions("t2v"),
+          help: "Wan 2.2 5B Turbo is the fast one: the 5B in 4 steps instead of 20. Wan 2.2 5B takes several times "
+            + "longer for a little more detail and motion - ask for the best quality to use it for one clip." },
         { key: "i2v_model", label: "Model for a video from a picture", type: "select", options: videoOptions("i2v"),
           help: "A video from a first to a last picture uses it when it can (Wan 2.2 14B picture to video), otherwise a " +
             "model that can. The assistant can still use another downloaded model if you name it." },

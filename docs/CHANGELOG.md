@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.25.0 - 2026-10-25
+
+- **Faster video: Wan 2.2 5B Turbo.** A new video model under Settings →
+  Models → Video models: the 5B in 4 steps instead of 20, without the second
+  pass each step needed - a tenth of the work for the same 5-second 720p clip,
+  which took about a quarter of an hour. Beside Wan 2.2 5B it is a 332 MB
+  download (it uses the 5B's files). Once downloaded it is the default for
+  video from a description and from a picture; ask for "the best quality" to
+  have one clip made with the 5B's 20 steps, or choose Wan 2.2 5B under
+  Settings → Assistant → Video. The Turbo is licensed for non-commercial use.
+
 ## 0.24.1 - 2026-10-25
 
 - **The queue's times count up.** The GPU queue showed each job's running or

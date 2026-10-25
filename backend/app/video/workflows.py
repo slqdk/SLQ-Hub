@@ -5,6 +5,9 @@ Wan 2.2 5B (video_wan2_2_5B_ti2v.json): one model makes video from a description
 UNETLoader -> ModelSamplingSD3 (shift 8); CLIPLoader (umt5-xxl, type "wan"); VAELoader (the Wan 2.2 VAE, 16x
 spatial); Wan22ImageToVideoLatent (1280x704, 121 frames, the picture as its first frame when there is one);
 KSampler (20 steps, cfg 5, uni_pc/simple); VAEDecodeTiled (below); CreateVideo (24 fps); SaveVideo.
+Wan 2.2 5B Turbo (0.25.0) is the same graph with the Turbo LoRA (quanhaol's 4-step, CFG-distilled 5B, as Kijai's
+rank-64 LoRA) in a LoraLoaderModelOnly after the UNETLoader, and 4 steps at cfg 1 - ComfyUI then skips the
+negative pass - with UniPC (bh2) at shift 5, as the Turbo's own examples (diffusers' UniPC, flow_shift 5).
 
 Wan 2.2 14B (video_wan2_2_14B_t2v.json, _i2v.json, _flf2v.json): two experts, high noise for the first half of the
 steps and low noise for the rest, each a KSamplerAdvanced; with the lightx2v 4-step LoRAs (the templates' "fast"
@@ -55,7 +58,8 @@ def _save(video_ref: list, prefix: str) -> dict:
 def wan_5b(*, prompt: str, negative_prompt: str = "", seconds: float, width: int, height: int, seed: int, unet: str,
            text_encoder: str, vae: str, steps: int = 20, cfg: float = 5.0, shift: float = 8.0,
            sampler: str = "uni_pc", scheduler: str = "simple", fps: int = 24, start_image: str | None = None,
-           prefix: str = "video/hub") -> dict:
+           lora: str | None = None, lora_strength: float = 1.0, prefix: str = "video/hub") -> dict:
+    """lora given: the Turbo (or another LoRA on the 5B) between the model and its sampling."""
     graph = {
         "1": {"class_type": "UNETLoader", "inputs": {"unet_name": unet, "weight_dtype": "default"}},
         "2": {"class_type": "ModelSamplingSD3", "inputs": {"model": ["1", 0], "shift": float(shift)}},
@@ -77,6 +81,10 @@ def wan_5b(*, prompt: str, negative_prompt: str = "", seconds: float, width: int
     if start_image:
         graph["7"] = {"class_type": "LoadImage", "inputs": {"image": start_image}}
         graph["8"]["inputs"]["start_image"] = ["7", 0]
+    if lora:
+        graph["13"] = {"class_type": "LoraLoaderModelOnly",
+                       "inputs": {"model": ["1", 0], "lora_name": lora, "strength_model": float(lora_strength)}}
+        graph["2"]["inputs"]["model"] = ["13", 0]
     return graph
 
 

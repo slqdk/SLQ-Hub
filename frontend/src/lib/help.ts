@@ -66,8 +66,8 @@ export const NEEDS: Record<Need, { missing: string; get: string; tab?: string }>
   "sound.sound": { missing: "Needs a sound effects model", get: "Download Stable Audio 3 Medium under Settings, Models, Sound, music and speech.", tab: "models" },
   "sound.voice": { missing: "Needs Seed-VC", get: "Download Seed-VC (and Mel-Band RoFormer vocals, for songs) under Settings, Models, Sound, music and speech.", tab: "models" },
   "sound.separate": { missing: "Needs Mel-Band RoFormer vocals", get: "Download it under Settings, Models, Sound, music and speech.", tab: "models" },
-  "video.t2v": { missing: "Needs a video model", get: "Download Wan 2.2 5B or Wan 2.2 14B text to video under Settings, Models, Video models.", tab: "models" },
-  "video.i2v": { missing: "Needs a video model for pictures", get: "Download Wan 2.2 5B or Wan 2.2 14B picture to video under Settings, Models, Video models.", tab: "models" },
+  "video.t2v": { missing: "Needs a video model", get: "Download Wan 2.2 5B Turbo (fast), Wan 2.2 5B or Wan 2.2 14B text to video under Settings, Models, Video models.", tab: "models" },
+  "video.i2v": { missing: "Needs a video model for pictures", get: "Download Wan 2.2 5B Turbo (fast), Wan 2.2 5B or Wan 2.2 14B picture to video under Settings, Models, Video models.", tab: "models" },
   "video.flf2v": { missing: "Needs Wan 2.2 14B picture to video", get: "Download it under Settings, Models, Video models.", tab: "models" },
 };
 
@@ -537,11 +537,12 @@ export const SECTIONS: HelpSection[] = [
         id: "quality",
         tools: ["video_generate"],
         title: "Length, shape and quality",
-        what: "Ask for the length (1-10 seconds), landscape, portrait or square, 720p, and - with the Wan 2.2 14B "
-          + "models - full quality (several times slower than the default).",
+        what: "Ask for the length (1-10 seconds), landscape, portrait or square, 720p, and the best quality: several "
+          + "times slower than the default - Wan 2.2 5B Turbo hands the clip to the 5B's 20 steps, the 14B models "
+          + "run 20 steps instead of 4.",
         examples: [
           { text: "The same video again, 8 seconds long" },
-          { text: "The same, but in full quality" },
+          { text: "The same, but in the best quality" },
           { text: "Make it in 720p" },
         ],
         needs: ["video.t2v"],

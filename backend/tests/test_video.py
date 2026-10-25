@@ -61,16 +61,18 @@ def catalog(app) -> dict:
 async def test_the_video_models_are_in_the_catalog_and_download(signed_in, app):
     r = await signed_in.get("/hub/api/models")
     video = {m["id"]: m for m in r.json()["video"]}
-    assert list(video) == ["wan2.2-5b", "wan2.2-i2v-14b", "wan2.2-t2v-14b"]
+    assert list(video) == ["wan2.2-5b-turbo", "wan2.2-5b", "wan2.2-i2v-14b", "wan2.2-t2v-14b"]   # the fast one first
     assert not any(m["installed"] for m in video.values())
     assert {m["engine"] for m in video.values()} == {"comfy"}
-    assert video["wan2.2-5b"]["abilities"] == ["t2v", "i2v"]
+    assert video["wan2.2-5b"]["abilities"] == video["wan2.2-5b-turbo"]["abilities"] == ["t2v", "i2v"]
     assert video["wan2.2-i2v-14b"]["abilities"] == ["i2v", "flf2v"] and video["wan2.2-t2v-14b"]["abilities"] == ["t2v"]
     for m in video.values():
-        assert m["description"].endswith("Apache 2.0 licence.")
+        assert m["description"].endswith("Apache 2.0 licence." if m["id"] != "wan2.2-5b-turbo" else
+                                          "Turbo: CC BY-NC-SA 4.0, not for commercial use; Wan 2.2: Apache 2.0.")
         for f in m["files"]:
             assert f["dest"].startswith("comfy/") and f["size"] > 0 and f["repo"] and f["path"] and f["role"], f
-            assert f["path"].startswith("split_files/") and f["path"].rsplit("/", 1)[-1] == f["dest"].rsplit("/", 1)[-1]
+            assert f["path"].rsplit("/", 1)[-1] == f["dest"].rsplit("/", 1)[-1]
+            assert f["path"].startswith("split_files/") or f["repo"] == "Kijai/WanVideo_comfy"
     total = {k: sum(f["size"] for f in m["files"]) / 1e9 for k, m in video.items()}
     assert round(total["wan2.2-5b"], 1) == 18.1 and round(total["wan2.2-i2v-14b"], 1) == 38.0      # the templates'
     # the 14B pair shares the text encoder and the VAE, which download once
@@ -81,6 +83,11 @@ async def test_the_video_models_are_in_the_catalog_and_download(signed_in, app):
     assert not any(UMT5 in q or "vae" in q for q in r.json()["queued"])
     for m in ("wan2.2-i2v-14b", "wan2.2-t2v-14b"):
         app.state.hub.extras["downloads"].cancel(m)
+    # the Turbo is the 5B's files and its LoRA: with the 5B there, only the LoRA downloads
+    install(app, "wan2.2-5b")
+    r = await signed_in.post("/hub/api/models/wan2.2-5b-turbo/download")
+    assert r.json()["queued"] == ["comfy/loras/Wan22_TI2V_5B_Turbo_lora_rank_64_fp16.safetensors"]
+    app.state.hub.extras["downloads"].cancel("wan2.2-5b-turbo")
 
 
 async def test_no_video_tool_until_a_model_is_downloaded(signed_in, app, fakes):
@@ -274,6 +281,66 @@ async def test_wan_14b_from_a_description_and_the_settings_choose_the_model(sign
     assert len(fakes.comfy["prompts"]) == 2
 
 
+# ---------------------------------------------------------------- Wan 2.2 5B Turbo (0.25.0)
+
+async def test_wan_5b_turbo_is_the_fast_default_and_full_quality_is_the_5b(signed_in, app, fakes, tmp_path):
+    install(app, "wan2.2-5b-turbo")                       # its files are the 5B's and the LoRA: both are there
+    c = await new_chat(signed_in)
+    res = await call(app, signed_in, c["id"], fakes, {"prompt": "A red fox runs through snow", "seed": 7})
+    assert res["ok"], res
+    tool = tools_offered(fakes, 0)["video_generate"]
+    assert tool["parameters"]["properties"]["model"]["enum"] == ["wan2.2-5b-turbo", "wan2.2-5b"]
+    assert "Wan 2.2 5B Turbo: Wan 2.2 5B's 20 steps instead of 4" in tool["parameters"]["properties"]["quality"][
+        "description"]
+    assert "Without model: from a description: Wan 2.2 5B Turbo; from a picture: Wan 2.2 5B Turbo" in \
+        tool["description"]
+    g = fakes.comfy["prompts"][0]
+    assert one(g, "UNETLoader")["unet_name"] == "wan2.2_ti2v_5B_fp16.safetensors"
+    assert one(g, "LoraLoaderModelOnly") == {"model": ["1", 0], "lora_name":
+                                             "Wan22_TI2V_5B_Turbo_lora_rank_64_fp16.safetensors", "strength_model": 1.0}
+    assert one(g, "ModelSamplingSD3") == {"model": ["13", 0], "shift": 5.0}         # the LoRA, then the sampling
+    k = one(g, "KSampler")
+    assert (k["model"], k["steps"], k["cfg"], k["sampler_name"], k["scheduler"]) == (["2", 0], 4, 1.0, "uni_pc_bh2",
+                                                                                     "simple")
+    latent = one(g, "Wan22ImageToVideoLatent")
+    assert (latent["width"], latent["height"], latent["length"]) == (1280, 704, 121)
+    assert res["text"].startswith("Saved a-red-fox-runs-through-snow.mp4: 5.04 s, 121 frames at 24 fps, 1280x704, "
+                                  "Wan 2.2 5B Turbo, seed 7 (")
+    assert res["display"]["video"][0]["model"] == "Wan 2.2 5B Turbo"
+    # from a picture too
+    put(app, c["id"], "fox.png", picture((1024, 768)))
+    res = await call(app, signed_in, c["id"], fakes, {"prompt": "the fox turns its head", "image": "fox.png"})
+    assert res["ok"] and "Wan 2.2 5B Turbo" in res["text"], res
+    g = fakes.comfy["prompts"][1]
+    assert one(g, "LoraLoaderModelOnly")["lora_name"] == "Wan22_TI2V_5B_Turbo_lora_rank_64_fp16.safetensors"
+    assert "start_image" in one(g, "Wan22ImageToVideoLatent") and one(g, "KSampler")["steps"] == 4
+    # full quality: the 5B's own 20 steps, no LoRA
+    res = await call(app, signed_in, c["id"], fakes, {"prompt": "A red fox runs through snow", "quality": "full"},
+                     text="The same in the best quality")
+    assert res["ok"] and "1280x704, Wan 2.2 5B, seed" in res["text"], res
+    g = fakes.comfy["prompts"][2]
+    assert "LoraLoaderModelOnly" not in W.class_types(g)
+    k = one(g, "KSampler")
+    assert (k["steps"], k["cfg"], k["sampler_name"]) == (20, 5.0, "uni_pc") and one(g, "ModelSamplingSD3")["shift"] == 8.0
+    # the owner's choice of the 5B stands: the default quality does not make it the Turbo
+    await signed_in.put("/hub/api/settings", json={"section": "video", "values": {"t2v_model": "wan2.2-5b"}})
+    res = await call(app, signed_in, c["id"], fakes, {"prompt": "A red fox runs through snow"})
+    assert res["ok"] and "Wan 2.2 5B, seed" in res["text"] and "LoraLoaderModelOnly" not in W.class_types(
+        fakes.comfy["prompts"][3])
+
+
+def test_the_turbo_graph_names_its_lora_and_loads_it_before_the_sampling():
+    g = W.wan_5b(prompt="p", seconds=5, width=1280, height=704, seed=1, unet="u.safetensors", text_encoder=UMT5,
+                 vae="v.safetensors", steps=4, cfg=1.0, shift=5.0, sampler="uni_pc_bh2", lora="turbo.safetensors",
+                 lora_strength=0.8)
+    assert g["13"] == {"class_type": "LoraLoaderModelOnly", "inputs": {"model": ["1", 0], "lora_name": "turbo.safetensors",
+                                                                        "strength_model": 0.8}}
+    assert g["2"]["inputs"]["model"] == ["13", 0] and g["9"]["inputs"]["model"] == ["2", 0]
+    plain = W.wan_5b(prompt="p", seconds=5, width=1280, height=704, seed=1, unet="u.safetensors", text_encoder=UMT5,
+                     vae="v.safetensors")
+    assert "13" not in plain and plain["2"]["inputs"]["model"] == ["1", 0]
+
+
 # ---------------------------------------------------------------- people and errors
 
 async def test_a_persons_video_goes_to_her_device_and_comfyui_keeps_nothing(signed_in, app, fakes, tmp_path,
@@ -379,7 +446,8 @@ async def test_the_hugging_face_dialog_points_to_the_hubs_own_models(signed_in, 
     assert r.json()["in_hub"] == [{"id": "seed-vc", "name": "Seed-VC", "group": "audio",
                                    "section": "Sound, music and speech", "installed": False}]
     r = await signed_in.get("/hub/api/models/hf/search", params={"q": "wan 2.2"})
-    assert [m["id"] for m in r.json()["in_hub"]] == ["wan2.2-5b", "wan2.2-i2v-14b", "wan2.2-t2v-14b"]
+    assert [m["id"] for m in r.json()["in_hub"]] == ["wan2.2-5b-turbo", "wan2.2-5b", "wan2.2-i2v-14b",
+                                                     "wan2.2-t2v-14b"]
     assert {m["section"] for m in r.json()["in_hub"]} == {"Video models"}
     assert (await signed_in.get("/hub/api/models/hf/search", params={"q": "zz"})).json()["in_hub"] == []
 

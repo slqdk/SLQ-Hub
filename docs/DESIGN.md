@@ -1431,6 +1431,22 @@ sound, with ComfyUI's own nodes only (the image is unchanged):
     (832×480) by default, 720p (1280×720) when asked. 38.0 GB each (35.4 in
     Settings); the pair shares the text encoder and the VAE (7.0 GB,
     downloaded once).
+  - `wan2.2-5b-turbo` (0.25.0), first in the list, so it is the default
+    once downloaded: the 5B with the Turbo distillation - quanhaol's
+    Wan2.2-TI2V-5B-Turbo, step- and CFG-distilled to 4 steps with
+    Self-Forcing/DMD, for a description and for a picture, CC BY-NC-SA 4.0 -
+    as Kijai's rank-64 LoRA (`Kijai/WanVideo_comfy`,
+    `LoRAs/Wan22-Turbo/Wan22_TI2V_5B_Turbo_lora_rank_64_fp16.safetensors`, 332
+    MB, sha256 0ace5244...). Its other files are the 5B's, so beside the 5B
+    only the LoRA downloads. 4 steps at cfg 1 - ComfyUI then leaves out the
+    negative pass, so 4 model passes instead of the 5B's 40 - with UniPC (bh2)
+    at shift 5, as the Turbo's own examples; decoding stays as it was. Søren
+    asked for video to be faster after the test runs (15.5 minutes for a 5-s
+    clip; "they turn out good"): the faster choice is the default, and
+    `quality: "full"` (the user asks for the best quality) hands the clip to
+    the 5B's 20 steps (`settings.full_model`), as `full` drops the 14B's
+    LoRAs. FastWan's 5B LoRA (3 steps) was the other candidate; it was
+    trained for text to video only.
   - Why Wan: fp16 and fp8 weights, which ComfyUI computes in 16 bits on
     RDNA3 - the plain ROCm path. LTX-2.x and the newer MiniMax and Hunyuan
     templates ship nvfp4 or int8-convrot weights and 32B-class text encoders
@@ -1440,7 +1456,9 @@ sound, with ComfyUI's own nodes only (the image is unchanged):
   templates (workflow_templates 0.11.93 for ComfyUI v0.42.3). 5B:
   `UNETLoader → ModelSamplingSD3`, `CLIPLoader` (type `wan`), `VAELoader`,
   `Wan22ImageToVideoLatent` (the picture as its first frame), `KSampler`,
-  `VAEDecodeTiled` (0.22.1, below), `CreateVideo`, `SaveVideo` (MP4, H.264). 14B: two `UNETLoader`
+  `VAEDecodeTiled` (0.22.1, below), `CreateVideo`, `SaveVideo` (MP4, H.264);
+  the Turbo puts its LoRA in a `LoraLoaderModelOnly` between the
+  `UNETLoader` and `ModelSamplingSD3`. 14B: two `UNETLoader`
   (each through `LoraLoaderModelOnly` when fast) → `ModelSamplingSD3`;
   `EmptyHunyuanLatentVideo` for a description, `WanImageToVideo` for a
   picture, `WanFirstLastFrameToVideo` for two; the high-noise sampler runs

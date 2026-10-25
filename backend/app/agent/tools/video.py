@@ -115,8 +115,9 @@ def _params(models: list[str]) -> dict:
                                 "description": "Without a picture; a video from a picture keeps its shape."},
                 "hd": {"type": "boolean", "description": "true: 720p, false: 480p (default: the model's own)."},
                 "quality": {"type": "string", "enum": ["fast", "full"],
-                            "description": "Wan 2.2 14B only: fast (4 steps, default) or full (20 steps, several "
-                                           "times longer)."},
+                            "description": "fast (default) or full - when the user asks for the best quality: "
+                                           "several times longer. Wan 2.2 14B: 20 steps instead of 4; Wan 2.2 5B "
+                                           "Turbo: Wan 2.2 5B's 20 steps instead of 4."},
                 "negative": {"type": "string", "description": "What to keep out."},
                 "model": model, "seed": {"type": "integer"},
                 "save_as": {"type": "string", "description": "Path in the working folder (.mp4)."}}, ["prompt"])
