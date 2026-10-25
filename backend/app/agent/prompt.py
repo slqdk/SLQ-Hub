@@ -110,7 +110,8 @@ sung in a particular person's voice, make the song with music_generate, then con
 user has the right to use."""
 REMAKE = """
 - music_remake re-performs an existing song with another sound - described in its prompt and/or taken from a \
-reference clip (another song, a live recording with its audience and room)."""
+reference clip (another song, a live recording with its audience and room). For the same recording only live (a \
+hall, an audience), effects keep it exactly: its description shows how."""
 SOUND_TOOLS = {"speech": ("speech_generate",), "music": ("music_generate", "music_remake"),
                "sound": ("sound_generate",), "voice": ("voice_convert",), "separate": ("audio_separate",)}
 

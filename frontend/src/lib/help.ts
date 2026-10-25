@@ -434,8 +434,21 @@ export const SECTIONS: HelpSection[] = [
           { text: "Make the first song sound like the clip from the second", attach: "a song and a clip" },
           { text: "Make a jazz version and keep the lyrics: [paste the lyrics]", attach: "a song" },
         ],
-        tips: ["Give the lyrics to keep the words. Ask to keep more of the original to stay closer to the recording."],
+        tips: ["Give the lyrics to keep the words. Without a clip the song keeps its own sound and the prompt says "
+          + "what changes; ask it to keep more (or less) of the original recording to stay closer to it (or freer)."],
         needs: ["sound.music"],
+      },
+      {
+        id: "live",
+        tools: ["bash", "sound_generate"],
+        title: "The same recording, only live",
+        what: "Keeps the recording exactly and adds a big hall and an audience with effects - a crowd made by the "
+          + "sound effects model when it is there.",
+        examples: [
+          { text: "Keep this exact recording, but make it sound live: a big hall and a cheering audience", attach: "a song" },
+          { text: "Add more hall, and let the audience cheer louder at the end" },
+        ],
+        needs: ["code"],
       },
       {
         id: "stems",

@@ -353,7 +353,7 @@ def make_comfy(state: dict) -> FastAPI:
                  "VAEEncodeAudio", "AudioMerge", "SLQAceStepReference", "SLQAceStepEncode", "SLQSeparateVocals",
                  "SLQSeedVC", "ModelSamplingSD3", "Wan22ImageToVideoLatent", "WanImageToVideo",
                  "WanFirstLastFrameToVideo", "EmptyHunyuanLatentVideo", "KSamplerAdvanced", "LoraLoaderModelOnly",
-                 "CreateVideo", "SaveVideo"]
+                 "CreateVideo", "SaveVideo", "TrimAudioDuration", "AudioConcat"]
         names = [n for n in names if n not in state.get("missing_nodes", ())]
         return {n: {"input": {}, "output": []} for n in names}
 
@@ -417,6 +417,10 @@ def make_comfy(state: dict) -> FastAPI:
         for node_id, node in graph.items():                   # PreviewAny shows the text it was given
             if node.get("class_type") == "PreviewAny":
                 outputs[node_id] = {"text": [state.get("preview_text", "An enhanced, detailed prompt.")]}
+            if node.get("class_type") == "SLQAceStepReference" and "source" in (node.get("inputs") or {}):
+                outputs[node_id] = {"text": [state.get("ace_check", json.dumps(          # its check of the codes
+                    {"timbre_frames": 750, "codes": 1295, "agree": 0.998, "cosine_mean": 0.9993,
+                     "cosine_min": 0.97, "distinct": 811}))]}
             if node.get("class_type") == "SLQSeedVC":         # what the conversion did, as the node reports it
                 outputs[node_id] = {"text": [state.get("vc_text", json.dumps(
                     {"semitones": 12, "reference_seconds": 18.5, "seconds": 61.0, "rate": 44100}))]}

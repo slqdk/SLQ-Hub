@@ -17,8 +17,10 @@ SLQ Hub's own nodes (services/comfyui/nodes/slq_audio) add four graphs:
 - a song with a reference sound (ace_step(timbre=...)): the clip, VAE-encoded, goes to SLQAceStepReference as
   timbre only - the planner still writes the structure;
 - a remake (ace_remake): the song, VAE-encoded, is the cover source (its codes are the structure) and the latent
-  the sampler starts from (denoise 1 - keep), with a style clip as timbre; SLQAceStepEncode leaves the planner out
-  and unknown metadata as N/A;
+  the sampler starts from (denoise 1 - keep), with a style clip as timbre - or, without one, the song itself: 10 s
+  from its start, middle and end, as ACE-Step's own pipeline prepares a reference (0.20.2: chat 24's remake had
+  silence for a timbre and kept neither the key nor the tempo); SLQAceStepEncode leaves the planner out and unknown
+  metadata as N/A;
 - stems (separate): SLQSeparateVocals (Mel-Band RoFormer) -> vocals and accompaniment;
 - another voice (seed_vc): the vocals separated when there is music, SLQSeedVC with the separated reference, the
   accompaniment added back with AudioMerge.
@@ -104,10 +106,11 @@ def _encoded(first: str, audio: str) -> dict:
 
 def ace_remake(*, song: str, caption: str, lyrics: str, seconds: float, seed: int, bpm: int | None, key: str | None,
                time_signature: int | None, language: str, unet: str, text_encoder: str, planner: str, vae: str,
-               keep: float = 0.0, reference: str | None = None, steps: int = 8, cfg: float = 1.0, shift: float = 3.0,
+               keep: float = 0.5, reference: str | None = None, steps: int = 8, cfg: float = 1.0, shift: float = 3.0,
                fmt: str = "mp3", prefix: str = "audio/hub") -> dict:
     """A new version of a song (a file in ComfyUI's input folder): its codes are the structure, the sampler starts
-    from it (keep 0: from noise; up to 0.9: from the song itself), a reference clip gives the sound."""
+    from it (keep 0: from noise; up to 0.9: from the song itself), a reference clip gives the sound - else the
+    song's own (timbre_parts)."""
     seconds = float(max(5.0, min(600.0, seconds)))
     lang = language if language in ACE_LANGUAGES else "unknown"
     ts = str(time_signature) if str(time_signature or "") in ACE_TIME_SIGNATURES else ""
@@ -135,7 +138,29 @@ def ace_remake(*, song: str, caption: str, lyrics: str, seconds: float, seed: in
     if reference:
         graph.update(_encoded("13", reference))
         graph["15"]["inputs"]["timbre"] = ["14", 0]
+    else:
+        graph.update(timbre_parts(["11", 0], seconds, first=16))
+        graph["15"]["inputs"]["timbre"] = ["21", 0]
     return graph
+
+
+def timbre_parts(audio_ref: list, seconds: float, first: int, part: float = 10.0) -> dict:
+    """A song's own sound for ACE-Step's timbre encoder: 10 s from its start, its middle and its end, joined (30 s,
+    what the encoder hears at most) - ACE-Step's pipeline prepares a reference so. Nodes first..first+5; the
+    VAE-encoded result is node first+5. A song under 30 s is used whole."""
+    ids = [str(first + i) for i in range(6)]
+    if seconds < 3 * part:
+        return {ids[5]: {"class_type": "VAEEncodeAudio", "inputs": {"audio": audio_ref, "vae": ["4", 0]}}}
+    trim = lambda start: {"class_type": "TrimAudioDuration",  # noqa: E731
+                          "inputs": {"audio": audio_ref, "start_index": round(start, 2), "duration": part}}
+    return {
+        ids[0]: trim(0.0),
+        ids[1]: trim(max(0.0, seconds / 2 - part / 2)),
+        ids[2]: trim(max(0.0, seconds - part)),
+        ids[3]: {"class_type": "AudioConcat", "inputs": {"audio1": [ids[0], 0], "audio2": [ids[1], 0], "direction": "after"}},
+        ids[4]: {"class_type": "AudioConcat", "inputs": {"audio1": [ids[3], 0], "audio2": [ids[2], 0], "direction": "after"}},
+        ids[5]: {"class_type": "VAEEncodeAudio", "inputs": {"audio": [ids[4], 0], "vae": ["4", 0]}},
+    }
 
 
 def _separate(audio_ref: list, model: str, config: str) -> dict:

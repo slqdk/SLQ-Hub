@@ -1110,6 +1110,25 @@ Hub's own (`services/comfyui/nodes/slq_audio`, installed by the ComfyUI image):
   past 64,000. ComfyUI's own cover mode uses the quantized values, never the
   index, so it does not meet this; the node runs the FSQ step in float32
   (100 % equal to the tokenizer's float32 output).
+  **0.20.2 (chat 24, measured):** the first remake on the card - keep 0, no
+  style clip, "a live concert with a cheering audience and a big hall" - came
+  back in another key (D major → E major) and tempo (about 112 → 152 BPM),
+  its chroma no closer to the song's at the same moment than at a random
+  offset of 20-60 s, its loudness flat where the song has a quiet intro and a
+  drop: a new song of the same length and lyrics. With no clip the timbre
+  encoder had heard silence. Since then, without a clip the song's own sound
+  is the timbre - 10 s of its start, middle and end, joined (ComfyUI's
+  `TrimAudioDuration` and `AudioConcat`), as ACE-Step's own pipeline prepares
+  a reference; keep defaults to 0.5; and `SLQAceStepReference` works out the
+  song's codes when it runs (the model loaded for it) and checks them against
+  ACE-Step's own tokenizer path - the share of 5-a-second steps whose decoded
+  vectors agree (cosine > 0.99) - which the tool's result reports, with a
+  warning the user hears under 90 % (stand-ins: 100 % in float32 and in
+  bfloat16). For the same recording only live, the tool's description gives
+  effects that keep it exactly: a hall (convolution with a decaying pink-noise
+  impulse response; `afir` normalises it to its peak, so it needs `wet=10` and
+  `volume=2` to sit about 5 dB under the song) and a crowd from
+  `sound_generate`, mixed under with ffmpeg.
 - **Stems** (`audio_separate`): vocals and accompaniment, for karaoke,
   remixes, or one part alone. `SLQSeparateVocals` runs Kimberley Jensen's
   Mel-Band RoFormer vocal model (SDR 10.98 on MVSEP's multisong set, the one
@@ -1623,7 +1642,10 @@ has them now - a song, a mix, a script that failed - newest turn first, up to
   fails with its name and the reason. The catalog's paths for them were not
   checked against Hugging Face from here. Seed-VC (April 2025) and its
   dependencies are pinned; MSST is pinned to the commit the node was written
-  against (its import line is checked when loaded).
+  against (its import line is checked when loaded). The first remake heard
+  (chat 24) did not follow its song; whether 0.20.2's own-sound timbre and
+  keep 0.5 make remakes follow, and what the codes check says on the real
+  weights, is not known yet.
 - **Video** (0.19.0, §8) ran only on a CPU ComfyUI with stand-ins. Unknown on
   the 7900 XTX: the time per clip (the 5B at 720p and 121 frames; the 14B
   pair fast and full); whether the 5B at 720p fits in 24 GB under ComfyUI's

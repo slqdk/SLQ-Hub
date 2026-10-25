@@ -416,7 +416,7 @@ async def music_remake(ctx: ToolContext, args: dict) -> ToolResult:
         bpm = int(_number(args, "bpm", 0, 0, 300)) or None
         ts = int(_number(args, "time_signature", 0, 0, 6)) or None
         out = await pipe.remake(song=song, seconds=seconds, prompt=prompt, lyrics=lyrics, reference=reference,
-                                keep=_number(args, "keep", 0.0, 0.0, 0.9), bpm=bpm, key=args.get("key") or None,
+                                keep=_number(args, "keep", KEEP_DEFAULT, 0.0, 0.9), bpm=bpm, key=args.get("key") or None,
                                 time_signature=ts, language=str(args.get("language") or "en"), seed=args.get("seed"),
                                 model=args.get("model") or None, fmt=fmt, ticket=ctx.ticket,
                                 on_progress=await _progress(ctx))
@@ -425,15 +425,28 @@ async def music_remake(ctx: ToolContext, args: dict) -> ToolResult:
     except (ValueError, AudioError) as exc:
         return ToolResult(f"The remake failed: {exc}", is_error=True)
     _save(ctx, rel, out["data"], "made")
-    sound = f" with the sound of {str(args['reference']).strip()}" if reference else ""
+    sound = f" with the sound of {str(args['reference']).strip()}" if reference else " with its own sound"
     words = "no lyrics given, so the words are not kept" if not lyrics.strip() else f"lyrics in {out['language']}"
     meta = ", ".join(x for x in (f"{out['bpm']} BPM" if out["bpm"] else "", out["key"] or "",
                                   f"{out['time_signature']}/4" if out["time_signature"] else "") if x)
     return ToolResult(f"Saved {rel}: a new version of {str(args.get('audio')).strip()}{sound}, {out['seconds']:.0f} s, "
                       f"{out['model']['name']}, keep {out['keep']:.1f}, {words}"
                       f"{', ' + meta if meta else ''}, seed {out['seed']} ({out['compute']:.0f} s on the card). "
-                      f"{_reach(ctx, out['data'])}{note}",
+                      f"{_reach(ctx, out['data'])}{note}{_codes_note(out.get('codes') or {})}",
                       display={"audio": [{"path": rel, "seconds": out["seconds"], "model": out["model"]["name"]}]})
+
+
+def _codes_note(check: dict) -> str:
+    """SLQAceStepReference's check of the song's codes against ACE-Step's own tokenizer (0.20.2: chat 24's remake
+    lost the key and the tempo) - for the export, and a warning the user hears when they disagree."""
+    if "agree" not in check:
+        return ""
+    share = float(check["agree"])
+    if share >= CODES_AGREE:
+        return f" Check: the song's codes agree with ACE-Step's own tokenizer for {share:.1%} of it."
+    return (f" Warning: the song's codes agree with ACE-Step's own tokenizer for only {share:.1%} of it, so the new "
+            "version may not follow the song. Tell the user, and ask for the chat's export (the ⋯ menu, Export for "
+            "troubleshooting).")
 
 
 def _remake_params(models: list[str]) -> dict:
@@ -445,7 +458,8 @@ def _remake_params(models: list[str]) -> dict:
                                                             "empty: the words are not kept."},
                 "reference": {"type": "string", "description": "Optional: a clip in the working folder whose "
                                                                "sound to take (5-30 s)."},
-                "keep": {"type": "number", "description": "0-0.9, default 0: how much of the recording itself stays."},
+                "keep": {"type": "number", "description": f"0-0.9, default {KEEP_DEFAULT}: how much of the "
+                                                         "recording the new version starts from."},
                 "bpm": {"type": "integer"}, "key": {"type": "string"},
                 "time_signature": {"type": "integer", "description": "2, 3, 4 or 6."},
                 "language": {"type": "string", "description": "Language of the lyrics (ISO code, default en)."},
@@ -457,6 +471,16 @@ def _remake_params(models: list[str]) -> dict:
 REMAKE_TEXT = ("Make a new version of a song in the working folder: its melody, rhythm and structure re-performed "
                "with another sound - a style described in the prompt and/or the sound of a reference clip (another "
                "song, a live recording with its audience, room and reverb). Runs on the graphics card.")
+KEEP_DEFAULT = 0.5          # 0.20.2: keep 0 (chat 24) came back in another key and tempo - a new song
+CODES_AGREE = 0.9
+# The same recording, only live: effects keep it exactly. Tried with this Hub's ffmpeg (6.1): the hall at about
+# 5 dB under the song (afir's peak-normalised IR needs wet=10 and volume=2 to be heard), the crowd looped under.
+LIVE_RECIPE = ('ffmpeg -i song.mp3 -f lavfi -i "anoisesrc=c=pink:r=44100:a=0.5:d=2.5,afade=t=out:st=0:d=2.5:curve=exp,'
+               'highpass=f=150,lowpass=f=7000,aformat=sample_fmts=fltp:channel_layouts=stereo" -stream_loop -1 -i '
+               'crowd.mp3 -filter_complex "[0:a]aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo,'
+               'asplit[dry][wet];[wet][1:a]afir=wet=10,volume=2[hall];[dry][hall]amix=inputs=2:normalize=0[room];'
+               '[2:a]aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo,volume=0.25[crowd];'
+               '[room][crowd]amix=inputs=2:duration=first:normalize=0,alimiter=limit=0.9[out]" -map "[out]" live.mp3')
 
 
 def _remake_dynamic(ctx: ToolContext) -> tuple[str, dict]:
@@ -470,9 +494,16 @@ def _remake_dynamic(ctx: ToolContext) -> tuple[str, dict]:
             "reference, you do not: describe what the user says it sounds like.\n- reference: a clip of the sound to "
             "take (5-30 s; cut the part you want with ffmpeg first - the first 30 s are used).\n- lyrics: the song's "
             "words as they are sung, with section tags, in language. Ask the user when you do not know them; "
-            "without them the singing loses its words.\n- keep: 0 (default) a new performance that follows the "
-            "song; 0.3-0.6 stays closer to the recording itself (more of its voice and sound survive, less of the new "
-            "style).\n- bpm, key and time_signature: give them when you know them, else leave them out.\n"
+            "without them the singing loses its words.\n- Without a reference the song's own sound is used (10 s "
+            "of its start, middle and end): describe in the prompt what should change.\n- keep: how much of the "
+            f"recording the new version starts from. {KEEP_DEFAULT} (default) stays close to the song while its sound "
+            "changes; 0.7-0.9 keeps nearly the recording and changes mostly its sound; 0-0.3 is a new performance "
+            "that only follows the song's codes and can come out in another key, tempo and genre.\n- bpm, key and "
+            "time_signature: give them when you know them, else leave them out.\n- The same recording, only "
+            "live: when the user wants this very recording to sound live (a hall, an audience) rather than played "
+            "anew, effects keep it exactly - a crowd from sound_generate (\"concert crowd cheering and applauding in "
+            "a big hall, no music\", when offered) and a hall, with ffmpeg in bash: " + LIVE_RECIPE + " (more hall: "
+            "a higher volume= after afir; without a crowd leave out its input and the last amix).\n"
             "Only recordings the user has the right to use. Models: " +
             ", ".join(f"{e['id']} ({e['name']})" for e in models))
     return text, _remake_params([e["id"] for e in models])

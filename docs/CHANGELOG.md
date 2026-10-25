@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.20.2 - 2026-10-25
+
+- **Remakes stay closer to the original.** Chat 24's live remake of "Breakfast
+  at Tiffany's" came back in another key and tempo - a new song. Now a remake
+  without a style clip keeps the song's own sound (the model hears 10 s of
+  its start, middle and end) and starts from the recording itself by default
+  (keep 0.5; ask for more or less of the original). The result says how well
+  the song's melody codes were read, and warns when they were not.
+- **The same recording, only live.** Ask to keep the exact recording but make
+  it sound live, and the assistant adds a big hall and a cheering crowd with
+  effects - the recording itself stays as it is. In Help under Sound and
+  music.
+
 ## 0.20.1 - 2026-10-25
 
 - **Easier to see which help section you are in.** The sections are now

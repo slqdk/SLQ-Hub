@@ -255,12 +255,13 @@ class AudioPipeline:
                 "time_signature": node["timesignature"], "language": node["language"], "format": fmt}
 
     async def remake(self, *, song: bytes, seconds: float, prompt: str, lyrics: str = "",
-                     reference: bytes | None = None, keep: float = 0.0, bpm: int | None = None, key: str | None = None,
+                     reference: bytes | None = None, keep: float = 0.5, bpm: int | None = None, key: str | None = None,
                      time_signature: int | None = None, language: str = "en", seed: int | None = None,
                      model: str | None = None, fmt: str = "mp3", ticket: Ticket | None = None, owner: str = "web",
                      priority: str = "interactive", on_progress=None) -> dict:
         """A new version of a song (FLAC): its melody, rhythm and structure (ACE-Step's codes of it), the sound
-        from the prompt and a reference clip; keep > 0 starts from the song itself instead of noise."""
+        from the prompt and a reference clip - or the song's own; keep > 0 starts from the song itself instead of
+        noise. "codes" is SLQAceStepReference's check of the song's codes against ACE-Step's own tokenizer."""
         entry = self.chosen("music", model)
         if fmt not in COMFY_FORMATS:
             raise AudioError(f"music can be saved as {', '.join(COMFY_FORMATS)}")
@@ -270,12 +271,14 @@ class AudioPipeline:
         graph = W.ace_remake(song=names["song"], reference=names.get("reference"), caption=prompt, lyrics=lyrics,
                              seconds=seconds, seed=sd, bpm=bpm, key=key, time_signature=time_signature,
                              language=(language or "en").lower(), keep=keep, fmt=fmt, **files)
-        data, took = await self._run(graph, ticket, owner, priority, f"remake: {prompt[:60]}", on_progress)
+        files, texts, took = await self._run_all(graph, ticket, owner, priority, f"remake: {prompt[:60]}",
+                                                 on_progress)
         enc = graph["5"]["inputs"]
-        return {"data": data, "seconds": round(float(enc["duration"]), 1), "compute": round(took, 1), "model": entry,
-                "seed": sd, "bpm": enc["bpm"] or None, "key": enc["keyscale"] or None,
+        return {"data": files[0][1], "seconds": round(float(enc["duration"]), 1), "compute": round(took, 1),
+                "model": entry, "seed": sd, "bpm": enc["bpm"] or None, "key": enc["keyscale"] or None,
                 "time_signature": int(enc["timesignature"]) if enc["timesignature"] else None,
-                "language": enc["language"], "keep": 1.0 - float(graph["8"]["inputs"]["denoise"]), "format": fmt}
+                "language": enc["language"], "keep": 1.0 - float(graph["8"]["inputs"]["denoise"]), "format": fmt,
+                "own_sound": not reference, "codes": node_text(texts, "15")}
 
     async def separate(self, *, audio: bytes, stems: tuple[str, ...] = ("vocals", "accompaniment"),
                        model: str | None = None, fmt: str = "mp3", ticket: Ticket | None = None, owner: str = "web",

@@ -13,12 +13,20 @@ SLQAceStepReference patches the model so that
 ACE-Step 1.5 itself keeps these apart (its reference audio and its source audio); the patch only routes them.
 
 SLQAceStepEncode is TextEncodeAceStepAudio1.5 without the planner and with the metadata optional: a cover takes
-its codes from the source, and a bpm or key nobody knows is better left out ("N/A") than guessed."""
+its codes from the source, and a bpm or key nobody knows is better left out ("N/A") than guessed.
+
+0.20.2: chat 24's remake kept neither the song's key nor its tempo. The source's codes are now worked out when the
+node runs, on the card, and checked against ACE-Step's own tokenizer path (the quantized values, as ComfyUI's cover
+uses them); the node reports the check as JSON text, which the Hub puts in its result."""
 from __future__ import annotations
+
+import json
+import logging
 
 import torch
 
 import comfy.model_base
+import comfy.model_management
 import comfy.utils
 from comfy_api.latest import IO
 
@@ -61,6 +69,23 @@ def audio_codes(base, samples: torch.Tensor, dev: torch.device) -> torch.Tensor:
     return found[0].long()
 
 
+def check_codes(base, samples: torch.Tensor, codes: torch.Tensor, dev: torch.device) -> dict:
+    """How well the codes stand for the source: the values they decode to (get_output_from_indices, what the
+    model's forward does with them) against what ACE-Step's own tokenizer path quantizes the same latent to (what
+    ComfyUI's cover mode uses) - the share of the 5-a-second steps whose two vectors point the same way."""
+    tok = base.diffusion_model.tokenizer
+    dtype = base.get_dtype_inference()
+    with torch.no_grad():
+        theirs, _ = tok.tokenize(samples[:1].to(device=dev, dtype=dtype).movedim(-1, -2))
+        mine = tok.quantizer.get_output_from_indices(codes.to(dev), dtype=dtype)
+        a, b = theirs.float()[0], mine.float()[0]
+        n = min(a.shape[0], b.shape[0])
+        cos = torch.nn.functional.cosine_similarity(a[:n], b[:n], dim=-1)
+    return {"codes": int(codes.shape[-1]), "agree": round(float((cos > 0.99).float().mean()), 4),
+            "cosine_mean": round(float(cos.mean()), 4), "cosine_min": round(float(cos.min()), 4),
+            "distinct": int(torch.unique(codes).numel())}
+
+
 class AceStepReference(IO.ComfyNode):
     @classmethod
     def define_schema(cls):
@@ -90,6 +115,17 @@ class AceStepReference(IO.ComfyNode):
         timbre_samples = None if timbre is None else timbre["samples"][:1, :, :MAX_TIMBRE_FRAMES]
         source_samples = None if source is None else source["samples"][:1]
         cache: dict = {}
+        report: dict = {"timbre_frames": None if timbre_samples is None else int(timbre_samples.shape[-1])}
+        if source_samples is not None:
+            # the codes now, on the card (the sampler loads the same model next), with their check
+            base = m.model
+            if not isinstance(base, comfy.model_base.ACEStep15):
+                raise ValueError("SLQAceStepReference works with ACE-Step 1.5 models only")
+            comfy.model_management.load_models_gpu([m])
+            dev = comfy.model_management.get_torch_device()
+            codes = cache["codes"] = audio_codes(base, source_samples, dev)
+            report.update(check_codes(base, source_samples, codes, dev))
+            logging.info("SLQAceStepReference: the source's codes: %s", json.dumps(report))
 
         def wrapper(apply_model, args):
             x, c = args["input"], dict(args["c"])
@@ -115,7 +151,7 @@ class AceStepReference(IO.ComfyNode):
             return apply_model(x, args["timestep"], **c)
 
         m.set_model_unet_function_wrapper(wrapper)
-        return IO.NodeOutput(m)
+        return IO.NodeOutput(m, ui={"text": [json.dumps(report)]})
 
 
 class AceStepEncode(IO.ComfyNode):

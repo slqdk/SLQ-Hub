@@ -143,10 +143,28 @@ async def test_a_song_remade_with_the_sound_of_another(signed_in, app, fakes):
     g = fakes.comfy["prompts"][1]
     assert (g["5"]["inputs"]["bpm"], g["5"]["inputs"]["keyscale"], g["5"]["inputs"]["timesignature"]) == \
         (92, "F# minor", "3")
-    assert g["8"]["inputs"]["denoise"] == 1.0 and "timbre" not in g["15"]["inputs"]
+    # 0.20.2 (chat 24: keep 0 and silence for a timbre came back in another key and tempo): keep 0.5 by default,
+    # and without a clip the song's own sound - 10 s of its start, middle and end, as ACE-Step prepares a reference
+    assert g["8"]["inputs"]["denoise"] == 0.5 and g["15"]["inputs"]["timbre"] == ["21", 0]
+    assert [(n["inputs"]["audio"], n["inputs"]["start_index"], n["inputs"]["duration"])
+            for n in (g["16"], g["17"], g["18"])] == [(["11", 0], 0.0, 10.0), (["11", 0], 145.0, 10.0),
+                                                      (["11", 0], 290.0, 10.0)]
+    assert g["19"]["inputs"] == {"audio1": ["16", 0], "audio2": ["17", 0], "direction": "after"}
+    assert g["20"]["inputs"] == {"audio1": ["19", 0], "audio2": ["18", 0], "direction": "after"}
+    assert g["21"] == {"class_type": "VAEEncodeAudio", "inputs": {"audio": ["20", 0], "vae": ["4", 0]}}
+    assert "a new version of lang.wav with its own sound, 300 s" in res["text"] and "keep 0.5" in res["text"]
     assert "no lyrics given, so the words are not kept, 92 BPM, F# minor, 3/4" in res["text"]
     assert "Only the first 5:00 of the song (6:40) were used." in res["text"]
+    assert res["text"].endswith("Check: the song's codes agree with ACE-Step's own tokenizer for 99.8% of it.")
     assert "music_remake re-performs an existing song" in system(fakes, 0)
+    assert "For the same recording only live" in system(fakes, 0)
+    desc = tools_offered(fakes, 0)["music_remake"]["description"]
+    assert "0.5 (default) stays close to the song" in desc and "afir=wet=10,volume=2" in desc
+    # codes that do not agree with ACE-Step's tokenizer are said so - the user is told
+    fakes.comfy["ace_check"] = json.dumps({"timbre_frames": 750, "codes": 1295, "agree": 0.41, "cosine_mean": 0.62})
+    res = await call(app, signed_in, c["id"], fakes, "music_remake", {"audio": "sang.wav", "prompt": "lo-fi"})
+    assert res["ok"] and "Warning: the song's codes agree with ACE-Step's own tokenizer for only 41.0% of it, so " \
+                         "the new version may not follow the song. Tell the user" in res["text"]
 
 
 # ---------------------------------------------------------------- stems
@@ -316,6 +334,17 @@ def test_graphs():
     assert (enc["duration"], enc["bpm"], enc["keyscale"], enc["timesignature"], enc["language"]) == \
         (600.0, 300, "C major", "", "unknown")
     assert enc["seed"] < 2**63 and g["8"]["inputs"]["denoise"] == 0.1 and "13" not in g
+    assert g["17"]["inputs"]["start_index"] == 295.0 and g["18"]["inputs"]["start_index"] == 590.0   # of 600 s
+    # a song under 30 s is its own timbre whole; a clip replaces the song's own sound
+    short = W.ace_remake(song="s.flac", caption="c", lyrics="", seconds=20, seed=1, bpm=None, key=None,
+                         time_signature=None, language="en", unet="u", text_encoder="t", planner="p", vae="v")
+    assert short["8"]["inputs"]["denoise"] == 0.5 and short["15"]["inputs"]["timbre"] == ["21", 0]
+    assert short["21"]["inputs"]["audio"] == ["11", 0] and "16" not in short and "TrimAudioDuration" not in \
+        W.class_types(short)
+    clip = W.ace_remake(song="s.flac", caption="c", lyrics="", seconds=200, seed=1, bpm=None, key=None,
+                        time_signature=None, language="en", unet="u", text_encoder="t", planner="p", vae="v",
+                        reference="r.flac")
+    assert clip["15"]["inputs"]["timbre"] == ["14", 0] and not {"16", "21"} & set(clip)
     s = W.separate(audio="a.flac", model="m", config="c", stems=("accompaniment",), fmt="ogg")
     assert set(s) == {"1", "2", "4"} and s["4"]["inputs"]["format"] == "opus"
     with pytest.raises(ValueError, match="needs the vocal separation model"):
@@ -323,6 +352,27 @@ def test_graphs():
     v = W.seed_vc(audio="a", voice="v", dit="d", config="c", whisper="w", vocoder="o", steps=999, cfg=3, pitch=-99)
     assert (v["5"]["inputs"]["steps"], v["5"]["inputs"]["cfg"], v["5"]["inputs"]["pitch"]) == (200, 1.0, -24)
     assert v["5"]["inputs"]["reference"] == ["2", 0] and set(v) == {"1", "2", "5", "7"}
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="needs ffmpeg")
+def test_the_live_recipe_runs(tmp_path):
+    """The effects the remake tool tells the assistant about (the same recording with a hall and a crowd): the
+    command runs as written with this ffmpeg, the result is as long as the song, and nothing clips. (The hall's
+    level - about 5 dB under the dry song - was measured by hand on chat 24's song; see LIVE_RECIPE.)"""
+    from app.agent.tools.audio import LIVE_RECIPE
+    run = lambda *a: subprocess.run(["ffmpeg", "-nostdin", "-loglevel", "error", "-y", *a], cwd=tmp_path,  # noqa: E731
+                                    check=True, capture_output=True, text=True)
+    run("-f", "lavfi", "-i", "sine=frequency=330:duration=6", "-ac", "2", "song.mp3")
+    run("-f", "lavfi", "-i", "anoisesrc=c=pink:a=0.2:d=2", "-ac", "2", "crowd.mp3")
+    cmd = shlex.split(LIVE_RECIPE)
+    assert cmd[0] == "ffmpeg"
+    subprocess.run(["ffmpeg", "-nostdin", "-loglevel", "error", "-y", *cmd[1:]], cwd=tmp_path, check=True)
+    probe = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0",
+                            str(tmp_path / "live.mp3")], capture_output=True, text=True, check=True)
+    assert float(probe.stdout) == pytest.approx(6.0, abs=0.1)
+    stats = subprocess.run(["ffmpeg", "-nostdin", "-hide_banner", "-i", str(tmp_path / "live.mp3"), "-af", "volumedetect",
+                            "-f", "null", "-"], capture_output=True, text=True).stderr
+    assert float(re.search(r"max_volume: (-?[\d.]+) dB", stats).group(1)) <= 0.0
 
 
 def _node_ids() -> set[str]:
