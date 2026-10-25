@@ -1,8 +1,11 @@
 """A GGUF file's header, read just far enough to learn its architecture
-(general.architecture: qwen35, llama, gemma3, ...). llama.cpp writes that
-key first; the reader gives up on anything unexpected."""
+(general.architecture: qwen35, llama, gemma3, ...) and the context it was
+trained for ({arch}.context_length). llama.cpp writes the architecture first
+and the model's numbers before the tokenizer's long lists; the reader gives up
+on anything unexpected."""
 from __future__ import annotations
 
+import functools
 import struct
 from pathlib import Path
 
@@ -29,6 +32,41 @@ def architecture(path: Path) -> str | None:
     except (OSError, struct.error, UnicodeDecodeError, ValueError):
         return None
     return None
+
+
+_INTS = {4: "<I", 5: "<i", 10: "<Q", 11: "<q"}             # uint32, int32, uint64, int64
+
+
+def context_length(path: Path) -> int | None:
+    arch = None
+    try:
+        with open(path, "rb") as f:
+            if f.read(4) != b"GGUF":
+                return None
+            (version,) = struct.unpack("<I", f.read(4))
+            if version < 2:
+                return None
+            _tensors, kvs = struct.unpack("<QQ", f.read(16))
+            for _ in range(min(kvs, 256)):
+                key = _string(f)
+                (vtype,) = struct.unpack("<I", f.read(4))
+                if key == "general.architecture" and vtype == _STRING:
+                    arch = _string(f)
+                    continue
+                if arch and key == f"{arch}.context_length" and vtype in _INTS:
+                    (n,) = struct.unpack(_INTS[vtype], f.read(_SCALAR[vtype]))
+                    return int(n) if n > 0 else None
+                if not _skip(f, vtype):
+                    return None
+    except (OSError, struct.error, UnicodeDecodeError, ValueError):
+        return None
+    return None
+
+
+@functools.lru_cache(maxsize=64)
+def context_length_cached(path: str, stamp: int) -> int | None:
+    """context_length, read once per version of the file (stamp: its modification time)."""
+    return context_length(Path(path))
 
 
 def _string(f) -> str:

@@ -176,9 +176,12 @@ async def models(request: Request):
     for group in GROUPS:
         out[group] = []
         for e in hub.catalog.entries(group):
-            out[group].append({**e, "installed": hub.catalog.installed(e),
-                               "downloads": by_model.get(e["id"], []),
-                               "loaded": group == "llm" and hub.loaded_model() == e["id"]})
+            row = {**e, "installed": hub.catalog.installed(e), "downloads": by_model.get(e["id"], []),
+                   "loaded": group == "llm" and hub.loaded_model() == e["id"]}
+            if group == "llm":                       # what one chat may use now, and what the model was trained for
+                row["context_per_chat"] = hub.catalog.context_per_request(e["id"])
+                row["context_native"] = hub.catalog.native_context(e)
+            out[group].append(row)
     out["current"] = hub.scheduler.current
     out["defaults"] = hub.settings.get("models")
     out["sdxl"] = {"presets": sources.PRESETS, "samplers": list(W.SDXL_SAMPLERS),

@@ -4,9 +4,12 @@
 Ported from SLQ Companion's tools/slq_container.py (2.66.0), for several
 services. Run on the VM as root, from the clone (normally through update.sh):
 
-    sudo bash update.sh                  pull, build, back up, restart, check
+    sudo bash update.sh                  pull, build, wait until nobody uses the Hub, back up, restart, check
     sudo bash update.sh --yes            the same without the question (cron)
+    sudo bash update.sh --now            do not wait: stop the Hub right after the build
     sudo bash update.sh --force          rebuild and restart even with nothing new
+    sudo bash update.sh --here           wait and install in this window, not in the background
+    sudo bash update.sh cancel           stop an update that builds or waits
     sudo bash update.sh status           version, containers, health, firewall, backups
     sudo bash update.sh backups          list the backups
     sudo bash update.sh rollback [name]  back to a backup (code + images + data)
@@ -27,13 +30,25 @@ possible:
      back - nothing was stopped. When the fast-forward changed the updater
      itself, the new updater does the rest (from the build on): what it
      changed applies to this update, not only the next one.
-  4. Stops everything and backs up /srv/slq-hub/data (not the models, which
+  4. Waits until nobody uses the Hub (0.26.0): it asks the running Hub
+     (/hub/api/internal/busy, with the internal token) whether a chat, a
+     person's chat, a picture, a video, a test run, a library or a download is
+     going, and goes on once the Hub has had nothing to do for --quiet seconds
+     (60). Started in a terminal, the waiting and installing run in a session
+     of their own - right after the build, or before it when the new updater
+     took over - and the terminal shows their log (/srv/slq-hub/update.log):
+     Ctrl+C or closing the window does not stop them. `update.sh cancel`
+     stops an update that still builds or waits, and so does anything that
+     goes wrong before the install: the code and the images' tags go back. A
+     Hub older than 0.26.0 cannot say: the card's own load (gpu_busy_percent)
+     decides. --now skips the wait; --here keeps it all in the window.
+  5. Stops everything and backs up /srv/slq-hub/data (not the models, which
      can be downloaded again) to <backups>/<time>_<version>.tar.gz + .json.
-  5. Starts the new version and waits until /hub/api/health answers.
-  6. Healthy -> the VM's firewall script is brought up to this version and
+  6. Starts the new version and waits until /hub/api/health answers.
+  7. Healthy -> the VM's firewall script is brought up to this version and
      applied, and old backups beyond --keep are deleted. Not healthy within
      --timeout -> the log is shown and everything is put back: old code,
-     old images, and the data from step 4.
+     old images, and the data from step 5.
 
 Settings live in /srv/slq-hub/.env; compose changes in
 /srv/slq-hub/docker-compose.override.yml - the clone stays clean, so
@@ -42,13 +57,16 @@ updates are fast-forwards. Standard library only.
 from __future__ import annotations
 
 import argparse
+import http.client
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tarfile
 import time
+import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
@@ -67,6 +85,9 @@ FOLDERS = ("data", "models/llm", "models/comfy", "models/speech", "comfy/input",
 KEEP = 3
 TIMEOUT = 300
 POLL = float(os.environ.get("HUB_UPDATE_POLL", "3"))
+QUIET = 60                # seconds the Hub must have had nothing to do before an update stops it (0.26.0)
+CHECK = float(os.environ.get("HUB_UPDATE_CHECK", "5"))
+BUSY_PERCENT = 10         # a Hub older than 0.26.0 cannot say what it does: the card's own load decides
 # Left out of the backups: logs, and what is downloaded or built again by itself - the sandbox's NuGet packages
 # and caches, and .NET build output (.hub/dotnet) in any working folder (0.15.1).
 BACKUP_EXCLUDE = ("./logs", "./sandbox-home/.nuget", "./sandbox-home/.local/share/NuGet")
@@ -85,7 +106,10 @@ class Out:
         return f"\033[{code}m{text}\033[0m" if self.tty else text
 
     def say(self, text: str = "") -> None:
-        print(text, flush=True)
+        try:
+            print(text, flush=True)
+        except OSError:              # the window was closed (--here): the update goes on without it
+            pass
 
     def head(self, text: str) -> None:
         self.say(self._c(text, "36;1"))
@@ -108,8 +132,9 @@ out = Out()
 
 # ---------------------------------------------------------------- helpers
 
-def read_env(path: Path = ENV_FILE) -> dict[str, str]:
+def read_env(path: Path | None = None) -> dict[str, str]:
     env: dict[str, str] = {}
+    path = path or ENV_FILE
     try:
         for line in path.read_text(encoding="utf-8").splitlines():
             line = line.strip()
@@ -315,6 +340,268 @@ def show_log(lines: int = 40) -> None:
         out.say("  ------------------------------")
 
 
+# ---------------------------------------------------------------- waiting until nobody uses the Hub (0.26.0)
+
+class Cancelled(Exception):
+    """`update.sh cancel`, a closed terminal or Ctrl+C while the update waited for the card."""
+
+
+def busy_url() -> str:
+    port = read_env().get("HUB_PORT") or "8080"
+    return f"http://127.0.0.1:{port}/hub/api/internal/busy"
+
+
+def card_load(drm: str = "/sys/class/drm") -> int | None:
+    """The card's own load in percent (amdgpu's gpu_busy_percent; the busiest card), None without one."""
+    best = None
+    for p in Path(drm).glob("card*/device/gpu_busy_percent"):
+        try:
+            v = int(p.read_text().strip())
+        except (OSError, ValueError):
+            continue
+        best = v if best is None else max(best, v)
+    return best
+
+
+_noted: set[str] = set()
+
+
+def note_once(text: str) -> None:
+    if text not in _noted:
+        _noted.add(text)
+        out.warn(text)
+
+
+def hub_busy() -> tuple[bool, list[str]]:
+    """(busy, what is going on), as the running Hub says (0.26.0 on). A Hub that does not say - older, refusing,
+    not answering or cut off while it restarts - leaves it to the card's own load."""
+    req = urllib.request.Request(busy_url(), headers={"X-Internal-Token": read_env().get("HUB_INTERNAL_TOKEN", "")})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            data = json.loads(r.read().decode("utf-8"))
+        why = [str(w) for w in data.get("why") or []]
+        return bool(data.get("busy")) or bool(why), why
+    except urllib.error.HTTPError as exc:            # 401 or 404 from a Hub before 0.26.0: it has no such question
+        if exc.code == 403:
+            note_once("The Hub refused the updater's question (403): is HUB_INTERNAL_TOKEN in .env the Hub's? "
+                      "Watching the card's load instead.")
+        elif exc.code >= 500:
+            note_once(f"The Hub could not answer ({exc.code}). Watching the card's load instead.")
+    except Cancelled:
+        raise
+    except (urllib.error.URLError, http.client.HTTPException, OSError, ValueError, AttributeError, TypeError):
+        pass
+    load = card_load()
+    if load is not None and load >= BUSY_PERCENT:
+        return True, [f"the card is {load} % busy (the running Hub cannot say what for)"]
+    return False, []
+
+
+def wait_until_free(quiet: float) -> None:
+    """Back once the Hub has had nothing to do for `quiet` seconds; says what it waits for when that changes, and
+    every ten minutes. Raises Cancelled from the signal handlers."""
+    free_since, said, said_at = None, None, 0.0
+    while True:
+        busy, why = hub_busy()
+        now = time.monotonic()
+        if busy:
+            free_since = None
+            if why != said or now - said_at > 600:
+                out.info(f"{datetime.now():%H:%M} waiting: " + "; ".join(why))
+                said, said_at = why, now
+        else:
+            if free_since is None:
+                free_since = now
+                if said is not None:
+                    out.info(f"{datetime.now():%H:%M} free - going on after {int(quiet)} s without work")
+                said = None
+            if now - free_since >= quiet:
+                return
+        time.sleep(CHECK)
+
+
+def _cancel(signum, frame):
+    raise Cancelled(signal.Signals(signum).name)
+
+
+def attached() -> bool:
+    """Run from a terminal that may close (not cron, not the background updater)."""
+    return sys.stdout.isatty()
+
+
+def lock_file() -> Path:
+    return HUB_ROOT / "update.lock"
+
+
+def log_file() -> Path:
+    return HUB_ROOT / "update.log"
+
+
+LOCK_MARK = b"tools/hub_update.py"   # in the command line of the process a lock names (not a pid used again)
+CANCELLABLE = ("building", "waiting")
+
+
+def boot_id() -> str:
+    try:
+        return Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+    except OSError:
+        return ""
+
+
+def lock_data() -> dict:
+    try:
+        lock = json.loads(lock_file().read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {}
+    except (OSError, ValueError):
+        lock_file().unlink(missing_ok=True)          # written whole (os.replace), so this one is broken
+        return {}
+    return lock if isinstance(lock, dict) else {}
+
+
+def lock_alive(lock: dict) -> bool:
+    """Its process still runs: the same boot, and that pid is an updater (not a process that got the number since)."""
+    try:
+        if lock.get("boot") and lock["boot"] != boot_id():
+            return False
+        return LOCK_MARK in Path(f"/proc/{int(lock['pid'])}/cmdline").read_bytes()
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+
+
+def read_lock() -> dict:
+    """The update that builds, waits or installs now ({} when none). A lock whose process is gone stays for
+    recover_cut_off() to deal with."""
+    lock = lock_data()
+    return lock if lock and lock_alive(lock) else {}
+
+
+def write_lock(state: dict, phase: str) -> None:
+    lock = lock_data()
+    since = lock.get("since") if lock.get("pid") == os.getpid() else None
+    data = {"pid": os.getpid(), "boot": boot_id(), "version": state["new_version"], "phase": phase,
+            "since": since or datetime.now().isoformat(timespec="seconds"), "log": str(log_file()),
+            "old": state["old"], "old_version": state["old_version"]}
+    tmp = lock_file().with_name(lock_file().name + ".tmp")
+    tmp.write_text(json.dumps(data), encoding="utf-8")
+    os.replace(tmp, lock_file())
+
+
+def drop_own_lock() -> None:
+    if lock_data().get("pid") == os.getpid():
+        lock_file().unlink(missing_ok=True)
+
+
+def recover_cut_off(args) -> None:
+    """An update whose process is gone (killed, the VM reset) left its lock. Before the install nothing was
+    stopped: its code and its images' tags go back, so this update can offer the version again. Cut off during the
+    install, the Hub may be stopped or half-updated: say what to do (--force restarts this version)."""
+    lock = lock_data()
+    if not lock or lock_alive(lock):
+        return
+    phase, version = str(lock.get("phase", "")), lock.get("version")
+    if phase.startswith(CANCELLABLE) and lock.get("old"):
+        out.warn(f"An update to {version} stopped while it was {phase} (since {lock.get('since')}), and its "
+                 f"process is gone. Putting the code back at {lock.get('old_version')} first - nothing was stopped.")
+        undo_build(lock)
+    elif not args.force:
+        raise Stop(f"an update to {version} was cut off while it was {phase} (since {lock.get('since')}; its log: "
+                   f"{lock.get('log')}). Check the Hub: sudo bash update.sh status. To start this version again: "
+                   "sudo bash update.sh --force; to go back to the last backup: sudo bash update.sh rollback.")
+    else:
+        out.warn(f"An update to {version} was cut off while it was {phase}: --force builds and starts again.")
+    lock_file().unlink(missing_ok=True)
+
+
+def quiet_signals() -> None:
+    """From here on nothing may cut it off: neither `cancel` nor a closed window or Ctrl+C."""
+    for s in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
+        signal.signal(s, signal.SIG_IGN)
+
+
+def undo_build(state: dict) -> None:
+    """Back to before the fast-forward, as after a failed build: the old code, the old images as :latest."""
+    git("reset", "--hard", state["old"])
+    tag_images("rollback", "latest")
+
+
+def go_background(args, state: dict) -> int:
+    """The rest of the update by an updater in a session of its own (0.26.0), so that neither Ctrl+C nor a closed
+    window cuts it off - least of all while it stops, backs up and starts the Hub. This window shows its log."""
+    path, log = resume_file(), log_file()
+    child, start, why = None, 0, ""
+    try:
+        path.write_text(json.dumps({**state, "detached": True}), encoding="utf-8")
+        if log.exists():
+            log.replace(log.with_name(log.name + ".1"))
+        flags = ["--keep", str(args.keep), "--timeout", str(args.timeout), "--quiet", str(args.quiet)] + \
+            (["--no-backup"] if args.no_backup else []) + (["--now"] if args.now else [])
+        with open(log, "w", encoding="utf-8") as f:
+            f.write(f"SLQ Hub update {state['old_version']} -> {state['new_version']}, from "
+                    f"{datetime.now():%Y-%m-%d %H:%M:%S}\n")
+            f.flush()
+            start = f.tell()
+            child = subprocess.Popen([sys.executable, str(ROOT / "tools" / "hub_update.py"), "update", "--resume",
+                                      str(path), "--yes", *flags], cwd=str(ROOT), stdin=subprocess.DEVNULL, stdout=f,
+                                     stderr=subprocess.STDOUT, start_new_session=True)
+        for _ in range(60):
+            if not path.exists() or child.poll() is not None:
+                break
+            time.sleep(0.5)
+    except (Exception, KeyboardInterrupt) as exc:  # noqa: BLE001 - `cancel`, Ctrl+C, a disk error: see below
+        why = f" ({type(exc).__name__}: {exc})" if str(exc) else f" ({type(exc).__name__})"
+    if child is None or path.exists():                  # it never took over: nothing was stopped, the code goes back
+        quiet_signals()
+        path.unlink(missing_ok=True)
+        try:
+            if child is not None:
+                child.kill()
+        except OSError:
+            pass
+        undo_build(state)
+        raise Stop(f"the update could not go on in the background{why} (see {log}). The code is back where it "
+                   "was; nothing was stopped.")
+    out.info("The rest runs in the background: Ctrl+C or closing this window does not stop it.")
+    out.info(f"Its log      : sudo tail -f {log}")
+    out.info("Stop it while it builds or waits: sudo bash update.sh cancel")
+    out.say()
+    return follow(child, log, start)
+
+
+def follow(child, log: Path, start: int = 0) -> int:
+    """Shows the background updater's log until it ends (its exit code). The update is the other process's now:
+    nothing here may undo it - Ctrl+C, `cancel` aimed at this one or a closed window only stop the showing."""
+    for s in (signal.SIGTERM, signal.SIGHUP):
+        signal.signal(s, signal.SIG_DFL)
+    pos = start
+    try:
+        while True:
+            done = child.poll()
+            pos = show_from(log, pos)
+            if done is not None:
+                return done
+            time.sleep(0.5)
+    except KeyboardInterrupt:
+        out.say()
+        out.info(f"No longer shown here - the update goes on. Follow it: sudo tail -f {log}")
+    except Exception:  # noqa: BLE001 - the window went away
+        pass
+    return 0
+
+
+def show_from(log: Path, pos: int) -> int:
+    try:
+        with open(log, "rb") as f:
+            f.seek(pos)
+            new = f.read()
+    except OSError:
+        return pos
+    if new:
+        sys.stdout.write(new.decode("utf-8", "replace"))
+        sys.stdout.flush()
+    return pos + len(new)
+
+
 def _exclude(info: tarfile.TarInfo) -> tarfile.TarInfo | None:
     if any(info.name == e or info.name.startswith(e + "/") for e in BACKUP_EXCLUDE):
         return None
@@ -485,11 +772,19 @@ def put_back(commit: str, images: dict[str, str | None], backup: str | None, tim
 # ---------------------------------------------------------------- commands
 
 def cmd_update(args) -> int:
-    if args.resume:                                   # the old updater fast-forwarded and handed over
-        out.head("=== SLQ Hub - update, continued by the new updater ===")
-        return finish_update(args, take_over(args.resume))
+    if args.resume:                                   # the old updater handed over, or this one went to the background
+        state = take_over(args.resume)
+        out.head("=== SLQ Hub - update, " + ("in the background ===" if state.get("detached")
+                                             else "continued by the new updater ==="))
+        return finish_update(args, state)
     out.head("=== SLQ Hub - update ===")
     branch = preflight()
+    recover_cut_off(args)
+    other = read_lock()
+    if other:
+        raise Stop(f"an update to {other.get('version')} is already {other.get('phase')} (since {other.get('since')}, "
+                   f"process {other.get('pid')}). Follow it: sudo tail -f {other.get('log')}; stop it while it "
+                   "waits: sudo bash update.sh cancel")
     old = git("rev-parse", "HEAD").stdout.strip()
     old_version = read_version_at()
     out.info(f"Clone  : {ROOT}  ({branch} at {old[:10]}, version {old_version})")
@@ -519,8 +814,9 @@ def cmd_update(args) -> int:
     if not args.yes:
         if not sys.stdin.isatty():
             raise Stop("not asking without a terminal - add --yes to update unattended.")
-        if input("\n  Update now? The Hub is stopped for the backup. [y/N] ").strip().lower() \
-                not in ("y", "yes", "j", "ja"):
+        when = "right after the build" if args.now else "once nobody has used it for a minute"
+        if input(f"\n  Update? The new version is built while the Hub runs; it is stopped for the backup {when}. "
+                 "[y/N] ").strip().lower() not in ("y", "yes", "j", "ja"):
             out.info("Nothing changed.")
             return 0
 
@@ -554,12 +850,16 @@ def hand_over(args, state: dict) -> int:
     path = resume_file()
     path.write_text(json.dumps(state), encoding="utf-8")
     out.info("The updater itself changed - the new one does the rest of this update.")
-    flags = ["--keep", str(args.keep), "--timeout", str(args.timeout)] + (["--no-backup"] if args.no_backup else [])
-    try:
-        rc = subprocess.call([sys.executable, str(ROOT / "tools" / "hub_update.py"), "update", "--resume", str(path),
+    flags = ["--keep", str(args.keep), "--timeout", str(args.timeout), "--quiet", str(args.quiet)] + \
+        (["--no-backup"] if args.no_backup else []) + (["--now"] if args.now else []) + (["--here"] if args.here else [])
+    child = subprocess.Popen([sys.executable, str(ROOT / "tools" / "hub_update.py"), "update", "--resume", str(path),
                               *flags])
-    except KeyboardInterrupt:
-        rc = 130
+    while True:
+        try:
+            rc = child.wait()
+            break
+        except KeyboardInterrupt:     # the new updater got the Ctrl+C too: killing it could cut off its undo
+            continue
     if path.exists():                                   # it never took over: as a failed build
         path.unlink(missing_ok=True)
         git("reset", "--hard", state["old"])
@@ -584,16 +884,63 @@ def take_over(path: str) -> dict:
 
 
 def finish_update(args, state: dict) -> int:
-    """Build, back up, start, check - or put the old version back."""
+    """Build, wait until nobody uses the Hub, back up, start, check - or put the old version back."""
+    try:
+        return _finish_update(args, state)
+    finally:
+        drop_own_lock()
+
+
+def in_terminal(args, state: dict) -> bool:
+    """Started in a window that may close (not cron, not the background updater, not --here)."""
+    return attached() and not state.get("detached") and not args.here
+
+
+def _finish_update(args, state: dict) -> int:
     old, old_version, new_version = state["old"], state["old_version"], state["new_version"]
     old_images = state["old_images"]
-    out.head("Building the new images (the Hub keeps running)...")
-    compose("pull", "searxng", capture=False)
-    if compose("build", capture=False).returncode != 0:
-        git("reset", "--hard", old)
-        tag_images("rollback", "latest")
-        raise Stop("the build failed (see above). The code is back where it was; nothing was stopped.")
-    out.ok("Built")
+    if args.resume and in_terminal(args, state):
+        # Handed over by the old updater, which kills this one a quarter of a second after a Ctrl+C - even in the
+        # middle of putting the code back: the build goes to the background too.
+        return go_background(args, state)
+    for s in (signal.SIGTERM, signal.SIGHUP):          # `update.sh cancel`, a closed window: undo, stop nothing
+        signal.signal(s, _cancel)
+    phase, detach = "building", False
+    try:
+        if not state.get("built"):
+            write_lock(state, phase)
+            out.head("Building the new images (the Hub keeps running)...")
+            compose("pull", "searxng", capture=False)
+            if compose("build", capture=False).returncode != 0:
+                quiet_signals()
+                undo_build(state)
+                raise Stop("the build failed (see above). The code is back where it was; nothing was stopped.")
+            out.ok("Built")
+            state["built"] = True
+        if in_terminal(args, state):                   # stopping, the backup and the start: in a session of its own
+            detach = True
+        elif container_state() == "running" and not args.now:   # 0.26.0: not while somebody uses the Hub
+            phase = "waiting for the Hub to be free"
+            write_lock(state, phase)
+            out.head(f"Waiting until nobody has used the Hub for {int(args.quiet)} s...")
+            wait_until_free(args.quiet)
+            out.ok("Nobody uses the Hub")
+    except Stop:
+        raise
+    except (Cancelled, KeyboardInterrupt) as exc:
+        quiet_signals()
+        undo_build(state)
+        raise Stop(f"cancelled while {phase} ({str(exc) or 'Ctrl+C'}). The code is back where it was; nothing was "
+                   "stopped, and the next update.sh offers this version again.")
+    except Exception as exc:  # noqa: BLE001 - anything before the install: the Hub runs on as it was
+        quiet_signals()
+        undo_build(state)
+        raise Stop(f"{type(exc).__name__} while {phase}: {exc}. The code is back where it was; nothing was "
+                   "stopped.") from exc
+    if detach:
+        return go_background(args, state)
+    quiet_signals()                                     # from here on it finishes, or puts the old version back
+    write_lock(state, "being installed")
 
     name = None
     first = container_id() is None
@@ -709,7 +1056,35 @@ def cmd_status(args) -> int:
     report_ways_out()
     b = list_backups(backup_dir())
     out.info(f"Backups: {len(b)} in {backup_dir()}" + (f", newest {b[0]['name']}" if b else ""))
+    lock = lock_data()
+    if lock and lock_alive(lock):
+        out.warn(f"Update : to {lock.get('version')} {lock.get('phase')} since {lock.get('since')} "
+                 f"(process {lock.get('pid')}, log {lock.get('log')})")
+    elif lock:
+        out.bad(f"Update : to {lock.get('version')} was cut off while it was {lock.get('phase')} (since "
+                f"{lock.get('since')}; log {lock.get('log')}) - the next update.sh deals with it")
     return 0
+
+
+def cmd_cancel(args) -> int:
+    """Stop an update that builds or waits for the Hub to be free (the code and images go back; nothing was
+    stopped)."""
+    if os.geteuid() != 0:
+        raise Stop("run it as root: sudo bash update.sh cancel")
+    lock = read_lock()
+    if not lock:
+        out.info("No update is building or waiting.")
+        return 0
+    if not str(lock.get("phase", "")).startswith(CANCELLABLE):
+        raise Stop(f"the update to {lock.get('version')} is {lock.get('phase')} now - too late to cancel; it "
+                   "finishes, or puts the old version back by itself.")
+    os.kill(int(lock["pid"]), signal.SIGTERM)
+    for _ in range(120):
+        if not read_lock():
+            out.ok(f"The update to {lock.get('version')} is cancelled; the Hub runs on as it was.")
+            return 0
+        time.sleep(0.5)
+    raise Stop(f"the waiting update (process {lock['pid']}) did not stop - see {lock.get('log')}.")
 
 
 def cmd_firewall(args) -> int:
@@ -750,6 +1125,10 @@ def main(argv: list[str] | None = None) -> int:
     u.add_argument("--no-backup", action="store_true", help="skip the data backup")
     u.add_argument("--keep", type=int, default=KEEP, help=f"backups to keep (default {KEEP})")
     u.add_argument("--timeout", type=float, default=TIMEOUT, help="seconds to wait for the Hub")
+    u.add_argument("--now", action="store_true", help="do not wait until nobody uses the Hub")
+    u.add_argument("--here", action="store_true", help="wait and install in this window, not in the background")
+    u.add_argument("--quiet", type=float, default=QUIET,
+                   help=f"seconds without work before the Hub is stopped (default {QUIET})")
     u.add_argument("--resume", metavar="FILE", help=argparse.SUPPRESS)      # the old updater handing over
     r = sub.add_parser("rollback", help="back to a backup: its code, images and data")
     r.add_argument("backup", nargs="?", help="backup name (default: the newest)")
@@ -758,17 +1137,18 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("status", help="version, containers, health, firewall, backups")
     sub.add_parser("backups", help="list the backups")
     sub.add_parser("firewall", help="install this version's firewall script and apply it")
+    sub.add_parser("cancel", help="stop an update that builds or waits for the Hub to be free")
     sub.add_parser("compose", help="docker compose with this install's files")
     args = p.parse_args(argv)
     try:
         return {"update": cmd_update, "rollback": cmd_rollback, "status": cmd_status,
-                "backups": cmd_backups, "firewall": cmd_firewall}[args.command](args)
+                "backups": cmd_backups, "firewall": cmd_firewall, "cancel": cmd_cancel}[args.command](args)
     except Stop as stop:
         out.say()
         out.bad(f"STOPPED: {stop}")
         out.say()
         return 1
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, Cancelled):
         out.say()
         out.warn("Interrupted.")
         return 130

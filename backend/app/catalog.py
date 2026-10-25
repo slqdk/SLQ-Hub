@@ -64,7 +64,11 @@ RENAMABLE = ("llm", "comfy")             # what chats show by name: the chat mod
 ORDERABLE = RENAMABLE                    # ... and in the owner's order (0.17.0)
 MAX_NAME = 60
 EDITABLE_SERVER_KEYS = {"ctx", "parallel", "kv_unified", "cache_type", "gpu_layers", "flash_attn",
-                        "cache_ram_mib", "extra"}
+                        "cache_ram_mib", "extra", "per_request"}
+# per_request (0.26.0): the most one chat's request may use - the model card's context_per_request until the owner
+# sets it. Raising the context alone gave a chat no more room (chat 74 ran with 128,000 and was cut at 65,536).
+SIZED_SERVER_KEYS = ("ctx", "parallel", "per_request", "cache_ram_mib")
+MIN_CONTEXT = 4096
 
 
 class Catalog:
@@ -171,7 +175,30 @@ class Catalog:
                 bad = set(server) - EDITABLE_SERVER_KEYS
                 if bad:
                     raise ValueError(f"not editable: {', '.join(sorted(bad))}")
-                entry.setdefault("server", {}).update(server)
+                server = dict(server)
+                own = entry.setdefault("server", {})
+                for key in SIZED_SERVER_KEYS:
+                    if key not in server:
+                        continue
+                    v = server.pop(key)
+                    if v is None:                             # null: the model card's again
+                        own.pop(key, None)
+                        continue
+                    if isinstance(v, bool) or not isinstance(v, (int, float)) or v != int(v) or v < 0:
+                        raise ValueError(f"{key} is a whole number of 0 or more")
+                    own[key] = int(v)
+                own.update(server)
+                if not own.get("per_request"):
+                    own.pop("per_request", None)              # empty: the model card's again
+                now = {**self._card_server(model_id), **own}
+                ctx = int(now.get("ctx") or 0)
+                if ctx < MIN_CONTEXT:
+                    raise ValueError(f"The context must be at least {MIN_CONTEXT} tokens.")
+                if int(now.get("parallel") if now.get("parallel") is not None else 1) < 1:
+                    raise ValueError("There must be at least one slot.")
+                per = own.get("per_request")
+                if per is not None and not MIN_CONTEXT <= per <= ctx:
+                    raise ValueError(f"Context per chat goes from {MIN_CONTEXT} up to the context ({ctx} tokens).")
             if aliases is not None:
                 entry["aliases"] = [str(a).strip() for a in aliases if str(a).strip()]
             if reset_sampling:
@@ -192,6 +219,14 @@ class Catalog:
             self.override_path.write_text(json.dumps(over, indent=1), encoding="utf-8")
         self.reload()
         return self.get_llm(model_id) or {}
+
+    def _card_server(self, model_id: str) -> dict:
+        """The server settings as the model's card has them (bundled, or added from Hugging Face)."""
+        for path in (self.bundled, self.custom_path):
+            for e in self._read(path).get("llm") or []:
+                if isinstance(e, dict) and e.get("id") == model_id and isinstance(e.get("server"), dict):
+                    return dict(e["server"])
+        return {}
 
     def rename(self, model_id: str, name: str) -> dict:
         """The name the Hub shows for a chat or picture model - in chats, the model choices, Settings and on the
@@ -401,9 +436,24 @@ class Catalog:
         return max(1, int((m or {}).get("server", {}).get("parallel", 1)))
 
     def context_per_request(self, model_id: str) -> int:
+        """The most one request - one chat's turn - may use: the owner's choice (Settings -> Models), else the
+        model card's; never more than a slot has (the whole shared context with a unified KV cache, else a share)."""
         m = self.get_llm(model_id) or {}
         s = m.get("server", {})
-        if m.get("context_per_request"):
-            return int(m["context_per_request"])
         ctx = int(s.get("ctx", 32768))
-        return ctx if s.get("kv_unified") else ctx // max(1, int(s.get("parallel", 1)))
+        room = ctx if s.get("kv_unified") else ctx // max(1, int(s.get("parallel", 1)))
+        want = int(s.get("per_request") or m.get("context_per_request") or room)
+        return max(1024, min(want, room))
+
+    def native_context(self, entry: dict) -> int | None:
+        """The context the model was trained for, from its file's header (None before it is downloaded)."""
+        from . import gguf
+        first = next((f for f in entry.get("files") or [] if not f.get("role")), None)
+        if not first or not first.get("dest"):
+            return None
+        path = self.models_dir / first["dest"]
+        try:
+            stamp = path.stat().st_mtime_ns
+        except OSError:
+            return None
+        return gguf.context_length_cached(str(path), stamp)

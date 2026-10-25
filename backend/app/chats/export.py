@@ -367,7 +367,7 @@ def _context(hub, agent, chat: dict, project: dict | None) -> dict:
     """What the model would be sent if a message were sent now."""
     from ..agent import cloud as cloudmod
     from ..agent import context as C
-    from ..agent.loop import Engine, vision
+    from ..agent.loop import Engine, last_token_ratio, vision
     from ..agent.runs import Run
     from ..llm import payload as P
     try:
@@ -386,15 +386,17 @@ def _context(hub, agent, chat: dict, project: dict | None) -> dict:
     tools = engine.tools()
     schemas = engine.schemas(tools)
     ctx = hub.catalog.context_per_request(entry["id"])
+    ratio = last_token_ratio(store.runs_for_chat(chat["id"]))       # real tokens per estimated, as last measured
     used = C.estimate_tokens(messages)
     request = P.build(entry, messages, tools=schemas or None, thinking=thinking, effort=effort,
-                      sampling={"max_tokens": max(1024, min(32768, ctx - used))})
+                      sampling={"max_tokens": max(1024, min(32768, ctx - int((used + C.schema_tokens(schemas)) * ratio)))})
     return strip_images({
         "note": "What the model would be sent if a message were sent now, with today's settings and skills. "
                 "Older messages are condensed into the chat's summary (in the system prompt).",
         "model": entry["id"], "thinking": thinking, "effort": effort, "escalation": escalation,
         "hand_over_to": engine.handover_label(),
-        "context_per_request": ctx, "estimated_tokens": used,
+        "context_per_request": ctx, "estimated_tokens": used, "schema_tokens": C.schema_tokens(schemas),
+        "token_ratio": round(ratio, 3),
         "compact_at": hub.settings.get("agent", "compact_at"),
         "messages": messages,
         "tools": [{"name": t.name, "description": (getattr(t, "description", "") or "")[:300]} for t in tools],

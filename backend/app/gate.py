@@ -44,7 +44,8 @@ MEMBER_ROUTES = [
 def member_may(method: str, path: str) -> bool:
     return any(method in methods and pat.match(path) for methods, pat in MEMBER_ROUTES)
 PUBLIC_UI = {"/hub/api/health", "/hub/api/auth/login", "/hub/api/auth/status", "/hub/api/auth/logout",
-             "/hub/api/auth/setup"}
+             "/hub/api/auth/setup",
+             "/hub/api/internal/busy"}       # the updater on the VM, with the internal token (ui/update_routes.py)
 CORS_HEADERS = ("authorization, content-type, x-api-key, anthropic-version, anthropic-beta, "
                 "anthropic-dangerous-direct-browser-access, openai-organization, x-stainless-arch, "
                 "x-stainless-lang, x-stainless-os, x-stainless-package-version, x-stainless-runtime, "

@@ -377,6 +377,9 @@ All commands run in the VM from `/opt/slq-hub`:
 | What | Command |
 |---|---|
 | Update (backup + automatic rollback) | `sudo bash /opt/slq-hub/update.sh` |
+| Update without waiting until nobody uses the Hub | `sudo bash /opt/slq-hub/update.sh --now` |
+| Follow an update after its window was closed | `sudo tail -f /srv/slq-hub/update.log` |
+| Stop an update that still builds or waits | `sudo bash /opt/slq-hub/update.sh cancel` |
 | Status (containers, health, firewall, the model containers' way out) | `sudo bash /opt/slq-hub/update.sh status` |
 | Install and apply this version's firewall | `sudo bash /opt/slq-hub/update.sh firewall` |
 | Follow the Hub's log | `sudo bash /opt/slq-hub/update.sh compose logs -f hub` |

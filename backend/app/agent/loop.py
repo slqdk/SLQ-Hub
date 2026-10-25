@@ -103,6 +103,10 @@ class Engine:
         self.kept: set[str] = set()          # calls the end of the context cut off whose file was kept
         self.ctx_limit = hub.catalog.context_per_request(model["id"])
         self.schema_tokens = 0               # the tool definitions take room in every request too
+        # Real tokens per estimated token, as the last model step measured (at least 1): the estimate counts
+        # characters, and hex dumps or binary text cost far more tokens a character than prose - chat 74's last
+        # request was 45,004 tokens by the estimate and 62,286 real, so it was not condensed and ran out of room.
+        self.token_ratio = 1.0
         self._partial = {"text": "", "thinking": ""}
         # Loop guard (see REPEATED): +1 epoch after every call that may change something; read-only calls
         # remember the epoch they ran in; refused repeats and identical steps are counted.
@@ -204,7 +208,28 @@ class Engine:
             if forced:                            # stuck in a loop: no tools this time, only an answer
                 messages.append({"role": "user", "content": MUST_ANSWER})
             try:
-                res = await self._model_step(messages, [] if forced else schemas, step)
+                try:
+                    res = await self._model_step(messages, [] if forced else schemas, step)
+                except LlmError as exc:
+                    refused = refused_size(exc)
+                    if refused is None or self.cloud is not None:
+                        raise
+                    # Still too long for the model server (a new result costs more tokens a character than the
+                    # last step measured - a hex dump, say): its own count sets the ratio, its own context the
+                    # limit (it keeps the size it was started with until it is loaded again, whatever Settings
+                    # say now), and the request is fitted again, once.
+                    real, room = refused
+                    raw = C.estimate_tokens(messages) + (0 if forced else self.schema_tokens)
+                    self.token_ratio = max(self.token_ratio, token_ratio(real, raw))
+                    if room:
+                        self.ctx_limit = min(self.ctx_limit, room)
+                    self.last_prompt_tokens = real
+                    self.steps.append({"type": "refit", "step": step, "tokens": real, "context": room,
+                                       "depth": self.depth})
+                    messages = await self._fit(messages, compact)
+                    if forced and (messages[-1].get("content") != MUST_ANSWER):   # condensing rebuilt them
+                        messages.append({"role": "user", "content": MUST_ANSWER})
+                    res = await self._model_step(messages, [] if forced else schemas, step)
             except asyncio.CancelledError:
                 await self._save_partial(persist)
                 raise
@@ -305,13 +330,17 @@ class Engine:
         if blocks:
             await persist("assistant", blocks)
 
+    def _tokens(self, messages: list[dict], schemas: bool = True) -> int:
+        """A request's size in tokens: the estimate from its characters, scaled by what the last step measured."""
+        return int((C.estimate_tokens(messages) + (self.schema_tokens if schemas else 0)) * self.token_ratio)
+
     async def _fit(self, messages: list[dict], compact) -> list[dict]:
         if self.cloud is not None:
             return messages                       # cloud models have room; we do not summarise for them
         budget = int(self.ctx_limit * float(self.hub.settings.get("agent", "compact_at") or 0.75))
 
         def size(msgs: list[dict]) -> int:
-            return C.estimate_tokens(msgs) + self.schema_tokens
+            return self._tokens(msgs)
 
         if max(self.last_prompt_tokens, size(messages)) <= budget:
             return messages
@@ -354,10 +383,13 @@ class Engine:
                 if time.monotonic() - t_switch > 1:
                     self.steps.append({"type": "load", "model": self.model["id"],
                                        "seconds": round(time.monotonic() - t_switch, 2)})
-            room = self.ctx_limit - C.estimate_tokens(messages) - (self.schema_tokens if schemas else 0)
+            raw = C.estimate_tokens(messages) + (self.schema_tokens if schemas else 0)
+            room = self.ctx_limit - int(raw * self.token_ratio)
             pl = P.build(self.model, messages, tools=schemas or None, thinking=self.thinking, effort=self.effort,
                          sampling={"max_tokens": max(1024, min(32768, room))})
-            sent = sent_summary(pl, len(messages), len(schemas), self.ctx_limit - room)
+            sent = sent_summary(pl, len(messages), len(schemas), raw)
+            if self.token_ratio > 1.0:
+                sent["token_ratio"] = round(self.token_ratio, 3)
             acc = Accumulator()
             async for chunk in self.hub.llm.stream_chat(self.hub.main_url, pl):
                 for kind, data in acc.feed(chunk):
@@ -365,6 +397,8 @@ class Engine:
             res = acc.result()
         u, t = res.get("usage") or {}, res.get("timings") or {}
         self.last_prompt_tokens = int(u.get("prompt_tokens") or 0)
+        if self.cloud is None and sent.get("estimated_tokens") and self.last_prompt_tokens:
+            self.token_ratio = token_ratio(self.last_prompt_tokens, sent["estimated_tokens"])
         self.usage["prompt_tokens"] += int(u.get("prompt_tokens") or 0)
         self.usage["completion_tokens"] += int(u.get("completion_tokens") or 0)
         self.usage["cached_tokens"] += int(t.get("cache_n") or 0)
@@ -679,6 +713,33 @@ def first_text(rows: list[dict]) -> str:
 SENT_SAMPLING = ("temperature", "top_p", "top_k", "min_p", "presence_penalty", "frequency_penalty", "repeat_penalty")
 
 
+TOO_LONG = re.compile(r"request \((\d+) tokens\) exceeds the available context size(?: \((\d+) tokens\))?")
+
+
+def refused_size(exc: Exception) -> tuple[int, int | None] | None:
+    """(the request's real size, the server's context) when the model server refused a request as too long."""
+    m = TOO_LONG.search(str(exc))
+    return (int(m.group(1)), int(m.group(2)) if m.group(2) else None) if m else None
+
+
+MIN_SUMMARY_ROOM = 1000             # estimated tokens of old messages a summary request must at least take in
+
+
+def token_ratio(real: int, estimated: int) -> float:
+    """Real tokens per estimated token, between 1 (the estimate is not trusted lower) and 3."""
+    return min(3.0, max(1.0, real / estimated)) if estimated > 0 and real > 0 else 1.0
+
+
+def last_token_ratio(runs: list[dict]) -> float:
+    """The ratio of a chat's latest measured model step, for its next turn's first request (1 when none)."""
+    for r in reversed(runs):
+        for s in reversed(r.get("steps") or []):
+            est = (s.get("sent") or {}).get("estimated_tokens") if isinstance(s.get("sent"), dict) else None
+            if s.get("type") == "model" and s.get("prompt_tokens") and est:
+                return token_ratio(int(s["prompt_tokens"]), int(est))
+    return 1.0
+
+
 def sent_summary(pl: dict, messages: int, tools: int, estimated: int) -> dict:
     """What a model step asked llama-server for (stored with the step, for later)."""
     out = {"sampling": {k: pl[k] for k in SENT_SAMPLING if k in pl},
@@ -827,7 +888,12 @@ class Agent:
         tail = [{"role": "user", "content": C.SUMMARY_PROMPT}]
         # The request must fit the context: room for the notes it writes, a margin for the tokenizer.
         notes = min(2000, engine.ctx_limit // 4)
-        room = int(engine.ctx_limit * 0.8) - notes - C.estimate_tokens(head + tail)
+        room = int((engine.ctx_limit * 0.8 - notes) / engine.token_ratio) - C.estimate_tokens(head + tail)
+        if room < MIN_SUMMARY_ROOM:
+            # The summary so far leaves no room for what it should take in: folding now would drop those
+            # messages unread (summary_upto moves past them). The caller shortens the request instead.
+            log.warning("chat %s: no room to condense (%s tokens)", chat_id, room)
+            return messages
         body = C.shrink_for_summary(C.to_model_messages(old, None, keep_images_from=10**12, vision=False), room)
         msgs = [*head, *body, *tail]
         await engine.ticket.switch(engine.need)
@@ -931,6 +997,7 @@ class Agent:
             run.emit("started", model=entry["id"], waited=waited, thinking=thinking)
             engine = Engine(self.hub, run, chat, project, wd, entry, ticket, thinking=thinking, effort=effort,
                             escalation=escalation)
+            engine.token_ratio = last_token_ratio(chats.runs_for_chat(chat["id"]))   # the last turn's measure
             engine.turn_options = {k: options[k] for k in ("thinking", "effort") if options.get(k) is not None}
             engine.steps.append({"type": "queue", "seconds": waited})
 

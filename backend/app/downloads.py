@@ -19,6 +19,11 @@ CIVITAI_LOGIN = ("Civitai wants a signed-in user for this file: create an API ke
                  "and download again.")
 
 
+class _UserCancelled(Exception):
+    """Cancel in Settings -> Models: this file stops, the queue goes on (not the task's own CancelledError, which
+    ended the queue and left the other models' files waiting for ever)."""
+
+
 def _source(f: dict) -> tuple[str, dict, str]:
     """(url, headers, site) for one catalog file. Tokens go only to their own
     site; httpx drops Authorization when a redirect leaves the host."""
@@ -61,6 +66,7 @@ class Downloads:
             d = next((x for x in (self.catalog.get(g, dep) for g in GROUPS) if x), None)
             if d:
                 deps.insert(0, d)
+        self._cancel.difference_update(e["id"] for e in deps)     # asked for again: an earlier Cancel is over
         for e in deps:
             for f in e["files"]:
                 dest = f["dest"]
@@ -94,6 +100,8 @@ class Downloads:
             try:
                 await self._download(entry_id, f, st)
                 st["status"] = "done"
+            except _UserCancelled:
+                st["status"] = "cancelled"
             except asyncio.CancelledError:
                 st["status"] = "cancelled"
                 raise
@@ -132,7 +140,7 @@ class Downloads:
                         with open(part, mode) as out:
                             async for chunk in r.aiter_bytes(4 * 1024 * 1024):
                                 if entry_id in self._cancel:
-                                    raise asyncio.CancelledError()
+                                    raise _UserCancelled()
                                 out.write(chunk)
                                 have += len(chunk)
                                 st["done"] = have

@@ -889,6 +889,159 @@ async def test_a_long_turn_stays_inside_the_context(signed_in, app, fakes, monke
     assert any("shortened by" in (m.get("content") or "") for m in last if m["role"] == "assistant")
 
 
+# ---------------------------------------------------------------- the real token count
+
+def real_tokens(body: dict, dense: float = 1.0, hex_cost: float = 1.0) -> int:
+    """What the fake model server counts for a request: `dense` tokens per estimated token, and a tool result that
+    holds a hex dump (HEX) `hex_cost` times that - Qwen's tokenizer reads hex at far fewer characters a token."""
+    from app.agent import context as C
+    n = C.schema_tokens(body.get("tools")) * dense
+    for m in body["messages"]:
+        k = C.estimate_tokens([m]) * dense
+        n += k * hex_cost if m["role"] == "tool" and "HEX" in (m.get("content") or "") else k
+    return int(n)
+
+
+def counting(ctx: int, replies: list[dict], sizes: list, **cost):
+    """A responder that reports the real token count and refuses a request too long for the context, in
+    llama-server's words. `sizes` collects (real, refused) for each request but the titles."""
+    queue = list(replies)
+
+    def responder(body):
+        if "short title" in last_user(body):
+            return {"content": "Title"}
+        real = real_tokens(body, **cost)
+        if real > ctx:
+            sizes.append((real, True))
+            return {"error": f"request ({real} tokens) exceeds the available context size ({ctx} tokens), "
+                             "try increasing it"}
+        sizes.append((real, False))
+        reply = queue.pop(0) if len(queue) > 1 else queue[0]
+        return {**reply, "usage": {"prompt_tokens": real, "completion_tokens": 50, "total_tokens": real + 50}}
+    return responder
+
+
+async def test_dense_text_is_fitted_by_the_real_token_count(signed_in, app, fakes, monkeypatch):
+    """Chat 74: every character of its hex dumps cost more tokens than the estimate says (62,286 real for 45,004
+    estimated), so it was never condensed and ran out of room. The last step's real count scales the estimate."""
+    hub = app.state.hub
+    monkeypatch.setattr(hub.catalog, "context_per_request", lambda model_id: 14000)
+    c = await new_chat(signed_in)
+    wd = hub.extras["agent"].workdir(chats.get_chat(c["id"]))
+    for i in range(10):
+        wd.write(f"dump{i}.txt", f"dump {i}\n" + "0f a3 " * 1000 + "\n", author="test", origin="test", message="dump")
+    sizes: list = []
+    fakes.llama["responder"] = counting(14000, [
+        *({"content": f"Dump {i} read.", "tool_calls": [{"name": "read_file", "arguments": {"path": f"dump{i}.txt"}}]}
+          for i in range(10)), {"content": "All read."}], sizes, dense=1.6)
+    run = await finish(app, await say(signed_in, c["id"], "Read every dump"))
+    assert run.status == "done", (run.events[-1], sizes)
+    assert len(sizes) == 11 and not any(refused for _, refused in sizes), sizes
+    model_steps = [s for s in chats.runs_for_chat(c["id"])[0]["steps"] if s["type"] == "model"]
+    assert "token_ratio" not in model_steps[0]["sent"]                       # nothing measured yet
+    assert all(abs(s["sent"]["token_ratio"] - 1.6) < 0.05 for s in model_steps[1:]), [s["sent"] for s in model_steps]
+
+
+async def test_a_request_the_model_server_refuses_as_too_long_is_fitted_again(signed_in, app, fakes, monkeypatch):
+    """Three hex dumps arrive in one step: the last step measured plain text, so the estimate says the next request
+    fits. The model server refuses it with its real size; that size sets the ratio and the request is shortened."""
+    hub = app.state.hub
+    monkeypatch.setattr(hub.catalog, "context_per_request", lambda model_id: 14000)
+    c = await new_chat(signed_in)
+    wd = hub.extras["agent"].workdir(chats.get_chat(c["id"]))
+    for i in range(3):
+        wd.write(f"hex{i}.txt", f"HEX {i}\n" + "0f a3 " * 800 + "\n", author="test", origin="test", message="hex")
+    sizes: list = []
+    fakes.llama["responder"] = counting(14000, [
+        {"content": "Reading the three dumps.",
+         "tool_calls": [{"name": "read_file", "arguments": {"path": f"hex{i}.txt"}} for i in range(3)]},
+        {"content": "The dumps differ at byte 4."}], sizes, hex_cost=3.0)
+    run = await finish(app, await say(signed_in, c["id"], "Compare the dumps"))
+    assert run.status == "done", (run.events[-1], sizes)
+    assert [refused for _, refused in sizes] == [False, True, False], sizes
+    steps = chats.runs_for_chat(c["id"])[0]["steps"]
+    refit = next(s for s in steps if s["type"] == "refit")
+    assert refit["tokens"] == sizes[1][0] and refit["step"] == 2
+    last = [b for b in fakes.llama["requests"] if "short title" not in last_user(b)][-1]["messages"]
+    assert "HEX 2" in last[-1]["content"] and "0f a3 " * 800 in last[-1]["content"]   # the newest result is whole
+    assert texts(run).endswith("The dumps differ at byte 4.")
+
+
+async def test_a_new_turn_starts_from_the_last_turns_measure(signed_in, app, fakes, monkeypatch):
+    """The first request of a turn has nothing measured in this turn: the chat's last model step's ratio is used,
+    so a chat of dense text is condensed before it is sent - not refused first."""
+    hub = app.state.hub
+    monkeypatch.setattr(hub.catalog, "context_per_request", lambda model_id: 20000)
+    c = await new_chat(signed_in)
+    for i in range(3):
+        chats.add_message(c["id"], "user", [{"type": "text", "text": f"Dump {i}: " + "0f a3 " * 650}])
+        chats.add_message(c["id"], "assistant", [{"type": "text", "text": f"Noted dump {i}: " + "1b 2c " * 650}])
+    chats.run_started("run_before", c["id"], "qwen3.8-27b")
+    chats.run_finished("run_before", "done", [{"type": "model", "step": 1, "prompt_tokens": 8000,
+                                              "sent": {"estimated_tokens": 4000}}], {})
+    sizes: list = []
+    plain = counting(20000, [{"content": "Fine."}], sizes, dense=2.0)
+
+    def responder(body):
+        if "Condense the conversation" in last_user(body):
+            sizes.append((real_tokens(body, dense=2.0), "condense"))
+            return {"content": "SUMMARY: three dumps."}
+        return plain(body)
+    fakes.llama["responder"] = responder
+    run = await finish(app, await say(signed_in, c["id"], "And the fourth?"))
+    assert run.status == "done", (run.events[-1], sizes)
+    assert [kind for _, kind in sizes] == ["condense", False] and sizes[0][0] <= 20000, sizes
+    assert sizes[1][0] <= 20000 * 0.75, sizes
+    assert any(e["type"] == "compacted" for e in run.events)
+    assert chats.get_chat(c["id"])["summary"] == "SUMMARY: three dumps."
+
+
+async def test_a_server_with_less_context_than_the_settings_say_is_believed(signed_in, app, fakes, monkeypatch):
+    """Context per chat raised in Settings while the model is loaded: llama-server keeps its old size until it is
+    loaded again. Its refusal names that size, and the turn fits itself to it."""
+    hub = app.state.hub
+    monkeypatch.setattr(hub.catalog, "context_per_request", lambda model_id: 30000)      # what Settings say now
+    c = await new_chat(signed_in)
+    wd = hub.extras["agent"].workdir(chats.get_chat(c["id"]))
+    for i in range(6):
+        wd.write(f"page{i}.txt", f"page {i}\n" + "w" * 9000 + "\n", author="test", origin="test", message="page")
+    sizes: list = []
+    fakes.llama["responder"] = counting(14000, [                                        # what the server has
+        *({"content": f"Page {i} read.", "tool_calls": [{"name": "read_file", "arguments": {"path": f"page{i}.txt"}}]}
+          for i in range(6)), {"content": "All read."}], sizes)
+    run = await finish(app, await say(signed_in, c["id"], "Read every page"))
+    assert run.status == "done", (run.events[-1], sizes)
+    refused = [n for n, (_, r) in enumerate(sizes) if r]
+    assert len(refused) == 1 and all(real <= 14000 for real, r in sizes[refused[0] + 1:]), sizes
+    refit = next(s for s in chats.runs_for_chat(c["id"])[0]["steps"] if s["type"] == "refit")
+    assert refit["context"] == 14000
+
+
+async def test_no_room_to_condense_leaves_the_history_alone(signed_in, app, fakes, monkeypatch):
+    """A summary so long that the request to condense more could take in nothing: the old messages are not folded
+    into it unread (they would be lost), the turn is shortened instead."""
+    hub = app.state.hub
+    monkeypatch.setattr(hub.catalog, "context_per_request", lambda model_id: 16000)
+    c = await new_chat(signed_in)
+    for i in range(3):
+        chats.add_message(c["id"], "user", [{"type": "text", "text": f"Question {i}: " + "x" * 3000}])
+        chats.add_message(c["id"], "assistant", [{"type": "text", "text": f"Answer {i}: " + "y" * 3000}])
+    chats.update_chat(c["id"], summary="S" * 22000, summary_upto=0)
+    chats.run_started("run_before", c["id"], "qwen3.8-27b")
+    chats.run_finished("run_before", "done", [{"type": "model", "step": 1, "prompt_tokens": 9000,
+                                              "sent": {"estimated_tokens": 6000}}], {})
+    asked = []
+
+    def responder(body):
+        asked.append(last_user(body))
+        return {"content": "Fine."}
+    fakes.llama["responder"] = responder
+    await finish(app, await say(signed_in, c["id"], "And now?"))
+    assert not any("Condense the conversation" in a for a in asked)
+    chat = chats.get_chat(c["id"])
+    assert chat["summary"] == "S" * 22000 and not chat["summary_upto"]
+
+
 # ---------------------------------------------------------------- skills and memory
 
 async def test_memory_files_are_listed_in_the_prompt(signed_in, app, fakes):

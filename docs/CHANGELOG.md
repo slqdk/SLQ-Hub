@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.26.0 - 2026-10-25
+
+- **Updates wait until nobody uses the Hub.** `sudo bash update.sh` can be
+  started at any time: it builds the new version while the Hub runs, then
+  waits until the Hub has had nothing to do for a minute - no chat answering
+  or waiting for an answer, no person's chat, picture, video, test run,
+  library or download - before it stops it for the backup. The waiting and
+  installing run on their own, and the window shows them: Ctrl+C or closing
+  it does not stop the update, and never in the middle of a backup or a
+  start. `sudo bash update.sh cancel` stops an update that still builds or
+  waits (nothing has been stopped then), `--now` skips the wait, and an
+  update that was cut off (the VM reset, say) is put right by the next
+  `update.sh`. The update to 0.26.0 itself can only watch the card's load:
+  the running 0.25.0 cannot say what it does.
+- **Long chats no longer run out of room unnoticed.** The Hub estimated a
+  request's size from its characters, and text such as hex dumps costs far
+  more tokens than that: chat 74 was at 62,286 tokens where the Hub counted
+  45,004, so it was never condensed and stopped with "request exceeds the
+  available context size". Every step now measures the real count and
+  condenses or shortens in time, and a request the model server still finds
+  too long is shortened and sent again.
+- **Context per chat** in Settings → Models → Settings, beside the context.
+  Raising the context gave a chat no more room before: it kept the model
+  card's 65,536. The dialog says what one chat may use now and what the model
+  was trained for; whether a bigger context fits on the card shows when the
+  model loads.
+- Cancelling a download no longer leaves the other models' downloads waiting
+  for ever, and a cancelled model can be downloaded again right away.
+- The troubleshooting export's `context.json` has the measured token ratio.
+
 ## 0.25.0 - 2026-10-25
 
 - **Faster video: Wan 2.2 5B Turbo.** A new video model under Settings →

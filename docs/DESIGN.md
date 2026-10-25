@@ -319,6 +319,24 @@ KV heads × 256 head dim): weights 15.3 GiB + mmproj 0.9 + recurrent state
 → about 21 GiB. One conversation can use up to 64K tokens (the agent compacts
 before that), and both slots share the pool.
 
+**Context per chat** (0.26.0). The server's context (`-c`, the shared pool)
+and what one chat's request may use (`--kv-unified-per-slot`, the agent's
+budget, what `/api/show` and `/api/ps` report) are two settings: Settings →
+Models → Settings has both (`server.ctx`, `server.per_request`). Empty, the
+second is the card's `context_per_request`; it is never more than a slot has
+(the pool with a unified cache, else an equal share) and must be at least
+4,096 and at most the context. Before, only the pool could be changed, and a
+chat kept the card's 65,536 whatever the pool (chat 74 ran with 128,000). The
+dialog says what one chat may use now and what the model was trained for
+(`{arch}.context_length` from the file's header, `app/gguf.py`). The KV cache
+is reserved when the model loads, so a pool too big for the card stops
+llama-server from starting; per token the 27B's q8_0 cache takes 16 × 4 × 256
+× 2 values ≈ 34 KiB by the numbers above (not measured). A change reaches
+llama-server when the model is loaded again; a turn in between learns the
+running server's size from its refusal (§6 "The real token count"). Null for
+the context, the slots or the RAM cache means the card's value again; a slot
+count below one is refused.
+
 Searching by name (Add from Hugging Face): the Hub asks
 `/api/models?search=<longest word>&filter=gguf&sort=downloads` and keeps the
 repositories whose id contains every word of the query; owner/name or a link
@@ -834,6 +852,26 @@ answers, then the oldest messages are left out (with a note). Within one long
 turn there is nothing before the user's message to fold, so the turn's own
 older results, then older answers and tool-call arguments, are shortened -
 in a small context down to only the newest result and answer whole.
+
+**The real token count** (0.26.0). The sizes above are estimates from the
+characters (3.2 a token), and some text costs far more tokens a character:
+chat 74's hex dumps made its last request 62,286 tokens where the estimate
+said 45,004, so it was never condensed, its answer was cut at the end of the
+64K context and the next request was refused. Each local model step now
+measures real tokens per estimated token (llama-server's `prompt_tokens`
+over the estimate it sent, between 1 and 3) and every later size - fitting,
+condensing, the room left for the answer, the summary request - is scaled by
+it. A turn starts from its chat's last measured step (subagents from their
+parent). When new text is denser still and llama-server refuses a request as
+longer than its context ("request (N tokens) exceeds the available context
+size (M tokens)"), N sets the ratio, M caps the turn's context (a server keeps
+the size it was started with until it is loaded again, whatever Settings say
+now), and the request is fitted again, once (a `refit` step; a forced answer
+keeps its instruction). A step's `sent` keeps `token_ratio` when it was above
+1. A summary so long that the request to condense more could take in fewer
+than 1,000 estimated tokens of old messages is not extended: folding would
+move `summary_upto` past messages it never read, so the turn is shortened
+instead.
 
 **Messages while it works.** A message sent while a turn runs does not wait
 for the end: it goes into the run's inbox (event `user_queued`), and the
@@ -1769,15 +1807,60 @@ assistant made), each sent with every message.
 
 1. Fast-forward the clone.
 2. Build the new images while the old ones serve.
-3. Stop the app and back up `data/` (not the logs, the sandbox's NuGet caches
+3. Wait until nobody uses the Hub (0.26.0, below).
+4. Stop the app and back up `data/` (not the logs, the sandbox's NuGet caches
    or .NET build output: they come back by themselves).
-4. Start the new version and wait for health.
-5. On failure, roll back code, images and data automatically.
-6. Install the firewall script and unit as the new version has them, and
+5. Start the new version and wait for health.
+6. On failure, roll back code, images and data automatically.
+7. Install the firewall script and unit as the new version has them, and
    apply the rules (0.15.0; they are added only when missing).
 
+**Waiting for a free Hub** (0.26.0). An update may be started at any time:
+after the build it asks the running Hub, `GET /hub/api/internal/busy` (from
+the VM with `HUB_INTERNAL_TOKEN` from `.env`; refused through the proxy,
+`app/ui/update_routes.py`), what is going on - a job on the card or waiting
+for it, a model being loaded, a chat turn between two steps or waiting for an
+answer to its question, a person's turn and their device fetching its answer
+(two minutes after it ended), a test run, a library reading a document, a
+model download - and goes on only once the answer has been "nothing" for
+`--quiet` seconds (60, asked every 5). A turn whose task has ended without
+finishing, and queued downloads nothing is downloading, do not count: they
+would keep it waiting for ever.
+
+Started in a terminal, the waiting and installing run in a session of their
+own (`start_new_session`; the resume file below, marked `detached`; output in
+`/srv/slq-hub/update.log`, the previous one kept as `update.log.1`), and the
+terminal shows that log until they end and returns their exit code: Ctrl+C or
+closing the window stops only the showing, never a backup or a start halfway.
+The update's own updater builds first, in the window (Ctrl+C there undoes it);
+an updater that was handed over goes to its own session before the build,
+because the old updater kills it a quarter of a second after a Ctrl+C - in
+0.25.0's `subprocess.call`; from 0.26.0 on, `hand_over` waits and leaves the
+Ctrl+C to the new one. Without a terminal (cron, `--yes`) or with `--here` it
+all runs where it is.
+
+`/srv/slq-hub/update.lock` names the update's process, written whole
+(`os.replace`) with the boot id, the phase (building, waiting for the Hub to
+be free, being installed), the old commit and version; a lock counts only
+while its pid, in the same boot, is a `tools/hub_update.py` process.
+`update.sh status` shows it, and another update is refused while it runs.
+`update.sh cancel` stops an update that builds or waits - SIGTERM, which
+SIGHUP and Ctrl+C equal there: the code and the images' tags go back as after
+a failed build, nothing was stopped. So does any error before the install.
+From the install on, SIGTERM, SIGHUP and SIGINT are ignored, as they are while
+putting the code back. A lock whose process is gone (killed, the VM reset) is
+dealt with by the next `update.sh`: cut off before the install, it puts the
+code and the tags back first and carries on; cut off during it, it stops and
+says what to do (`status`, `--force` to start this version again, or
+`rollback`). `--now` skips the wait. A Hub older than 0.26.0 cannot answer
+(its gate says 401), and then the card's own load decides
+(`gpu_busy_percent` of 10 or more is busy), which does not see a turn between
+its steps - so the update to 0.26.0 itself waits for the card only; a 403 (a
+token that is not the Hub's) or a 5xx is said once and also falls back to the
+card.
+
 When the fast-forward changed the updater itself (`tools/hub_update.py` or
-`update.sh`), the new updater does steps 2-6 (0.16.0): the old one writes what
+`update.sh`), the new updater does steps 2-7 (0.16.0): the old one writes what
 it knows (`HUB_ROOT/update-resume.json`: the commits, versions and the images
 tagged `:rollback`), starts `hub_update.py update --resume <file>` and waits.
 The new one deletes the file as it takes over; a file still there afterwards

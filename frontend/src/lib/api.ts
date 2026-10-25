@@ -191,7 +191,9 @@ export interface ModelEntry { id: string; name: string; name_card?: string; desc
   loaded?: boolean; downloads: DownloadState[]; capabilities?: string[]; kind?: string;
   files: { repo?: string; path?: string; url?: string; dest: string; size?: number; role?: string }[];
   server?: Record<string, unknown>; thinking?: { efforts?: string[]; default_effort?: string; default?: boolean };
-  context_per_request?: number; parameter_size?: string; quantization?: string; aliases?: string[]; requires?: string[];
+  context_per_request?: number;
+  /** Language models: what one chat may use now (Settings or the card), and what the model was trained for. */
+  context_per_chat?: number; context_native?: number | null; parameter_size?: string; quantization?: string; aliases?: string[]; requires?: string[];
   custom?: boolean; family?: string; abilities?: string[]; sdxl?: SdxlSettings; architecture?: string;
   /** Sound models: where they run (the card through ComfyUI, or the CPU speech service) and what they speak. */
   engine?: "comfy" | "speech"; languages?: string[];

@@ -303,11 +303,13 @@ function ModelSettings({ model, thinkingInChats, onClose, onSaved }: { model: Mo
   const firstSampling = useMemo(() => samplingForm(model), [model]);
   const [sampling, setSampling] = useState<SamplingForm>(firstSampling);
   const [ctx, setCtx] = useState(String(server.ctx ?? ""));
+  const [perChat, setPerChat] = useState(String(server.per_request ?? ""));
   const [parallel, setParallel] = useState(String(server.parallel ?? ""));
   const [cache, setCache] = useState(String(server.cache_type ?? "q8_0"));
   const firstExtra = ((server.extra as string[] | undefined) ?? []).join(" ");
   const [extra, setExtra] = useState(firstExtra);
-  const serverChanged = ctx !== String(server.ctx ?? "") || parallel !== String(server.parallel ?? "")
+  const serverChanged = ctx !== String(server.ctx ?? "") || perChat !== String(server.per_request ?? "")
+    || parallel !== String(server.parallel ?? "")
     || cache !== String(server.cache_type ?? "q8_0") || extra !== firstExtra;
   const samplingChanged = JSON.stringify(sampling) !== JSON.stringify(firstSampling);
   const setValue = (mode: "instruct" | "thinking", key: string, v: string) =>
@@ -332,7 +334,7 @@ function ModelSettings({ model, thinkingInChats, onClose, onSaved }: { model: Mo
         : { instruct: clean(sampling.instruct) };
     }
     if (serverChanged) body.server = { ctx: Number(ctx), parallel: Number(parallel), cache_type: cache,
-      extra: extra.trim() ? extra.trim().split(/\s+/) : [] };
+      per_request: perChat.trim() ? Number(perChat) : 0, extra: extra.trim() ? extra.trim().split(/\s+/) : [] };
     if (!Object.keys(body).length) {
       onClose();
       return;
@@ -383,10 +385,20 @@ function ModelSettings({ model, thinkingInChats, onClose, onSaved }: { model: Mo
         (unified KV cache); more context or slots need more VRAM.</p>
       <div className="form-grid">
         <label className="field"><span>Context (tokens, all slots)</span><input className="input" type="number" value={ctx} onChange={(e) => setCtx(e.target.value)} /></label>
+        <label className="field"><span>Context per chat (tokens)</span><input className="input" type="number" min={4096}
+          value={perChat} placeholder={model.context_per_chat ? String(model.context_per_chat) : "the model card's"}
+          onChange={(e) => setPerChat(e.target.value)} /></label>
         <label className="field"><span>Slots (parallel requests)</span><input className="input" type="number" min={1} max={8} value={parallel} onChange={(e) => setParallel(e.target.value)} /></label>
         <label className="field"><span>KV cache type</span><select className="select" value={cache} onChange={(e) => setCache(e.target.value)}>
           {["f16", "q8_0", "q4_0"].map((c) => <option key={c} value={c}>{c}</option>)}</select></label>
       </div>
+      <p className="muted small" style={{ margin: 0 }}>
+        {model.context_per_chat ? <>One chat may use {model.context_per_chat.toLocaleString("en")} tokens now. </> : null}
+        {model.context_native ? <>The model was trained for up to {model.context_native.toLocaleString("en")}. </> : null}
+        Context per chat is at most the context; empty: the model card's. With two slots, leave the other some room
+        (titles, a second chat). The cache is reserved when the model loads: if it does not fit on the card, the model
+        will not start (the System tab shows the VRAM in use). Long chats are slower - reading one that is not in the
+        cache can take minutes.</p>
       <label className="field"><span>Extra llama-server flags</span><input className="input mono" value={extra} onChange={(e) => setExtra(e.target.value)}
         placeholder="--temp 0.6" /><small>For experiments. The Hub sets <code className="mono">--host</code> and{" "}
         <code className="mono">--port</code>; <code className="mono">--api-key</code> is not allowed (the model server is
