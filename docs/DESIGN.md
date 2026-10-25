@@ -176,7 +176,9 @@ for statistics.
    - **Following a job** (0.22.2). The Hub hears a job's progress over
      ComfyUI's websocket, without keepalive pings: in the second test run the
      socket closed during a 14B video job, 162 s after its last message, and
-     the Hub gave up - and cancelled - a job that may have been running on.
+     the Hub gave up - and cancelled - a job that ComfyUI's log shows going
+     on for almost five minutes more (busy loading its second expert, it had
+     not answered the client's pings).
      A closed socket now only means asking instead: `/history/<id>` until the
      job is there, every second; a job in neither the history nor `/queue` is
      gone - ComfyUI keeps both in memory, so it restarted (or the job was

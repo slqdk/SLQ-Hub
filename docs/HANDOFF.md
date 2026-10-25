@@ -566,15 +566,23 @@ the host if the VM ever stops by itself.
     picture model fast, then `quality: full` (several times longer); (4) a
     first and a last picture; (5) the 14B text model. Then: does it look
     right, does the motion follow the prompt, Danish prompt vs English.
-51. **The 14B pair and the VM's memory** (0.19.0) - in the second test run
-    the 14B picture pair made one step in 65 s and then nothing for 162 s
-    before the websocket closed: why is not known. ComfyUI holds one 14.3 GB
-    expert on the card at a time and swaps the other in from RAM; with the
-    6.7 GB text encoder that is about 35 GB of weights for the VM's 40 GB.
-    Watch `free -g` and ComfyUI's log during (3). If the VM swaps hard or
-    ComfyUI is killed, try `COMFY_ARGS=--cache-none` in `.env` (ComfyUI
-    then reloads from disk each time) and `update.sh`; ask for the log
-    before changing more.
+51. **The 14B pair and the VM's memory** (0.19.0) - the second test run's
+    ComfyUI log (12:05-12:30 UTC) and kernel log: ComfyUI's dynamic VRAM
+    staged both experts ("13630MB Staged" each; "0 models unloaded" before
+    the second) beside the text encoder (6419 MB). The first expert's first
+    step took 51 s with its loading; the second expert's loading had run
+    3 min 16 s without a step when the job stopped, and the job ended 510 s
+    after it began - 4 min 43 s after the Hub's interrupt (ComfyUI honours an
+    interrupt between steps), with no restart, no out-of-memory kill and no
+    GPU reset. The kernel's only line: `amdgpu_amdkfd_restore_userptr_worker
+    hogged CPU` at 12:14:36 - the driver restoring host memory registered for
+    the card, which ComfyUI's "pinned memory" is on AMD (`hipHostRegister`;
+    up to 40-90 % of RAM by its own rule). Likely the VM's RAM - about 34 GB
+    of staged weights in 40 GB - but not measured. To measure: `vmstat 5` in
+    a second SSH window during a 14B job (si/so, free). To try, one at a
+    time: `COMFY_ARGS=--disable-pinned-memory`, then `--cache-none`, in
+    `.env` and `update.sh`; ComfyUI's start-up log says its pinned limit
+    ("Enabled pinned memory").
 52. **Remakes after 0.20.2** - a test plan with chat 24's song: (1) the same
     request ("Re-make this song as a live concert with a cheering audience
     and a big hall"): the result should say "with its own sound", "keep 0.5"
@@ -625,14 +633,12 @@ the host if the VM ever stops by itself.
 57. **The clip from a picture that came out broken** (second test run): the
     5B, right after a 14B job the Hub had cancelled, made a clip that keeps
     the picture only in the top-left corner of its first frame and is flat
-    colours after. Not explained. To tell whether it was the state the 14B
-    job left behind or the 5B from a picture as such: Settings → Tests, only
-    "Make a picture move", with the 5B (Settings → Assistant → Video), and
-    the ComfyUI log of 2026-10-25 12:05-12:30 UTC (`sudo bash
-    /opt/slq-hub/update.sh compose logs --since 2026-10-25T12:05:00Z --until
-    2026-10-25T12:30:00Z comfyui > comfyui-2.log`) with the kernel's for the
-    same time (`sudo journalctl -k --since "2026-10-25 12:00 UTC" --until
-    "2026-10-25 12:35 UTC" > kernel-2.log`).
+    colours after. Not explained. ComfyUI's log shows nothing amiss for it:
+    13 min 20 s, no warning, no tiled-encode fallback - but it began 39 s
+    after the 14B job ended (item 51), under whatever that job left in RAM.
+    To tell which: a fresh ComfyUI (`sudo bash /opt/slq-hub/update.sh compose
+    restart comfyui`), then Settings → Tests, only "Make a picture move",
+    with the 5B (Settings → Assistant → Video).
 
 ## Where things are
 

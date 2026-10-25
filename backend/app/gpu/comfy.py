@@ -292,9 +292,10 @@ class Comfy:
         ws_url = self.url.replace("http://", "ws://").replace("https://", "wss://") + f"/ws?clientId={client_id}"
         try:
             # No keepalive pings. In the second test run the socket closed during a 14B video job, 162 s after
-            # its last message, and the Hub gave the job up - whether ComfyUI stopped or only left the library's
-            # pings unanswered while it worked is not known. A ComfyUI that stops closes the connection itself;
-            # a closed or quiet one is asked about the job (one that restarted no longer has it: that ends it).
+            # its last message, and the Hub gave the job up - ComfyUI's log shows it going on for almost five
+            # minutes more, loading its second expert, too busy to answer pings. A ComfyUI that stops closes the
+            # connection itself; a closed or quiet one is asked about the job (one that restarted no longer has it:
+            # that ends it).
             ws = await ws_connect(ws_url, max_size=64 * 1024 * 1024, open_timeout=10, ping_interval=None)
         except Exception:                       # no websocket: poll instead
             prompt_id = queued["id"] = await self.queue(graph, client_id)
