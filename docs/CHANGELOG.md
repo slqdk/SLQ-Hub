@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.28.1 - 2026-10-25
+
+- **Settings → Assistant → Video tells the truth about first-to-last videos.**
+  The help under "Model for a video from a picture" named Wan 2.2 14B picture
+  to video even when it was not downloaded. It now says which downloaded
+  model makes a video from a first to a last picture - or that none does
+  (the 5B models start from one picture only). The assistant is told the
+  same, so it says so instead of trying.
+
 ## 0.28.0 - 2026-10-25
 
 - **The same vocals, a new band - in one go.** Chat 76's second try split the

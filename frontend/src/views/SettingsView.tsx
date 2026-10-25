@@ -1303,6 +1303,15 @@ function AgentTab({ s }: { s: S }) {
     return [{ value: "", label: fit.length ? `The first downloaded (${fit[0].name})` : "None downloaded" },
       ...fit.map((m) => ({ value: m.id, label: m.name }))];
   };
+  // A first-to-last video takes the chosen model when it can, else the first downloaded one that can - and the
+  // 5B models cannot (0.28.1: the text named the 14B after Søren had deleted it).
+  const canEnds = (m: { abilities?: string[] }) => (m.abilities ?? []).includes("flf2v");
+  const endsWith = videoModels.filter(canEnds);
+  const endsCould = (models?.video ?? []).filter(canEnds).map((m) => m.name);
+  const endsHelp = endsWith.length
+    ? `A video from a first to a last picture uses it when it can, otherwise ${endsWith[0].name}.`
+    : "No downloaded model makes a video from a first to a last picture"
+      + (endsCould.length ? `; ${endsCould.join(", ")} can (the Models tab).` : ".");
   return (
     <div>
       <SectionForm s={s} section="agent" title="The assistant" fields={[
@@ -1371,8 +1380,7 @@ function AgentTab({ s }: { s: S }) {
           help: "Wan 2.2 5B Turbo is the fast one: the 5B in 4 steps instead of 20. Wan 2.2 5B takes several times "
             + "longer for a little more detail and motion - ask for the best quality to use it for one clip." },
         { key: "i2v_model", label: "Model for a video from a picture", type: "select", options: videoOptions("i2v"),
-          help: "A video from a first to a last picture uses it when it can (Wan 2.2 14B picture to video), otherwise a " +
-            "model that can. The assistant can still use another downloaded model if you name it." },
+          help: `${endsHelp} The assistant can still use another downloaded model if you name it.` },
       ]} />}
     </div>
   );

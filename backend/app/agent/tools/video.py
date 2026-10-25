@@ -144,6 +144,14 @@ def _dynamic(ctx: ToolContext) -> tuple[str, dict]:
     # picked the 14B pair for a picture on its own, and that job stalled for minutes (HANDOFF item 51).
     picks = [f"from {words}: {pipe.chosen(a)['name']}" for a, words in (("t2v", "a description"),
                                                                          ("i2v", "a picture")) if pipe.available(a)]
+    # 0.28.1: with the 14B picture to video deleted (Søren's disk), nothing makes a first-to-last video - say so here
+    # instead of letting the assistant find out from a refusal.
+    ends = ""
+    if not pipe.available("flf2v"):
+        could = [e["name"] for e in pipe.hub.catalog.entries("video") if "flf2v" in (e.get("abilities") or [])]
+        ends = ("\n- A video from a first to a last picture: none of the downloaded models makes one"
+                + (f" ({', '.join(could)} would - Settings -> Models -> Video)" if could else "")
+                + ". Tell the user instead of trying.")
     text = (TEXT + "\n- prompt: one rich paragraph in English: the subject, what it does and how it moves, the "
             "camera (static, slow push-in, pan left, orbit, tracking shot, handheld), the light, the style and the "
             "mood. With a picture, describe the motion and the camera - the picture already shows what is in it. "
@@ -152,8 +160,8 @@ def _dynamic(ctx: ToolContext) -> tuple[str, dict]:
             "first frame with image_generate (when offered) and start the video from it.\n- The video has no "
             "sound: make it with sound_generate or music_generate (when offered) and put it under the video with "
             "ffmpeg in bash: ffmpeg -i video.mp4 -i sound.mp3 -map 0:v -map 1:a -c:v copy -c:a aac -shortest "
-            "out.mp4\nWithout model: " + "; ".join(picks) + " - pick another only when the user asks for it."
-            "\nModels:\n" + "\n".join(lines))
+            "out.mp4" + ends + "\nWithout model: " + "; ".join(picks) + " - pick another only when the user asks for "
+            "it.\nModels:\n" + "\n".join(lines))
     return text, _params([e["id"] for e in models])
 
 

@@ -108,6 +108,7 @@ async def test_no_video_tool_until_a_model_is_downloaded(signed_in, app, fakes):
     assert "Without model: from a description: Wan 2.2 5B; from a picture: Wan 2.2 5B - pick another only when " \
            "the user asks for it" in desc
     assert "describe the motion and the camera" in desc and "-map 0:v -map 1:a" in desc
+    assert "none of the downloaded models makes one" not in desc            # the 14B picture to video does
     assert "# Video\n- video_generate makes a short video" in system(fakes, 0)
 
 
@@ -279,6 +280,10 @@ async def test_wan_14b_from_a_description_and_the_settings_choose_the_model(sign
     assert not res["ok"] and "no downloaded video model makes video from a first and a last picture: Wan 2.2 5B, " \
                              "Wan 2.2 14B text to video cannot" in res["text"]
     assert len(fakes.comfy["prompts"]) == 2
+    # 0.28.1 (Søren deleted the 14B picture to video): the description says so before anything is tried
+    assert "\n- A video from a first to a last picture: none of the downloaded models makes one (Wan 2.2 14B " \
+           "picture to video would - Settings -> Models -> Video). Tell the user instead of trying.\n" in \
+           tools_offered(fakes, 0)["video_generate"]["description"]
 
 
 # ---------------------------------------------------------------- Wan 2.2 5B Turbo (0.25.0)

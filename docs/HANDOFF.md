@@ -192,7 +192,10 @@ changed little. `music_remake` now keeps the song's own vocals in one call
 (`vocals: "original"`: separation, a remake of the band only, the vocals
 added back at their level, the band saved too), every remake measures
 whether it kept the song's tempo, key and beat (`SLQBeatCheck`, a new node in
-the ComfyUI image), and keep defaults to 0.6 - item 67.
+the ComfyUI image), and keep defaults to 0.6 - item 67. 0.28.1: Settings → Assistant →
+Video named Wan 2.2 14B picture to video for first-to-last videos after Søren
+had deleted it; the help text and the video tool's description now follow
+what is downloaded (no first-to-last video without the 14B picture to video).
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
 host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU
