@@ -363,11 +363,13 @@ class Engine:
 
         now = size(messages)
         if now > self.ctx_limit * CLEAR_AT:
-            # Old tool output, cleared in one go long before the context is full (0.27.0): a model answers worse
-            # in a long context well before it runs out. Only when it frees a good share - every change to an
-            # older message makes llama-server read the request again from there.
-            cleared = C.trim_tool_results(messages, keep_last=KEEP_RESULTS, limit=C.OLD_RESULT_HEAD,
-                                          why="cleared to keep the conversation short")
+            # Old tool output and older steps' thinking, cleared in one go long before the context is full (0.27.0;
+            # thinking since 0.28.4): a model answers worse in a long context well before it runs out. Only when it
+            # frees a good share - every change to an older message makes llama-server read the request again from
+            # there.
+            cleared = C.trim_reasoning(C.trim_tool_results(messages, keep_last=KEEP_RESULTS, limit=C.OLD_RESULT_HEAD,
+                                                           why="cleared to keep the conversation short"),
+                                       keep_last=KEEP_THOUGHTS)
             after = size(cleared)
             if now - after >= self.ctx_limit * CLEAR_GAIN:
                 self.steps.append({"type": "cleared", "before": now, "after": after, "depth": self.depth})
@@ -375,7 +377,14 @@ class Engine:
                 messages, self.last_prompt_tokens = cleared, 0     # the last real count was of the longer one
         if max(self.last_prompt_tokens, size(messages)) <= budget:
             return messages
-        messages = C.trim_tool_results(messages)
+        # Over the budget: room is made well below it, so the next steps only add to the request. Trimmed just
+        # under it, the next step is over again and an older message changes at every step - and a model with
+        # linear-attention layers (Qwen3.5 and later) can only resume its cache from a checkpoint near the start:
+        # chat 78 read 36,000 tokens again at each of four steps in a row, about a minute each.
+        target = int(self.ctx_limit * REFILL_TO)
+        messages = C.trim_reasoning(messages, keep_last=KEEP_THOUGHTS)
+        if size(messages) > target:
+            messages = C.trim_tool_results(messages)
         if size(messages) > budget and compact is not None:
             before = size(messages)
             folded = await compact(messages)
@@ -383,7 +392,7 @@ class Engine:
                 self.emit("compacted", before=before, after=size(folded))
                 self._note_prompt(folded, None, "compacted")
             messages = folded
-        if size(messages) > budget:
+        if size(messages) > target:
             messages = C.trim_tool_results(messages, keep_last=2, limit=400)
         if size(messages) > budget:               # a long turn: shorten its older answers and calls too
             messages = C.trim_assistant(messages, keep_last=4, limit=400)
@@ -762,6 +771,9 @@ MIN_SUMMARY_ROOM = 1000             # estimated tokens of old messages a summary
 CLEAR_AT = 0.5                      # of the context: old tool output is cleared (all but the newest results) ...
 CLEAR_GAIN = 0.15                   # ... when that frees at least this share of it
 KEEP_RESULTS = 4                    # the newest tool results kept whole when clearing
+KEEP_THOUGHTS = 2                   # the newest steps whose thinking stays (0.28.4)
+REFILL_TO = 0.6                     # over the budget, the lighter cuts go down to this share of the context (0.28.4)
+MIN_FOLD = 0.1                      # condensing waits until what it can fold is at least this share of the context
 
 
 def token_ratio(real: int, estimated: int) -> float:
@@ -921,6 +933,11 @@ class Agent:
         if split is None or engine.ticket is None:
             return messages
         old = [r for r in rows if r["id"] <= split]
+        foldable = C.estimate_tokens(C.to_model_messages(old, None, keep_images_from=10**12, vision=False))
+        if foldable * engine.token_ratio < engine.ctx_limit * MIN_FOLD:
+            # Too little before this turn to be worth a summary (chat 78: the new chat's notes, 1,200 tokens, were
+            # condensed into notes as long, and the changed system prompt made the server read 48,000 tokens again).
+            return messages
         head = [{"role": "system", "content": "You condense conversations into notes."}]
         if chat.get("summary"):
             head += [{"role": "user", "content": "The notes so far, from earlier in the conversation:\n"

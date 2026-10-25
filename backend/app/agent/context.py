@@ -247,8 +247,9 @@ NOTES_HEADINGS = """## Goal
 ## Done
 ## Open questions
 ## Next"""
-NOTES_RULES = """Keep what the user asked for and decided, facts and numbers that matter, file names and what \
-they hold, what was tried and did not work, and the next step. Leave out pleasantries and what is settled and \
+NOTES_RULES = """Keep what the user asked for and decided, facts and numbers that matter, the files with their \
+paths in the working folder (attachments are in .hub/attachments/) and what they hold, what was tried and did not \
+work, and the next step. Say which findings were checked and which are still guesses. Leave out pleasantries and what is settled and \
 will not matter again. Write in the conversation's language, as short bullet points under these headings \
 (leave out a heading with nothing under it), at most about 600 words. Reply with the notes only.
 
@@ -297,24 +298,48 @@ def trim_tool_results(messages: list[dict], keep_last: int = 6, limit: int = 150
     return out
 
 
+CUT = re.compile(r"\n?\.\.\. \[shortened by (\d+) characters\]$")
+
+
+def cut_text(text: str, limit: int, sep: str = "\n") -> str:
+    """Text cut to `limit` characters, with how many were cut. Cutting a cut text again changes nothing unless it
+    cuts deeper (the count then adds up): the same text every time, so llama-server's prompt cache holds (chat 78:
+    re-cutting changed "shortened by 33" to "32" - an older message changed at every step)."""
+    m = CUT.search(text)
+    body, extra = (text[:m.start()], int(m.group(1))) if m else (text, 0)
+    if len(body) <= limit:
+        return text
+    return body[:limit] + f"{sep}... [shortened by {extra + len(body) - limit} characters]"
+
+
 def _shrink_args(raw: str, limit: int) -> str:
-    """Tool call arguments with long strings cut (still valid JSON)."""
+    """Tool call arguments with long strings cut (still valid JSON; shrinking them again changes nothing)."""
     if len(raw or "") <= limit:
         return raw
     try:
         args = json.loads(raw)
     except ValueError:
-        return json.dumps({"_shortened": raw[:limit]})
+        return json.dumps({"_shortened": raw[:limit]}, ensure_ascii=False)
 
     def cut(v):
-        if isinstance(v, str) and len(v) > limit:
-            return v[:limit] + f"... [shortened by {len(v) - limit} characters]"
+        if isinstance(v, str):
+            return cut_text(v, limit, "")
         if isinstance(v, dict):
             return {k: cut(x) for k, x in v.items()}
         if isinstance(v, list):
             return [cut(x) for x in v]
         return v
     return json.dumps(cut(args), ensure_ascii=False)
+
+
+def trim_reasoning(messages: list[dict], keep_last: int = 2) -> list[dict]:
+    """The thinking of all but the newest `keep_last` answers of the turn left out: a thinking model's working-out
+    is most of a long turn (chat 78: 134,000 characters in 33 steps, more than its results and calls together), and
+    what came of it stays - the answers, the calls, the results."""
+    idx = [i for i, m in enumerate(messages) if m.get("role") == "assistant" and m.get("reasoning_content")]
+    old = set(idx[:max(0, len(idx) - keep_last)])
+    return [{k: v for k, v in m.items() if k != "reasoning_content"} if i in old else m
+            for i, m in enumerate(messages)]
 
 
 def trim_assistant(messages: list[dict], keep_last: int = 4, limit: int = 400) -> list[dict]:
@@ -327,8 +352,8 @@ def trim_assistant(messages: list[dict], keep_last: int = 4, limit: int = 400) -
         if i in old:
             m = {k: v for k, v in m.items() if k != "reasoning_content"}
             c = m.get("content")
-            if isinstance(c, str) and len(c) > limit:
-                m["content"] = c[:limit] + f"\n... [shortened by {len(c) - limit} characters]"
+            if isinstance(c, str):
+                m["content"] = cut_text(c, limit)
             if m.get("tool_calls"):
                 m["tool_calls"] = [{**tc, "function": {**tc["function"],
                                                        "arguments": _shrink_args(tc["function"].get("arguments") or "{}", limit)}}

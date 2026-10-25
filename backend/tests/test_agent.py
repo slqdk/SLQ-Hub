@@ -1106,6 +1106,56 @@ async def test_old_tool_output_is_cleared_at_half_the_context(signed_in, app, fa
     assert len(whole) == 4                                                    # the newest four stay whole
 
 
+async def test_a_thinking_turn_clears_older_thinking_in_one_go(signed_in, app, fakes, monkeypatch):
+    """0.28.4 (chat 78): a thinking model's working-out is most of a long turn. It is cleared together with the old
+    results, in one go, keeping the newest two steps' thinking - and between clearings the requests only grow, so
+    llama-server's cache holds (a model with linear-attention layers otherwise reads from near the start)."""
+    hub = app.state.hub
+    monkeypatch.setattr(hub.catalog, "context_per_request", lambda model_id: 40000)
+    c = await new_chat(signed_in)
+    wd = hub.extras["agent"].workdir(chats.get_chat(c["id"]))
+    for i in range(16):
+        wd.write(f"note{i}.txt", f"note {i}\n" + "n" * 1200 + "\n", author="test", origin="test", message="note")
+    fakes.llama["replies"] = [{"reasoning": f"Thinking about note {i}. " + "r" * 7000, "content": f"Note {i}.",
+                               "tool_calls": [{"name": "read_file", "arguments": {"path": f"note{i}.txt"}}]}
+                              for i in range(16)] + [{"content": "All read."}, {"content": "Notes"}]
+    run = await finish(app, await say(signed_in, c["id"], "Read every note"))
+    assert run.status == "done", run.events[-1]
+    main = [b for b in fakes.llama["requests"] if "short title" not in last_user(b)]
+    changed = [i for i, (a, b) in enumerate(zip(main, main[1:]), 2)
+               if any(json.dumps(x, sort_keys=True) != json.dumps(y, sort_keys=True)
+                      for x, y in zip(a["messages"], b["messages"]))]
+    cleared = [s for s in chats.runs_for_chat(c["id"])[0]["steps"] if s["type"] == "cleared"]
+    # older messages change only when a clearing frees a good share - steps apart, never a little at every step
+    assert cleared and len(changed) == len(cleared), (changed, cleared)
+    assert all(x["before"] - x["after"] >= 6000 for x in cleared) and all(b - a >= 3 for a, b in zip(changed, changed[1:]))
+    after = main[changed[0] - 1]["messages"]
+    thought = [m for m in after if m["role"] == "assistant" and m.get("reasoning_content")]
+    assert len(thought) == 2 and thought[-1]["reasoning_content"].startswith(f"Thinking about note {changed[0] - 2}")
+    assert all(m.get("content") for m in after if m["role"] == "assistant")    # what came of it stays
+
+
+async def test_condensing_waits_until_there_is_something_to_fold(signed_in, app, fakes, monkeypatch):
+    """0.28.4 (chat 78): twenty minutes into its first turn, the continued chat condensed the only thing before it -
+    its notes, 1,200 tokens - into notes as long, and the changed system prompt made the server read it all again.
+    Too little to fold: the turn is trimmed instead, and no summary is asked for."""
+    hub = app.state.hub
+    monkeypatch.setattr(hub.catalog, "context_per_request", lambda model_id: 12000)
+    c = await new_chat(signed_in)
+    chats.add_message(c["id"], "user", [{"type": "text", "text": "Short question"}])
+    chats.add_message(c["id"], "assistant", [{"type": "text", "text": "Short answer."}])
+    wd = hub.extras["agent"].workdir(chats.get_chat(c["id"]))
+    for i in range(6):
+        wd.write(f"page{i}.txt", f"page {i}\n" + "p" * 9000 + "\n", author="test", origin="test", message="page")
+    fakes.llama["replies"] = [{"content": f"Page {i}.", "tool_calls": [{"name": "read_file",
+                                                                        "arguments": {"path": f"page{i}.txt"}}]}
+                              for i in range(6)] + [{"content": "All read."}, {"content": "Pages"}]
+    run = await finish(app, await say(signed_in, c["id"], "Read every page"))
+    assert run.status == "done", run.events[-1]
+    assert not any("Condense the conversation" in last_user(b) for b in fakes.llama["requests"])
+    assert not any(e["type"] == "compacted" for e in run.events) and not chats.get_chat(c["id"]).get("summary")
+
+
 # ---------------------------------------------------------------- skills and memory
 
 async def test_memory_files_are_listed_in_the_prompt(signed_in, app, fakes):

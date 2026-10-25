@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.28.4 - 2026-10-25
+
+- **Long thinking turns waste less time re-reading.** In chat 78 the stronger
+  model read its whole conversation again at four steps in a row, about a
+  minute each: the Hub trimmed a little at every step, and models like
+  Qwen3.8 can only pick up from near the start after any change. Now the
+  older steps' thinking - most of such a turn - is cleared in one go with
+  old tool output, room is made well below the limit, and something cut once
+  stays exactly as it was.
+- No pointless condensing: a chat with almost nothing before the current
+  turn (like a fresh continued chat) is no longer condensed.
+- **Notes for Continue in a new chat** give the files with their paths and say
+  which findings were checked and which are still guesses.
+
 ## 0.28.3 - 2026-10-25
 
 - **A tidier "Working with ..." line on a phone.** The model's name and the

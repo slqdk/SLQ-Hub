@@ -349,6 +349,37 @@ async def test_a_planted_link_is_never_followed(signed_in, app, fakes, tmp_path)
     assert (outside / "precious.txt").exists() and not (folder / ".hub" / "skills").is_symlink()
 
 
+def test_cutting_again_changes_nothing():
+    """0.28.4 (chat 78): an older answer or call cut again changed in its tail - "shortened by 33 characters" became
+    "32" - so an older message changed at every step, and llama-server read the request again from there."""
+    import json
+    from app.agent.context import _shrink_args, cut_text, trim_assistant, trim_reasoning
+    once = cut_text("a" * 1000, 400)
+    assert once == "a" * 400 + "\n... [shortened by 600 characters]"
+    assert cut_text(once, 400) == once and cut_text(once, 500) == once
+    deeper = cut_text(once, 100)
+    assert deeper == "a" * 100 + "\n... [shortened by 900 characters]" and cut_text(deeper, 100) == deeper
+    script = json.dumps({"command": "python3 << 'EOF'\n" + 'print("æøå \\"quoted\\"")\n' * 80 + "EOF",
+                         "timeout": 60})
+    once = _shrink_args(script, 400)
+    assert json.loads(once)["command"].endswith("characters]") and json.loads(once)["timeout"] == 60
+    assert _shrink_args(once, 400) == once and _shrink_args(_shrink_args(once, 400), 400) == once
+    broken = "{not json: æøå " + "x" * 600
+    assert _shrink_args(_shrink_args(broken, 400), 400) == _shrink_args(broken, 400)
+    msgs = [{"role": "user", "content": "go"}] + [
+        {"role": "assistant", "content": f"Step {i}: " + "t" * 900, "reasoning_content": "r" * 3000,
+         "tool_calls": [{"id": f"c{i}", "type": "function", "function": {"name": "bash", "arguments": script}}]}
+        for i in range(6)]
+    cut = trim_assistant(msgs, keep_last=2, limit=400)
+    assert trim_assistant(cut, keep_last=2, limit=400) == cut
+    assert trim_assistant(trim_assistant(cut, keep_last=2, limit=400), keep_last=2, limit=400) == cut
+    assert "reasoning_content" not in cut[1] and cut[-1]["reasoning_content"] == "r" * 3000
+    # older thinking leaves first: the newest two steps keep theirs, the others lose only that
+    lean = trim_reasoning(msgs, keep_last=2)
+    assert [("reasoning_content" in m) for m in lean[1:]] == [False] * 4 + [True] * 2
+    assert [m["content"] for m in lean] == [m["content"] for m in msgs] and trim_reasoning(lean, keep_last=2) == lean
+
+
 def test_shortening_is_stable_and_keeps_where_the_whole_is():
     """Shortened again, a result stays the same (llama-server's prompt cache holds) unless it is cut deeper - and
     keeps the true count and where the whole output is."""

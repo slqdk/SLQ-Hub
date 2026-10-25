@@ -911,6 +911,32 @@ before it runs out, so the context is kept small all along, not only at 75%:
 - The main agent's prompt says what a subagent is for: big or many files,
   long pages or logs, hex dumps go to `task` with a precise question, and
   only the answer comes back.
+- **0.28.4 (chat 78, measured):** a model with linear-attention layers
+  (Qwen3.5 and later, as Søren's Qwen3.8 27B) can resume llama-server's
+  cache only from a checkpoint - in chat 78 from the end of the system
+  prompt and tools, 12,432 tokens. A change to any older message therefore
+  means reading almost the whole request again: four steps in a row trimmed
+  a little each (the request hovered at the 75% budget) and read about
+  36,000 tokens again each, about a minute a step. Three causes, three
+  changes. Thinking: the 27B wrote 134,000 characters of it in 33 steps,
+  more than all results and calls together, and the current turn's thinking
+  goes back with every step; the clearing at half the context now also
+  leaves out the thinking of all but the newest two steps
+  (`trim_reasoning`), so it frees its 15% in one go. Headroom: over the
+  budget, the lighter cuts (older thinking, results beyond the newest six to
+  1,500 characters, beyond two to 400) go down to 60% of the context, so the
+  next steps only add to the request. Stability: an older answer or call cut
+  again changed its count ("shortened by 33 characters" became "32") - an
+  older message changed at every step; `cut_text` now leaves a cut text as
+  it is unless it cuts deeper (the count adds up), like `shorten_result`.
+  Replayed on chat 78's steps 16-33 with the real token ratios (the replay
+  matched the real request sizes within 3%): older messages changed at
+  steps 17, 30, 31, 32 and 33, about 177,000 tokens read; with 0.28.4 at 17,
+  20, 30 and 32, about 134,000 - and from step 30 on no longer at every
+  step. Condensing waits until what it can fold is at least 10% of the
+  context: the continued chat had condensed its only earlier messages (the
+  notes, 1,200 tokens) into notes as long, and the changed system prompt
+  made the server read 48,000 tokens again.
 
 **chat_history** (0.27.0, `app/agent/tools/history.py`). Search (BM25 over
 each message's text, tool calls and results; Danish letters are word
@@ -935,7 +961,11 @@ folder that is then renamed into place - never into whatever sits at the new
 chat's path. Its first message is a `handover` block, and a run with
 `handover_from` writes the notes from the old chat's notes and messages
 (`HANDOVER_PROMPT`, the same headings, no thinking) as its first answer,
-streamed like any answer. The model later reads "(SLQ Hub: this chat
+streamed like any answer. Since 0.28.4 the notes give files with their paths
+(attachments are in `.hub/attachments/` - chat 78's first command looked for
+them at the top of the folder) and say which findings were checked and which
+are still guesses (chat 78's notes carried the old chat's guesses about the
+record layout as facts). The model later reads "(SLQ Hub: this chat
 continues the chat "…"…your notes from it follow…)" - without "notes follow"
 when writing them was stopped. Retry under the notes writes them again; a
 message sent meanwhile is answered after them; options from the browser
