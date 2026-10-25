@@ -221,8 +221,10 @@ the children's profiles to come.
 from amdgpu's hwmon (microwatts): `power1_average`, else `power1_input`, and
 the limit `power1_cap`. On VM 222 (RX 7900 XTX, read by Søren on 2026-10-25)
 there is `power1_average` - 337 W while it built code, against a 339 W cap
-(default 339, 305-350 W) - and no `power1_input`; the label is PPT. It is the
-card's figure, not the PC at the socket.
+(default 339, 305-350 W), and 65 W idle (after the 0.24.0 update, so with
+the default chat model loaded) - and no `power1_input`; the label is PPT. It is
+the card's figure, not the PC at the socket. At 65 W the idle card alone is
+about 1.56 kWh a day, 4.68 kr at 3 kr per kWh.
 
 **Splitting it** (`app/gpu/energy.py`, `EnergyMeter`). Time is cut at every
 change of what runs or loads (the scheduler's new `on_change`, called on each

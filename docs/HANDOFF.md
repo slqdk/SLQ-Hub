@@ -676,8 +676,13 @@ the host if the VM ever stops by itself.
     `llm` container as it reads the VRAM there - Settings → Usage should say
     "The card draws N W now" after the update; if it says there is no
     reading, `compose exec llm cat /sys/class/drm/card*/device/hwmon/hwmon*/power1_average`
-    tells why. (b) The idle draw: Søren's reading while idle is still to
-    come; compare it with "The card draws" on an idle Hub. (c) How quickly
+    tells why. (b) The idle draw: Søren read 65 W idle on the VM
+    (2026-10-25, right after the 0.24.0 update - the default chat model
+    preloaded), about 4.68 kr a day; "The card draws" on an idle Hub should
+    say about the same. Not measured yet: the idle draw with nothing loaded
+    (Settings → Models, Free the GPU, then the same `power1_average` after
+    half a minute) - if it is much lower, unloading the model after a while
+    without work would save that difference. (c) How quickly
     `power1_average` follows the load (the SMU's averaging): a short answer
     may be counted at the draw from just before it; long turns, pictures and
     videos are what the numbers are for. (d) Two jobs on the card at once
