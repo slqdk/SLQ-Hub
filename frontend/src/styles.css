@@ -630,17 +630,21 @@ button.file-chip:disabled { cursor: default; }
 /* The rule under the tabs is an inset shadow, so the active tab's underline can
    cover it without sticking out: with overflow-x: auto a tab reaching 1px below
    the row made a vertical scrollbar (visible with Windows' classic scrollbars). */
-.tabs { display: flex; gap: 2px; box-shadow: inset 0 -1px 0 var(--rule); margin-bottom: 18px; overflow-x: auto; overflow-y: hidden; }
+/* A tab strip scrolls sideways on a phone without showing a scrollbar: Android's lay over the chosen tab's line
+   (0.20.1). The chosen tab is tinted, with a thicker line; the strip scrolls it into view (Tabs in ui.tsx). */
+.tabs { display: flex; gap: 2px; box-shadow: inset 0 -1px 0 var(--rule); margin-bottom: 18px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+.tabs::-webkit-scrollbar { display: none; }
 .tab {
   border: 0; background: transparent;
-  padding: 8px 12px 9px;
+  padding: 8px 12px 8px;
   font-family: var(--font-plate); font-weight: 600; font-size: 15px;
   color: var(--ink-2);
-  border-bottom: 2px solid transparent;
+  border-bottom: 3px solid transparent;
+  border-radius: 6px 6px 0 0;
   white-space: nowrap;
 }
-.tab:hover { color: var(--ink); }
-.tab[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--act); }
+@media (hover: hover) { .tab:hover { color: var(--ink); } }
+.tab[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--act); background: color-mix(in srgb, var(--act) 10%, transparent); }
 
 /* lists and tables in settings */
 .list { border: 1px solid var(--rule); border-radius: 8px; background: var(--sheet); }
@@ -727,6 +731,18 @@ button.hf-hit:hover:not(:disabled) { background: var(--paper); }
 .help-search .input { flex: 1; min-width: 0; }
 .help-intro { color: var(--ink-2); margin: 0 0 16px; max-width: 72ch; }
 .help-section-title { font-family: var(--font-plate); font-weight: 600; font-size: 19px; margin: 24px 0 10px; }
+.help-section-head { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+/* the sections: chips that wrap, so all of them show on a phone; the chosen one filled (0.20.1) */
+.help-sections { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 18px; }
+.help-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 13px 6px 11px; border: 1px solid var(--rule); border-radius: 999px;
+  background: var(--sheet); color: var(--ink-2);
+  font-family: var(--font-plate); font-weight: 600; font-size: 14.5px; white-space: nowrap; cursor: pointer;
+}
+@media (hover: hover) { .help-chip:hover { color: var(--ink); border-color: var(--ink-3); } }
+.help-chip[aria-selected="true"] { background: var(--ink); border-color: var(--ink); color: var(--sheet); }
+.help-chip:focus-visible { outline: 2px solid var(--act); outline-offset: 2px; }
 .help-item { border: 1px solid var(--rule); border-radius: 8px; background: var(--sheet); padding: 14px 16px 12px; margin: 0 0 14px; }
 .help-item-head { display: flex; align-items: center; gap: 6px 10px; flex-wrap: wrap; }
 .help-item-head h3 { margin: 0; flex: 1 1 auto; font-family: var(--font-plate); font-weight: 600; font-size: 17px; }

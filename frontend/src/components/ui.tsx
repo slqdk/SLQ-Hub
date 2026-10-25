@@ -117,10 +117,21 @@ export function SwitchRow({ checked, onChange, title, children, disabled }: { ch
   );
 }
 
+/** A tab strip; on a phone it scrolls sideways, so the chosen tab is scrolled into view. */
 export function Tabs<T extends string>({ tabs, value, onChange }: { tabs: { id: T; label: string }[]; value: T;
   onChange: (v: T) => void }) {
+  const strip = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = strip.current;
+    const tab = el?.querySelector<HTMLElement>('[aria-selected="true"]');
+    if (!el || !tab) return;
+    const r = tab.getBoundingClientRect();
+    const c = el.getBoundingClientRect();
+    if (r.left < c.left) el.scrollLeft -= c.left - r.left + 8;
+    else if (r.right > c.right) el.scrollLeft += r.right - c.right + 8;
+  }, [value]);
   return (
-    <div className="tabs" role="tablist">
+    <div className="tabs" role="tablist" ref={strip}>
       {tabs.map((t) => (
         <button key={t.id} className="tab" role="tab" aria-selected={t.id === value} onClick={() => onChange(t.id)}>
           {t.label}

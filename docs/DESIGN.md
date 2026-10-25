@@ -1361,7 +1361,13 @@ setting, and for a person her code permission. An item that cannot work says
 what is missing - to the owner where to get it (Open Settings), to a person to
 ask the owner - and its Try is off. A person gets the same page from her
 sidebar, without the owner's items (projects, memory, libraries, Windows
-programs, export) and with hers (chats kept on the device).
+programs, export) and with hers (chats kept on the device). The sections
+are chips that wrap - all of them in view on a phone, the chosen one filled
+(ink on paper inverted), its name and icon heading the section (0.20.1: on
+Søren's phone the tab strip's scrollbar lay over the chosen tab's thin
+underline, so it was hard to tell which was chosen). Tab strips elsewhere
+(Settings, a project page) hide their scrollbar, tint the chosen tab with a
+3 px line, and scroll it into view when it starts off-screen on a phone.
 
 **The phone chat page (`/chat`)** is a second, small page for the rest of the
 household: one column, a drawer of chats, and a composer with Picture (the

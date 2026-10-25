@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.20.1 - 2026-10-25
+
+- **Easier to see which help section you are in.** The sections are now
+  buttons that wrap onto several lines - all of them show on a phone - and
+  the chosen one is filled; its name heads the section below.
+- Tabs in Settings and on a project page show the chosen tab more clearly (a
+  tinted tab with a thicker line), no longer have a scrollbar lying over it on
+  a phone, and scroll to it when it starts off the edge of the screen.
+
 ## 0.20.0 - 2026-10-25
 
 - **Help.** A new page - Help in the sidebar, or "What you can ask for" on a

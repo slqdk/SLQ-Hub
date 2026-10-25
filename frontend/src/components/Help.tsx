@@ -1,11 +1,18 @@
 // The help page's content (0.20.0): what you can ask for, section by section, with examples that start a new chat
 // - and whether each thing works on this Hub now (GET /hub/api/help). The owner's page and a person's use it.
-import { useEffect, useMemo, useState } from "react";
-import { Check, Copy, MessageSquarePlus, Paperclip, Search, Settings, X } from "lucide-react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { Brain, Check, Clapperboard, Copy, FileText, Image as ImageIcon, MessageSquare, MessageSquarePlus, Music,
+  Paperclip, Search, Server, Settings, SquareTerminal, X } from "lucide-react";
 import { api } from "../lib/api";
 import { NEEDS, SECTIONS, has, searchText, visible, type Example, type HelpCaps, type HelpItem, type HelpSection,
   type Need } from "../lib/help";
 import { Lamp, copyText } from "./ui";
+
+const ICONS: Record<string, ReactNode> = {
+  chat: <MessageSquare size={15} />, documents: <FileText size={15} />, images: <ImageIcon size={15} />,
+  sound: <Music size={15} />, video: <Clapperboard size={15} />, code: <SquareTerminal size={15} />,
+  memory: <Brain size={15} />, hub: <Server size={15} />,
+};
 
 export function useHelpCaps(): HelpCaps | null {
   const [caps, setCaps] = useState<HelpCaps | null>(null);
@@ -55,9 +62,9 @@ export function HelpContent({ section, onSection, onTry, onSettings }: {
         ))
       ) : (
         <>
-          <div className="tabs" role="tablist" aria-label="Help sections">
-            {sections.map((s) => <button key={s.id} className="tab" role="tab" aria-selected={s.id === current.id}
-              onClick={() => onSection(s.id)}>{s.title}</button>)}
+          <div className="help-sections" role="tablist" aria-label="Help sections">
+            {sections.map((s) => <button key={s.id} className="help-chip" role="tab" aria-selected={s.id === current.id}
+              onClick={() => onSection(s.id)}>{ICONS[s.id]}{s.title}</button>)}
           </div>
           <SectionView section={current} caps={caps} onTry={onTry} onSettings={onSettings} />
         </>
@@ -70,6 +77,7 @@ function SectionView({ section, caps, onTry, onSettings }: { section: HelpSectio
   onTry: (example: Example) => void; onSettings?: (tab: string) => void }) {
   return (
     <div role="tabpanel" aria-label={section.title}>
+      <h2 className="help-section-title help-section-head">{ICONS[section.id]}{section.title}</h2>
       <p className="help-intro">{section.intro}</p>
       {section.items.map((i) => <Item key={i.id} item={i} caps={caps} onTry={onTry} onSettings={onSettings} />)}
     </div>

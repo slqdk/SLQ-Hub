@@ -7,7 +7,7 @@ import { ago, bytes, residencyName } from "../lib/format";
 import { navigate } from "../lib/router";
 import { useApp, type Theme } from "../state";
 import { QueueModal, plateState } from "../components/Queue";
-import { ConfirmButton, Empty, Lamp, Modal, Switch, SwitchRow, copyText, useInterval, type LampState } from "../components/ui";
+import { ConfirmButton, Empty, Lamp, Modal, Switch, SwitchRow, Tabs, copyText, useInterval, type LampState } from "../components/ui";
 import { forgetSettings } from "./ChatView";
 
 const TABS = [
@@ -58,10 +58,7 @@ export function SettingsView({ tab }: { tab: string }) {
       </div>
       <div className="scroll">
         <div className="page">
-          <div className="tabs" role="tablist">
-            {TABS.map((t) => <button key={t.id} className="tab" role="tab" aria-selected={t.id === current}
-              onClick={() => navigate({ name: "settings", tab: t.id }, true)}>{t.label}</button>)}
-          </div>
+          <Tabs tabs={TABS} value={current} onChange={(tab) => navigate({ name: "settings", tab }, true)} />
           {current === "models" && <ModelsTab s={s} />}
           {current === "queue" && <QueueTab s={s} />}
           {current === "people" && <PeopleTab />}
