@@ -299,6 +299,14 @@ def trim_tool_results(messages: list[dict], keep_last: int = 6, limit: int = 150
 
 
 CUT = re.compile(r"\n?\.\.\. \[shortened by (\d+) characters\]$")
+# The Hub's marks for text it left out of what the model is shown - cut_text's, shorten_result's (with the reasons the
+# Hub gives) and tools/base.py clip's - anywhere in a text: what the model writes into a file with one in it copied
+# shortened context (chat 79: a 9B model wrote "<p>Brow... [shortened by 24 characters]" into its game's index.html -
+# tools/files.py refuses it).
+WHYS = ("shortened to make room", "cleared to keep the conversation short", "left out to make room",
+        "a result from an earlier turn")
+MARK = re.compile(r"\.\.\. \[shortened by \d+ characters\]|\.\.\. \[\d+ characters omitted\] \.\.\."
+                  r"|\[(?:\.\.\. )?\d+ (?:more )?characters - (?:" + "|".join(map(re.escape, WHYS)) + r"); [^\]\n]*\]")
 
 
 def cut_text(text: str, limit: int, sep: str = "\n") -> str:

@@ -17,22 +17,23 @@ async def test_the_owner_learns_what_works_here(signed_in, app, fakes):
     r = await signed_in.get("/hub/api/help")
     assert r.status_code == 200, r.text
     h = r.json()
-    assert (h["member"], h["code"], h["memory"], h["projects"], h["windows"], h["internet_asks"]) == \
-        (False, True, True, True, False, False)
+    assert (h["member"], h["code"], h["memory"], h["projects"], h["windows"], h["browser"], h["internet_asks"]) == \
+        (False, True, True, True, False, False, False)
     assert h["images"] == {"generate": True, "edit": True, "cutout": True}         # Qwen-Image 2.1 (conftest)
     assert h["sound"] == dict.fromkeys(("speech", "music", "sound", "voice", "separate"), False)
     assert h["video"] == {"t2v": False, "i2v": False, "flf2v": False}
     assert h["handover"] is True                                                   # Qwen3.8 27B by default
     assert h["libraries"] is True and h["mcp"] == 0
     install(app, "wan2.2-5b", "roest-v3", "ace-step-1.5-turbo")
-    fakes.sandbox["windows"] = True
+    fakes.sandbox["windows"] = fakes.sandbox["browser"] = True
     app.state.hub.extras.pop("windows_app", None)                                  # asked again, not cached
+    app.state.hub.extras.pop("web_app", None)
     await signed_in.put("/hub/api/settings", json={"section": "web", "values": {"access": "ask"}})
     await signed_in.put("/hub/api/settings", json={"section": "agent", "values": {"escalate_to": ""}})
     h = (await signed_in.get("/hub/api/help")).json()
     assert h["video"] == {"t2v": True, "i2v": True, "flf2v": False}
     assert (h["sound"]["speech"], h["sound"]["music"], h["sound"]["voice"]) == (True, True, False)
-    assert (h["windows"], h["internet_asks"], h["handover"]) == (True, True, False)
+    assert (h["windows"], h["browser"], h["internet_asks"], h["handover"]) == (True, True, True, False)
 
 
 async def test_a_person_learns_what_works_in_her_chats(signed_in, app, fakes):
@@ -41,8 +42,8 @@ async def test_a_person_learns_what_works_in_her_chats(signed_in, app, fakes):
         await sign_in(phone)
         h = (await phone.get("/hub/api/help")).json()
     assert h["member"] is True
-    assert (h["code"], h["memory"], h["projects"], h["libraries"], h["windows"], h["mcp"]) == \
-        (False, False, False, False, False, 0)
+    assert (h["code"], h["memory"], h["projects"], h["libraries"], h["windows"], h["browser"], h["mcp"]) == \
+        (False, False, False, False, False, False, 0)
     assert h["images"]["generate"] is True
     await add_person(signed_in, username="per", may_run_code=True)
     async with client_from(app) as phone:
@@ -74,7 +75,7 @@ async def test_every_need_in_the_help_is_answered(signed_in):
     text = _help_text()
     union = re.search(r"export type Need = ([^;]+);", text).group(1)
     needs = re.findall(r'"([a-z.0-9]+)"', union)
-    assert len(needs) == 16
+    assert len(needs) == 17
     h = (await signed_in.get("/hub/api/help")).json()
     for n in needs:
         group, _, key = n.partition(".")

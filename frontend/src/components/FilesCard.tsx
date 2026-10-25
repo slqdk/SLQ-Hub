@@ -14,6 +14,7 @@ const SHOWN = 6;                            // rows before "Show all"
 export interface FileHandlers {
   src: (f: ProducedFile) => string | null | Promise<string | null>;   // for the player, the picture, Open in a tab
   download: (f: ProducedFile) => void;
+  downloadAll?: (fs: ProducedFile[]) => void;                   // as one ZIP (0.29.0: a game is several files)
   open?: (f: ProducedFile) => void;                             // in the side panel
   add?: (f: ProducedFile) => void;                              // put it in the next message
   added?: (f: ProducedFile) => boolean;
@@ -70,12 +71,17 @@ export function FilesCard({ files, handlers, unfinished, onContinue }: { files: 
   const [all, setAll] = useState(false);
   if (!files.length) return null;
   const shown = all || files.length <= SHOWN ? files : files.slice(0, SHOWN - 1);
+  const whole = files.filter((f) => !f.skipped);
   return (
     <section className={`files-card${unfinished ? " unfinished" : ""}`} aria-label="Files from this answer">
       {unfinished && <UnfinishedLine why={unfinished} onContinue={onContinue} />}
       <div className="files-card-head">
-        {unfinished ? (files.length === 1 ? "The file so far" : `${files.length} files so far`)
-          : files.length === 1 ? "File from this answer" : `${files.length} files from this answer`}
+        <span className="grow">{unfinished ? (files.length === 1 ? "The file so far" : `${files.length} files so far`)
+          : files.length === 1 ? "File from this answer" : `${files.length} files from this answer`}</span>
+        {handlers.downloadAll && whole.length > 1 && (
+          <button className="btn quiet small" onClick={() => handlers.downloadAll?.(whole)}
+            title={`Download the ${whole.length} files as one ZIP, folders kept`}><FileArchive size={14} /> Download all</button>
+        )}
       </div>
       {shown.map((f) => <FileRow key={f.path} file={f} handlers={handlers} />)}
       {shown.length < files.length && (

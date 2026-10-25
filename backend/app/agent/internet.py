@@ -9,7 +9,8 @@ Allow once, Always, or Deny. What is asked and what "always" remembers:
   internet: true, which asks: "Always allow internet for code" (internet:code). Where the sandbox cannot keep code
   off the internet (no Landlock ABI 4), every command asks;
 * windows_app - the program (and its build) runs without the internet, or with it where internet for code is
-  always allowed; where the sandbox cannot keep it off, every run asks (internet:code).
+  always allowed; where the sandbox cannot keep it off, every run asks (internet:code);
+* web_app - the same for the browser: offline, the page gets only its own files (the rest is listed as blocked).
 
 The owner's "always" answers are kept with the tools they always allow (tool_permissions) and listed in Settings,
 where each can be taken back. A person (a member's chat) answers once each time: their chats leave nothing on the
@@ -17,6 +18,7 @@ Hub, and the owner's answers are the owner's.
 """
 from __future__ import annotations
 
+import json
 import time
 from urllib.parse import urlparse
 
@@ -27,7 +29,7 @@ from .. import netfetch
 SEARCH = "internet:search"
 CODE = "internet:code"
 SITE = "internet:site:"
-TOOLS = ("web_search", "web_fetch", "bash", "windows_app")
+TOOLS = ("web_search", "web_fetch", "bash", "windows_app", "web_app")
 
 
 def asking(settings) -> bool:
@@ -114,15 +116,30 @@ def question(name: str, args: dict, allowed, can_block_code: bool) -> tuple[dict
             return {"kind": "internet", "key": CODE, "what": "code", "detail": shown(args.get("command"), 4000),
                     "always": "Always allow internet for code", "unblockable": not can_block_code}, True
         return None, False                             # runs offline
-    if name == "windows_app":
+    if name in ("windows_app", "web_app"):
         if allowed(CODE):
             return None, True
         if not can_block_code:
-            return {"kind": "internet", "key": CODE, "what": "code",
-                    "detail": shown(f"Run {args.get('target') or 'a Windows program'} on the virtual screen", 1000),
+            what = (f"Run {args.get('target') or 'a Windows program'} on the virtual screen" if name == "windows_app"
+                    else f"Open {args.get('target') or args.get('artifact') or 'a page'} in a browser" + _evals(args))
+            return {"kind": "internet", "key": CODE, "what": "code", "detail": shown(what, 1000),
                     "always": "Always allow internet for code", "unblockable": True}, True
         return None, False
     return None, True
+
+
+def _evals(args: dict) -> str:
+    """The JavaScript a web_app call runs in the page (its eval steps), for the question."""
+    steps = args.get("steps")
+    if isinstance(steps, str):
+        try:
+            steps = json.loads(steps)
+        except ValueError:
+            steps = []
+    if not isinstance(steps, list):                    # what a model sent - the tool refuses it, the question must not fail
+        return ""
+    code = [str(s["eval"]) for s in steps if isinstance(s, dict) and "eval" in s]
+    return ("\nJavaScript it runs in the page:\n" + "\n".join(code)) if code else ""
 
 
 async def code_can_go_offline(hub) -> bool:

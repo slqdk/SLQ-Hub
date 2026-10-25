@@ -2,9 +2,10 @@
 // each file's history with restore. Beside a chat, files can also be put in
 // the next message (picked/onPick).
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Check, ChevronDown, ChevronRight, Download, File as FileIcon, FilePlus, Folder, FolderPlus, History,
-  MessageSquarePlus, Pencil, Plus, RefreshCw, Search, Trash2, Upload as UploadIcon } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Download, File as FileIcon, FileArchive, FilePlus, Folder, FolderPlus,
+  History, MessageSquarePlus, Pencil, Plus, RefreshCw, Search, Trash2, Upload as UploadIcon } from "lucide-react";
 import { api, type FileData, type TreeData, type TreeEntry } from "../lib/api";
+import { downloadZip } from "../lib/download";
 import { ago, bytes } from "../lib/format";
 import { useApp } from "../state";
 import { ConfirmButton, Modal, useInterval } from "./ui";
@@ -124,6 +125,8 @@ export function Files({ folder, projectId, select, selectAt, picked, onPick }: {
     }
   };
 
+  const zip = () => downloadZip(`${url}/zip`).catch((e) => toast((e as Error).message, "fault"));
+
   const ask = (title: string, label: string, value: string, action: (v: string) => Promise<void>) =>
     setPrompt({ title, label, value, action });
 
@@ -156,6 +159,8 @@ export function Files({ folder, projectId, select, selectAt, picked, onPick }: {
               <button className="icon-btn small" onClick={newFile} aria-label="New file" title="New file"><FilePlus size={15} /></button>
               <button className="icon-btn small" onClick={newFolder} aria-label="New folder" title="New folder"><FolderPlus size={15} /></button>
               <span className="grow" />
+              <button className="icon-btn small" onClick={zip} aria-label="Download the folder as a ZIP"
+                title="Download the folder as a ZIP"><FileArchive size={15} /></button>
               <button className="icon-btn small" onClick={refresh} aria-label="Refresh" title="Refresh"><RefreshCw size={14} /></button>
             </div>
             <label className="tree-find">
@@ -203,6 +208,8 @@ export function Files({ folder, projectId, select, selectAt, picked, onPick }: {
               <div className="page faint" style={{ maxWidth: "36rem" }}>
                 {tree && sel && !selected && <p className="notice">{sel} is not in the folder any more.</p>}
                 {tree ? `${tree.entries.filter((e) => !e.dir).length} files. Pick one to look at it or edit it.` : "Loading"}
+                {tree && <p><button className="btn small" onClick={zip}>
+                  <FileArchive size={14} /> Download the folder as a ZIP</button></p>}
                 {tree && onPick && <p>The + beside a file puts it in your next message: the assistant then has the file
                   as it is now, to change it or answer about it.</p>}
                 {tree?.root && <div className="code-line">{tree.root}</div>}

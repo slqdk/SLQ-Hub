@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.29.0 - 2026-10-26
+
+- **The assistant can see and play what it makes for the browser.** A new
+  tool opens a web page, a browser game or an HTML/React artifact in a
+  browser in the sandbox, clicks, types and holds keys as a player would,
+  and gets screenshots, what the page wrote to its console, errors with the
+  file and line, and files that failed to load. In chat 79 the game was
+  never opened; opened now, its data file has a broken line (an apostrophe
+  in "Japhet N'Doram") that stops the team and player lists from working.
+  Needs update.sh: it adds the browser to the sandbox. The self-test checks it.
+- **New working rules for the assistant:** look for existing documentation
+  and tools first, keep notes in a file during long work, check a result the
+  way you will use it before calling it done, and say what it checked and
+  what it could not check.
+- **Download as ZIP.** "Download all" on the files under an answer gives
+  them as one ZIP (a game's files and its data folder together), and Files
+  has a button for the whole folder.
+- **React artifacts work again.** Every React artifact showed a Babel error
+  in the side panel instead of the app.
+- The assistant can no longer write the Hub's "[shortened by N characters]"
+  marks into a file - chat 79's game got one in its heading.
+
 ## 0.28.4 - 2026-10-25
 
 - **Long thinking turns waste less time re-reading.** In chat 78 the stronger

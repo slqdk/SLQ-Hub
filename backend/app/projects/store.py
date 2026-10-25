@@ -10,6 +10,7 @@ revision, so it can be restored and the Windows client picks it up.
 from __future__ import annotations
 
 import codecs
+import errno
 import json
 import mimetypes
 import os
@@ -152,6 +153,65 @@ class Workdir:
 
     def rel(self, p: Path) -> str:
         return p.resolve().relative_to(self.root.resolve()).as_posix() or "."
+
+    def zip_files(self, paths: list[str] | None = None) -> list[tuple[str, str, int]]:
+        """(its path in the folder, its name in the ZIP, its size) for a ZIP of the folder, or of the files and folders
+        given - named from the folder that holds them all, so a game's files from one answer come out as index.html,
+        game.js, data/... (0.29.0). A folder brings what it holds, without what sync leaves out (.hub, .git,
+        node_modules, ...); a file given by name comes as it is, and one given that is not there any more is left
+        out. Regular files only, no links (open_inside reads them the same way). Raises ValueError, and
+        FileNotFoundError when none of those given is there."""
+        root = self.root.resolve()
+        picked = [p for p in (self.resolve(rel) for rel in paths or ["."]) if p.exists()]
+        if not picked:
+            raise FileNotFoundError(", ".join(paths or ["."]))
+        base = Path(os.path.commonpath([str(p if p == root else p.parent) for p in picked]))
+        out: dict[str, tuple[str, int]] = {}
+
+        def add(f: Path) -> None:
+            try:
+                st = f.lstat()
+            except OSError:
+                return
+            if stat.S_ISREG(st.st_mode):
+                out.setdefault(f.relative_to(base).as_posix(), (f.relative_to(root).as_posix(), st.st_size))
+
+        for p in picked:
+            if not p.is_dir():
+                add(p)
+                continue
+            for dirpath, dirnames, filenames in os.walk(p):
+                here = Path(dirpath)
+                dirnames[:] = sorted(d for d in dirnames
+                                     if d.lower() not in syncstore.IGNORE_DIRS and not (here / d).is_symlink())
+                for name in sorted(filenames):
+                    if not syncstore.ignored((here / name).relative_to(root).as_posix()):
+                        add(here / name)
+        return sorted(((rel, name, size) for name, (rel, size) in out.items()), key=lambda x: x[1])
+
+    def open_inside(self, rel: str) -> int:
+        """A file of the folder opened for reading without following a link anywhere on its way - not even one that
+        sandboxed code (the same uid, the same folder) puts in place of a file or a folder after it was listed: from
+        the workspace down, each folder opened from the one before with O_NOFOLLOW, the file too, and only a regular
+        file (not a FIFO that would hang, not a device). A file descriptor. Raises OSError (ELOOP: a link), ValueError."""
+        parts = [p for p in rel.split("/") if p not in ("", ".")]
+        if not parts or ".." in parts:
+            raise ValueError(f"{rel}: not a path inside the folder")
+        ws = self.workspace.resolve()
+        parts = list(self.root.relative_to(self.workspace).parts) + parts      # the folder itself is not taken on trust
+        fd = os.open(ws, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            for part in parts[:-1]:
+                nxt = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+                os.close(fd)
+                fd = nxt
+            f = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
+        finally:
+            os.close(fd)
+        if not stat.S_ISREG(os.fstat(f).st_mode):
+            os.close(f)
+            raise OSError(errno.EINVAL, f"{rel}: not a regular file")
+        return f
 
     def tree(self, rel: str = ".", max_entries: int = 2000) -> list[dict]:
         base = self.resolve(rel)

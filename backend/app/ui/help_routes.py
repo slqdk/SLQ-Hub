@@ -8,6 +8,7 @@ from fastapi import APIRouter, Request
 from .. import auth
 from ..agent import internet
 from ..agent.loop import local_target
+from ..agent.tools import webapp as webapp_tool
 from ..agent.tools import windows as windows_tool
 from ..state import get_hub
 
@@ -42,17 +43,19 @@ async def capabilities(hub, user) -> dict:
     images, audio, video = (hub.extras.get(k) for k in ("images", "audio", "video"))
     if member:                                       # as a device turn decides it (agent/device.py)
         code = bool((user or {}).get("may_run_code")) and await hub.extras["device"].can_confine()
-        windows = False
+        windows = browser = False
     else:
         code = True
         await windows_tool.refresh(hub)
-        windows = windows_tool.ready(hub)
+        await webapp_tool.refresh(hub)
+        windows, browser = windows_tool.ready(hub), webapp_tool.ready(hub)
     libs, mcp = hub.extras.get("libraries"), hub.extras.get("mcp")
     return {
         "member": member,
         "internet_asks": internet.asking(hub.settings),
         "code": code,
         "windows": windows,
+        "browser": browser,
         "memory": not member,
         "projects": not member,
         "libraries": not member and bool(libs and libs.available()),

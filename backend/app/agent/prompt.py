@@ -22,7 +22,16 @@ up instead of guessing, read files before changing them, run code to check a res
 - For work with several steps, keep a task list with todo_write and work through it item by item.{big_reads}
 - When a tool call fails, read the error, fix the cause and try again differently - do not repeat the same \
 failing call. If something is impossible, say so plainly.
-- When you are done with a task, finish with a short summary of what you did and anything the user must know.
+- For a known file format, protocol, game or program, look for its documentation and existing tools first - \
+someone may have worked it out already - before you work it out byte by byte.
+- In long work (a file format, a design, an analysis over many steps), keep what you find in a notes file in the \
+working folder (e.g. NOTES.md) as you go: what you checked, kept apart from what you only guess. It outlasts this \
+chat - a new chat starts from it.
+- Before you call a task done, check it the way the user will use it: run the program or its tests, open or play \
+what you made{look}, compare results with a reference when there is one. Measure with code rather than reason \
+at length about what a quick script can tell you.
+- When you are done with a task, finish with a short summary of what you did, what you checked and what you could \
+not check, and anything the user must know.
 
 # The working folder
 {folder}
@@ -210,15 +219,18 @@ def system_prompt(*, user: str, model_name: str, folder_text: str, sandbox_path:
                   tz: str | None = None, handover_to: str = "", subagent: bool = False,
                   cloud_model: str = "", taken_over_from: str = "", memory: bool = True, code: bool = True,
                   dropped: int = 0, sound: list[str] | None = None, internet_asks: bool = False,
-                  windows: bool = False, video: bool = False) -> str:
+                  windows: bool = False, video: bool = False, web: bool = False) -> str:
     now = datetime.now(ZoneInfo(tz) if tz else local_tz())
     csharp = CSHARP.format(windows=CSHARP_SCREEN if windows else CSHARP_NO_SCREEN)
     tools_line = ((TOOLS_LINE_ASKS if internet_asks else TOOLS_LINE).format(sandbox_path=sandbox_path) + csharp
                   if code else NO_CODE_LINE) + ((INTERNET_ASKS if code else INTERNET_ASKS_NO_CODE) if internet_asks
                                                 else "")
+    seen = [what for what, ok in (("web_app for web pages and browser games", web),
+                                  ("windows_app for Windows programs", windows)) if ok and code]
+    look = f" ({', '.join(seen)})" if seen else ""
     text = BASE.format(user=user, model=model_name, date=now.strftime("%A %d %B %Y"), folder=folder_text,
                        tools_line=tools_line, image_gen=IMAGE_GEN if images_available else "",
-                       big_reads="" if subagent else BIG_READS)
+                       big_reads="" if subagent else BIG_READS, look=look)
     text += sound_text(sound or [])
     if video:
         text += VIDEO

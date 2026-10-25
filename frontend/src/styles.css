@@ -441,7 +441,7 @@ button.file-chip:disabled { cursor: default; }
 
 /* the files an answer made or changed: one card under the answer */
 .files-card { display: flex; flex-direction: column; border: 1px solid var(--rule); border-radius: 8px; background: var(--sheet); overflow: hidden; width: 100%; max-width: 46rem; container-type: inline-size; }
-.files-card-head { padding: 6px 12px; font-family: var(--font-plate); font-weight: 600; font-size: 13px; letter-spacing: 0.02em; color: var(--ink-2); background: var(--paper); border-bottom: 1px solid var(--rule-2); }
+.files-card-head { display: flex; align-items: center; gap: 8px; min-height: 32px; padding: 4px 6px 4px 12px; font-family: var(--font-plate); font-weight: 600; font-size: 13px; letter-spacing: 0.02em; color: var(--ink-2); background: var(--paper); border-bottom: 1px solid var(--rule-2); }
 .files-card-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 12px; align-items: start; padding: 10px 12px; border-top: 1px solid var(--rule-2); }
 .files-card-head + .files-card-row { border-top: 0; }
 /* a turn that is not done (0.21.1): why, and Continue - in the files card, or alone under an answer without files */

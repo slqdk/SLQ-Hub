@@ -224,6 +224,83 @@ def windows_verdict(res: dict, offline: bool) -> tuple[str, str, str, str]:
     return ("FAIL", "windows programs", str(res.get("error") or res)[:300], "docker compose logs sandbox")
 
 
+WEB_PROBE = {
+    "index.html": """<!doctype html>
+<html><head><meta charset="utf-8"><title>SLQ Hub self-test</title></head>
+<body><input id="name"> <button id="count">Count</button> <span id="n">0</span>
+<script src="probe.js"></script></body></html>
+""",
+    "probe.js": """let n = 0;
+document.getElementById("count").addEventListener("click", () => {
+  n += 1;
+  document.getElementById("n").textContent = String(n);
+});
+fetch("data/word.json").then((r) => r.json()).then((d) => { window.word = d.word; console.log("loaded " + d.word); });
+""",
+    "data/word.json": '{"word": "hello"}\n',
+}
+WEB_STEPS = [{"click": "#name"}, {"type": WINDOWS_TYPED}, {"click": "Count"}, {"click": "Count"},
+             {"eval": "[document.getElementById('name').value, document.getElementById('n').textContent, window.word]"}]
+WEB_EXPECT = [WINDOWS_TYPED, "2", "hello"]
+
+
+def _web(rep, c, env, hz: dict) -> None:
+    """web_app: a small page that fetch()es its own data file is opened in the sandbox's browser (offline where the
+    sandbox can run code offline - the page needs nothing from the internet); Danish letters are typed into it and
+    must arrive exactly, and its button, found by its text, counts two clicks."""
+    if not hz.get("browser"):
+        rep.line("WARN", "web pages", "the sandbox has no browser (Playwright's Chromium is missing in its image, or "
+                 "does not start)", "update the Hub; docker compose logs sandbox")
+        return
+    root, folder = (hz.get("root") or "/workspace").rstrip("/"), ".hub/selftest-web"
+    files = " && ".join(f"printf %s {_sh(text)} > {folder}/{name}" for name, text in WEB_PROBE.items())
+    req = {"root": f"{root}/{folder}", "path": "index.html", "steps": WEB_STEPS, "timeout": 60,
+           "out": f"{root}/{folder}/shots", "online": False}
+    try:
+        _sandbox_exec(c, env, f"rm -rf {folder} && mkdir -p {folder}/data && {files}")
+        r = c.post(env.sandbox_url + "/exec", headers={"X-Internal-Token": env.internal_token},
+                   json={"cmd": "pageshot --json " + _sh(json.dumps(req)), "cwd": root, "timeout": 120,
+                         "offline": hz.get("offline") is True}, timeout=150).json()
+        _sandbox_exec(c, env, f"rm -rf {folder}")
+        res = json.loads((r.get("stdout") or "").strip().splitlines()[-1])
+    except Exception as exc:  # noqa: BLE001
+        rep.line("FAIL", "web pages", f"the probe failed ({exc.__class__.__name__}: {exc})",
+                 "docker compose logs sandbox")
+        return
+    rep.line(*web_verdict(res, hz.get("offline") is True))
+
+
+def web_verdict(res: dict, offline: bool) -> tuple[str, str, str, str]:
+    """(status, what, detail, hint) for the self-test's line from pageshot's result."""
+    if not res.get("ok"):
+        return ("FAIL", "web pages", str(res.get("error") or res)[:300], "docker compose logs sandbox")
+    said = next((str(s["did"])[len("value: "):] for s in res.get("steps") or []
+                 if str(s.get("did") or "").startswith("value: ")), None)
+    try:
+        value = json.loads(said) if said else None
+    except ValueError:
+        value = None
+    problems = [str(e.get("message")) for e in res.get("errors") or []]
+    problems += [f"{f.get('url')}: {f.get('status') or f.get('error')}" for f in res.get("failed") or []]
+    if problems:
+        return ("FAIL", "web pages", "the self-test page went wrong in the browser: " + "; ".join(problems)[:300],
+                "pageshot.py in the sandbox; docker compose logs sandbox")
+    if value == WEB_EXPECT:
+        how = "offline " if offline else ""
+        return ("PASS", "web pages", f"a page opened {how}in Chromium fetched its own data file, \"{WINDOWS_TYPED}\" "
+                f"typed into it arrived exactly, and its button, found by its text, counted two clicks "
+                f"({res.get('seconds')} s)", "")
+    if isinstance(value, list) and len(value) == 3 and value[0] != WINDOWS_TYPED:
+        return ("FAIL", "web pages", f"typing into a page: \"{WINDOWS_TYPED}\" arrived as \"{value[0]}\"",
+                "web_app types with Playwright (pageshot.py); docker compose logs sandbox")
+    if isinstance(value, list) and len(value) == 3 and value[2] != "hello":
+        return ("FAIL", "web pages", "the page could not fetch() its own data file (served at http://page.local/)",
+                "pageshot.py in the sandbox; docker compose logs sandbox")
+    steps = "; ".join(str(s.get("error") or s.get("did")) for s in res.get("steps") or [])
+    return ("WARN", "web pages", f"the page opened, but did not answer as expected: {steps}"[:300],
+            "web_app can show pages; clicks by text may miss")
+
+
 def _comfy_folders(rep, env) -> None:
     """People's pictures: the Hub deletes ComfyUI's copies after each answer, through the mounted folders."""
     base = env.comfy_files
@@ -402,6 +479,7 @@ def selftest(images: bool = False, speech: bool = False) -> int:
         _confinement(rep, c, env, hz)
         _offline(rep, c, env, hz)
         _windows(rep, c, env, hz)
+        _web(rep, c, env, hz)
     except Exception as exc:  # noqa: BLE001
         rep.line("FAIL", "sandbox", f"{exc.__class__.__name__}: {exc}", "docker compose logs sandbox")
 

@@ -171,6 +171,25 @@ async def read_file(ctx: ToolContext, args: dict) -> ToolResult:
     return ToolResult(f"{rel}:\n{body}{more}" if body else f"{rel} is empty.")
 
 
+def copied_mark(new: str, there=lambda: "") -> str | None:
+    """A mark the Hub puts where it left text out of what the model was shown, in text it writes and not already in
+    the file (there: its text, or what gives it - read only when there is a mark): a copy of shortened context, not
+    content (chat 79: its game's index.html got a heading cut short and "... [shortened by 24 characters]"). The
+    mark, or None."""
+    from ..context import MARK
+    found = [m.group(0) for m in MARK.finditer(new)]
+    if not found:
+        return None
+    text = there() if callable(there) else there
+    return next((f for f in found if f not in text), None)
+
+
+def marked(mark: str, rel: str) -> ToolResult:
+    return ToolResult(f"Not written: the text for {rel} has \"{mark}\" in it. That is the Hub's mark for text left out "
+                      "of what you were shown - it belongs to no file. Write that part in full (read the file or the "
+                      "source again if you need its text).", is_error=True)
+
+
 async def write_file(ctx: ToolContext, args: dict) -> ToolResult:
     rel = args.get("path") or ""
     content = args.get("content")
@@ -178,6 +197,9 @@ async def write_file(ctx: ToolContext, args: dict) -> ToolResult:
         return ToolResult("content must be a string", is_error=True)
     p = ctx.workdir.resolve(rel)
     existed = p.exists()
+    mark = copied_mark(content, lambda: p.read_text(encoding="utf-8", errors="replace") if p.is_file() else "")
+    if mark:
+        return marked(mark, rel)
     # Files this turn writes in parts. Chat 21 (0.20.2): twice the model left out append: true for the next part,
     # replaced the whole game with it and spent 12 of its 60 steps building the file again.
     in_parts = ctx.state.setdefault("written_in_parts", set())
@@ -220,6 +242,9 @@ async def edit_file(ctx: ToolContext, args: dict) -> ToolResult:
     if count > 1 and not args.get("replace_all"):
         return ToolResult(f"old_string occurs {count} times in {rel}. Add surrounding lines to make it unique, "
                           "or set replace_all.", is_error=True)
+    mark = copied_mark(new, text)
+    if mark:
+        return marked(mark, rel)
     updated = text.replace(old, new) if args.get("replace_all") else text.replace(old, new, 1)
     ctx.workdir.write(rel, updated, "agent", "hub", f"agent edited {rel}")
     line = text[: text.index(old)].count("\n") + 1

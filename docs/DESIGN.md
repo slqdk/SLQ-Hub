@@ -592,6 +592,7 @@ message's time with the conversation.
 | `list_files`, `read_file`, `write_file`, `edit_file`, `search_files`, `move_file`, `delete_file` | The project's folder (or the chat's scratch folder). Every write is checked in as a sync revision, so everything can be restored. `read_file` on an image puts the image in front of the model. `write_file` with `append: true` adds to a file's end (0.16.2): a long file goes in parts. |
 | `bash` | Runs in the sandbox in the project folder, with a timeout and output limits. Long output goes to a file, and the model gets the head, the tail and the path. C# with the .NET 10 SDK (0.15.1, below). |
 | `windows_app` | A Windows desktop program (Windows Forms or WPF on .NET 10) run under Wine on a virtual screen in the sandbox, built first if it is a project: screenshots when its first window is up, at each `shot` step and at the end; steps click (by position or by the text on the screen), type, press keys, drag, scroll and wait (0.16.0, "Windows programs on a virtual screen" below). The owner's chats, where the sandbox has Wine. |
+| `web_app` | A web page, browser app or game from the working folder - or an HTML, React, SVG or Mermaid artifact, as the side panel runs it - opened in Chromium in the sandbox: screenshots, the console, uncaught errors with file and line, failed requests, alert texts; steps click (by position, CSS selector or text), type, press and hold keys, move, scroll, wait and evaluate JavaScript (0.29.0, "Web pages in a browser" below). The owner's chats, where the sandbox has the browser. |
 | `view_image`, `image_transform`, `image_ocr` | Look at an image; crop, resize, rotate, convert and compress (Pillow); Tesseract OCR (dan+eng). |
 | `image_generate`, `image_edit`, `image_remove_background` | ComfyUI through the queue (the lease switches residency). |
 | `speech_generate`, `music_generate`, `sound_generate` | Audio files in the working folder (0.13.0, section 8): speech on the CPU (the speech service), music and sound effects in ComfyUI through the queue. Offered when a model for them is downloaded. |
@@ -628,6 +629,7 @@ tool: Allow once, Allow in this chat, Always, or Deny.
 | `web_fetch` | per site, showing the URL | "Always allow www.dr.dk" (`internet:site:www.dr.dk`; the exact host as the connection names it - IDNA, so a look-alike name shows as `xn--...` - and `dr.dk` is another) |
 | `bash` | only with `internet: true`; otherwise the command runs offline | "Always allow internet for code" (`internet:code`) |
 | `windows_app` | never where code can be kept offline: the program and its build run offline (online where internet for code is always or in this chat allowed); where it cannot, every run asks | as `bash` (`internet:code`) |
+| `web_app` | as `windows_app`: offline the page gets only its own files (anything from the web is listed as blocked); where code cannot be kept offline every run asks, showing the JavaScript its steps run | "Always allow internet for code" (`internet:code`) |
 
 - **Offline code.** The sandbox daemon runs the command under `confine.py
   --offline`: Landlock (ABI 4+) refuses every TCP connection, and a seccomp
@@ -850,6 +852,73 @@ reads in each window.
   different, and the OS version a program reads says 8.1. The prompt says so;
   the user tries the program on a real PC.
 
+**Web pages in a browser** (0.29.0, `web_app` in `app/agent/tools/webapp.py`,
+`services/sandbox/pageshot.py`). The assistant made web pages and games it
+never saw: chat 79's Championship Manager page "tested" itself by starting
+`python3 -m http.server &` in the sandbox and listing its files, and was handed
+over with a data file that did not parse (an apostrophe in "Japhet N'Doram")
+and so a team list and a player list that threw. The sandbox image has
+Playwright (pinned, in its own Python, `/opt/pageshot`) and only Chromium's
+headless shell with its libraries (`/opt/ms-playwright`); the Hub runs
+`pageshot --json {...}` like a bash command - as the owner, offline while the
+internet asks first - and reads the screenshots from `.hub/web/<call>/` (only
+those paths, checked as pictures, then the folder removed; also when the turn
+is stopped, and runs older than ten minutes are swept).
+
+- **Served, not opened as a file.** pageshot answers every request to
+  `http://page.local/` from the page's folder through Playwright's request
+  routing - no server, no port, nothing that needs the network - so a page
+  that `fetch()`es its own level data works as on a web server, which a
+  `file://` page does not. The site's root is the page's folder (or `root`);
+  nothing outside it is served, after a folder's `index.html` is added and
+  every link followed. Names are escaped into the address ("spil #1.html").
+  Other hosts load only online and are listed as blocked offline. The
+  browser's own blocking does not cover everything (a WebRTC or prefetch
+  connection) - offline, the whole run is under `confine.py --offline`.
+- **One run.** The page loaded (and its network quiet for up to 3 s), a
+  screenshot, the steps, a screenshot at the end (or at each `shot`). What
+  comes back: each step's result (a click by CSS selector or by the words on
+  the page, with where it landed; an `eval`'s value as JSON), the console
+  with where each line came from, uncaught errors with their stack - a
+  script that does not parse has none, so an error listener installed before
+  the page's scripts gives its file, line and column (chat 79: "Unexpected
+  identifier 'Doram' at data.js:78:33") - requests that failed (a missing
+  file is a 404), `alert()` and `confirm()` texts (dismissed), and the page's
+  text for a model without vision. A held key repeats as a keyboard does (a
+  quarter second, then 30 a second), so a game that moves on keydown moves.
+  Waits and holds are cut to the run's time (default 30 s, at most 120); a
+  page that stops answering - a script that never ends, an eval that never
+  settles - still gives what came before, printed when the time and a grace
+  are up, with the step it hung at.
+- **Artifacts as the panel runs them.** `artifact: "<id>"` writes the
+  artifact's newest version into the run's folder as `ArtifactPanel.tsx`
+  builds it (`artifact_doc` is a copy of `artifactDoc`; a test runs the
+  TypeScript with node and compares) with the Hub's artifact runtime beside
+  it, and runs it like the panel's frame: a Content-Security-Policy `sandbox`
+  with the frame's flags (no storage, its own origin), and while the internet
+  asks first the panel's offline policy and guard. 760x820 by default, the
+  panel's size on a big screen. The first artifact opened this way showed
+  that every React artifact failed in the panel: the bundled Babel 8 has
+  removed preset-typescript's `isTSX`/`allExtensions`, which the panel
+  passed; it now takes TSX from the `.tsx` file name.
+- **Who.** The owner's chats, where the sandbox's `/health` says `browser`
+  (`pageshot --check`: Chromium starts, tried when the daemon starts - not at
+  the image build, so a browser that will not start cannot stop the image
+  from building), asked every few minutes before a turn writes its prompt.
+  The self-test opens a small page offline, types Danish letters into it and
+  clicks its button by its text.
+
+**How it works** (0.29.0). Four rules in the base prompt bring it closer to
+how Claude works: for a known file format, protocol, game or program, look
+for its documentation and existing tools first (chats 74-79 spent hours on
+Championship Manager's data files byte by byte; a community package with
+them turned up late); in long work, keep what is found in a notes file in the working folder
+as it goes, what was checked apart from what is only guessed (it outlasts the
+chat); before calling a task done, check it the way the user will use it -
+run it, open or play it (`web_app`, `windows_app` where there), compare with
+a reference - and measure with code rather than reason at length; and end
+with what was done, what was checked and what could not be checked.
+
 **Thinking.** The default is on for agent turns in projects and off for
 quick chats. A toggle in the composer overrides it. Qwen3.8 tends to
 overthink, so the default effort is `medium`.
@@ -937,6 +1006,14 @@ before it runs out, so the context is kept small all along, not only at 75%:
   context: the continued chat had condensed its only earlier messages (the
   notes, 1,200 tokens) into notes as long, and the changed system prompt
   made the server read 48,000 tokens again.
+
+- **0.29.0 (chat 79):** a 9B model wrote "<p>Brow... [shortened by 24
+  characters]" into its game's `index.html` - the Hub's own mark for text left
+  out of what the model sees, copied into a file. `write_file`, `edit_file`
+  and `artifact` now refuse text with one of the Hub's marks in it (`MARK` in
+  `context.py`: `cut_text`'s, `shorten_result`'s with the reasons the code
+  gives, and `clip`'s "... [N characters omitted] ...") unless the file has it
+  already, and say what the mark is. Text written with bash is not checked.
 
 **chat_history** (0.27.0, `app/agent/tools/history.py`). Search (BM25 over
 each message's text, tool calls and results; Danish letters are word
@@ -1204,6 +1281,23 @@ generic (`.git`, `node_modules`, `__pycache__`, `.venv`, `*.tmp`, `*.bak`,
 
 The UI gets a file tree with preview and editor, the revision list with
 restore, and the sync devices.
+
+**Download as ZIP** (0.29.0; Søren, chat 79: a browser game is four files and
+a data folder, downloaded one by one). `GET /hub/api/folders/{kind}/{id}/zip`
+gives the folder - or the files and folders named (`path=`, repeated) - as one
+ZIP, named after the project or the chat. The files card's **Download all**
+sends the answer's files, named from the folder that holds them all (a game in
+`game/` comes out as `index.html`, `game.js`, `data/...`); the Files panel's
+ZIP button sends the whole folder, without what sync ignores (`.hub`, `.git`,
+`node_modules`, ...). A file named that is gone since is left out. At most
+2 GB; the page asks first (`check=true`: how many files, how big, or why not)
+so a refusal is a message rather than a broken download. Built in a temporary
+file in `data/tmp` off the event loop and deleted once sent. Code in the
+sandbox has the same uid and the same folder and may swap a listed file or
+folder for a link (to the Hub's database, to `/dev/urandom`) or a FIFO before
+it is read: each file is opened from the workspace down with `O_NOFOLLOW` at
+every step (`Workdir.open_inside`), only a regular file is read, and no more
+of it than was listed.
 
 ---
 

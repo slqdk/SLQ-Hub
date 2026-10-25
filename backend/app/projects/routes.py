@@ -2,11 +2,18 @@
 (tree, read, write, upload, move, delete, history, restore), sync devices."""
 from __future__ import annotations
 
+import asyncio
+import os
+import re
+import tempfile
+import time
+import zipfile
 from pathlib import Path
 
-from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
+from starlette.background import BackgroundTask
 
 from .. import auth, db
 from ..state import Hub, get_hub
@@ -14,6 +21,7 @@ from . import store, syncstore
 
 router = APIRouter()
 MAX_UPLOAD = 200 * 1024 * 1024
+MAX_ZIP = 2 * 1024 ** 3                       # what one ZIP of a folder may hold
 
 
 class ProjectIn(BaseModel):
@@ -119,6 +127,87 @@ async def raw_file(kind: str, fid: int, path: str, request: Request, download: b
     if mime != "application/pdf":       # a page made in the folder must not run as the Hub; the PDF viewer needs it off
         headers["Content-Security-Policy"] = "sandbox"
     return FileResponse(p, media_type=mime, filename=p.name if download else None, headers=headers)
+
+
+def _zip_name(kind: str, fid: int, wd: store.Workdir, asked: str) -> str:
+    """The ZIP's file name: the one asked for, else the project's name or the chat's title."""
+    name = asked
+    if not name.strip() and wd.project_id:
+        name = (store.get_project(wd.project_id) or {}).get("name") or ""
+    if not name.strip() and kind == "chat":
+        with db.connect() as con:
+            r = con.execute("SELECT title FROM chats WHERE id=?", (fid,)).fetchone()
+        name = (r["title"] if r else "") or f"chat {fid}"
+    name = re.sub(r'[\\/:*?"<>|\x00-\x1f]+', "-", name).strip(" .-")[:80].strip(" .-")
+    return (name or "files") + ".zip"
+
+
+def _write_zip(out: str, wd: store.Workdir, files: list[tuple[str, str, int]]) -> None:
+    """The files into a ZIP, each read link-safe (open_inside) and no more of it than was listed - a file that
+    grows (or was swapped for something endless) does not fill the disk."""
+    from ..chats.export import STORED                  # pictures, sound, video, archives: already packed
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+        for rel, name, size in files:
+            try:
+                fd = wd.open_inside(rel)
+            except (OSError, ValueError):              # gone, or no longer a plain file
+                continue
+            with os.fdopen(fd, "rb") as f:
+                st = os.fstat(f.fileno())
+                when = min(max(time.localtime(st.st_mtime)[:6], (1980, 1, 1, 0, 0, 0)), (2107, 12, 31, 23, 59, 58))
+                info = zipfile.ZipInfo(name, date_time=when)
+                info.compress_type = zipfile.ZIP_STORED if Path(name).suffix.lower() in STORED else zipfile.ZIP_DEFLATED
+                info.external_attr = ((st.st_mode & 0o777) | 0o100000) << 16
+                left = size
+                with z.open(info, "w", force_zip64=size > zipfile.ZIP64_LIMIT) as dst:
+                    while left > 0:
+                        chunk = f.read(min(left, 1 << 20))
+                        if not chunk:
+                            break
+                        dst.write(chunk)
+                        left -= len(chunk)
+
+
+def _sweep(tmp: Path) -> None:
+    """ZIPs a broken-off download left (the response deletes its own once sent)."""
+    for old in tmp.glob("folder-*.zip"):
+        try:
+            if old.stat().st_mtime < time.time() - 3600:
+                old.unlink()
+        except OSError:
+            pass
+
+
+@router.get("/hub/api/folders/{kind}/{fid}/zip")
+async def zip_folder(kind: str, fid: int, request: Request, path: list[str] = Query(default=[]), name: str = "",
+                     check: bool = False):
+    """The folder as a ZIP, or the files and folders given (path=..., repeated): the files card's Download all, the
+    Files panel's Download as ZIP (0.29.0). check=true: only what it would hold ({files, bytes, name}) - or why
+    not, which the page shows before it starts the download."""
+    hub = get_hub(request)
+    wd = workdir(hub, kind, fid)
+    files = await asyncio.to_thread(_safe, wd.zip_files, path or None)
+    if not files:
+        raise HTTPException(404, "There are no files to put in a ZIP.")
+    total = sum(size for _, _, size in files)
+    if total > MAX_ZIP:
+        raise HTTPException(413, f"The files come to {total / 1024 ** 3:.1f} GB - more than one ZIP takes "
+                                 f"({MAX_ZIP // 1024 ** 3} GB).")
+    filename = _zip_name(kind, fid, wd, name)
+    if check:
+        return {"files": len(files), "bytes": total, "name": filename}
+    tmp = hub.env.data_dir / "tmp"
+    tmp.mkdir(parents=True, exist_ok=True)
+    await asyncio.to_thread(_sweep, tmp)
+    fd, out = tempfile.mkstemp(dir=tmp, prefix="folder-", suffix=".zip")
+    os.close(fd)
+    try:
+        await asyncio.to_thread(_write_zip, out, wd, files)
+    except Exception as exc:  # noqa: BLE001 - whatever it was, the half-made ZIP goes
+        Path(out).unlink(missing_ok=True)
+        raise HTTPException(500, f"The ZIP could not be made: {exc}") from exc
+    return FileResponse(out, media_type="application/zip", filename=filename,
+                        background=BackgroundTask(Path(out).unlink, missing_ok=True))
 
 
 class FileWrite(BaseModel):

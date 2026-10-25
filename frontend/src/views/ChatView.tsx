@@ -15,7 +15,7 @@ import { FilesCard, producedFiles, UnfinishedNote, type FileHandlers } from "../
 import { Items } from "../components/Turn";
 import { Markdown } from "../components/Markdown";
 import { copyText, Lamp, MenuButton, Modal } from "../components/ui";
-import { download } from "../lib/download";
+import { download, downloadZip } from "../lib/download";
 import type { PanelState } from "../App";
 import type { Folder } from "../components/Files";
 
@@ -378,6 +378,10 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
   const fileHandlers: FileHandlers = {
     src: fileSrc,
     download: (f) => download(`${fileSrc(f)}&download=true`, f.path.split("/").pop()),
+    downloadAll: (fs) => {
+      if (folderKey) downloadZip(`/hub/api/folders/${folderKey}/zip?` + fs.map((f) => `path=${encodeURIComponent(f.path)}`)
+        .join("&")).catch((e) => toast((e as Error).message, "fault"));
+    },
     open: (f) => showFiles(f.path),
     add: (f) => onRefs((r) => (r.includes(f.path) ? r.filter((x) => x !== f.path) : [...r, f.path])),
     added: (f) => refs.includes(f.path),

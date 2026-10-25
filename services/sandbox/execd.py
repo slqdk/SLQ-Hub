@@ -5,7 +5,8 @@ Runs as the unprivileged `sandbox` user inside the sandbox container. Every
 call needs the shared token in X-Internal-Token. Working directories must be
 inside /workspace (the Hub's project and chat folders).
 
-    GET  /health                          -> {ok, root, uid, landlock: ABI or 0, offline: bool, windows: bool}
+    GET  /health                          -> {ok, root, uid, landlock: ABI or 0, offline: bool, windows: bool,
+                                              browser: bool}
     POST /exec        {cmd, cwd, timeout, env, max_output, confine, offline, end_leftovers}
                       -> {exit_code, stdout, stderr, timed_out, duration_ms, truncated}
                       confine {root, home, require}: the command may touch only
@@ -18,6 +19,8 @@ inside /workspace (the Hub's project and chat folders).
                       too (the owner's command allowed online once).
                       windows (in /health): Windows programs can run here
                       (winshot.py --check: Wine, its prefix, the Windows .NET runtime).
+                      browser (in /health): web pages can be opened in a headless
+                      browser here (pageshot.py --check: Chromium starts).
     POST /proc/start  {cmd, cwd, env}     -> {id}         long-lived process with
     POST /proc/write  {id, data}          -> {ok}         pipes (MCP stdio servers)
     POST /proc/read   {id, timeout}       -> {data, eof, exit_code}
@@ -47,6 +50,8 @@ DEFAULT_MAX_OUTPUT = 100_000
 MAX_PROCS = 16
 CONFINE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "confine.py")
 WINSHOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "winshot.py")
+PAGESHOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pageshot.py")
+PAGESHOT_PYTHON = os.environ.get("PAGESHOT_PYTHON", "/opt/pageshot/bin/python")
 
 
 def _inside_root(path: str) -> str:
@@ -165,6 +170,20 @@ def windows_works() -> bool:
 
 
 WINDOWS = windows_works()
+
+
+def browser_works() -> bool:
+    """Whether pageshot can open web pages here (its --check starts Chromium's headless shell once)."""
+    if not (os.path.isfile(PAGESHOT) and os.path.isfile(PAGESHOT_PYTHON)):
+        return False
+    try:
+        return subprocess.run([PAGESHOT_PYTHON, "-I", PAGESHOT, "--check"], timeout=60, stdout=subprocess.DEVNULL,
+                              stderr=subprocess.DEVNULL, check=False).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+BROWSER = browser_works()
 
 
 def _end_leftovers(pgid: int, mark: str) -> int:
@@ -322,7 +341,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):  # noqa: N802
         if urlparse(self.path).path == "/health":
             return self._send(200, {"ok": True, "root": ROOT, "uid": os.getuid(), "landlock": LANDLOCK,
-                                    "offline": OFFLINE, "windows": WINDOWS})
+                                    "offline": OFFLINE, "windows": WINDOWS, "browser": BROWSER})
         self._send(404, {"error": "not found"})
 
     def do_POST(self):  # noqa: N802
@@ -369,7 +388,8 @@ def main() -> None:
         pass
     print(f"slq-hub sandbox daemon on :{PORT}, root {ROOT}, uid {os.getuid()}, landlock ABI {LANDLOCK}, "
           f"offline commands {'possible' if OFFLINE else 'not possible'}, "
-          f"Windows programs {'possible' if WINDOWS else 'not possible'}", flush=True)
+          f"Windows programs {'possible' if WINDOWS else 'not possible'}, "
+          f"web pages in a browser {'possible' if BROWSER else 'not possible'}", flush=True)
     httpd.serve_forever()
 
 

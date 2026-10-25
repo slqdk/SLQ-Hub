@@ -408,3 +408,60 @@ def test_shortening_is_stable_and_keeps_where_the_whole_is():
     assert len(kept[2]["content"]) < 300 and all(m["content"] == "B" * 2000 for m in kept[4:])
     last_resort = trim_tool_results(msgs, keep_last=1, limit=100, unread=True)
     assert [len(m["content"]) < 300 for m in last_resort[4:]] == [True, True, False]
+
+
+async def test_a_mark_of_shortened_context_is_not_written_into_a_file(signed_in, app, fakes):
+    """Chat 79: the 9B model wrote "<p>Brow... [shortened by 24 characters]" into its game's index.html - the Hub's
+    mark for text left out of what it was shown, copied. write_file, edit_file and artifact refuse a mark the file
+    does not have already."""
+    c = await new_chat(signed_in)
+    folder = app.state.hub.env.workspace_dir / "chats" / str(c["id"])
+    page = "<h1>CM 98</h1>\n<p>Brow... [shortened by 24 characters]\n"
+    good = "<h1>CM 98</h1>\n<p>Browser Edition</p>\n"
+    cleared = "[... 900 more characters - cleared to keep the conversation short; look it up whole with chat_history]"
+    fakes.llama["replies"] = [
+        {"tool_calls": [{"name": "write_file", "arguments": {"path": "index.html", "content": page}}]},
+        {"tool_calls": [{"name": "write_file", "arguments": {"path": "index.html", "content": good}}]},
+        {"tool_calls": [{"name": "edit_file", "arguments": {"path": "index.html", "old_string": "Browser Edition",
+                                                            "new_string": cleared}}]},
+        {"tool_calls": [{"name": "artifact", "arguments": {"action": "create", "id": "p", "title": "P", "type": "html",
+                                                           "content": page}}]},
+        {"content": "Done."}, {"content": "Title"}]
+    run = await finish(app, await say(signed_in, c["id"], "Lav siden"))
+    res = [e["data"] for e in run.events if e["type"] == "tool_result"]
+    assert [r["ok"] for r in res] == [False, True, False, False]
+    assert res[0]["text"].startswith('Not written: the text for index.html has "... [shortened by 24 characters]" in '
+                                     "it. That is the Hub's mark for text left out of what you were shown")
+    assert cleared in res[2]["text"] and "the artifact 'p'" in res[3]["text"]
+    assert (folder / "index.html").read_text() == good and not chats.get_artifact(c["id"], "p")
+    (folder / "log.txt").write_text("x... [shortened by 3 characters]\n")            # a file with the mark already
+    fakes.llama["requests"].clear()
+    fakes.llama["replies"] = [
+        {"tool_calls": [{"name": "write_file", "arguments": {"path": "log.txt",
+                                                             "content": "x... [shortened by 3 characters]\ny\n"}}]},
+        {"content": "Done."}]
+    run = await finish(app, await say(signed_in, c["id"], "Tilføj en linje"))
+    assert [e["data"]["ok"] for e in run.events if e["type"] == "tool_result"] == [True]
+
+
+def test_every_mark_the_hub_makes_is_known_to_the_guard():
+    """The guard knows each mark the Hub puts where it left text out, with every reason the code gives - and not
+    ordinary text that looks a bit like one."""
+    import re
+    from pathlib import Path
+
+    from app.agent import context as C
+    from app.agent.tools.base import clip
+    from app.agent.tools.files import copied_mark
+    src = "".join(Path(C.__file__).with_name(n).read_text() for n in ("loop.py", "context.py"))
+    whys = {a or b for a, b in re.findall(r'\bwhy="([^"]+)"|\bwhy: str = "([^"]+)"', src)}
+    whys |= set(re.findall(r'shorten_result\([^)]*?, "([^"]+)"\)', src))
+    assert whys and whys <= set(C.WHYS), whys - set(C.WHYS)
+    text = "x" * 5000
+    full = text + "\n\n(The full output is in .hub/outputs/x.txt - read it with read_file and offset/limit.)"
+    marks = [C.cut_text(text, 100), C.cut_text(text, 100, ""), clip(text, 1000)[0], C.shorten_result(full, 100, C.WHYS[0])]
+    marks += [C.shorten_result(text, head, why) for why in C.WHYS for head in (0, 100)]
+    for m in marks:
+        assert copied_mark(m), m[-160:]
+    for plain in ("[12 characters - letters; digits]", "... [see below]", "shortened by 3 characters", "[3 characters omitted]"):
+        assert copied_mark(plain) is None, plain

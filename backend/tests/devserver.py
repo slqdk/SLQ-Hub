@@ -8,7 +8,8 @@ internet), "read dr.dk" (web_fetch), "jingle" (a command makes a
 sound, a PDF and notes: the card under the answer), "announce" (speech),
 "song" (music), "horn" (a sound effect), "video" (Wan 2.2 5B: ffmpeg's test
 pattern when ffmpeg is installed), "game" (slow steps, to try
-sending a message while it works), "page" (makes an artifact), a test case of
+sending a message while it works), "page" (makes an artifact), "react page" (a React artifact; "react page in the
+browser" tries it with web_app), "web game" (writes a game and plays it with web_app: needs --sandbox), a test case of
 Settings -> Tests (tests/dev_evals.py), "endless" (a file each step until the
 step limit: the answer is marked unfinished, with Continue), "think" (reasons first), "long thinking" (a box full of
 thinking, streamed slowly), "search" (web search), "web picture" (a picture
@@ -119,6 +120,51 @@ fetch("https://api.example.com/data").then(function () { document.getElementById
 <a id="go" href="https://example.com/elsewhere">go elsewhere</a>"""
 
 
+REACT_COUNTER = """import { useState } from "react";
+
+type Props = { start?: number };
+
+export default function App({ start = 0 }: Props) {
+  const [n, setN] = useState<number>(start);
+  return (
+    <div className="p-6 space-y-3">
+      <h1 className="text-2xl font-semibold">Snowflakes caught</h1>
+      <button className="rounded bg-sky-600 px-4 py-2 text-white" onClick={() => setN(n + 1)}>Snow {n}</button>
+    </div>
+  );
+}
+"""
+
+WEB_GAME = {
+    "game/index.html": '''<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Snow catcher</title>
+<style>body{font-family:system-ui;margin:0;background:#0b1d33;color:#fff}canvas{display:block;margin:12px auto;
+background:#123}p{text-align:center}</style></head>
+<body><p>Score: <b id="score">0</b> - level <span id="level">?</span></p><canvas id="c" width="480" height="320"></canvas>
+<script src="game.js"></script></body></html>
+''',
+    "game/game.js": '''window.game = { x: 220, score: 0, level: null };
+const ctx = document.getElementById("c").getContext("2d");
+fetch("data/level.json").then((r) => r.json()).then((d) => {
+  game.level = d.name;
+  document.getElementById("level").textContent = d.name;
+  console.log("level " + d.name + " loaded");
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "ArrowRight") game.x = Math.min(440, game.x + 8);
+  if (e.key === "ArrowLeft") game.x = Math.max(0, game.x - 8);
+});
+function frame() {
+  ctx.clearRect(0, 0, 480, 320);
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(game.x, 296, 40, 12);
+  requestAnimationFrame(frame);
+}
+frame();
+''',
+    "game/data/level.json": '{"name": "Vojens"}\n',
+}
+
 SKILL_MD = """---
 name: pump-alarms
 description: Explains the alarm codes of the demo pumps and the first thing to check for each. Use it when someone \
@@ -227,6 +273,26 @@ def responder(body: dict) -> dict:
             return {"tool_calls": [{"name": "sound_generate", "arguments": {
                 "prompt": "Ice hockey arena horn at the end of a period, loud, huge echoing hall", "duration": 3}}]}
         return {"content": "The horn: **ice-hockey-arena-horn-at-the-end-of-a-period.mp3** (3 s)."}
+    if "react page" in low:                             # a React artifact (TSX: Babel 8 in the panel, 0.29.0)
+        if tools_done == 0:
+            return {"tool_calls": [{"name": "artifact", "arguments": {"action": "create", "id": "snow-counter",
+                                                                      "title": "Snow counter", "type": "react",
+                                                                      "content": REACT_COUNTER}}]}
+        if tools_done == 1 and "browser" in low:
+            return {"content": "Now I try it.", "tool_calls": [{"name": "web_app", "arguments": {
+                "artifact": "snow-counter", "steps": [{"click": "Snow 0"}, {"click": "Snow 1"},
+                                                      {"eval": "document.querySelector('button').textContent"}]}}]}
+        return {"content": "The counter is open on the right."}
+    if "web game" in low:                               # a game in files, played with web_app (needs --sandbox)
+        names = list(WEB_GAME)
+        if tools_done < len(names):
+            return {"tool_calls": [{"name": "write_file", "arguments": {"path": names[tools_done],
+                                                                        "content": WEB_GAME[names[tools_done]]}}]}
+        if tools_done == len(names):
+            return {"content": "Now I play it.", "tool_calls": [{"name": "web_app", "arguments": {
+                "target": "game", "steps": [{"hold": "ArrowRight", "seconds": 1}, {"eval": "[game.x, game.level]"},
+                                            {"shot": "moved right"}]}}]}
+        return {"content": "The game loads its level, and the paddle moves with the arrow keys."}
     if "remote page" in low:                            # an artifact that loads from the web (stopped while asking)
         if tools_done == 0:
             return {"tool_calls": [{"name": "artifact", "arguments": {"action": "create", "id": "remote",

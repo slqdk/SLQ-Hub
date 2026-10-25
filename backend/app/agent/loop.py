@@ -61,7 +61,7 @@ def loop_notice(reason: str) -> str:
 
 
 def _ensure_tools_loaded() -> None:
-    from .tools import audio, files, history, images, knowledge, shell, video, web, windows  # noqa: F401 - registration
+    from .tools import audio, files, history, images, knowledge, shell, video, web, webapp, windows  # noqa: F401
     from . import meta_tools  # noqa: F401
 
 
@@ -902,6 +902,7 @@ class Agent:
                                  subagent=subagent, taken_over_from=taken_over_from, memory=False,
                                  code=device.code, dropped=device.dropped, sound=sound, video=video,
                                  internet_asks=internet.asking(self.hub.settings))
+        from .tools import webapp as webapp_tool
         from .tools import windows as windows_tool
         mem = self.hub.extras["memory"].index(project["id"] if project else None)
         user = self.hub.settings.get("agent", "user_name") or (self.hub.env.admin_user or "the user").title()
@@ -912,7 +913,8 @@ class Agent:
                              images_available=bool(images and images.available()),
                              handover_to=handover_to, subagent=subagent, cloud_model=cloud_model,
                              taken_over_from=taken_over_from, sound=sound, video=video,
-                             internet_asks=internet.asking(self.hub.settings), windows=windows_tool.ready(self.hub))
+                             internet_asks=internet.asking(self.hub.settings), windows=windows_tool.ready(self.hub),
+                             web=webapp_tool.ready(self.hub))
 
     def build_messages(self, chat: dict, project: dict | None, wd: projects.Workdir, entry: dict, run: Run,
                        handover_to: str = "", taken_over_from: str = "") -> list[dict]:
@@ -1062,8 +1064,10 @@ class Agent:
             mcp = self.hub.extras.get("mcp")
             if mcp is not None:
                 await mcp.ensure_started()
-            from .tools import windows as windows_tool    # (registered with the others, in their order)
+            from .tools import webapp as webapp_tool      # (registered with the others, in their order)
+            from .tools import windows as windows_tool
             await windows_tool.refresh(self.hub)          # whether windows_app is there, before the prompt says so
+            await webapp_tool.refresh(self.hub)           # and web_app
             holder: dict = {}
             run.emit("queued", position=None, current=self.hub.scheduler.current)
             pos_task = asyncio.get_running_loop().create_task(self._report_position(run, holder))

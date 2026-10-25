@@ -603,7 +603,7 @@ def make_sandbox(state: dict) -> FastAPI:
     async def health():
         abi = state.get("landlock", 7)
         return {"ok": True, "uid": 1000, "root": "/workspace", "landlock": abi, "offline": state.get("offline", abi >= 4),
-                "windows": state.get("windows", False)}
+                "windows": state.get("windows", False), "browser": state.get("browser", False)}
 
     @app.post("/exec")
     async def exec_(request: Request):

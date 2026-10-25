@@ -146,6 +146,10 @@ async def artifact(ctx: ToolContext, args: dict) -> ToolResult:
         if kind not in ARTIFACT_TYPES:
             return ToolResult(f"type must be one of {', '.join(ARTIFACT_TYPES)}", is_error=True)
         title = args.get("title") or (current or {}).get("title") or aid
+    from .files import copied_mark, marked
+    mark = copied_mark(content, (current or {}).get("content") or "")
+    if mark:
+        return marked(mark, f"the artifact {aid!r}")
     if device is not None:
         version = device.save_artifact(aid, title, kind, content)
     else:

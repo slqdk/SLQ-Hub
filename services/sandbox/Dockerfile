@@ -85,6 +85,22 @@ RUN printf '#!/bin/sh\nexec /usr/bin/python3 -I /opt/execd/winshot.py "$@"\n' > 
     && install -d -o sandbox -g sandbox /opt/hub-wine \
     && runuser -u sandbox -- /usr/bin/python3 -I /opt/execd/winshot.py --setup /opt/hub-wine
 
+# Web pages and apps in a headless browser (the web_app tool: pageshot.py): Playwright, pinned, in a Python of its
+# own - the agent's /opt/py stays its own to change - and only Chromium's headless shell (260 MB, not the full
+# browser) with the libraries it needs, in /opt/ms-playwright, which pageshot points Playwright at. Added after the
+# layers above, so it did not rebuild Wine's. Not started here: a browser that will not start must not stop the
+# image from building - execd's /health says browser: false, and the Hub leaves web_app out.
+ARG PLAYWRIGHT_VERSION=1.63.0
+RUN python3 -m venv /opt/pageshot \
+    && /opt/pageshot/bin/pip install "playwright==${PLAYWRIGHT_VERSION}" \
+    && PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright /opt/pageshot/bin/playwright install --with-deps --only-shell \
+        chromium \
+    && apt-get clean && rm -rf /var/lib/apt/lists/* \
+    && chmod -R a+rX /opt/ms-playwright
+COPY pageshot.py /opt/execd/pageshot.py
+RUN printf '#!/bin/sh\nexec /opt/pageshot/bin/python -I /opt/execd/pageshot.py "$@"\n' > /usr/local/bin/pageshot \
+    && chmod 755 /usr/local/bin/pageshot
+
 COPY execd.py confine.py /opt/execd/
 
 USER sandbox

@@ -336,7 +336,7 @@ export function toolSummary(t: ToolView): string {
   const s = (k: string) => (typeof a[k] === "string" ? (a[k] as string) : "");
   switch (t.name) {
     case "bash": return s("command").split("\n")[0];
-    case "windows_app": {
+    case "windows_app": case "web_app": {
       const n = Array.isArray(a.steps) ? a.steps.length : 0;
       return s("target") + (n ? ` (${n} step${n === 1 ? "" : "s"})` : "");
     }

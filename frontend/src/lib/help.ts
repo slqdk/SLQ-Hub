@@ -8,6 +8,7 @@ export interface HelpCaps {
   internet_asks: boolean;
   code: boolean;
   windows: boolean;
+  browser: boolean;
   memory: boolean;
   projects: boolean;
   libraries: boolean;
@@ -18,7 +19,7 @@ export interface HelpCaps {
   video: { t2v: boolean; i2v: boolean; flf2v: boolean };
 }
 
-export type Need = "code" | "windows" | "libraries" | "mcp" | "handover"
+export type Need = "code" | "windows" | "browser" | "libraries" | "mcp" | "handover"
   | "images.generate" | "images.edit" | "images.cutout"
   | "sound.speech" | "sound.music" | "sound.sound" | "sound.voice" | "sound.separate"
   | "video.t2v" | "video.i2v" | "video.flf2v";
@@ -55,6 +56,8 @@ export const NEEDS: Record<Need, { missing: string; get: string; tab?: string }>
   "code": { missing: "Code is not allowed in your chats", get: "The owner can allow it under Settings, People." },
   "windows": { missing: "The sandbox cannot run Windows programs",
     get: "Its image needs Wine and the Windows packs; update.sh builds it. Settings, System shows the sandbox.", tab: "system" },
+  "browser": { missing: "The sandbox has no browser",
+    get: "Its image needs Chromium (Playwright); update.sh builds it. Settings, System shows the sandbox.", tab: "system" },
   "libraries": { missing: "Needs the embedding model", get: "Download Qwen3 Embedding under Settings, Models, Helpers for libraries; then make a library.", tab: "models" },
   "mcp": { missing: "No MCP server is connected", get: "Add one under Settings, MCP servers.", tab: "mcp" },
   "handover": { missing: "No model is chosen to take over", get: "Choose one under Settings, Assistant: When the model gets stuck, hand over to.", tab: "agent" },
@@ -222,8 +225,9 @@ export const SECTIONS: HelpSection[] = [
     id: "documents",
     title: "Documents and files",
     intro: "Each chat has its own folder, and a project has one for all its chats. The assistant reads, writes and "
-      + "changes files there. Every file it makes or changes is listed under its answer, to open or download, and "
-      + "Files at the top of the chat shows the whole folder.",
+      + "changes files there. Every file it makes or changes is listed under its answer, to open or download - or "
+      + "all of them as one ZIP with Download all - and Files at the top of the chat shows the whole folder, which "
+      + "its ZIP button downloads.",
     items: [
       {
         id: "read",
@@ -628,6 +632,22 @@ export const SECTIONS: HelpSection[] = [
           { text: "Make a countdown to Christmas as a React component" },
           { text: "Make a simple game where you catch falling snowflakes" },
         ],
+      },
+      {
+        id: "web",
+        tools: ["web_app"],
+        title: "Try web pages and browser games",
+        what: "It opens a page or game from the folder in a browser in the sandbox, clicks, types and plays it, and "
+          + "sees screenshots, the console and any errors - so it finds and fixes what is broken before you try it.",
+        examples: [
+          { text: "Make a browser game where you steer a snake with the arrow keys. Play it yourself and fix what does not work" },
+          { text: "Open index.html in this project, click through every menu and tell me what is broken" },
+          { text: "Check how my page looks on a phone (390x844)" },
+        ],
+        tips: ["While the internet asks first, the page gets only its own files: fonts or scripts from the web are "
+          + "left out, and it says so."],
+        needs: ["browser"],
+        owner: true,
       },
       {
         id: "projects",

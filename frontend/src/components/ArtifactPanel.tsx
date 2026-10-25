@@ -46,6 +46,8 @@ export function artifactDoc(type: string, content: string, offline = false): str
   return offline ? withPolicy(doc, offlinePolicy(window.location.origin)) : doc;
 }
 
+// backend/app/agent/tools/webapp.py builds the same pages (web_app opens an artifact as this panel shows it); a
+// backend test runs this function with node and compares.
 function buildDoc(type: string, content: string): string {
   const head = `<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">`;
   const showErrors = `<script>window.addEventListener("error", function (e) {
@@ -69,7 +71,8 @@ svg{max-width:100%;max-height:100vh;height:auto}</style></head><body>${content}<
 <body><pre class="mermaid">${escapeHtml(content)}</pre>
 <script>mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "strict" });</script></body></html>`;
   }
-  // react: compile in the frame with Babel, imports from "react" only
+  // react: compile in the frame with Babel, imports from "react" only. Babel 8 takes TSX from the .tsx name (its
+  // preset-typescript has no isTSX/allExtensions: with them every React artifact failed to compile - 0.29.0)
   return `<!doctype html><html><head>${head}${showErrors}
 <script src="/artifact-runtime/react.js"></script><script src="/artifact-runtime/react-dom.js"></script>
 <script src="/artifact-runtime/babel.js"></script><script src="/artifact-runtime/tailwind.js"></script>
@@ -79,7 +82,7 @@ svg{max-width:100%;max-height:100vh;height:auto}</style></head><body>${content}<
   var src = ${JSON.stringify(content).replace(/</g, "\\u003c")};
   try {
     var out = Babel.transform(src, { filename: "artifact.tsx", presets: [["react", { runtime: "classic" }],
-      ["typescript", { isTSX: true, allExtensions: true }]], plugins: ["transform-modules-commonjs"] }).code;
+      "typescript"], plugins: ["transform-modules-commonjs"] }).code;
     var module = { exports: {} };
     var req = function (name) {
       if (name === "react") return React;
@@ -91,6 +94,7 @@ svg{max-width:100%;max-height:100vh;height:auto}</style></head><body>${content}<
     if (!App) throw new Error("The component needs a default export");
     ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(App));
   } catch (e) {
+    console.error(e);
     var p = document.createElement("pre");
     p.style.cssText = "color:#c22b2b;white-space:pre-wrap;padding:12px;margin:0;font:13px ui-monospace,monospace";
     p.textContent = String(e && e.message || e);
