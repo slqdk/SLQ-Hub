@@ -495,7 +495,9 @@ button.file-chip:disabled { cursor: default; }
 .todos li[data-status="completed"] { color: var(--ink-3); text-decoration: line-through; }
 .todos li .lamp { transform: translateY(1px); }
 
-.run-state { display: flex; align-items: center; gap: 8px; color: var(--ink-2); font-size: 14px; }
+.run-state { display: flex; align-items: flex-start; gap: 8px; color: var(--ink-2); font-size: 14px; }
+.run-state > .lamp { margin-top: 5.5px; }   /* on the first line's middle (21-px lines), also when the figures wrap */
+.run-what { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 8px; min-width: 0; }
 
 /* ------------------------------------------------------------ markdown */
 .md { overflow-wrap: anywhere; }
@@ -873,6 +875,8 @@ div.tests-result-head { cursor: default; }
   .scrim { position: fixed; inset: 0; z-index: 44; background: rgba(20, 24, 26, 0.35); }
   .app.with-panel .panel { width: 100vw; }
   .column { padding: 0 14px; }
+  .messages { padding-bottom: 10px; }   /* 0.28.3: less room above the composer on a phone */
+  .run-what { flex-direction: column; }   /* the figures always under the words: no jump as they grow */
   .msg-user { max-width: 92%; }
   .files { grid-template-columns: 1fr; }
   .tree { max-height: 36vh; border-right: 0; border-bottom: 1px solid var(--rule-2); }

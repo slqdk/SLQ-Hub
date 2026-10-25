@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.28.3 - 2026-10-25
+
+- **A tidier "Working with ..." line on a phone.** The model's name and the
+  figures (time, steps, tokens/s) each wrapped into two lines side by side;
+  now the figures sit on their own line under the name. On a desktop they
+  stay on one line. Also in people's chats.
+- Less empty room between the last line of a chat and the message box on a
+  phone.
+
 ## 0.28.2 - 2026-10-25
 
 - **Live thinking reads like a terminal.** While a model thinks, its box

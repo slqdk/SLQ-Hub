@@ -201,7 +201,10 @@ a 340-px box, so the front was cut off token by token and the newest text was
 below the box; it now follows the end like a terminal (`ThinkingText`, whole
 lines, the box pinned to its end until the reader scrolls up). The dev server's
 fake model now streams for real (`StreamingASGITransport`), so this can be
-watched there ("long thinking").
+watched there ("long thinking"). 0.28.3: on a phone the "Working with ..." line's name
+and figures wrapped side by side, and 28 px of room sat above the composer;
+the figures now go under the name below 860 px, and the room is 10 px
+(Chromium, 11 checks at 360, 412 and 1440 px).
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
 host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU

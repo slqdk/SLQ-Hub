@@ -1,5 +1,5 @@
 // A chat: history, the live turn, and the composer.
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import { Copy, Download, FileText, FolderOpen, Menu, MessageSquarePlus, MoreHorizontal, NotebookPen, Pencil, RotateCcw, ShieldCheck,
   Trash2 } from "lucide-react";
 import { api, mediaUrl, type ArtifactRef, type Block, type ChatData, type ChatSettings, type Library, type Message,
@@ -689,6 +689,16 @@ export function TurnFoot({ turn, names, canRetry, onRetry, stats = true }: { tur
   );
 }
 
+/** A lamp, what is happening and its figures: side by side when they fit, else the figures on their own line under
+ *  it (0.28.3: on a phone both halves wrapped into two lines side by side). */
+function RunLine({ lamp, what, figures }: { lamp: ReactNode; what: string; figures: string }) {
+  return (
+    <div className="run-state">{lamp}
+      <span className="run-what"><span>{what}</span><span className="faint num">{figures}</span></span>
+    </div>
+  );
+}
+
 export function LiveState({ live, queueCurrent, names }: { live: LiveRun; queueCurrent: string | null; names: Record<string, string> }) {
   const [, tick] = useState(0);
   useEffect(() => {
@@ -699,22 +709,18 @@ export function LiveState({ live, queueCurrent, names }: { live: LiveRun; queueC
   if (live.status === "queued") {
     const loading = live.position === 0 || (live.position == null && queueCurrent !== null);
     return (
-      <div className="run-state"><Lamp state="wait" />
-        {live.position && live.position > 0
-          ? `Waiting for the card, ${live.position} job${live.position === 1 ? "" : "s"} ahead`
-          : loading ? "Getting the card ready" : "Waiting for the card"}
-        <span className="faint num">{seconds(secs)}</span>
-      </div>
+      <RunLine lamp={<Lamp state="wait" />} figures={seconds(secs)} what={live.position && live.position > 0
+        ? `Waiting for the card, ${live.position} job${live.position === 1 ? "" : "s"} ahead`
+        : loading ? "Getting the card ready" : "Waiting for the card"} />
     );
   }
   if (live.status === "running") {
     const waiting = waitsForAnswer(live.items);
     return (
-      <div className="run-state">
-        <Lamp state={waiting ? "act" : "run"} pulse={!waiting} />
-        {waiting ? "Waiting for your answer" : `Working${live.model ? ` with ${names[live.model] ?? live.model}` : ""}`}
-        <span className="faint num">{seconds(secs)}{live.steps ? `, ${live.steps} step${live.steps === 1 ? "" : "s"}` : ""}{live.tps ? `, ${Math.round(live.tps)} tokens/s` : ""}</span>
-      </div>
+      <RunLine lamp={<Lamp state={waiting ? "act" : "run"} pulse={!waiting} />}
+        what={waiting ? "Waiting for your answer" : `Working${live.model ? ` with ${names[live.model] ?? live.model}` : ""}`}
+        figures={`${seconds(secs)}${live.steps ? `, ${live.steps} step${live.steps === 1 ? "" : "s"}` : ""}`
+          + `${live.tps ? `, ${Math.round(live.tps)} tokens/s` : ""}`} />
     );
   }
   if (live.status === "error") return <div className="run-state"><Lamp state="fault" />{live.error ?? "The turn failed"}</div>;
