@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.22.2 - 2026-10-25
+
+- **Edits and cut-outs at the original's size.** A picture you edit or cut
+  out came back at the model's working size, about one megapixel - the test
+  runs' 768×512 ball came back at 1248×832, and the assistant said it was the
+  same size. It now comes back at the original's size (up to 2048×2048;
+  a cut-out keeps clean edges), and the assistant is told the size.
+- **A video job is followed to the end.** In the second test run the
+  connection to ComfyUI closed during a 14B video, and the Hub gave the job
+  up and stopped it. The Hub now keeps asking ComfyUI about the job instead,
+  and if ComfyUI restarted and lost it, that is said at once rather than
+  after five minutes.
+- **Tests judge the result, not the way to it.** The second run's model
+  turned the ball blue with its own code - exactly right - and failed because
+  it did not use the edit tool; the edit and the cut-out now judge the picture
+  the answer left, however it was made. Also: the invitation is checked up to
+  its "Venlig hilsen" and signature, with anything after it as a check of its
+  own; the poster's two lines are read whole (two right posters failed on a
+  letter Tesseract dropped); the converter's formula is found when written
+  `(c * 9) / 5`; and a video that jumps between flat colours fails a new
+  check, "it moves smoothly".
+
 ## 0.22.1 - 2026-10-25
 
 - **Video that ran out of memory at the very end.** In the first test run on

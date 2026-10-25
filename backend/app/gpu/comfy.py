@@ -31,6 +31,8 @@ class ComfyError(RuntimeError):
 ProgressFn = Callable[[int, int, str | None], Awaitable[None] | None]
 
 
+QUIET_S = 300                   # a ComfyUI that answers nothing for this long while a job runs is given up on
+LOST = ("ComfyUI no longer has the job: it restarted, or the job was taken out of its queue, while the job ran")
 LOADERS = {"LoadImage": "image", "LoadImageMask": "image", "LoadAudio": "audio"}   # node -> its file input
 OUTPUT_KINDS = ("images", "audio")          # what saving nodes put in a job's history
 
@@ -241,11 +243,13 @@ class Comfy:
             except OSError as exc:
                 log.warning("could not delete ComfyUI's %s/%s: %s", kind, name, exc)
 
-    async def _poll(self, prompt_id: str, timeout: float, quiet: float = 300) -> None:
+    async def _poll(self, prompt_id: str, timeout: float, quiet: float = QUIET_S) -> None:
         """Until the job ends. A ComfyUI that does not answer for a while (loading a large model) is asked again;
-        one that has not answered for `quiet` seconds is given up on."""
+        one that has not answered for `quiet` seconds is given up on, and a job it no longer has (it restarted)
+        ends at once."""
         deadline = time.monotonic() + timeout
         answered = time.monotonic()
+        looked = 0.0
         while time.monotonic() < deadline:
             try:
                 hist = await self.history(prompt_id)
@@ -259,15 +263,39 @@ class Comfy:
             status = hist.get("status") or {}
             if status.get("completed") or status.get("status_str") in ("success", "error"):
                 return
+            if not hist and time.monotonic() - looked > 10:
+                looked = time.monotonic()
+                if await self._lost(prompt_id):
+                    raise ComfyError(LOST)
             await asyncio.sleep(1.0)
         raise ComfyError(f"the ComfyUI job did not finish within {int(timeout)} s")
+
+    async def _lost(self, prompt_id: str) -> bool:
+        """Neither in ComfyUI's history nor in its queue: it restarted (its history and queue are in memory), or
+        the job was deleted. False when that cannot be told."""
+        try:
+            q = (await self._get("/queue", timeout=10)).json()
+        except (ComfyError, ValueError):
+            return False
+        waiting = {item[1] for key in ("queue_running", "queue_pending") for item in q.get(key) or []
+                   if isinstance(item, list) and len(item) > 1}
+        if prompt_id in waiting:
+            return False
+        try:
+            return not await self.history(prompt_id)         # not just finished between the two questions
+        except ComfyError:
+            return False
 
     async def _run_ws(self, graph: dict, client_id: str, on_progress: ProgressFn | None, timeout: float,
                       queued: dict | None = None) -> str:
         queued = queued if queued is not None else {}
         ws_url = self.url.replace("http://", "ws://").replace("https://", "wss://") + f"/ws?clientId={client_id}"
         try:
-            ws = await ws_connect(ws_url, max_size=64 * 1024 * 1024, open_timeout=10)
+            # No keepalive pings. In the second test run the socket closed during a 14B video job, 162 s after
+            # its last message, and the Hub gave the job up - whether ComfyUI stopped or only left the library's
+            # pings unanswered while it worked is not known. A ComfyUI that stops closes the connection itself;
+            # a closed or quiet one is asked about the job (one that restarted no longer has it: that ends it).
+            ws = await ws_connect(ws_url, max_size=64 * 1024 * 1024, open_timeout=10, ping_interval=None)
         except Exception:                       # no websocket: poll instead
             prompt_id = queued["id"] = await self.queue(graph, client_id)
             await self._poll(prompt_id, timeout)
@@ -275,6 +303,7 @@ class Comfy:
         async with ws:
             prompt_id = queued["id"] = await self.queue(graph, client_id)
             deadline = time.monotonic() + timeout
+            heard = time.monotonic()                        # the last word from ComfyUI: a message or an answer
             while True:
                 left = deadline - time.monotonic()
                 if left <= 0:
@@ -285,14 +314,22 @@ class Comfy:
                     try:
                         hist = await self.history(prompt_id)   # missed the end?
                     except ComfyError as exc:              # busy (loading a model): the socket is still open
+                        if time.monotonic() - heard > QUIET_S:
+                            raise ComfyError(f"ComfyUI has not answered for {QUIET_S} s ({exc})") from exc
                         log.info("ComfyUI did not answer while job %s runs (%s); waiting on", prompt_id, exc)
                         continue
+                    heard = time.monotonic()
                     if (hist.get("status") or {}).get("completed"):
                         return prompt_id
+                    if not hist and await self._lost(prompt_id):
+                        raise ComfyError(LOST)
                     continue
-                except Exception as exc:                    # the socket closed: ComfyUI stopped or restarted
-                    raise ComfyError(f"ComfyUI closed the connection while the job ran "
-                                     f"({exc.__class__.__name__})") from exc
+                except Exception as exc:                    # the socket closed: follow the job by asking instead
+                    log.warning("ComfyUI's websocket closed while job %s runs (%s: %s); asking about the job instead",
+                                prompt_id, exc.__class__.__name__, exc)
+                    await self._poll(prompt_id, max(1.0, deadline - time.monotonic()))
+                    return prompt_id
+                heard = time.monotonic()
                 if isinstance(msg, bytes):
                     continue                                    # preview frames
                 try:

@@ -227,7 +227,7 @@ async def image_edit(ctx: ToolContext, args: dict) -> ToolResult:
         return gpu_failure("Image editing failed", exc)
     paths = _save_outputs(ctx, items, args.get("save_as"), args.get("prompt") or "edit")
     where = f" Saved as {', '.join(paths)}." if paths else ""
-    return ToolResult(f"Edited image(s) ready ({len(items)}).{where}",
+    return ToolResult(f"Edited image(s) ready ({len(items)}, {_size_note(items[0])}).{where}",
                       images=[{"sha": it["sha"], "mime": "image/png"} for it in items],
                       display={"generated": [{"sha": it["sha"], "seed": it["seed"], "path": p}
                                              for it, p in zip(items, paths + [None] * len(items))]})
@@ -246,9 +246,18 @@ async def image_remove_background(ctx: ToolContext, args: dict) -> ToolResult:
         return gpu_failure("Background removal failed", exc)
     save_as = args.get("save_as") or f"{Path(name).stem}-cutout.png"
     ctx.workdir.write(save_as, blobs.read(items[0]["sha"]), "agent", "hub", f"cut out {save_as}")
-    return ToolResult(f"Background removed; saved as {save_as} (PNG with transparency).",
+    return ToolResult(f"Background removed; saved as {save_as} (PNG with transparency, {_size_note(items[0])}).",
                       images=[{"sha": items[0]["sha"], "mime": "image/png"}],
                       display={"generated": [{"sha": items[0]["sha"], "path": save_as}]})
+
+
+def _size_note(item: dict) -> str:
+    """The size of an edit or a cut-out, against the original's (the pipeline scales it back up to 2048x2048)."""
+    w, h = item.get("width"), item.get("height")
+    src = tuple(item.get("source") or ())
+    if not w or len(src) != 2 or (w, h) == src:
+        return f"{w}x{h} px, the original's size" if w else "size unknown"
+    return f"{w}x{h} px - the original is {src[0]}x{src[1]}; pictures that big stay at the model's size"
 
 
 def _images_ready(ctx: ToolContext) -> bool:

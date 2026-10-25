@@ -81,6 +81,14 @@ def name_of(path: str | None) -> str:
     return os.path.basename(path) if path else ""
 
 
+def made_picture(inp: dict) -> str | None:
+    """The picture the turn left for the user: its newest picture file in the folder (whichever way it was made -
+    a tool, or its own code), else the picture tools' newest output."""
+    pics = [f["path"] for f in inp.get("files", [])
+            if str(f.get("mime", "")).startswith("image/") and os.path.isfile(f["path"])]
+    return pics[0] if pics else output(inp, "images")
+
+
 def output(inp: dict, kind: str) -> str | None:
     """The newest picture, sound or video the turn's tools made (their paths, from the tool results)."""
     items = [x for x in inp.get(kind, []) if os.path.isfile(x["path"])]
@@ -122,6 +130,21 @@ def frame(path: str, at: float):
     return Image.open(io.BytesIO(p.stdout)).convert("RGB")
 
 
+def frame_jump(path: str) -> tuple[float, int]:
+    """The biggest change from one frame to the next, at 64x36 grey, and where. A good clip changes by a point or
+    two (the second run's kite: 1.3); the second run's broken clip - flat white, yellow and black every four frames
+    - by 107."""
+    import numpy as np
+    p = subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-i", path, "-vf", "scale=64:36", "-f", "rawvideo",
+                        "-pix_fmt", "gray", "-"], capture_output=True, timeout=300)
+    fr = np.frombuffer(p.stdout, dtype=np.uint8)
+    if p.returncode != 0 or fr.size < 2 * 64 * 36:
+        return 0.0, 0
+    fr = fr[: fr.size // (64 * 36) * 64 * 36].reshape(-1, 36, 64).astype(np.float32)
+    d = np.abs(np.diff(fr, axis=0)).mean(axis=(1, 2))
+    return float(d.max()), int(d.argmax()) + 1
+
+
 def small_grey(img, size=(64, 36)):
     import numpy as np
     return np.asarray(img.convert("L").resize(size), dtype=np.float32)
@@ -155,10 +178,24 @@ def distance(a: str, b: str) -> int:
     return prev[-1]
 
 
-def read_word(words: list[str], target: str) -> str | None:
-    """The OCR word closest to `target`, if it is at most one letter off (stylised poster text)."""
-    best = min(words, key=lambda w: distance(w, target), default=None)
-    return best if best is not None and distance(best, target) <= (1 if len(target) > 3 else 0) else None
+def read_phrase(words: list[str], phrase: str) -> str | None:
+    """Consecutive OCR words that spell `phrase` (spaces and dots aside), at most one letter in five off and its
+    numbers exact: Tesseract reads a stylised headline in pieces and drops letters (on two posters spelled right it
+    read "ULI HALLEN" and "JUL ALLEN")."""
+    target = re.sub(r"[^A-ZÆØÅ0-9]", "", phrase.upper())
+    best: tuple[int, str] | None = None
+    for i in range(len(words)):
+        joined = ""
+        for j in range(i, min(i + 6, len(words))):
+            joined += words[j]
+            if len(joined) > len(target) + 3:
+                break
+            d = distance(joined, target)
+            if re.sub(r"\D", "", joined) != re.sub(r"\D", "", target):
+                continue                                # a number must be read exactly: 13. DECEMBER is wrong
+            if best is None or d < best[0]:
+                best = (d, " ".join(words[i:j + 1]))
+    return best[1] if best is not None and best[0] <= max(1, len(target) // 5) else None
 
 
 def unit_tests(test_file: str, module_dir: str, timeout: int = 180) -> tuple[int, int, str]:
@@ -303,8 +340,8 @@ def _poster(inp: dict) -> None:
     img = Image.open(p).convert("RGB")
     info("size", f"{img.width}x{img.height} px")
     words = ocr_words(img)
-    for target in ("JUL", "HALLEN", "DECEMBER"):
-        got = read_word(words, target)
+    for target in ("JUL I HALLEN", "12. DECEMBER"):
+        got = read_phrase(words, target)
         check(f"Tesseract reads {target}", got is not None,
               f"read as {got}" if got else f"read: {' '.join(words[:30])}"[:300], "should")
     import numpy as np
@@ -320,9 +357,9 @@ def _poster(inp: dict) -> None:
 
 @case("images.edit")
 def _edit(inp: dict) -> None:
-    p = output(inp, "images")
+    p = made_picture(inp)
     src = inp.get("inputs", {}).get("picture")
-    if not check("an edited picture was made", p is not None, name_of(p) or "no picture from the picture tools"):
+    if not check("an edited picture was made", p is not None, name_of(p) or "no new picture"):
         return
     import numpy as np
     from PIL import Image
@@ -348,8 +385,8 @@ def _edit(inp: dict) -> None:
 
 @case("images.cutout")
 def _cutout(inp: dict) -> None:
-    p = output(inp, "images")
-    if not check("a cut-out was made", p is not None, name_of(p) or "no picture from the picture tools"):
+    p = made_picture(inp)
+    if not check("a cut-out was made", p is not None, name_of(p) or "no new picture"):
         return
     import numpy as np
     from PIL import Image
@@ -423,6 +460,9 @@ def _video(inp: dict) -> dict | None:
     first, last = frame(p, 0.0), frame(p, max(0.0, secs - 0.25))
     moved = float(abs(small_grey(first) - small_grey(last)).mean())
     check("it moves", moved > 2.0, f"difference first-last frame: {moved:.1f} of 255", "should")
+    jump, at = frame_jump(p)
+    check("it moves smoothly (no jumps between frames)", jump <= 30,
+          f"biggest change from one frame to the next: {jump:.1f} of 255 (frame {at})", "should")
     return {"path": p, "first": first, "seconds": secs}
 
 
@@ -458,7 +498,7 @@ def _roman(inp: dict) -> None:
 @case("code.debug")
 def _inventory(inp: dict) -> None:
     p = "lager/inventory.py" if os.path.isfile("lager/inventory.py") else find(inp, "inventory.py")
-    if not check("inventory.py is there", p is not None, "lager/inventory.py is gone"):
+    if not check("inventory.py is there", p is not None, p or "lager/inventory.py is gone"):
         return
     folder = os.path.dirname(p) or "."
     n, bad, first = unit_tests(".hub/tests/test_inventory_orig.py", folder)

@@ -5,9 +5,12 @@ tiles, a job the Hub gives up on is cancelled in ComfyUI, a busy ComfyUI is wait
 chat model loads (and once more when the model did not fit), and a failure of the card does not hand the turn over."""
 from __future__ import annotations
 
+import time
+
 import pytest
 
 from app.gpu import backend as B
+from app.gpu.comfy import ComfyError
 from app.gpu.runner import RunnerError
 from app.video import workflows as W
 
@@ -163,3 +166,21 @@ async def test_a_busy_comfyui_lends_its_last_node_list(app, fakes):
     comfy._object_info = None
     with pytest.raises(Exception):
         await comfy.object_info()
+
+
+async def test_a_job_comfyui_no_longer_has_ends_at_once(app, fakes):
+    """0.22.2: ComfyUI restarted under a job (its history and queue live in memory) - said at once, not after five
+    minutes of asking."""
+    fakes.comfy["lost"] = True
+    t0 = time.monotonic()
+    with pytest.raises(ComfyError, match="no longer has the job: it restarted"):
+        await app.state.hub.comfy.run({"9": {"class_type": "SaveImage", "inputs": {}}}, timeout=60)
+    assert time.monotonic() - t0 < 10
+
+
+async def test_a_job_still_running_is_waited_for(app, fakes):
+    """Not in the history yet but in the queue: running (the second run's websocket closed during such a job)."""
+    fakes.comfy["running_s"] = 2.5
+    t0 = time.monotonic()
+    files = await app.state.hub.comfy.run({"9": {"class_type": "SaveImage", "inputs": {}}}, timeout=60)
+    assert len(files) == 1 and time.monotonic() - t0 >= 2.4

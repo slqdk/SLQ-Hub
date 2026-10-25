@@ -173,6 +173,15 @@ for statistics.
      slow to answer while a job runs (loading a large model) is waited for,
      not failed, and its last node list stands in when it is too busy to list
      them.
+   - **Following a job** (0.22.2). The Hub hears a job's progress over
+     ComfyUI's websocket, without keepalive pings: in the second test run the
+     socket closed during a 14B video job, 162 s after its last message, and
+     the Hub gave up - and cancelled - a job that may have been running on.
+     A closed socket now only means asking instead: `/history/<id>` until the
+     job is there, every second; a job in neither the history nor `/queue` is
+     gone - ComfyUI keeps both in memory, so it restarted (or the job was
+     deleted) - and that ends the call at once, said as such; five minutes
+     with no answer at all ends it too.
 4. A lease that asks to switch takes precedence over waiting jobs. It
    waits only for the other running jobs to finish; the lease keeps its slot.
 5. Cancelling a waiting job removes it. Cancelling a running job aborts its
@@ -1003,6 +1012,14 @@ restore, and the sync devices.
   without the GPU: Pillow in the Hub, Tesseract in the sandbox.
 - **Outputs.** Generated images appear in the chat and are saved in the
   project's `images/` folder when the chat is in a project.
+- **Edits and cut-outs at the original's size** (0.22.2). Qwen-Image and
+  FLUX.2 klein edit at about one megapixel and return that size: both test
+  runs' 768×512 ball came back at 1248×832, and one model told the user it was
+  the original's size. Up to 2048×2048 the result is scaled to the original's
+  size (Lanczos; a cut-out premultiplied, so its edges keep their colour);
+  a bigger original keeps the model's size rather than being blown up from one
+  megapixel. The tool's result says the size, and the original's when they
+  differ.
 
 ### Sound (0.13.0)
 
@@ -1306,8 +1323,11 @@ sound, with ComfyUI's own nodes only (the image is unchanged):
   by 64, under a third of that. Time is not tiled (`temporal_size` 4096, the
   node's largest): both Wan VAEs decode a latent frame or two at a time with
   a cache, so a shorter time tile saves nothing and would leave a seam.
-  Measured in that run: 31-32 s a step at 1280×704 and 121 frames (20
-  steps, after about 30 s of loading), so about 11 minutes for a 5-s clip.
+  Measured on the card: 28-41 s a step at 1280×704 and 121 frames, the
+  first video of a test run the slowest (40.6 s in both runs, then 28-35 s;
+  why is not known), so 10-14 minutes of sampling for a 5-s clip; the tiled
+  decode and saving took 1.5 minutes more (second run). Its kite clip shows
+  no seam: the sky's colour runs on smoothly across the tile edges.
 - **Sizes** (`size_for`): the model's 480p or 720p pixel count in the
   picture's shape (held between 1:2.5 and 2.5:1), or landscape, portrait or
   square, rounded to 32 (5B: the 16× VAE and 2×2 patches) or 16 (14B).
@@ -1661,6 +1681,18 @@ first (chat, documents, code, research and tasks), then pictures and sound,
 which take the card from it, and video last - so a failure of the heaviest
 job cannot cost the others their run, as it did in the first run on the card.
 
+What the second run taught the checks (0.22.2): a result is judged, not the
+way to it - the edit and the cut-out judge the newest picture the turn left
+in its folder, made by a tool or by its own code (Qwen3.8 turned the ball blue
+with a hue shift in Python, pixel for pixel right, and failed a check that
+wanted `image_edit`); the invitation is judged up to its "Venlig hilsen" and
+signature, and anything after it (a ticked list of the rules, quoting
+"hyggelig") is a check of its own; the poster's lines are read whole, one
+letter in five off and the numbers exact ("ULI HALLEN" and "JUL ALLEN" were
+right posters); the page's formula may be written `(c * 9) / 5`; and a video
+must change smoothly from frame to frame (a good clip changes by a point or
+two of 255, the broken one by 107).
+
 Each case is a real chat (`chats.test_run` = the run: not in the chat list,
 deleted with the run) and a real turn: the agent, the model the run chose
 (thinking as in a chat, or on or off), the tools and the sandbox - nothing is
@@ -1776,11 +1808,15 @@ whether the work lives up to what is expected.
   (chat 24) did not follow its song; whether 0.20.2's own-sound timbre and
   keep 0.5 make remakes follow, and what the codes check says on the real
   weights, is not known yet.
-- **Video** (0.19.0, §8): the first test run on the card (2026-10-25)
-  measured the 5B at 720p and 121 frames - 31-32 s a step, about 11 minutes a
-  clip - and found its decode out of memory (hence the tiles, 0.22.1, not yet
-  seen on the card, nor how they look at their seams). Unknown on
-  the 7900 XTX: the 14B pair's time, fast and full; the fp8 experts on gfx1100; and the 14B pair's memory -
+- **Video** (0.19.0, §8): the test runs on the card (2026-10-25) measured
+  the 5B at 720p and 121 frames - 28-41 s a step, 10-14 minutes a clip - and
+  found its whole decode out of memory; in tiles (0.22.1) the second run's
+  clip from a description came out right. Its clip from a picture did not:
+  after a 14B job the Hub had given up on, the 5B's clip kept the picture only
+  in the top-left corner of its first frame (448 px square, where the first
+  decode tile's overlap begins), and the frames after it were flat colours -
+  not explained yet (ComfyUI's log). Unknown on the 7900 XTX:
+  the 14B pair's time, fast and full, and whether it fits the VM's RAM; the fp8 experts on gfx1100; and the 14B pair's memory -
   ComfyUI loads the high-noise expert, then the low-noise one (14.3 GB each),
   which with the 6.7 GB text encoder is about 35 GB of weights for the VM's
   40 GB of RAM if ComfyUI keeps them all cached. If it swaps or runs out,

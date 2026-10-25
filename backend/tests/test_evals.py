@@ -115,6 +115,35 @@ def _run_check(case_id: str, turn: Turn) -> dict:
     return {c["name"]: c["ok"] for c in checks if c["level"] != "info"}
 
 
+SECOND_RUN_INVITATION = """Her er invitationen:
+
+---
+
+**Julefrokost**
+
+Kære kollegaer,
+
+tillykke med, at vi snart fejrer jul sammen. Vi glæder os til at invite jer til julefrokost:
+
+- Fredag den 4. december afholdes julefrokost i kantinen.
+- Kom med til fælles frokost med kollegerne.
+- Tilmeld jer senest den 20. november.
+- Vi glæder os til at ses.
+
+Venlig hilsen,
+Ingeniørgruppen
+
+---
+
+Tjek af krav:
+- ✅ Præcis 4 punkter, hvert punkt under 12 ord (8, 7, 6, 6 ord)
+- ✅ Dato (fredag den 4. december), sted (kantinen), tilmelding senest 20. november
+- ✅ Ordet "hyggelig" bruges ikke i nogen form
+- ✅ Afslutter med en linje, der begynder med "Venlig hilsen"
+
+Sig til, hvis du vil have et andet navn/signatur i stedet for "Ingeniørgruppen"."""
+
+
 def test_the_checks_tell_good_answers_from_bad():
     good = {
         "chat.logic": "Hund i hus 2 giver ... \nSVAR: Dennis, gul",
@@ -154,10 +183,23 @@ def test_the_checks_tell_good_answers_from_bad():
         assert not all(got.values()), (case_id, got)
     weekday = _run_check("chat.danish", Turn(answer=bad["chat.danish-weekday"]))
     assert [k for k, v in weekday.items() if not v] == ["no wrong weekday for the dates (both are Fridays)"]
+    # the second run's answer: a right invitation, then a ticked list of the rules quoting "hyggelig" and a question
+    extra = _run_check("chat.danish", Turn(answer=SECOND_RUN_INVITATION))
+    assert [k for k, v in extra.items() if not v] == ["nothing after the invitation"]
+    detail = next(c for c in BY_ID["chat.danish"].check(Turn(answer=SECOND_RUN_INVITATION), {})
+                  if c["name"] == "nothing after the invitation")["detail"]
+    assert detail == 'then: Tjek af krav: - and "hyggelig" is used there'
+    # and without a sign-off the whole answer is the invitation
+    assert not _run_check("chat.danish", Turn(answer=good["chat.danish"].replace("Venlig hilsen\nSøren", "Hej")))[
+        'a line beginning "Venlig hilsen" at the end']
     # the page: an artifact with two fields, a reset and the formula
     html = ("<input id=c><input id=f><button>Nulstil</button><script>f.value = c.value * 9 / 5 + 32</script>")
     ok = _run_check("code.web", Turn(artifacts=[{"id": "x", "title": "Omregner", "type": "html", "content": html}]))
     assert all(ok.values())
+    react = ("<input value={c} onChange={onC} /><input value={f} /><button onClick={reset}>Nulstil</button> "
+             "fmt((c * 9) / 5 + 32); fmt(((f - 32) * 5) / 9)")                 # the second run's page
+    ok = _run_check("code.web", Turn(artifacts=[{"id": "x", "title": "C/F", "type": "react", "content": react}]))
+    assert all(ok.values()), ok
     assert _run_check("code.web", Turn()) == {"an artifact was made": False}
     web = _run_check("agent.web", Turn(answer="Python 3.15.0 (1. oktober 2026): https://www.python.org/downloads/",
                                        calls=[{"name": "web_search", "ok": True, "arguments": {}, "text": ""}]))
@@ -218,7 +260,21 @@ wb.save("budget.xlsx")
     assert all(c["ok"] for c in res.values() if c["level"] != "info"), res
     assert res["a cut-out was made"]["detail"] == "cut.png"                # the file, not what a failure would say
     assert _check_lib(tmp_path, "images.cutout", {"images": [], "expected": geo})["a cut-out was made"] == {
-        "name": "a cut-out was made", "ok": False, "level": "must", "detail": "no picture from the picture tools"}
+        "name": "a cut-out was made", "ok": False, "level": "must", "detail": "no new picture"}
+    # the picture the turn left is judged, whichever way it was made: the second run's model turned the ball blue
+    # with its own code (no image_edit call) - pixel for pixel right
+    img = Image.open(tmp_path / "in.png").convert("RGB")
+    px = img.load()
+    for y in range(img.height):
+        for x in range(img.width):
+            r, g, b = px[x, y]
+            if r > 120 and g < 90 and b < 90:
+                px[x, y] = (b, g, r)
+    img.save(tmp_path / "blaa.png")
+    res = _check_lib(tmp_path, "images.edit", {"images": [], "files": [{"path": "blaa.png", "mime": "image/png"}],
+                                               "inputs": {"picture": "in.png"}, "expected": geo})
+    assert all(c["ok"] for c in res.values() if c["level"] != "info"), res
+    assert res["an edited picture was made"]["detail"] == "blaa.png"
     res = _check_lib(tmp_path, "images.edit", {"images": [{"path": "in.png"}], "inputs": {"picture": "in.png"},
                                                "expected": geo})
     assert res["the ball is blue now"]["ok"] is False and res["the rest of the picture is unchanged"]["ok"] is True
@@ -242,6 +298,17 @@ def test_the_sandbox_checks_measure_sound_and_video(tmp_path):
     res = _check_lib(tmp_path, "video.i2v", {"video": [{"path": "video.mp4"}], "inputs": {"picture": "boat.png"},
                                              "expected": {"seconds": [2, 11]}})
     assert all(c["ok"] for c in res.values() if c["level"] != "info"), res
+    # the second run's broken clip: the picture, then flat white, yellow and black - a new colour every four frames
+    subprocess.run(["ffmpeg", "-nostdin", "-loglevel", "error", "-loop", "1", "-i", "boat.png", "-f", "lavfi", "-i",
+                    "color=c=white:s=1024x576:r=24:d=1", "-f", "lavfi", "-i", "color=c=0xBDB87A:s=1024x576:r=24:d=1",
+                    "-f", "lavfi", "-i", "color=c=black:s=1024x576:r=24:d=1", "-filter_complex",
+                    "[0]scale=1024:576,fps=24,trim=duration=0.2,setsar=1[a];[1]setsar=1[b];[2]setsar=1[c];"
+                    "[3]setsar=1[d];[a][b][c][d]concat=n=4:v=1,format=yuv420p", "-c:v", "libx264", "broken.mp4"],
+                   cwd=tmp_path, check=True)
+    res = _check_lib(tmp_path, "video.i2v", {"video": [{"path": "broken.mp4"}], "inputs": {"picture": "boat.png"},
+                                             "expected": {"seconds": [2, 11]}})
+    jumps = res["it moves smoothly (no jumps between frames)"]
+    assert jumps["ok"] is False and "of 255 (frame " in jumps["detail"], jumps
 
 
 # ---------------------------------------------------------------- runs through the agent

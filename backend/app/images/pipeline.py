@@ -75,6 +75,35 @@ def _png_ok(data: bytes) -> tuple[int, int]:
         return img.size
 
 
+# An edit or a cut-out comes back at the original's size up to this; a bigger original keeps the model's size
+# (about one megapixel) rather than being blown up from it.
+FIT_MAX_PIXELS = 2048 * 2048
+
+
+def _fit(outputs: list[tuple[str, bytes]], original: bytes) -> tuple[list[tuple[str, bytes]], tuple[int, int]]:
+    """Edits and cut-outs at the original's size. Qwen-Image and FLUX.2 klein work at about one megapixel and
+    return that: both test runs' 768x512 ball came back at 1248x832, and a model told the user it was the original's
+    size. Up to FIT_MAX_PIXELS the result is scaled to the original's size - transparency kept, scaled premultiplied
+    so the edges of a cut-out do not darken; above, it stays as the model made it. Also gives the original's size."""
+    with Image.open(io.BytesIO(original)) as img:
+        size = img.size
+    if size[0] * size[1] > FIT_MAX_PIXELS:
+        return outputs, size
+    fitted = []
+    for name, data in outputs:
+        with Image.open(io.BytesIO(data)) as img:
+            if img.size == size:
+                fitted.append((name, data))
+                continue
+            alpha = img.mode in ("RGBA", "LA", "PA") or "transparency" in img.info
+            out = (img.convert("RGBA").convert("RGBa").resize(size, Image.LANCZOS).convert("RGBA") if alpha
+                   else img.convert("RGB").resize(size, Image.LANCZOS))
+        buf = io.BytesIO()
+        out.save(buf, "PNG")
+        fitted.append((name, buf.getvalue()))
+    return fitted, size
+
+
 class ImagePipeline:
     def __init__(self, hub: Hub):
         self.hub = hub
@@ -246,8 +275,9 @@ class ImagePipeline:
                 graph = W.qwen_edit(prompt, names, sd, steps=steps or int(s.get("steps", 25)),
                                     cfg=float(s.get("cfg", 1.0)), turbo=model.endswith("turbo"))
             out = await self._run(graph, ticket, owner, priority, f"edit: {prompt[:60]}", on_progress)
+            out, source = _fit(out, images[0])
             for item in self._save(out, "edited"):
-                results.append({**item, "seed": sd, "model": model})
+                results.append({**item, "seed": sd, "model": model, "source": source})
         return results
 
     async def remove_background(self, image: bytes, ticket: Ticket | None = None, owner: str = "web",
@@ -258,7 +288,8 @@ class ImagePipeline:
         graph = W.qwen_remove_background(names[0], random.randint(1, 2**31 - 1),
                                          steps=int(self.hub.settings.get("images", "steps") or 25))
         out = await self._run(graph, ticket, owner, priority, "remove background", on_progress)
-        return self._save(out, "cutout")
+        out, source = _fit(out, image)
+        return [{**item, "source": source} for item in self._save(out, "cutout")]
 
     # ------------------------------------------------------------ OpenAI images API
     def _response(self, request: Request, items: list[dict], fmt: str) -> dict:

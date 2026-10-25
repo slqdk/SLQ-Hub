@@ -29,7 +29,7 @@ OOM_NOTE = (" The graphics card ran out of memory: the same call fails the same 
 def gpu_failure(what: str, exc: Exception) -> ToolResult:
     """A picture, sound or video job that failed: `what` failed: why. A failure on the card or in ComfyUI (the
     pipeline's error says hub=True, or it ran out of memory) is the Hub's, and running out of memory says what to
-    do instead of trying again - each try of a 720p video took eleven minutes before it ran out at the end."""
+    do instead of trying again - each try of a 720p video took 10-13 minutes before it ran out at the end."""
     text = f"{what}: {exc}"
     hub = bool(getattr(exc, "hub", False))
     if "out of memory" in text.lower():

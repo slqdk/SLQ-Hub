@@ -172,15 +172,38 @@ INVITE = """Skriv en kort invitation til julefrokosten for kollegerne i et lille
 - afslut med en linje, der begynder med "Venlig hilsen\""""
 
 
+def _invitation(text: str) -> tuple[str, str]:
+    """The invitation, and what the answer says after it. It ends with its "Venlig hilsen" line and the signature
+    under it (two short lines at most); what follows - a check of the rules, a question - is not part of it (the
+    second run's model put a ticked list of the rules after a right invitation, "hyggelig" quoted in it). Without
+    such a line the whole answer counts."""
+    lines = text.splitlines()
+    ends = [i for i, x in enumerate(lines) if plain(x).strip().lower().startswith("venlig hilsen")]
+    if not ends:
+        return text, ""
+    end, signed = ends[-1] + 1, 0
+    while end < len(lines) and signed < 2:
+        x = plain(lines[end]).strip()
+        if x and (bullets(x) or len(x.split()) > 5 or not re.search(r"\w", x)):
+            break                                       # a list, a sentence or a --- rule: not a signature
+        signed += bool(x)
+        end += 1
+    rest = "\n".join(x for x in lines[end:] if re.search(r"\w", x))
+    return "\n".join(lines[:end]), rest.strip()
+
+
 def _invite(t: Turn, e: dict) -> list[dict]:
-    text = t.answer
+    text, after = _invitation(t.answer)
     lang, da, en = language(text)
     pts = bullets(text)
     long = [p for p in pts if word_count(p) > 12]
     low = plain(text).lower()
-    lines = [x.strip() for x in plain(text).splitlines() if x.strip()]
     wrong = re.search(r"\b(mandag|tirsdag|onsdag|torsdag|lørdag|søndag)(?:\s+den)?\s+(?:4\.\s*december|20\.\s*november)",
                       low)
+    lines = [x.strip() for x in plain(text).splitlines() if x.strip()]
+    tail = after.splitlines()[0][:80] if after else ""
+    if after and re.search(r"hyggelig", after.lower()):
+        tail += ' - and "hyggelig" is used there'
     return [C("in Danish", lang == "da", f"Danish words {da:.0%}, English {en:.0%}"),
             C("exactly 4 points", len(pts) == 4, f"{len(pts)} points"),
             C("each point at most 12 words", bool(pts) and not long,
@@ -190,9 +213,10 @@ def _invite(t: Turn, e: dict) -> list[dict]:
             C("the place: the canteen", "kantine" in low, "", "should"),
             C('no "hyggelig" in any form', re.search(r"hyggelig", low) is None,
               ", ".join(sorted(set(re.findall(r"\w*hyggelig\w*", low))))),
-            C('a line beginning "Venlig hilsen" at the end', any(x.lower().startswith("venlig hilsen")
+            C('a line beginning "Venlig hilsen" at the end', any(plain(x).strip().lower().startswith("venlig hilsen")
                                                                  for x in lines[-3:]), lines[-1][:80] if lines else "",
               "should"),
+            C("nothing after the invitation", after == "", f"then: {tail}" if after else "", "should"),
             # both dates are Fridays (20 November is two weeks before 4 December) - the first run's model wrote
             # "torsdag den 20. november"
             C("no wrong weekday for the dates (both are Fridays)", wrong is None, wrong.group(0) if wrong else "",
@@ -332,6 +356,13 @@ def _tool(names: tuple[str, ...], what: str):
     return lambda t, e: [used(t, names, what)]
 
 
+def _any_way(t: Turn, e: dict) -> list[dict]:
+    """The picture is judged in the sandbox, whichever way it was made: the second run's model turned the ball blue
+    with its own code (a hue shift in Python) - pixel for pixel right - and failed a check that wanted image_edit.
+    The tools it used are in the "tools" line."""
+    return []
+
+
 def _vision(t: Turn, e: dict) -> list[dict]:
     line = answer_line(t.answer, "SVAR")
     parts = _parts(line)
@@ -402,8 +433,9 @@ def _page(t: Turn, e: dict) -> list[dict]:
             C("two input fields and code", inputs >= 2 and ("<script" in low or a.get("type") == "react"),
               f"{inputs} inputs"),
             C("a reset button", re.search(r"<button\b|type=[\"']reset", low) is not None, "", "should"),
-            C("the conversion formula", re.search(r"9\s*/\s*5|1\.8\b|5\s*/\s*9|0\.5555", low) is not None, "",
-              "should")]
+            # 9/5, 5/9, 1.8 or 0.555... - also written (c * 9) / 5 (the second run's page)
+            C("the conversion formula", re.search(r"9\s*\)*\s*/\s*\(*\s*5\b|5\s*\)*\s*/\s*\(*\s*9\b|\b1\.8\b|0\.55+",
+                                                  low) is not None, "", "should")]
 
 
 # ---------------------------------------------------------------- research and tasks
@@ -468,12 +500,12 @@ CASES: list[Case] = [
          sandbox=True, timeout=1200, review="Is the text spelled right and readable? Is it a poster?"),
     Case("images.edit", "images", "Change one thing in a picture", "A red ball made blue, nothing else changed.",
          "Gør den røde bold på billedet blå. Resten af billedet skal være uændret.", "The same picture with a blue "
-         "ball: the wall, the floor and the shadow as before.", _tool(("image_edit",), "edited the picture"),
+         "ball: the wall, the floor and the shadow as before.", _any_way,
          _ball_in, needs=("images.edit",), sandbox=True, timeout=1200, review="Is only the ball changed?"),
     Case("images.cutout", "images", "Remove a background", "The ball alone on a transparent background.",
          "Fjern baggrunden fra billedet, så kun bolden er tilbage med gennemsigtig baggrund.", "A PNG with "
          "transparency where only the ball (perhaps with its shadow) is left.",
-         _tool(("image_remove_background",), "removed the background"), _ball_in, needs=("images.cutout",),
+         _any_way, _ball_in, needs=("images.cutout",),
          sandbox=True, timeout=1200, review="Are the ball's edges clean?"),
     Case("images.vision", "images", "Read and count in a picture", "The text on a sign, and shapes counted by "
          "colour.", "Hvad står der på skiltet på billedet, og hvor mange blå cirkler og orange trekanter er der? "

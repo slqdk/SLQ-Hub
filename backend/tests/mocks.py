@@ -383,6 +383,13 @@ def make_comfy(state: dict) -> FastAPI:
         state.setdefault("queue_edits", []).append(await request.json())
         return {}
 
+    @app.get("/queue")
+    async def queue_list():
+        """A job queued less than `running_s` ago is running; with `lost` ComfyUI has none (it restarted)."""
+        running = [[i + 1, f"p{i + 1}", {}, {}, []] for i, at in enumerate(state.get("queued_at", []))
+                   if not state.get("lost") and time.monotonic() - at < state.get("running_s", 0)]
+        return {"queue_running": running, "queue_pending": []}
+
     @app.post("/upload/image")
     async def upload(request: Request):
         form = await request.form()
@@ -397,6 +404,7 @@ def make_comfy(state: dict) -> FastAPI:
     async def prompt(request: Request):
         body = await request.json()
         state["prompts"].append(body["prompt"])
+        state.setdefault("queued_at", []).append(time.monotonic())
         pid = f"p{len(state['prompts'])}"
         sounds = _saved_audios(body["prompt"], pid)
         videos = _saved_videos(body["prompt"], pid)
@@ -419,6 +427,10 @@ def make_comfy(state: dict) -> FastAPI:
 
     @app.get("/history/{pid}")
     async def history(pid: str):
+        n = int(pid[1:]) if pid[1:].isdigit() else 0
+        if state.get("lost") or (0 < n <= len(state.get("queued_at", [])) and
+                                 time.monotonic() - state["queued_at"][n - 1] < state.get("running_s", 0)):
+            return {}                                         # not done yet - or gone, with ComfyUI restarted
         graph = state["prompts"][int(pid[1:]) - 1] if pid[1:].isdigit() and int(pid[1:]) <= len(state["prompts"]) else {}
         sounds = _saved_audios(graph, pid)
         videos = _saved_videos(graph, pid)
@@ -455,7 +467,7 @@ def make_comfy(state: dict) -> FastAPI:
                             media_type="audio/mpeg")
         if filename.endswith(".mp4"):
             return Response(state.get("video_bytes") or fake_mp4(), media_type="video/mp4")
-        return Response(PNG_1x1, media_type="image/png")
+        return Response(state.get("picture_bytes") or PNG_1x1, media_type="image/png")
 
     return app
 
