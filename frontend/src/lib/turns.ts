@@ -291,7 +291,8 @@ function applyStream(items: Item[], ev: RunEvent): void {
       break;
     }
     case "escalated":
-      items.push({ kind: "notice", tone: "info", text: `Handed over to ${d.model}: ${d.reason}.` });
+      items.push({ kind: "notice", tone: "info", text: `Handed over to ${d.model}: ${d.reason}.`
+        + (d.chat_model ? ` The chat goes on with ${d.model}.` : "") });
       break;
     case "loop":
       items.push({ kind: "notice", tone: "info", text: `It was repeating itself (${d.reason}), so it was asked to answer with what it has.` });

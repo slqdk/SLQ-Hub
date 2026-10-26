@@ -2,8 +2,8 @@
 // each file's history with restore. Beside a chat, files can also be put in
 // the next message (picked/onPick).
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Check, ChevronDown, ChevronRight, Download, File as FileIcon, FileArchive, FilePlus, Folder, FolderPlus,
-  History, MessageSquarePlus, Pencil, Plus, RefreshCw, Search, Trash2, Upload as UploadIcon } from "lucide-react";
+import { ArrowDownAZ, Check, ChevronDown, ChevronRight, Clock, Download, File as FileIcon, FileArchive, FilePlus, Folder,
+  FolderPlus, History, MessageSquarePlus, Pencil, Plus, RefreshCw, Search, Trash2, Upload as UploadIcon } from "lucide-react";
 import { api, type FileData, type TreeData, type TreeEntry } from "../lib/api";
 import { downloadZip } from "../lib/download";
 import { ago, bytes } from "../lib/format";
@@ -14,7 +14,32 @@ export type Folder = { kind: "chat" | "project"; id: number };
 
 interface Node { name: string; path: string; dir: boolean; size: number; modified: number; children: Node[] }
 
-function buildTree(entries: TreeEntry[]): Node {
+/** The tree by name (folders first), or newest first (0.32.2) - a folder as new as the newest file in it. */
+export type Order = "name" | "newest";
+const ORDER_KEY = "slq.files.order";
+
+function savedOrder(): Order {
+  try {
+    return localStorage.getItem(ORDER_KEY) === "newest" ? "newest" : "name";
+  } catch {
+    return "name";
+  }
+}
+
+/** When a file last changed, short: the clock today, the day this year, the month before that. */
+export function fileTime(sec: number, now: Date = new Date()): string {
+  if (!sec) return "";
+  const t = new Date(sec * 1000);
+  if (t.toDateString() === now.toDateString()) return t.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  if (t.getFullYear() === now.getFullYear()) return t.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+  return t.toLocaleDateString(undefined, { month: "short", year: "numeric" });
+}
+
+function fullTime(sec: number): string {
+  return sec ? new Date(sec * 1000).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }) : "";
+}
+
+function buildTree(entries: TreeEntry[], by: Order = "name"): Node {
   const root: Node = { name: "", path: "", dir: true, size: 0, modified: 0, children: [] };
   const dirs = new Map<string, Node>([["", root]]);
   const sorted = [...entries].sort((a, b) => a.path.localeCompare(b.path));
@@ -41,8 +66,14 @@ function buildTree(entries: TreeEntry[]): Node {
     parent.children.push(node);
     if (e.dir) dirs.set(e.path, node);
   }
+  const newest = (n: Node): number => {               // a folder: as new as the newest thing in it
+    if (n.dir) n.modified = Math.max(n.modified, ...n.children.map(newest));
+    return n.modified;
+  };
+  newest(root);
+  const cmp = (a: Node, b: Node) => (by === "newest" ? b.modified - a.modified : 0) || a.name.localeCompare(b.name);
   const order = (n: Node) => {
-    n.children.sort((a, b) => (a.dir === b.dir ? a.name.localeCompare(b.name) : a.dir ? -1 : 1));
+    n.children.sort((a, b) => (a.dir === b.dir ? cmp(a, b) : a.dir ? -1 : 1));
     n.children.forEach(order);
   };
   order(root);
@@ -65,6 +96,7 @@ export function Files({ folder, projectId, select, selectAt, picked, onPick }: {
   const [open, setOpen] = useState<Set<string>>(new Set());
   const [sel, setSel] = useState<string | null>(null);
   const [q, setQ] = useState("");
+  const [by, setBy] = useState<Order>(savedOrder);
   const [prompt, setPrompt] = useState<null | { title: string; label: string; value: string; action: (v: string) => Promise<void> }>(null);
   const upInput = useRef<HTMLInputElement>(null);
   const url = base(folder);
@@ -102,13 +134,21 @@ export function Files({ folder, projectId, select, selectAt, picked, onPick }: {
     setQ("");
   }, [select, selectAt, url, reveal]);
 
-  const root = useMemo(() => buildTree(tree?.entries ?? []), [tree]);
+  const root = useMemo(() => buildTree(tree?.entries ?? [], by), [tree, by]);
   const pickedSet = useMemo(() => new Set(picked ?? []), [picked]);
   const matches = useMemo(() => {
     const terms = q.toLowerCase().split(/\s+/).filter(Boolean);
     if (!terms.length) return null;
-    return (tree?.entries ?? []).filter((e) => !e.dir && terms.every((t) => e.path.toLowerCase().includes(t)));
-  }, [q, tree]);
+    const hits = (tree?.entries ?? []).filter((e) => !e.dir && terms.every((t) => e.path.toLowerCase().includes(t)));
+    return by === "newest" ? [...hits].sort((a, b) => b.modified - a.modified) : hits;
+  }, [q, tree, by]);
+  const flip = () => setBy((o) => {
+    const next: Order = o === "newest" ? "name" : "newest";
+    try {
+      localStorage.setItem(ORDER_KEY, next);
+    } catch { /* the order is a convenience: without storage it lasts until the page is reloaded */ }
+    return next;
+  });
   const selected = tree?.entries.find((e) => e.path === sel) ?? null;
   const currentDir = selected ? (selected.dir ? selected.path : selected.path.split("/").slice(0, -1).join("/")) : "";
 
@@ -159,6 +199,10 @@ export function Files({ folder, projectId, select, selectAt, picked, onPick }: {
               <button className="icon-btn small" onClick={newFile} aria-label="New file" title="New file"><FilePlus size={15} /></button>
               <button className="icon-btn small" onClick={newFolder} aria-label="New folder" title="New folder"><FolderPlus size={15} /></button>
               <span className="grow" />
+              <button className="icon-btn small" onClick={flip} aria-pressed={by === "newest"}
+                aria-label={by === "newest" ? "Newest first: sort by name" : "Sorted by name: show the newest first"}
+                title={by === "newest" ? "Newest first. Click to sort by name." : "Sorted by name. Click for the newest first."}>
+                {by === "newest" ? <Clock size={15} /> : <ArrowDownAZ size={15} />}</button>
               <button className="icon-btn small" onClick={zip} aria-label="Download the folder as a ZIP"
                 title="Download the folder as a ZIP"><FileArchive size={15} /></button>
               <button className="icon-btn small" onClick={refresh} aria-label="Refresh" title="Refresh"><RefreshCw size={14} /></button>
@@ -174,10 +218,12 @@ export function Files({ folder, projectId, select, selectAt, picked, onPick }: {
                   const cut = e.path.lastIndexOf("/");
                   return (
                     <div className="tree-row" key={e.path}>
-                      <button className="tree-item" aria-current={sel === e.path} title={e.path} onClick={() => reveal(e.path)}>
+                      <button className="tree-item" aria-current={sel === e.path} title={`${e.path}, ${fullTime(e.modified)}`}
+                        onClick={() => reveal(e.path)}>
                         <FileIcon size={14} />
                         <span className="ellipsis">{e.path.slice(cut + 1)}
                           {cut > 0 && <span className="faint"> {e.path.slice(0, cut)}</span>}</span>
+                        <span className="tree-time">{fileTime(e.modified)}</span>
                       </button>
                       {onPick && <PickButton path={e.path} on={pickedSet.has(e.path)} onPick={onPick} />}
                     </div>
@@ -233,10 +279,12 @@ function TreeNodes({ nodes, depth, open, sel, onToggle, onSelect, picked, onPick
         <div key={n.path}>
           <div className="tree-row">
             <button className="tree-item" style={{ paddingLeft: 8 + depth * 14 }} aria-current={sel === n.path}
+              title={n.modified ? `${n.dir ? "Newest change inside" : "Changed"}: ${fullTime(n.modified)}` : undefined}
               onClick={() => (n.dir ? (onToggle(n.path), onSelect(n.path)) : onSelect(n.path))}>
               {n.dir ? (open.has(n.path) ? <ChevronDown size={13} /> : <ChevronRight size={13} />) : <span style={{ width: 13 }} />}
               {n.dir ? <Folder size={14} /> : <FileIcon size={14} />}
               <span className="ellipsis">{n.name}</span>
+              <span className="tree-time">{fileTime(n.modified)}</span>
             </button>
             {!n.dir && onPick && <PickButton path={n.path} on={picked.has(n.path)} onPick={onPick} />}
           </div>

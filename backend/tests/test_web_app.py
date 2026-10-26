@@ -132,6 +132,9 @@ async def test_the_working_rules_are_in_the_prompt(signed_in, app, fakes):
     assert "keep what you find in NOTES.md in the working folder as you go" in system          # named exactly (0.31.0)
     assert "Measure with code rather than reason at length" in system
     assert "what you did, what you checked and what you could not check" in system
+    # 0.33.0: Søren's CM98 folder was 14 files side by side, a test script among them
+    assert "Keep the folder in order, the way the user will look for things" in system
+    assert "Do not move the user's own files unless they ask. Scratch and test files go in .hub/tmp/" in system
 
 
 async def test_a_page_is_opened_and_its_report_read(signed_in, app, fakes):

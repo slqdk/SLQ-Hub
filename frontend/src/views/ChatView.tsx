@@ -152,6 +152,10 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
       liveRef.current = reduceLive(liveRef.current, ev);
       setLive(liveRef.current);
       if (ev.type === "title") refreshLists();
+      const kept = ev.type === "escalated" ? ev.data?.chat_model : undefined;   // the chat goes on with it (0.33.0)
+      if (typeof kept === "string") {
+        setData((d) => (d ? { ...d, chat: { ...d.chat, settings: { ...d.chat.settings, model: kept } } } : d));
+      }
       if (ev.type === "done" || ev.type === "error" || ev.type === "cancelled") ended = true;
     };
     const finish = async () => {

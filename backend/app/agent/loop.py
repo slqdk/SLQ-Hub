@@ -199,6 +199,7 @@ class Engine:
         self.only: set[str] | None = None   # the only tools it may have (the reviewer's: review.REVIEW_TOOLS)
         self.top_model: str | None = None   # the turn's model, when this engine works for it with another (reviewer)
         self.wrap_up: WrapUp | None = None  # it must end with a report (the reviewer): told so near its end
+        self.keeps_model = True              # a hand-over becomes the chat's model (not in a Settings -> Tests run)
         self.waited = 0.0                    # seconds spent waiting for the user's answer to a question (its clock)
         self.answer = ""                     # what the latest model step said (the loop returns the last non-empty)
         self.read_user_at = 0                # the step that read what the user wrote while the turn worked
@@ -889,6 +890,14 @@ class Engine:
             self.ticket = None
 
 
+    def _keep_model(self, model_id: str) -> bool:
+        """The chat's model from now on (its settings, as the model chip under the message box sets them)."""
+        try:
+            return chats.update_chat(self.chat["id"], settings={"model": model_id}) is not None
+        except Exception:  # noqa: BLE001 - the turn goes on with it either way
+            log.exception("could not keep the model for the chat")
+            return False
+
     async def _hand_over(self, messages: list[dict], reason: str) -> None:
         """The turn goes on with the stronger local model, inside the same
         lease (the card switches before the next step): its own system
@@ -909,11 +918,17 @@ class Engine:
         self.ctx_limit = self.hub.catalog.context_per_request(target["id"])
         self.handed_over_from = Catalog.label(before)
         self.must_answer, self.repeats, self.same_steps, self.fail_streak, self.recent = "", 0, {}, 0, []
-        self.emit("escalated", model=target["name"], model_id=target["id"], reason=reason, local=True)
+        # The chat goes on with the model that took over (0.33.0, Søren): its next message would otherwise switch
+        # the card back to the one that got stuck - a model load first, and the work back with the model that could
+        # not do it. Not in a person's chat (her device keeps her choice).
+        kept = self.device is None and self.keeps_model and self._keep_model(target["id"])
+        self.emit("escalated", model=target["name"], model_id=target["id"], reason=reason, local=True,
+                  **({"chat_model": target["id"]} if kept else {}))
         self.steps.append({"type": "escalated", "model": target["id"], "from": before["id"], "reason": reason,
                            "local": True})
+        goes_on = f" The chat goes on with {target['name']}." if kept else ""
         self.pending_notice = (f"{self.pending_notice} Handed over from {before['name']} to {target['name']}: "
-                               f"{reason}.").strip()
+                               f"{reason}.{goes_on}").strip()
         for m in messages:
             m.pop("reasoning_content", None)
         if not vision(target):
@@ -1309,6 +1324,7 @@ class Agent:
             engine.token_ratio = last_token_ratio(chats.runs_for_chat(chat["id"]))   # the last turn's measure
             from . import notes_file                      # NOTES.md as it was when the turn started (0.31.0)
             engine.remind_notes = notes_file.wanted(self.hub.settings) and not test
+            engine.keeps_model = not test                 # a test run measures its model, and keeps the chat's
             engine.notes_at = await asyncio.to_thread(notes_file.stamp, wd.root)
             engine.turn_options = {k: options[k] for k in ("thinking", "effort") if options.get(k) is not None}
             engine.steps.append({"type": "queue", "seconds": waited})

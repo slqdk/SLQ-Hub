@@ -918,6 +918,14 @@ chat); before calling a task done, check it the way the user will use it -
 run it, open or play it (`web_app`, `windows_app` where there), compare with
 a reference - and measure with code rather than reason at length; and end
 with what was done, what was checked and what could not be checked.
+Since 0.33.0 a fifth, from Søren's CM98 folder - fourteen files side by side,
+a test script among them: keep the folder in order the way the user will look
+for things (a program, site or game of several files in a folder of its own,
+extracted or converted data in `data/`, the scripts that make it in
+`scripts/`, the structure that is there already followed; a single file and
+NOTES.md at the top), do not move the user's own files unless asked, and put
+scratch and test files in `.hub/tmp/` - which Files, the card under the answer
+and SLQ Sync leave out. An existing folder is tidied by asking for it.
 
 **Thinking.** The default is on for agent turns in projects and off for
 quick chats. A toggle in the composer overrides it. Qwen3.8 tends to
@@ -1290,7 +1298,14 @@ order:
 Every hand-over shows a notice ("Handed over from Qwen3.6 35B-A3B to Qwen3.8
 27B: the same step (web_search) 3 times."), emits `escalated` and records an
 `escalated` step with `from`, `local` and the reason. The answer's footer
-names both models.
+names both models. Since 0.33.0 a local hand-over also becomes the chat's
+model (its settings, as the model chip sets them): Søren's next message after
+Fable handed over to Standard would have switched the card back to Fable - a
+model load first, and the work back with the model that had got stuck. The
+notice adds "The chat goes on with Qwen3.8 27B.", the event carries
+`chat_model` and the model chip under the message box changes at once; the
+chip takes it back. Not in a person's chat (her device keeps her choice), nor
+in a Settings → Tests run (it measures its model).
 
 **Cloud escalation** (web chats in projects with "Cloud escalation" on):
 
@@ -1472,7 +1487,12 @@ generic (`.git`, `node_modules`, `__pycache__`, `.venv`, `*.tmp`, `*.bak`,
 `~$*`, `thumbs.db`, …). The TwinCAT patterns are not included.
 
 The UI gets a file tree with preview and editor, the revision list with
-restore, and the sync devices.
+restore, and the sync devices. Each row of the tree says when the file last
+changed (0.33.0, Søren: the clock today, the day this year, the month before;
+the whole date and time on hover); a folder is as new as the newest thing in
+it. A button beside the ZIP turns the order to the newest first - folders
+still first, each by its newest change - and back to by name; the choice is
+kept in the browser (local storage) and applies to Find a file too.
 
 **Download as ZIP** (0.29.0; Søren, chat 79: a browser game is four files and
 a data folder, downloaded one by one). `GET /hub/api/folders/{kind}/{id}/zip`

@@ -18,6 +18,7 @@ Settings -> Tests (tests/dev_evals.py), "endless" (a file each step until the
 step limit: the answer is marked unfinished, with Continue), "think" (reasons first), "long thinking" (a box full of
 thinking, streamed slowly), "search" (web search), "web picture" (a picture
 from the web in the answer), "picture" (an image), "darker" (edits the newest picture it made, by its file),
+"hand it over" (Qwen3.6 35B-A3B hands the turn to Qwen3.8 27B, which the chat then keeps),
 "loop" (repeats the same searches until the Hub makes it answer), "long chat" (a long answer with a big
 tool result, to fill the context: Continue in a new chat is offered), "make a skill" (writes a skill and shows its
 card with Add skill), "window" (writes a
@@ -362,6 +363,11 @@ def responder(body: dict) -> dict:
                                                                       "title": "Pump status", "type": "html",
                                                                       "content": PAGE}}]}
         return {"content": "The page is open on the right. Tell me what to change."}
+    if "hand it over" in low:         # 0.33.0: the fast model hands over, and the chat goes on with the one that took it
+        if body.get("model") == "qwen3.6-35b-a3b":
+            return {"content": "This needs the stronger model.", "delay": 1,
+                    "tool_calls": [{"name": "escalate", "arguments": {"reason": "it needs a stronger model"}}]}
+        return {"content": f"Done by {body.get('model')}.", "delay": 2}
     if "darker" in low:               # 0.32.1: changes the newest picture it made - the file its result named
         made = re.findall(r"Saved as (images/[^\s\"\\]+\.png)", json.dumps([m.get("content") for m in msgs]))
         if tools_done == 0 and made:

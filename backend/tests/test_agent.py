@@ -1242,14 +1242,15 @@ async def test_a_stuck_small_model_hands_over_to_the_strong_one(signed_in, app, 
     assert _main_models(fakes) == ["Qwen3.6-35B-A3B-UD-IQ4_XS.gguf", "Qwen3.8-27B-UD-Q4_K_M.gguf"]
     esc_ev = next(e for e in run.events if e["type"] == "escalated")["data"]
     assert esc_ev == {"model": "Qwen3.8 27B", "model_id": "qwen3.8-27b", "reason": "the same step (web_search) 3 times",
-                      "local": True}
+                      "local": True, "chat_model": "qwen3.8-27b"}
+    assert chats.get_chat(c["id"])["settings"]["model"] == "qwen3.8-27b"          # the chat goes on with it
     steps = chats.runs_for_chat(c["id"])[0]["steps"]
     assert {"type": "escalated", "model": "qwen3.8-27b", "from": "qwen3.6-35b-a3b",
             "reason": "the same step (web_search) 3 times", "local": True} in steps
     assert not any(s["type"] == "loop" for s in steps)                             # handed over, not forced
     answer = chats.messages(c["id"])[-1]["content"]
     assert answer[0] == {"type": "notice", "text": "Handed over from Qwen3.6 35B-A3B to Qwen3.8 27B: the same step "
-                                                   "(web_search) 3 times."}
+                                                   "(web_search) 3 times. The chat goes on with Qwen3.8 27B."}
     assert answer[-1] == {"type": "text", "text": "Her er sammenligningen, med kilder."}
     prompts = chats.prompts_for_chat(c["id"])
     assert [(p["reason"], p["model"]) for p in prompts] == [("start", "qwen3.6-35b-a3b"), ("handed over", "qwen3.8-27b")]
@@ -1260,8 +1261,9 @@ async def test_a_stuck_small_model_hands_over_to_the_strong_one(signed_in, app, 
     from app import db
     fakes.llama["responder"] = None
     fakes.llama["replies"] = [{"content": "Ja."}]
-    hub.settings.update("models", {"default": "qwen3.8-27b"})
-    await finish(app, await say(signed_in, c["id"], "Tak"))
+    fakes.llama["requests"].clear()
+    await finish(app, await say(signed_in, c["id"], "Tak"))           # the default is still the fast model
+    assert {b["model"] for b in fakes.llama["requests"]} == {"qwen3.8-27b"}        # no switch back to it
     fakes.llama["replies"] = [{"content": "Ja igen."}]
     await finish(app, await say(signed_in, c["id"], "Tak igen"))
     prompts = chats.prompts_for_chat(c["id"])
@@ -1292,6 +1294,9 @@ async def test_failing_calls_and_the_escalate_tool_hand_over_too(signed_in, app,
     run = await finish(app, await say(signed_in, c["id"], "read the files"))
     assert next(e for e in run.events if e["type"] == "escalated")["data"]["reason"] == "three tool calls in a row failed"
     assert texts(run).endswith("Done by the big one.")
+    assert chats.get_chat(c["id"])["settings"]["model"] == "qwen3.8-27b"           # the chat goes on with it
+    r = await signed_in.patch(f"/hub/api/chats/{c['id']}", json={"settings": {"model": "qwen3.6-35b-a3b"}})
+    assert r.status_code == 200                                                      # back, with the model chip
 
     fakes.llama["requests"] = []
     fakes.llama["responder"] = lambda body: ({"content": "Big answer."} if body["model"] == "qwen3.8-27b" else
@@ -1301,6 +1306,22 @@ async def test_failing_calls_and_the_escalate_tool_hand_over_too(signed_in, app,
     assert esc["reason"] == "needs a real proof" and esc["model_id"] == "qwen3.8-27b"
     result = [b for m in chats.messages(c["id"]) if m["role"] == "tool" for b in m["content"]][-1]
     assert "Handing this turn over to Qwen3.8 27B" in result["text"]
+
+
+async def test_a_test_run_hands_over_without_keeping_the_model(signed_in, app, fakes):
+    """Settings -> Tests measures the model it tests: a hand-over there does not become the chat's model."""
+    hub = app.state.hub
+    hub.settings.update("models", {"default": "qwen3.6-35b-a3b"})
+    fakes.llama["responder"] = lambda body: ({"content": "Big."} if body["model"] == "qwen3.8-27b" else
+                                             {"tool_calls": [{"name": "escalate", "arguments": {"reason": "too hard"}}]})
+    c = await new_chat(signed_in)
+    chats.add_message(c["id"], "user", [{"type": "text", "text": "prove it"}])
+    run = hub.extras["agent"].start(c["id"], {"test": True})
+    await finish(app, run.id)
+    esc = next(e for e in run.events if e["type"] == "escalated")["data"]
+    assert esc["model_id"] == "qwen3.8-27b" and "chat_model" not in esc
+    assert chats.get_chat(c["id"])["settings"]["model"] is None                   # still the default
+    assert "The chat goes on" not in json.dumps(chats.messages(c["id"]))
 
 
 async def test_nobody_to_hand_over_to_means_an_answer_without_tools(signed_in, app, fakes):

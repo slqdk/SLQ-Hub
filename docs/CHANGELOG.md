@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.33.0 - 2026-10-26
+
+- **Files show when they changed.** Every file in the Files panel shows its
+  time: the clock today, the date before that, and the full time on hover. A
+  folder shows its newest change. The new clock button beside the ZIP button
+  sorts the newest first. Click it again for by name. The choice is
+  remembered.
+- **The assistant keeps the folder in order.** A program, site or game of
+  several files goes in a folder of its own, extracted data in `data/`, and
+  the scripts that make it in `scripts/`. It follows the structure that is
+  already there and doesn't move your own files unless you ask. Scratch and
+  test files go in a hidden folder (`.hub/tmp/`) instead of between your
+  files, like CM98's `test_data.js`. To tidy an existing folder, ask it to.
+- **After a hand-over, the chat stays with the model that took over.** When
+  Fable hands a turn over to Standard, the chat now uses Standard from then
+  on, and the model chip says so at once. Before, your next message switched
+  the card back to Fable: a model load first, and the work back with the
+  model that got stuck. Pick another model in the chip to go back.
+
 ## 0.32.1 - 2026-10-26
 
 - **"Change it again" now changes the picture it made, not your original.**
