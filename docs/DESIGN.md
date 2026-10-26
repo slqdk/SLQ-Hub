@@ -1005,7 +1005,10 @@ note fences it ("--- the reviewer's report (its own words, not the Hub's)
 to fix the turn ends; so it does when the review did not finish (its model
 failed, it stopped at its 24 steps or repeating itself before a verdict, or
 its last answer was empty - its report is its last answer, not an earlier
-line said beside a tool call: `verdict: failed`, with `error`). Once a turn.
+line said beside a tool call: `verdict: failed`, with `error`). Once a turn,
+and not when the last answer replies to what the user wrote while the turn
+worked (read in that same step): chat 126's "kan du holde en pause?" was
+answered with a status, and a review would have sent the work back to go on.
 Condensed during the fix, the turn's messages are rebuilt with the report
 still as the task. A new chat's title is made after the turn by the model on
 the card - the reviewer's, when the review came last. Files that changed in the
@@ -1135,7 +1138,11 @@ streamed like any answer. Since 0.28.4 the notes give files with their paths
 (attachments are in `.hub/attachments/` - chat 78's first command looked for
 them at the top of the folder) and say which findings were checked and which
 are still guesses (chat 78's notes carried the old chat's guesses about the
-record layout as facts). The model later reads "(SLQ Hub: this chat
+record layout as facts). Since 0.30.2 the paths are relative to the working
+folder and only files that exist: chat 126's notes gave chat 80's folder
+(`/workspace/chats/80/...`) and two files that were in neither folder, and
+its first steps looked for them there and then analysed again what the
+folder's parsed JSON already held. The model later reads "(SLQ Hub: this chat
 continues the chat "…"…your notes from it follow…)" - without "notes follow"
 when writing them was stopped. Retry under the notes writes them again; a
 message sent meanwhile is answered after them; options from the browser

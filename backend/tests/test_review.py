@@ -333,6 +333,22 @@ async def test_artifact_sources_are_not_written_through_a_link(signed_in, app, f
     assert "its source" not in asked and not (root / "game" / "holdene.html").exists()
 
 
+async def test_no_review_when_the_answer_replies_to_the_user(signed_in, app, fakes):
+    on(app, review_model="same")
+    seen: dict = {}
+
+    def pause(who, n):                                         # chat 126: written while it works
+        if who == "main" and n == 2:
+            run = app.state.hub.extras["agent"].runs.active_for_chat(c["id"])
+            run.inbox.append({"id": "note_1", "blocks": [{"type": "text", "text": "kan du holde en pause?"}]})
+    main = [MAIN[0], {"content": "Done - the game works."}, {"content": "Status: paused. Shall I go on?"}]
+    fakes.llama["responder"] = responder(main, FOUND, seen, pause)
+    c = await new_chat(signed_in)
+    run = await finish(app, await say(signed_in, c["id"], "Lav spillet"))
+    assert run.status == "done" and len(seen["main"]) == 3 and "reviewer" not in seen
+    assert chats.messages(c["id"])[-1]["content"][-1]["text"] == "Status: paused. Shall I go on?"
+
+
 async def test_retry_answers_the_users_message_not_the_review(signed_in, app, fakes):
     on(app, review_model="same")
     seen: dict = {}

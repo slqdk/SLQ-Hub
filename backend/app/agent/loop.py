@@ -135,6 +135,7 @@ class Engine:
         self.only: set[str] | None = None   # the only tools it may have (the reviewer's: review.REVIEW_TOOLS)
         self.top_model: str | None = None   # the turn's model, when this engine works for it with another (reviewer)
         self.answer = ""                     # what the latest model step said (the loop returns the last non-empty)
+        self.read_user_at = 0                # the step that read what the user wrote while the turn worked
 
     # ------------------------------------------------------------ helpers
     def emit(self, kind: str, **data) -> None:
@@ -192,6 +193,7 @@ class Engine:
         if self.depth:
             return
         for item in self.run.take_inbox():
+            self.read_user_at = self._step            # this step's answer may be a reply to it ("can you pause?")
             blocks = [{**b, "while_working": True} if b.get("type") == "text" else b for b in item["blocks"]]
             m = await persist("user", blocks) if persist else None
             row = m or {"id": 0, "role": "user", "content": blocks, "run_id": self.run.id}
@@ -293,7 +295,9 @@ class Engine:
                     messages.append({"role": "user", "content": "(Your answer was cut off at the length limit. "
                                                                 "Continue exactly where you stopped.)"})
                     continue
-                if review is not None and not forced and await review(messages):
+                # Not when this answer replies to what the user just wrote while it worked: chat 126's "kan du holde
+                # en pause?" was answered with a status - a review would have sent the work back to go on.
+                if review is not None and not forced and self.read_user_at != step and await review(messages):
                     # The independent review found problems: its report is the next message, and the fix has at
                     # least REVIEW_FIX_STEPS steps, however close to the limit the work ended. Checking each
                     # finding means reading again what was read before the answer (and the folder may have changed

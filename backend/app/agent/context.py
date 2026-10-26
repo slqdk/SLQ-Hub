@@ -251,8 +251,9 @@ NOTES_HEADINGS = """## Goal
 ## Done
 ## Open questions
 ## Next"""
-NOTES_RULES = """Keep what the user asked for and decided, facts and numbers that matter, the files with their \
-paths in the working folder (attachments are in .hub/attachments/) and what they hold, what was tried and did not \
+NOTES_RULES = """Keep what the user asked for and decided, facts and numbers that matter, the files - those that \
+exist, with their paths relative to the working folder (attachments are in .hub/attachments/) - and what they hold, \
+what was tried and did not \
 work, and the next step. Say which findings were checked and which are still guesses. Leave out pleasantries and what is settled and \
 will not matter again. Write in the conversation's language, as short bullet points under these headings \
 (leave out a heading with nothing under it), at most about 600 words. Reply with the notes only.

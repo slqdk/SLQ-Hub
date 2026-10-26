@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.30.2 - 2026-10-26
+
+- **"Pause" is respected by the review.** When you write while the assistant
+  works ("kan du holde en pause?") and it answers that, its work is not
+  checked and sent back to go on - the review runs when it ends the work
+  itself.
+- **Notes for Continue in a new chat give paths inside the folder.** Chat
+  126's notes pointed at the old chat's folder and at two files that did not
+  exist, and the new chat spent its first minutes looking for them and
+  analysing the database files again.
+
 ## 0.30.1 - 2026-10-26
 
 - **Settings → Tests judges the right cut-out.** "Remove a background" looked
