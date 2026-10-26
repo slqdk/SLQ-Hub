@@ -1345,6 +1345,10 @@ function AgentTab({ s }: { s: S }) {
             { value: "same", label: "The model that did the work" },
             ...(models?.llm ?? []).filter((m) => m.installed).map((m) => ({ value: m.id, label: m.name }))],
           help: "Another model sees other mistakes than the one that made them; switching models takes a moment." },
+        { key: "notes_file", label: "Keep the work's notes in NOTES.md", type: "bool",
+          help: "A file in the chat's or project's folder: the Hub writes the chat's notes there when it condenses the " +
+            "chat or continues it in a new one, reminds the assistant to write what it found in long work, and tells " +
+            "it to read the file first. Once you or the assistant change the file, the Hub leaves it as it is." },
       ]} />
       <SectionForm s={s} section="libraries" title="Libraries" fields={[
         { key: "page_images", label: "Page images for visual search", type: "select", options: [

@@ -1150,6 +1150,43 @@ cannot start a handover. The old chat stays as it was; the new one links
 back to it and searches it with chat_history. Not in people's chats (their
 chats live on their devices).
 
+**NOTES.md** (0.31.0). 0.29.0 asked the model in its prompt to keep what it
+finds in a notes file in long work; chat 126's model (the TURBO 735-882)
+went 54 steps and 31 minutes on the CM98 game without one, and the Hub's own
+notes lived only in the chat. Now the notes are a file the Hub looks after,
+`NOTES.md` at the top of the working folder (any case: `notes.md` counts;
+`agent.notes_file`, on by default; `app/agent/notes_file.py`):
+- **The Hub writes it** with the chat's notes when it condenses the chat,
+  when it writes the notes of Continue in a new chat (into the new chat's
+  folder) and when the user corrects the notes in the chat's menu - unless
+  someone else keeps the file. The Hub's copy starts with a mark,
+  `<!-- SLQ Hub notes <hash> ... -->`, whose hash covers the rest; once the
+  user or the assistant changes the file it no longer matches, and the Hub
+  leaves it alone. The mark also names the chat: in a project another chat's
+  notes do not write over it, the chat that continues it does. Notes cleared
+  in the menu take the chat's own copy away. A link named NOTES.md is
+  replaced, never written through, a FIFO in its place is not read, a
+  working folder that is a link is left alone; in a project the change is
+  checked in. Condensing at the start of a turn does not count as the model
+  keeping its notes (the reminder still comes).
+- **A reminder in long work.** A turn that has called a tool that makes
+  something (the review's `MAKES`) for 15 steps without NOTES.md changing
+  since it started gets "(SLQ Hub: this work has gone on for 15 steps, and
+  NOTES.md in the working folder has not been written in this turn. Write
+  what you have found into NOTES.md now - what you checked and how, apart
+  from what you still only guess, and what comes next - then go on. A new
+  chat starts from that file.)" after that step's results, and again every
+  25 steps while the file stays as it was. The turn shows "It was reminded
+  to write what it found in NOTES.md (step 15)." (event `notes_reminder`, a
+  notice block). Not in subagents, the reviewer, people's chats or test runs.
+- **Read first.** When the folder has the file, the working folder's lines in
+  the system prompt say "- NOTES.md in the working folder holds the notes of
+  this work, kept across chats: read it before you start, and keep it up to
+  date as you go" - one line, not the file's text, so the prompt changes only
+  when the file appears and the model server's cache holds. The working rule
+  names NOTES.md exactly. Subagents are told to leave it to the agent that
+  gave them the task.
+
 **Messages while it works.** A message sent while a turn runs does not wait
 for the end: it goes into the run's inbox (event `user_queued`), and the
 loop hands it to the model at the next step boundary - after the tool
@@ -1398,6 +1435,45 @@ folder for a link (to the Hub's database, to `/dev/urandom`) or a FIFO before
 it is read: each file is opened from the workspace down with `O_NOFOLLOW` at
 every step (`Workdir.open_inside`), only a regular file is read, and no more
 of it than was listed.
+
+**Move to a project** (0.31.0; Søren: chat 126's CM98 game should build on
+checked notes in a project). `POST /hub/api/chats/{id}/move` with
+`project_id`, or `new_project` (a name: the project is made once the plan
+holds), from the chat's ⋯ menu ("Move to a project": a new project named
+after the chat without its "(n)", or one there is). Only a chat outside a
+project, not a test case's, not while it works, at most 2 GB. The chat is in
+`agent.moving` from the first moment: no turn starts, no message, retry,
+edit, Continue or notes change is taken, and the Files panel cannot open its
+folder (409) - even a look would make the folder again. Then
+(`app/projects/move.py`):
+- the chat's folder is renamed away in one step (`chats/.moving-<id>-<hex>`),
+  so nothing that opens `chats/<id>` writes into what is being moved;
+- the plan walks it: every regular file (with `.hub/attachments` and
+  `.hub/outputs` - old messages point at them), every folder (empty ones
+  too), every link as a link (its text, never followed); not what `.hub`
+  makes again (skills, dotnet, tmp, home, web, windows, review, tests);
+  FIFOs, sockets and devices stay behind (`left`). Names that are not UTF-8
+  are refused - the sync history cannot hold them;
+- against the project, nothing is overwritten: the same content by the same
+  name is left as it is; other content - or a name alike but for case,
+  README.md beside Readme.md, one file on a Windows PC - refuses the move
+  before anything is made (409 names them), except an attachment, which gets
+  the name a second upload of it would get there (its sha's start before the
+  name) while the chat's message blocks are pointed at it and the system
+  prompt names the change;
+- under the project's sync lock the plan is made again and carried out:
+  folders opened from the folder down with O_NOFOLLOW and made a level at a
+  time, each file written to a fresh temp file (mode and time kept) and
+  hard-linked to its name - which fails when the name was taken meanwhile -
+  links made with symlink() the same way; then the check-in. On any failure
+  what the move made is taken away again, the chat's folder goes back, and a
+  project made for it is removed;
+- the chat gets the project and `settings.moved_from` (its old folder as the
+  sandbox saw it); its old folder goes to `data/trash`, not away.
+From its next answer on it works with the project's instructions, files,
+skills, libraries and memory, and the system prompt says it was moved from
+that folder - the conversation shows paths there. The UI opens the project's
+files afterwards.
 
 ---
 

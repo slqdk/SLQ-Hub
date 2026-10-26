@@ -1,7 +1,7 @@
 // A chat: history, the live turn, and the composer.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
-import { Copy, Download, FileText, FolderOpen, Menu, MessageSquarePlus, MoreHorizontal, NotebookPen, Pencil, RotateCcw, ShieldCheck,
-  Trash2 } from "lucide-react";
+import { Copy, Download, FileText, FolderInput, FolderOpen, Menu, MessageSquarePlus, MoreHorizontal, NotebookPen, Pencil, RotateCcw,
+  ShieldCheck, Trash2 } from "lucide-react";
 import { api, mediaUrl, type ArtifactRef, type Block, type ChatData, type ChatSettings, type Library, type Message,
   type ProducedFile, type RunEvent, type RunRecord, type Settings, type Skill, type Upload } from "../lib/api";
 import { clearDraftSkills, peekDraftSkills, setDraft as setMessageDraft } from "../lib/draft";
@@ -14,6 +14,7 @@ import { Composer, type ComposerSettings } from "../components/Composer";
 import { FilesCard, producedFiles, UnfinishedNote, type FileHandlers } from "../components/FilesCard";
 import { Items } from "../components/Turn";
 import { Markdown } from "../components/Markdown";
+import { MoveToProject } from "../components/MoveToProject";
 import { copyText, Lamp, MenuButton, Modal } from "../components/ui";
 import { download, downloadZip } from "../lib/download";
 import type { PanelState } from "../App";
@@ -52,6 +53,7 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
   const [renaming, setRenaming] = useState(false);
   const [showAllowed, setShowAllowed] = useState(false);
   const [showNotes, setShowNotes] = useState(false);
+  const [showMove, setShowMove] = useState(false);
   const scroller = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
   const seenArtifacts = useRef(0);
@@ -421,6 +423,9 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
                 {(data?.messages.length ?? 0) > 0 && <button className="menu-item" disabled={running}
                   onClick={() => { close(); handover(); }}>
                   <MessageSquarePlus size={15} /><span>Continue in a new chat<small>A fresh chat with notes from this one, and its files</small></span></button>}
+                {data && !project && !data.chat.test_run && <button className="menu-item" disabled={running}
+                  onClick={() => { close(); setShowMove(true); }}>
+                  <FolderInput size={15} /><span>Move to a project<small>Its files go into the project, and it works there from now on</small></span></button>}
                 <div className="menu-sep" />
                 <button className="menu-item" onClick={() => { close(); download(`/hub/api/chats/${chatId}/export?format=md`); }}>
                   <FileText size={15} /> Export as Markdown</button>
@@ -439,6 +444,14 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
         onChange={(allowed) => setData((d) => (d ? { ...d, allowed } : d))} onClose={() => setShowAllowed(false)} />}
       {showNotes && chatId && data && <ChatNotes chatId={chatId} notes={data.chat.summary ?? ""}
         onSaved={(chat) => setData((d) => (d ? { ...d, chat } : d))} onClose={() => setShowNotes(false)} />}
+      {showMove && chatId && data && <MoveToProject chatId={chatId} title={data.chat.title} onClose={() => setShowMove(false)}
+        onMoved={(r) => {
+          setShowMove(false);
+          refreshLists();
+          load();
+          openPanel({ kind: "files", folder: { kind: "project", id: r.project.id }, at: Date.now() });   // where they went
+          toast(`Moved into the project ${r.project.name}`);
+        }} />}
 
       <div className="scroll" ref={scroller} onScroll={(e) => {
         const el = e.currentTarget;

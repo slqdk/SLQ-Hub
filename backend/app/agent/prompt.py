@@ -24,9 +24,9 @@ up instead of guessing, read files before changing them, run code to check a res
 failing call. If something is impossible, say so plainly.
 - For a known file format, protocol, game or program, look for its documentation and existing tools first - \
 someone may have worked it out already - before you work it out byte by byte.
-- In long work (a file format, a design, an analysis over many steps), keep what you find in a notes file in the \
-working folder (e.g. NOTES.md) as you go: what you checked, kept apart from what you only guess. It outlasts this \
-chat - a new chat starts from it.
+- In long work (a file format, a design, an analysis over many steps), keep what you find in NOTES.md in the \
+working folder as you go: what you checked, kept apart from what you only guess. It outlasts this chat - a new \
+chat starts from it.
 - Before you call a task done, check it the way the user will use it: run the program or its tests, open or play \
 what you made{look}, compare results with a reference when there is one. Measure with code rather than reason \
 at length about what a quick script can tell you.
@@ -265,7 +265,8 @@ def system_prompt(*, user: str, model_name: str, folder_text: str, sandbox_path:
     if subagent:
         text += ("\n\n# You are a subagent\nAnother agent gave you one focused task. Do it with the tools you "
                  "have, then answer with a complete, self-contained report of what you found or did - that "
-                 "report is all the other agent will see.")
+                 "report is all the other agent will see. Do not write NOTES.md: the agent that gave you the task "
+                 "keeps it.")
     return text
 
 
@@ -281,8 +282,23 @@ def device_folder_text(sandbox_path: str, code: bool = False) -> str:
     return text
 
 
-def folder_text(project: dict | None, sandbox_path: str) -> str:
+def folder_text(project: dict | None, sandbox_path: str, notes: str = "", moved_from: str = "",
+                renamed: dict | None = None) -> str:
+    """The working folder's first lines. notes: the notes file's name when the folder has one (0.31.0) - one short
+    line that changes only when the file appears, so the model server's prompt cache holds. moved_from: the chat's
+    own folder before it was moved into the project (0.31.0) - the conversation shows paths there."""
     if project:
-        return (f"You work in the files of the project \"{project['name']}\" ({sandbox_path}). Every change is kept "
+        text = (f"You work in the files of the project \"{project['name']}\" ({sandbox_path}). Every change is kept "
                 "in the project's history and synced to the user's PC.")
-    return (f"This chat has its own scratch folder ({sandbox_path}). Files you create there stay with this chat.")
+        if moved_from:
+            text += (f" This chat was moved into the project from its own folder ({moved_from}): the files the "
+                     "conversation above shows there are in the project's folder now.")
+            if renamed:
+                text += (" Attachments the project had by the same names were renamed on the way: "
+                         + ", ".join(f"{a} is now {b}" for a, b in renamed.items()) + ".")
+    else:
+        text = f"This chat has its own scratch folder ({sandbox_path}). Files you create there stay with this chat."
+    if notes:
+        text += (f"\n- {notes} in the working folder holds the notes of this work, kept across chats: read it before "
+                 "you start, and keep it up to date as you go - what you checked, apart from what you only guess.")
+    return text

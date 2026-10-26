@@ -100,6 +100,35 @@ def update_chat(chat_id: int, title: str | None = None, settings: dict | None = 
     return get_chat(chat_id)
 
 
+def repoint_paths(chat_id: int, renamed: dict[str, str]) -> int:
+    """The chat's message blocks that name a file of its folder by a path in renamed get the new path (an attachment
+    renamed when the chat moved into a project, 0.31.0). -> how many messages changed."""
+    n = 0
+    for m in messages(chat_id):
+        blocks = m["content"]
+        if any(b.get("path") in renamed for b in blocks):
+            update_message(m["id"], [{**b, "path": renamed[b["path"]]} if b.get("path") in renamed else b
+                                     for b in blocks])
+            n += 1
+    return n
+
+
+def move_to_project(chat_id: int, project_id: int, moved_from: str, renamed: dict | None = None) -> dict | None:
+    """A chat becomes one of a project's (0.31.0); moved_from - its own folder before, as the sandbox saw it - and
+    the attachments renamed on the way stay in its settings for the system prompt (the conversation shows paths
+    there)."""
+    c = get_chat(chat_id)
+    if not c:
+        return None
+    settings = {**c["settings"], "moved_from": moved_from}
+    if renamed:
+        settings["moved_renamed"] = dict(list(renamed.items())[:20])
+    with db.connect() as con:
+        con.execute("UPDATE chats SET project_id=?, settings=?, updated_at=? WHERE id=?",
+                    (project_id, json.dumps(settings), db.utcnow(), chat_id))
+    return get_chat(chat_id)
+
+
 def delete_chat(chat_id: int) -> bool:
     with db.connect() as con:
         return con.execute("DELETE FROM chats WHERE id=?", (chat_id,)).rowcount > 0

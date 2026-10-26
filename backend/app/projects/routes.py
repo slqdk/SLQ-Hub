@@ -89,6 +89,9 @@ def workdir(hub: Hub, kind: str, fid: int) -> store.Workdir:
             raise HTTPException(404, "No such chat.")
         if r["project_id"]:
             return workdir(hub, "project", r["project_id"])
+        agent = hub.extras.get("agent")
+        if agent is not None and fid in agent.moving:        # (0.31.0) - not even a look: that would make it again
+            raise HTTPException(409, "This chat is being moved into a project - try again in a moment.")
         return store.Workdir(store.chat_dir(ws, fid), None, ws, hub.env.sandbox_workspace)
     raise HTTPException(404, "Unknown folder kind.")
 

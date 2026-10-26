@@ -320,7 +320,9 @@ export const SECTIONS: HelpSection[] = [
           { text: "Update the price list with the new prices from the attached offer", attach: "an offer" },
         ],
         how: ["The project's page has its chats, its files, its settings (the instructions), its history and Sync "
-          + "to a PC."],
+          + "to a PC.",
+          "A chat outside a project moves into one from its ⋯ menu: Move to a project - a new one or one there is. "
+            + "Its files go into the project's folder; nothing there is overwritten."],
         owner: true,
       },
     ],
@@ -676,6 +678,19 @@ export const SECTIONS: HelpSection[] = [
           "The owner turns it on or off, and chooses who checks, under Settings, Assistant."],
         tips: ["By default the model a stuck turn is handed over to checks: another model sees other mistakes."],
         needs: ["code"],
+        owner: true,
+      },
+      {
+        id: "notes-file",
+        title: "Notes in NOTES.md",
+        what: "Long work keeps its notes in NOTES.md in the chat's or the project's folder: what was checked, apart "
+          + "from what is still a guess, and what comes next. The next chat - continued, or another one in the "
+          + "project - starts from that file.",
+        how: ["The Hub writes the chat's notes into it when the chat is condensed or continued in a new chat - until "
+          + "you or the assistant change the file; then it is yours, and the Hub leaves it as it is.",
+          "In long work the assistant is reminded to write it, and the answer says so.",
+          "Open it, or correct it, under Files. Settings, Assistant turns it off."],
+        tips: ["Ask for it any time: \"Write what you have found in NOTES.md\"."],
         owner: true,
       },
       {

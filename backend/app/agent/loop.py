@@ -136,6 +136,10 @@ class Engine:
         self.top_model: str | None = None   # the turn's model, when this engine works for it with another (reviewer)
         self.answer = ""                     # what the latest model step said (the loop returns the last non-empty)
         self.read_user_at = 0                # the step that read what the user wrote while the turn worked
+        # NOTES.md in long work (0.31.0): whether to remind, the file as it was when last looked at, and when.
+        self.remind_notes = False
+        self.notes_at: tuple | None = None
+        self.notes_reminded = 0
 
     # ------------------------------------------------------------ helpers
     def emit(self, kind: str, **data) -> None:
@@ -327,6 +331,7 @@ class Engine:
             if parts:
                 messages.append({"role": "user", "content": [{"type": "text", "text": "(Images returned by the "
                                                                                       "tools above.)"}, *parts]})
+            self._remind_notes(messages, step)
             reason = self.state.pop("escalate", None)
             if reason:
                 if self.local_target() is not None:
@@ -677,6 +682,28 @@ class Engine:
         self._watch(name, args, result)
         return result
 
+    def _remind_notes(self, messages: list[dict], step: int) -> None:
+        """Long work keeps its notes in NOTES.md (0.31.0): a turn that has made something for REMIND_AFTER steps
+        without writing the file is reminded, and again every REMIND_EVERY steps while it is not written. Chat 126's
+        model went 54 steps without one although its prompt asked for it."""
+        from . import notes_file
+        from .review import made_something
+        if not self.remind_notes or self.depth:
+            return
+        due = self.notes_reminded + notes_file.REMIND_EVERY if self.notes_reminded else notes_file.REMIND_AFTER
+        if step < due or not made_something(self.steps):
+            return
+        self.notes_reminded = step
+        now = notes_file.stamp(self.workdir.root)
+        if now is not None and now != self.notes_at:      # written since the last look: the next one counts from here
+            self.notes_at = now
+            return
+        name = now[0] if now else notes_file.NAME
+        messages.append({"role": "user", "content": notes_file.REMINDER.format(steps=step, name=name)})
+        note = f"It was reminded to write what it found in {name} (step {step})."
+        self.pending_notice = f"{self.pending_notice} {note}".strip()
+        self.emit("notes_reminder", step=step, name=name)
+
     def _loop(self, reason: str) -> None:
         """The model is stuck: its next step must be an answer, without tools."""
         if self.must_answer:
@@ -744,7 +771,7 @@ class Engine:
         self.cloud = cloudmod.CloudClient(self.hub.settings, transport=self.hub.transports.web)
         self.emit("escalated", model=self.cloud.label, reason=reason)
         self.steps.append({"type": "escalated", "model": self.cloud.label, "reason": reason})
-        self.pending_notice = f"Handed over to {self.cloud.label}: {reason}."
+        self.pending_notice = f"{self.pending_notice} Handed over to {self.cloud.label}: {reason}.".strip()
         agent: Agent | None = self.hub.extras.get("agent")
         if agent is not None and messages and messages[0].get("role") == "system":
             chat = chats.get_chat(self.chat["id"]) or self.chat
@@ -781,7 +808,8 @@ class Engine:
         self.emit("escalated", model=target["name"], model_id=target["id"], reason=reason, local=True)
         self.steps.append({"type": "escalated", "model": target["id"], "from": before["id"], "reason": reason,
                            "local": True})
-        self.pending_notice = f"Handed over from {before['name']} to {target['name']}: {reason}."
+        self.pending_notice = (f"{self.pending_notice} Handed over from {before['name']} to {target['name']}: "
+                               f"{reason}.").strip()
         for m in messages:
             m.pop("reasoning_content", None)
         if not vision(target):
@@ -902,6 +930,7 @@ class Agent:
     def __init__(self, hub: Hub):
         self.hub = hub
         self.runs = RunRegistry()
+        self.moving: set[int] = set()        # chats whose files are being moved into a project (0.31.0)
         _ensure_tools_loaded()
 
     def workdir(self, chat: dict) -> projects.Workdir:
@@ -914,6 +943,8 @@ class Agent:
     def start(self, chat_id: int, options: dict | None = None) -> Run:
         if self.runs.active_for_chat(chat_id):
             raise RuntimeError("this chat is already working on an answer")
+        if chat_id in self.moving:
+            raise RuntimeError("this chat is being moved into a project - send it again in a moment")
         run = self.runs.create(chat_id)
         run.task = asyncio.get_running_loop().create_task(self._turn(run, options or {}), name=run.id)
         return run
@@ -968,8 +999,13 @@ class Agent:
         from .tools import windows as windows_tool
         mem = self.hub.extras["memory"].index(project["id"] if project else None)
         user = self.hub.settings.get("agent", "user_name") or (self.hub.env.admin_user or "the user").title()
+        from . import notes_file
+        notes = notes_file.find(wd.root) if notes_file.wanted(self.hub.settings) and not subagent else None
+        moved = str((chat.get("settings") or {}).get("moved_from") or "") if project else ""
+        renamed = (chat.get("settings") or {}).get("moved_renamed") if moved else None
         return system_prompt(user=user, model_name=Catalog.label(entry),
-                             folder_text=folder_text(project, wd.sandbox_path),
+                             folder_text=folder_text(project, wd.sandbox_path, notes.name if notes else "", moved,
+                                                     renamed if isinstance(renamed, dict) else None),
                              sandbox_path=wd.sandbox_path, memory_index=mem, skills=skills, project=project,
                              summary="" if subagent else chat.get("summary") or "",
                              images_available=bool(images and images.available()),
@@ -1026,6 +1062,9 @@ class Agent:
         summary = acc.result()["content"].strip()
         if summary:                                   # the new notes replace the old ones (which they took in)
             chats.update_chat(chat_id, summary=summary, summary_upto=split)
+            if await self.notes_to_file(chat, engine.workdir, summary, "the chat was condensed", engine.device):
+                from . import notes_file                   # the Hub's write is not the model keeping its notes
+                engine.notes_at = await asyncio.to_thread(notes_file.stamp, engine.workdir.root)
         chat = chats.get_chat(chat_id)
         engine.chat = chat
         return self.build_messages(chat, engine.project, engine.workdir, engine.model, run, engine.handover_label(),
@@ -1057,6 +1096,22 @@ class Agent:
         if not text:
             raise RuntimeError("the model wrote no notes - try again")
         await persist("assistant", [{"type": "text", "text": text}])
+        await self.notes_to_file(engine.chat, engine.workdir, text, f"continued from the chat \"{old['title']}\"",
+                                 engine.device)
+
+    async def notes_to_file(self, chat: dict, wd, notes: str, why: str, device=None) -> str | None:
+        """The chat's notes into NOTES.md in its working folder (0.31.0), unless someone else keeps that file -
+        best effort: the notes are the chat's in any case."""
+        from . import notes_file
+        if device is not None or wd is None or not notes_file.wanted(self.hub.settings):
+            return None
+        before = (chat.get("settings") or {}).get("continued_from")
+        try:
+            return await asyncio.to_thread(notes_file.write, wd, chat["id"], chat.get("title") or "this chat", notes,
+                                           why, (before,) if before else ())
+        except Exception:  # noqa: BLE001 - a folder or a sync history that will not take it: the chat keeps its notes
+            log.exception("could not write the notes file of chat %s", chat.get("id"))
+            return None
 
     async def _note_files(self, engine: Engine, wd: projects.Workdir, before: dict) -> None:
         """The files this turn made or changed in the working folder: a step of the run, shown under the answer."""
@@ -1148,6 +1203,9 @@ class Agent:
             engine = Engine(self.hub, run, chat, project, wd, entry, ticket, thinking=thinking, effort=effort,
                             escalation=escalation)
             engine.token_ratio = last_token_ratio(chats.runs_for_chat(chat["id"]))   # the last turn's measure
+            from . import notes_file                      # NOTES.md as it was when the turn started (0.31.0)
+            engine.remind_notes = notes_file.wanted(self.hub.settings) and not test
+            engine.notes_at = await asyncio.to_thread(notes_file.stamp, wd.root)
             engine.turn_options = {k: options[k] for k in ("thinking", "effort") if options.get(k) is not None}
             engine.steps.append({"type": "queue", "seconds": waited})
 

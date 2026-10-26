@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import mimetypes
 import os
 import re
@@ -18,6 +19,8 @@ from pydantic import BaseModel
 from ..projects import store as projects
 from ..state import get_hub
 from . import store
+
+log = logging.getLogger("hub.chats")
 
 router = APIRouter(prefix="/hub/api")
 MAX_UPLOAD = 512 * 1024 * 1024
@@ -127,12 +130,16 @@ async def put_notes(chat_id: int, body: NotesIn, request: Request):
     chat's menu; the model gets them in its system prompt."""
     from ..agent.context import MAX_NOTES
     _chat_or_404(chat_id)
+    _not_moving(request, chat_id)
     if _agent(request).runs.active_for_chat(chat_id):     # it may be condensing: the correction would be lost
         raise HTTPException(409, "The chat is working on an answer - correct the notes when it is done.")
     text = body.text.strip()
     if len(text) > MAX_NOTES:
         raise HTTPException(400, f"The notes can be at most {MAX_NOTES} characters.")
-    return store.update_chat(chat_id, summary=text)
+    chat = store.update_chat(chat_id, summary=text)
+    agent = _agent(request)                               # NOTES.md too, while it is the Hub's copy (0.31.0)
+    await agent.notes_to_file(chat, agent.workdir(chat), text, "corrected in the chat's menu")
+    return chat
 
 
 @router.get("/chats/{chat_id}/export")
@@ -181,6 +188,12 @@ def _start(request: Request, chat_id: int, options: dict) -> str:
         raise HTTPException(409, str(exc))
 
 
+def _not_moving(request: Request, chat_id: int) -> None:
+    """While a chat's files are moved into a project (0.31.0) nothing may change it or write into its old folder."""
+    if chat_id in _agent(request).moving:
+        raise HTTPException(409, "This chat is being moved into a project - try again in a moment.")
+
+
 def _reset_summary_if(chat: dict, message_id: int) -> None:
     if chat.get("summary_upto") and int(chat["summary_upto"]) >= message_id:
         store.update_chat(chat["id"], summary="", summary_upto=0)
@@ -192,6 +205,7 @@ async def post_message(chat_id: int, body: MessageIn, request: Request):
     the turn's inbox and the model reads it after the step it is on."""
     chat = _chat_or_404(chat_id)
     agent = _agent(request)
+    _not_moving(request, chat_id)                        # before anything is stored or copied into the old folder
     active = agent.runs.active_for_chat(chat_id)
     if active and len(active.inbox) >= 10:
         raise HTTPException(409, "Ten messages are already waiting for this turn")
@@ -241,6 +255,7 @@ class RetryIn(BaseModel):
 @router.post("/chats/{chat_id}/retry")
 async def retry(chat_id: int, body: RetryIn, request: Request):
     chat = _chat_or_404(chat_id)
+    _not_moving(request, chat_id)
     if _agent(request).runs.active_for_chat(chat_id):
         raise HTTPException(409, "this chat is already working on an answer")
     rows = store.messages(chat_id)
@@ -282,6 +297,7 @@ class ContinueIn(BaseModel):
 async def continue_turn(chat_id: int, body: ContinueIn, request: Request):
     """Continue under an unfinished turn: a message that tells the model why it stopped, then a new turn."""
     _chat_or_404(chat_id)
+    _not_moving(request, chat_id)
     if _agent(request).runs.active_for_chat(chat_id):
         raise HTTPException(409, "this chat is already working on an answer")
     runs = store.runs_for_chat(chat_id)
@@ -340,6 +356,7 @@ async def handover(chat_id: int, request: Request):
     the notes the work goes on from - a fresh context answers better than a very long one."""
     old = _chat_or_404(chat_id)
     agent = _agent(request)
+    _not_moving(request, chat_id)
     if agent.runs.active_for_chat(chat_id):
         raise HTTPException(409, "This chat is working on an answer - wait for it, or stop it.")
     if not store.count_messages(chat_id):
@@ -363,6 +380,91 @@ async def handover(chat_id: int, request: Request):
     return {"chat": store.get_chat(new["id"]), "run_id": run.id}
 
 
+class MoveIn(BaseModel):
+    project_id: int | None = None
+    new_project: str | None = None      # a name: the project is made first
+
+
+@router.post("/chats/{chat_id}/move")
+async def move_to_project(chat_id: int, body: MoveIn, request: Request):
+    """Move a chat into a project (0.31.0): its files go into the project's folder and it becomes one of the
+    project's chats - the project's instructions, files, skills, libraries and sync from its next answer on. Only a
+    chat outside a project; nothing in the project is overwritten (409, and nothing moves); the chat's old folder
+    goes to the trash (projects/move.py has how it is done safely)."""
+    from ..projects import move
+    chat = _chat_or_404(chat_id)
+    agent = _agent(request)
+    hub = get_hub(request)
+    if chat_id in agent.moving:
+        raise HTTPException(409, "This chat is being moved already.")
+    agent.moving.add(chat_id)                              # first: no turn starts, no message is stored meanwhile
+    try:
+        if chat.get("project_id"):
+            raise HTTPException(409, "This chat is in a project already.")
+        if chat.get("test_run"):
+            raise HTTPException(409, "A test case's chat cannot be moved.")
+        if agent.runs.active_for_chat(chat_id):
+            raise HTTPException(409, "This chat is working on an answer - wait for it, or stop it.")
+        name = " ".join((body.new_project or "").split())
+        if body.project_id is None and not name:
+            raise HTTPException(400, "Choose a project, or give the new project a name.")
+        project = None
+        if body.project_id is not None:
+            project = projects.get_project(body.project_id)
+            if project is None:
+                raise HTTPException(404, "No such project.")
+            if project.get("archived"):
+                raise HTTPException(409, "That project is archived.")
+        src = agent.workdir(chat)
+        size = await asyncio.to_thread(_folder_size, src.root)
+        if size > HANDOVER_MAX:
+            raise HTTPException(413, f"This chat's files take {size / 1024 ** 3:.1f} GB - too much to move. Delete "
+                                     "what you no longer need from its Files first.")
+        try:
+            return await _move(hub, chat, project, name, src.sandbox_path)
+        except move.Refused as exc:
+            raise HTTPException(exc.status, exc.detail)
+    finally:
+        agent.moving.discard(chat_id)
+
+
+async def _move(hub, chat: dict, project: dict | None, name: str, moved_from: str) -> dict:
+    """The move itself: the chat's folder taken away, planned (a refusal before a new project is made), merged into
+    the project under its sync lock, the chat's rows, the old folder into the trash. On a failure everything goes
+    back."""
+    from ..projects import move
+    ws, chat_id = hub.env.workspace_dir, chat["id"]
+    private = await asyncio.to_thread(move.take_away, ws, chat_id)
+    made = None
+    try:
+        if private is not None:
+            dst = projects.project_dir(ws, project["id"]) if project else None
+            move.refuse(await asyncio.to_thread(move.plan, private, dst))      # a quick answer before anything
+        if project is None:
+            project = made = projects.create_project(name)
+        dst = projects.project_dir(ws, project["id"])
+        result = move.Plan()
+        if private is not None:
+            result = await asyncio.to_thread(move.merge_locked, private, dst, project["id"],
+                                             f"moved in from the chat \"{chat['title']}\""[:200])
+        if result.renamed:                                   # attachments the project had by the same names
+            store.repoint_paths(chat_id, result.renamed)
+        moved = store.move_to_project(chat_id, project["id"], moved_from, result.renamed)
+    except BaseException as exc:
+        back = await asyncio.to_thread(move.put_back, ws, chat_id, private)
+        if made is not None:
+            projects.delete_project(made["id"], ws, hub.env.data_dir / "trash")
+        if isinstance(exc, (move.Refused, HTTPException)) or not isinstance(exc, Exception):
+            raise
+        log.exception("moving chat %s into a project failed", chat_id)
+        where = "" if back else f" Its files are kept in {private}."
+        raise HTTPException(507, f"Could not move the chat's files ({exc}); the chat stayed where it was.{where}")
+    trashed = await asyncio.to_thread(move.to_trash, private, hub.env.data_dir / "trash", chat_id)
+    return {"chat": moved, "project": projects.get_project(project["id"]), "copied": result.files,
+            "same": len(result.same), "left": result.left, "renamed": result.renamed,
+            "old_folder": str(trashed) if trashed else None}
+
+
 class EditIn(BaseModel):
     message_id: int
     text: str
@@ -372,6 +474,7 @@ class EditIn(BaseModel):
 @router.post("/chats/{chat_id}/edit")
 async def edit(chat_id: int, body: EditIn, request: Request):
     chat = _chat_or_404(chat_id)
+    _not_moving(request, chat_id)
     if _agent(request).runs.active_for_chat(chat_id):
         raise HTTPException(409, "this chat is already working on an answer")
     from ..agent.review import is_review_row

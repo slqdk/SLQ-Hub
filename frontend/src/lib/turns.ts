@@ -299,6 +299,9 @@ function applyStream(items: Item[], ev: RunEvent): void {
     case "compacted":
       items.push({ kind: "notice", tone: "info", text: "The earlier part of the chat was condensed to make room." });
       break;
+    case "notes_reminder":                   // NOTES.md in long work (0.31.0)
+      items.push({ kind: "notice", tone: "info", text: `It was reminded to write what it found in ${d.name} (step ${d.step}).` });
+      break;
     case "review": {
       if (d.state === "started") {
         items.push({ kind: "review", id: d.id, state: "running", model: d.model, files: d.files,

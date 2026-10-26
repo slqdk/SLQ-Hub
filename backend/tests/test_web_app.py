@@ -129,7 +129,7 @@ async def test_the_working_rules_are_in_the_prompt(signed_in, app, fakes):
     await finish(app, await say(signed_in, c["id"], "Hej"))
     system = fakes.llama["requests"][0]["messages"][0]["content"]
     assert "look for its documentation and existing tools first" in system
-    assert "keep what you find in a notes file in the working folder (e.g. NOTES.md)" in system
+    assert "keep what you find in NOTES.md in the working folder as you go" in system          # named exactly (0.31.0)
     assert "Measure with code rather than reason at length" in system
     assert "what you did, what you checked and what you could not check" in system
 

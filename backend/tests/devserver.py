@@ -11,7 +11,8 @@ pattern when ffmpeg is installed), "game" (slow steps, to try
 sending a message while it works), "page" (makes an artifact), "react page" (a React artifact; "react page in the
 browser" tries it with web_app), "web game" (writes a game and plays it with web_app: needs --sandbox), "review
 game" (a game the independent review finds a fault in, and the fix; every turn that writes a file or an artifact is
-reviewed - the reviewer here reads the last file and finds it fine), a test case of
+reviewed - the reviewer here reads the last file and finds it fine), "long work" (17 steps: the NOTES.md reminder at
+step 15, then it writes the file), a test case of
 Settings -> Tests (tests/dev_evals.py), "endless" (a file each step until the
 step limit: the answer is marked unfinished, with Continue), "think" (reasons first), "long thinking" (a box full of
 thinking, streamed slowly), "search" (web search), "web picture" (a picture
@@ -243,6 +244,15 @@ def responder(body: dict) -> dict:
         if tools_done == 2:
             return {"tool_calls": [{"name": "skill_propose", "arguments": {"path": "skills/pump-alarms"}}]}
         return {"content": "The skill **pump-alarms** is ready. Press **Add skill** on the card to keep it."}
+    if "long work" in low:            # 0.31.0: 17 parts; at step 15 the Hub reminds it of NOTES.md, which it writes
+        if "has not been written in this turn" in str(msgs[-1].get("content") or ""):
+            return {"content": "Right - my notes first.", "tool_calls": [{"name": "write_file", "arguments": {
+                "path": "NOTES.md", "content": "# Notes\n- checked: parts 1-15 are written and read back\n"
+                                               "- still a guess: the last two parts\n"}}]}
+        if tools_done < 17:
+            return {"tool_calls": [{"name": "write_file", "arguments": {"path": f"long/part{tools_done + 1}.txt",
+                                                                        "content": f"part {tools_done + 1}\n"}}]}
+        return {"content": "All parts are written; what I found is in **NOTES.md**."}
     if "endless" in low:              # never done: one more file each step, until the step limit (then Continue)
         return {"content": f"Part {tools_done + 1}.", "tool_calls": [{"name": "write_file", "arguments": {
             "path": f"endless/part{tools_done + 1}.txt", "content": f"part {tools_done + 1}\n"}}]}

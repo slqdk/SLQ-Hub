@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.31.0 - 2026-10-26
+
+- **The work's notes as a file: NOTES.md.** The chat's notes are written into
+  NOTES.md in its folder when the chat is condensed, continued in a new chat
+  or its notes corrected - so they are under Files, can be edited, and go
+  with the folder. Once you or the assistant change the file, the Hub leaves
+  it to you. In long work the assistant is reminded to write what it has
+  found there (the answer shows it), and when the file is there it is told
+  to read it first. Chat 126 went 54 steps without notes. Settings →
+  Assistant turns it off.
+- **Move to a project.** A chat outside a project can be moved into a new
+  project or one you have, from its ⋯ menu. Its files go into the project's
+  folder - nothing there is overwritten - and from its next answer on it
+  works with the project's instructions, files and sync.
+
 ## 0.30.2 - 2026-10-26
 
 - **"Pause" is respected by the review.** When you write while the assistant
