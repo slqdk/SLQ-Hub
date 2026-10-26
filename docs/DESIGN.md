@@ -976,7 +976,13 @@ user gave, that picture is the reference, never one made with image_generate.
 Measure it with one script (its size, the colours and places of its parts, the
 size of its text), build at its size, and compare until they match (`web_app`'s
 `compare`). When the task is the look, change the look and leave how it works
-alone: chat 135 rewrote game.js twice and ended up debugging the data.
+alone: chat 135 rewrote game.js twice and ended up debugging the data. Since 0.35.1: a reference already in the folder (a stylesheet, a page that
+already matches, a document of measurements) is used as it is - linked, its
+classes, places and values copied - and the result is compared with the
+reference's own and not left below it. Chat 136 had cm98.css and a matching
+squad page, borrowed the class names, wrote its own style.css (Verdana, a
+48-pixel title bar, buttons every 128 pixels) and stopped at 65% where the
+given page reached 77%.
 
 **Thinking.** The default is on for agent turns in projects and off for
 quick chats. A toggle in the composer overrides it. Qwen3.8 tends to

@@ -138,6 +138,9 @@ async def test_the_working_rules_are_in_the_prompt(signed_in, app, fakes):
     # 0.35.0: chat 135 made a "reference" with image_generate, and rewrote game.js twice while the task was the look
     assert "that picture is the reference - never one you make with image_generate" in system
     assert "When the task is how it looks, change how it looks and leave how it works alone." in system
+    # 0.35.1: chat 136 had cm98.css and a matching reference page, and wrote its own style.css with its own measures
+    assert "use it as it is - link it, copy its classes, places and values - instead of measuring again" in system
+    assert "compare your result with that reference's own result and do not stop below it" in system
     assert "Do not move the user's own files unless they ask. Scratch and test files go in .hub/tmp/" in system
 
 

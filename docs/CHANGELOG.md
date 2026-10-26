@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.35.1 - 2026-10-26
+
+- **A reference in the folder is used, not redone.** In chat 136 the CM98
+  folder held a finished stylesheet and a page that already matched the
+  original. The assistant borrowed the class names but wrote its own
+  stylesheet with its own measures. Its squad screen matched 65%, against
+  77% for the page it had been given. The assistant is now told to use such
+  a reference as it is: link it, and copy its classes, places and values. It
+  should compare its result with the reference's own result and not stop
+  below it.
+
 ## 0.35.0 - 2026-10-26
 
 - **The assistant can set its page beside the original.** In chat 135 you
