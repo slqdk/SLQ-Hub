@@ -601,6 +601,15 @@ async def stop_turn(turn_id: str, request: Request):
     return {"ok": True}
 
 
+@router.post("/hub/api/device/turns/{turn_id}/stop-thinking")
+async def stop_thinking(turn_id: str, request: Request):
+    """Stop thinking in a person's chat (0.30.0), as in the owner's."""
+    turn = _turns(request).get(turn_id, _person(request))
+    if turn is None or turn.run.finished:
+        raise HTTPException(404, "no such answer being written")
+    return {"ok": await turn.run.stop_thinking(get_hub(request).llm)}
+
+
 @router.post("/hub/api/device/turns/{turn_id}/approve")
 async def approve(turn_id: str, request: Request):
     """The person's answer when the turn asks first (internet for the assistant set to ask): allow once or deny -

@@ -202,6 +202,17 @@ def transcript(chat: dict, project: dict | None, rows: list[dict], runs: list[di
 
     for row in rows:
         role, blocks = row["role"], row["content"]
+        if role == "user" and blocks and all(b.get("type") == "review" for b in blocks):
+            for b in blocks:                              # the Hub's independent review (0.30.0): part of the turn
+                said = {"ok": "nothing to fix", "problems": "problems found"}.get(
+                    b.get("verdict"), "did not finish" + (f" ({b['error']})" if b.get("error") else ""))
+                what = ", ".join([*(b.get("files") or []), *(f"artifact {a}" for a in b.get("artifacts") or [])])
+                out += [f"**Independent review** by {b.get('model')}: {said} ({b.get('seconds')} s; {what})", ""]
+                if b.get("report"):
+                    out += [_fence(b["report"]), ""]
+                if b.get("changed"):
+                    out += [f"Changed while the review ran: {', '.join(b['changed'])}", ""]
+            continue
         if role == "user":
             close_section()
             out += ["", "---", "", f"## You - {_when(row['created_at'])}", ""]

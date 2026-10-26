@@ -68,6 +68,10 @@ def message_text(row: dict) -> str:
             parts.append(f"[{t}: {b.get('path') or b.get('name') or ''}]")
         elif t == "handover":
             parts.append(f"[continued from the chat \"{b.get('title') or ''}\"]")
+        elif t == "review":
+            said = {"ok": "nothing to fix", "problems": "found problems"}.get(b.get("verdict"), "did not finish")
+            parts.append(f"[independent review by {b.get('model') or 'another model'}: {said}]\n"
+                         f"{b.get('report') or b.get('error') or ''}")
     return "\n".join(parts)
 
 
@@ -75,6 +79,9 @@ def _label(row: dict) -> str:
     if row["role"] == "tool":
         names = {b.get("name") for b in row.get("content") or [] if b.get("type") == "tool_result"}
         return "tool " + ", ".join(sorted(n for n in names if n)) if names else "tool"
+    blocks = row.get("content") or []
+    if blocks and all(b.get("type") == "review" for b in blocks):
+        return "the Hub's independent review"
     return {"user": "the user", "assistant": "you"}.get(row["role"], row["role"])
 
 

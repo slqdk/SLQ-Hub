@@ -36,7 +36,13 @@ export type Item =
   | { kind: "skill"; card: SkillCardData }               // a skill the assistant made (skill_propose), to add
   | { kind: "todos"; items: Todo[] }
   | { kind: "notice"; text: string; tone: "info" | "fault" | "wait" }
+  | ReviewItem
   | { kind: "user"; message: Message; id: string };      // written while the turn worked, now read by the model
+
+/** The independent review of the turn's work (0.30.0): another model's check, its steps while it runs. */
+export interface ReviewItem { kind: "review"; id: string; state: "running" | "ok" | "problems" | "failed"; model?: string;
+  files?: string[]; artifacts?: string[]; report?: string; seconds?: number; changed?: string[]; error?: string;
+  children?: Item[] }
 
 export interface UserTurn { type: "user"; message: Message }
 export interface AssistantTurn { type: "assistant"; key: string; runId: string | null; items: Item[]; run?: RunRecord;
@@ -60,14 +66,29 @@ function lastTools(items: Item[]): ToolView[] {
   return strip.tools;
 }
 
-/** Whether a call - here or inside a subagent - waits for the user's answer. */
+/** Whether a call - here, inside a subagent or inside the review - waits for the user's answer. */
 export function waitsForAnswer(items: Item[]): boolean {
-  return items.some((it) => it.kind === "tools" && it.tools.some((t) => t.state === "approval"
-    || (t.children ? waitsForAnswer(t.children) : false)));
+  return items.some((it) => (it.kind === "tools" && it.tools.some((t) => t.state === "approval"
+    || (t.children ? waitsForAnswer(t.children) : false)))
+    || (it.kind === "review" && it.children ? waitsForAnswer(it.children) : false));
+}
+
+/** A review is a message of the Hub's in the turn, not the user's words. */
+export function isReview(m: Message): boolean {
+  return m.role === "user" && m.content.length > 0 && m.content.every((b) => b.type === "review");
+}
+
+function reviewItem(b: Extract<Block, { type: "review" }>): ReviewItem {
+  return { kind: "review", id: b.id, state: b.verdict, model: b.model, files: b.files, artifacts: b.artifacts,
+    report: b.report, seconds: b.seconds, changed: b.changed, error: b.error };
 }
 
 export function findTool(items: Item[], id: string): ToolView | undefined {
   for (const it of items) {
+    if (it.kind === "review" && it.children) {
+      const hit = findTool(it.children, id);
+      if (hit) return hit;
+    }
     if (it.kind !== "tools") continue;
     for (const t of it.tools) {
       if (t.id === id) return t;
@@ -78,6 +99,12 @@ export function findTool(items: Item[], id: string): ToolView | undefined {
     }
   }
   return undefined;
+}
+
+/** Where a subagent's or the reviewer's steps go: the call that started it, or the review. */
+function findHolder(items: Item[], id: string): { children?: Item[] } | undefined {
+  const review = items.find((it): it is ReviewItem => it.kind === "review" && it.id === id);
+  return review ?? findTool(items, id);
 }
 
 function afterResult(items: Item[], t: ToolView): void {
@@ -114,6 +141,15 @@ export function buildTurns(messages: Message[], runs: RunRecord[], skipRun?: str
   let cur: AssistantTurn | null = null;
   for (const m of messages) {
     if (skipRun && m.run_id === skipRun) continue;
+    if (isReview(m)) {                                    // inside the turn it reviewed
+      if (!cur || (m.run_id && cur.runId && m.run_id !== cur.runId)) {
+        cur = { type: "assistant", key: `m${m.id}`, runId: m.run_id, items: [], firstMessageId: m.id, text: "",
+          run: m.run_id ? byRun.get(m.run_id) : undefined };
+        out.push(cur);
+      }
+      for (const b of m.content) if (b.type === "review") cur.items.push(reviewItem(b));
+      continue;
+    }
     if (m.role === "user") {
       cur = null;
       out.push({ type: "user", message: m });
@@ -263,6 +299,17 @@ function applyStream(items: Item[], ev: RunEvent): void {
     case "compacted":
       items.push({ kind: "notice", tone: "info", text: "The earlier part of the chat was condensed to make room." });
       break;
+    case "review": {
+      if (d.state === "started") {
+        items.push({ kind: "review", id: d.id, state: "running", model: d.model, files: d.files,
+          artifacts: d.artifacts, children: [] });
+      } else {
+        const r = items.find((it): it is ReviewItem => it.kind === "review" && it.id === d.id);
+        if (r) Object.assign(r, { state: d.verdict, report: d.report, seconds: d.seconds, changed: d.changed,
+          error: d.error });
+      }
+      break;
+    }
   }
 }
 
@@ -272,7 +319,7 @@ export function reduceLive(live: LiveRun, ev: RunEvent): LiveRun {
   const next: LiveRun = { ...live, seq: ev.seq, items: live.items };
   const d = ev.data;
   if (d.parent && d.depth) {
-    const parent = findTool(next.items, d.parent);
+    const parent = findHolder(next.items, d.parent);
     if (parent) {
       parent.children ??= [];
       applyStream(parent.children, ev);

@@ -181,9 +181,14 @@ def make_llama(script: dict) -> FastAPI:
     A reply is {"content": str, "reasoning": str, "tool_calls": [{"name","arguments"}], "finish": str}; a tool
     call's "raw" is its arguments text as sent (cut off, say), a reply's "usage" its token counts. Like
     llama-server with --jinja, a request whose history has a tool call with arguments that are not a JSON object
-    is refused with a 500 (it renders every earlier call into the chat template)."""
+    is refused with a 500 (it renders every earlier call into the chat template). Like b11783 (0.30.0): POST
+    /v1/chat/completions/control ends the reasoning of a completion that streams with reasoning_control on - the
+    request's reasoning_budget_message, then the answer - and answers success for any such completion while it
+    streams, thinking or not (script["controls"] keeps each)."""
     app = FastAPI()
     script.setdefault("requests", [])
+    script.setdefault("controls", [])
+    streaming: dict[str, dict] = {}                     # completion id -> {"control", "stop"}, while it streams
 
     def next_reply(body: dict) -> dict:
         if script.get("responder"):
@@ -239,6 +244,9 @@ def make_llama(script: dict) -> FastAPI:
                                                    "JSON: [json.exception.parse_error.101] parse error"}},
                                         status_code=500)
         reply = next_reply(body)
+        cmpl_id = f"chatcmpl-{len(script['requests'])}"
+        reasoning = reply.get("reasoning") or ""
+        message = body.get("reasoning_budget_message") or ""
         if reply.get("delay"):
             import asyncio
             await asyncio.sleep(reply["delay"])
@@ -253,34 +261,48 @@ def make_llama(script: dict) -> FastAPI:
         usage = reply.get("usage") or {"prompt_tokens": 12, "completion_tokens": 7, "total_tokens": 19}
         if not body.get("stream"):
             msg = {"role": "assistant", "content": reply.get("content", "")}
-            if reply.get("reasoning"):
-                msg["reasoning_content"] = reply["reasoning"]
+            if reasoning:
+                msg["reasoning_content"] = reasoning
             if calls:
                 msg["tool_calls"] = [{k: v for k, v in c.items() if k != "index"} for c in calls]
-            return {"id": "chatcmpl-1", "object": "chat.completion", "created": int(time.time()),
+            return {"id": cmpl_id, "object": "chat.completion", "created": int(time.time()),
                     "model": body.get("model"), "choices": [{"index": 0, "message": msg, "finish_reason": finish}],
                     "usage": usage, "timings": timings}
 
         def chunk(delta: dict, finish_reason=None, **extra) -> bytes:
-            obj = {"id": "chatcmpl-1", "object": "chat.completion.chunk", "created": int(time.time()),
+            obj = {"id": cmpl_id, "object": "chat.completion.chunk", "created": int(time.time()),
                    "model": body.get("model"), "choices": [{"index": 0, "delta": delta, "finish_reason": finish_reason}]}
             obj.update(extra)
             return f"data: {json.dumps(obj)}\n\n".encode()
 
         async def gen():
-            if reply.get("reasoning") and reply.get("pace"):      # streamed a little at a time, to watch it arrive
-                import asyncio
-                text = reply["reasoning"]
-                for i in range(0, len(text), 9):
-                    yield chunk({"reasoning_content": text[i:i + 9]})
+            streaming[cmpl_id] = {"control": bool(body.get("reasoning_control")), "stop": False}
+            try:
+                async for part in parts():
+                    yield part
+            finally:
+                streaming.pop(cmpl_id, None)
+
+        async def parts():
+            import asyncio
+            if reasoning and reply.get("pace"):                   # streamed a little at a time, to watch it arrive
+                for i in range(0, len(reasoning), 9):
+                    if streaming[cmpl_id]["stop"]:                # ended: the message, a piece at a time, then the end
+                        for j in range(0, len(message), 9):
+                            yield chunk({"reasoning_content": message[j:j + 9]})
+                            await asyncio.sleep(reply["pace"])
+                        break
+                    yield chunk({"reasoning_content": reasoning[i:i + 9]})
                     await asyncio.sleep(reply["pace"])
-            elif reply.get("reasoning"):
-                for part in (reply["reasoning"][:5], reply["reasoning"][5:]):
+            elif reasoning:
+                for part in (reasoning[:5], reasoning[5:]):
                     if part:
                         yield chunk({"reasoning_content": part})
             content = reply.get("content", "")
             for i in range(0, len(content), 6):
                 yield chunk({"content": content[i:i + 6]})
+                if reply.get("content_pace"):                     # the answer written slowly too
+                    await asyncio.sleep(reply["content_pace"])
             for c in calls:
                 args = c["function"]["arguments"]
                 yield chunk({"tool_calls": [{"index": c["index"], "id": c["id"], "type": "function",
@@ -290,13 +312,27 @@ def make_llama(script: dict) -> FastAPI:
             # as llama-server b11783 does: the finish chunk is empty, and usage and
             # timings come together in a last chunk without choices
             yield chunk({}, finish)
-            last = {"choices": [], "id": "chatcmpl-1", "object": "chat.completion.chunk", "model": body.get("model"),
+            last = {"choices": [], "id": cmpl_id, "object": "chat.completion.chunk", "model": body.get("model"),
                     "usage": {**usage, "prompt_tokens_details": {"cached_tokens": timings["cache_n"]}},
                     "timings": timings}
             yield f"data: {json.dumps(last)}\n\n".encode()
             yield b"data: [DONE]\n\n"
 
         return StreamingResponse(gen(), media_type="text/event-stream")
+
+    @app.post("/v1/chat/completions/control")
+    async def control(request: Request):
+        body = await request.json()
+        script["controls"].append(body)
+        if body.get("action") != "reasoning_end":
+            return JSONResponse({"error": {"message": "unknown control action"}}, status_code=400)
+        live = streaming.get(body.get("id"))
+        if live is None:
+            return {"success": False, "message": "no active completion for this id"}
+        if not live["control"]:
+            return {"success": False, "message": "reasoning control not enabled for this completion"}
+        live["stop"] = True                                   # (too late once the answer has started: no effect)
+        return {"success": True}
 
     return app
 

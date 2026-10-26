@@ -244,7 +244,8 @@ async def retry(chat_id: int, body: RetryIn, request: Request):
     if _agent(request).runs.active_for_chat(chat_id):
         raise HTTPException(409, "this chat is already working on an answer")
     rows = store.messages(chat_id)
-    users = [r for r in rows if r["role"] == "user"]
+    from ..agent.review import is_review_row             # the Hub's review is not a message to answer again
+    users = [r for r in rows if r["role"] == "user" and not is_review_row(r)]
     target = next((r for r in users if r["id"] == body.message_id), None) if body.message_id else \
         (users[-1] if users else None)
     if target is None:
@@ -373,7 +374,9 @@ async def edit(chat_id: int, body: EditIn, request: Request):
     chat = _chat_or_404(chat_id)
     if _agent(request).runs.active_for_chat(chat_id):
         raise HTTPException(409, "this chat is already working on an answer")
-    target = next((r for r in store.messages(chat_id) if r["id"] == body.message_id and r["role"] == "user"), None)
+    from ..agent.review import is_review_row
+    target = next((r for r in store.messages(chat_id) if r["id"] == body.message_id and r["role"] == "user"
+                   and not is_review_row(r)), None)
     if target is None:
         raise HTTPException(404, "no such user message")
     blocks = [b for b in target["content"] if b.get("type") != "text"]
@@ -423,6 +426,16 @@ async def stop(run_id: str, request: Request):
     if not _agent(request).runs.cancel(run_id):
         raise HTTPException(404, "no such running run")
     return {"ok": True}
+
+
+@router.post("/runs/{run_id}/stop-thinking")
+async def stop_thinking(run_id: str, request: Request):
+    """End the thinking of the step that is thinking now (0.30.0): it goes on with what it has. ok false: no step
+    was thinking (it had just ended, say)."""
+    run = _agent(request).runs.get(run_id)
+    if run is None or run.finished:
+        raise HTTPException(404, "no such running run")
+    return {"ok": await run.stop_thinking(get_hub(request).llm)}
 
 
 class Approval(BaseModel):

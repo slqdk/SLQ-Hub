@@ -50,6 +50,7 @@ MUST_ANSWER = ("(SLQ Hub: you are repeating the same steps and getting the same 
 NO_ANSWER = "(The model kept repeating the same tool calls and gave no answer. Ask again, or try another model.)"
 LOOP_REPEATS = 3
 LOOP_SAME_STEPS = 3
+REVIEW_FIX_STEPS = 12               # the steps the work has at least after a review that found problems (0.30.0)
 # A call the end of the context cut off (chat 21: a whole game in one write_file, 13 minutes of output, lost).
 CUT_OFF = "This call was cut off: your answer reached {where} after {chars:,} characters of its arguments, so it {what}."
 IN_PARTS = ("Write a long file in parts of at most a few hundred lines: write_file with the first part, then "
@@ -91,6 +92,9 @@ class Engine:
         self.hub, self.run, self.chat, self.project, self.workdir = hub, run, chat, project, workdir
         self.model, self.ticket, self.depth, self.parent = model, ticket, depth, parent
         self.thinking, self.effort, self.escalation = thinking, effort, escalation
+        # The most thinking tokens a step may take before it must act (Settings -> Assistant; 0: no limit) - chat 78's
+        # Qwen3.8 27B thought 12,808 and 13,354 tokens in single steps, nine minutes each (0.30.0).
+        self.thinking_budget = thinking_budget(hub.settings)
         self.need = hub.model_need(model["id"])
         self.cloud: cloudmod.CloudClient | None = None
         self.steps: list[dict] = []
@@ -128,6 +132,9 @@ class Engine:
         # A person's chat, kept on their device (agent/device.py): no memory, libraries, MCP or cloud, code only
         # when allowed, artifacts and files go back to the device.
         self.device = None
+        self.only: set[str] | None = None   # the only tools it may have (the reviewer's: review.REVIEW_TOOLS)
+        self.top_model: str | None = None   # the turn's model, when this engine works for it with another (reviewer)
+        self.answer = ""                     # what the latest model step said (the loop returns the last non-empty)
 
     # ------------------------------------------------------------ helpers
     def emit(self, kind: str, **data) -> None:
@@ -163,6 +170,8 @@ class Engine:
         for t in REGISTRY.values():
             if self.depth and not t.in_subagent:
                 continue
+            if self.only is not None and t.name not in self.only:
+                continue
             if t.name == "escalate" and not self.can_hand_over():
                 continue
             if self.device is not None and (t.name in DEVICE_SKIP or (t.name == "bash" and not self.device.code)):
@@ -173,7 +182,7 @@ class Engine:
             except Exception:  # noqa: BLE001 - a broken check hides the tool, nothing more
                 continue
         mcp = self.hub.extras.get("mcp")
-        if mcp is not None and self.device is None:
+        if mcp is not None and self.device is None and self.only is None:
             out += mcp.tools()
         return out
 
@@ -195,14 +204,17 @@ class Engine:
 
     # ------------------------------------------------------------ the loop
     async def loop(self, messages: list[dict], persist: Persist = None, max_steps: int = 60,
-                   compact: Callable[[list[dict]], Awaitable[list[dict]]] | None = None) -> str:
+                   compact: Callable[[list[dict]], Awaitable[list[dict]]] | None = None,
+                   review: Callable[[list[dict]], Awaitable[bool]] | None = None) -> str:
         tools = self.tools()
         by_name = {t.name: t for t in tools}
         schemas = self.schemas(tools)
         self.schema_tokens = C.schema_tokens(schemas)
         self._note_prompt(messages, tools, "subagent" if self.depth else "start")
         final = ""
-        for step in range(1, max_steps + 1):
+        step = 0
+        while step < max_steps:
+            step += 1
             self._step = step
             await self._inbox(messages, persist)
             messages = await self._fit(messages, compact)
@@ -243,6 +255,7 @@ class Engine:
                 raise
             if forced:
                 res = {**res, "tool_calls": [], "content": res.get("content") or NO_ANSWER}
+            self.answer = res.get("content") or ""
             msg: dict = {"role": "assistant", "content": res["content"]}
             calls = res.get("tool_calls") or []
             if calls:
@@ -279,6 +292,15 @@ class Engine:
                 if res.get("finish_reason") == "length" and step < max_steps:
                     messages.append({"role": "user", "content": "(Your answer was cut off at the length limit. "
                                                                 "Continue exactly where you stopped.)"})
+                    continue
+                if review is not None and not forced and await review(messages):
+                    # The independent review found problems: its report is the next message, and the fix has at
+                    # least REVIEW_FIX_STEPS steps, however close to the limit the work ended. Checking each
+                    # finding means reading again what was read before the answer (and the folder may have changed
+                    # meanwhile): look-ups count again, and the loop guard starts over.
+                    max_steps = max(max_steps, step + REVIEW_FIX_STEPS)
+                    self.epoch += 1
+                    self.repeats, self.same_steps = 0, {}
                     continue
                 return final
             images: list[dict] = []
@@ -431,15 +453,42 @@ class Engine:
             raw = C.estimate_tokens(messages) + (self.schema_tokens if schemas else 0)
             room = self.ctx_limit - int(raw * self.token_ratio)
             pl = P.build(self.model, messages, tools=schemas or None, thinking=self.thinking, effort=self.effort,
-                         sampling={"max_tokens": max(1024, min(32768, room))})
+                         sampling={"max_tokens": max(1024, min(32768, room))}, control=True)
             sent = sent_summary(pl, len(messages), len(schemas), raw)
             if self.token_ratio > 1.0:
                 sent["token_ratio"] = round(self.token_ratio, 3)
+            # The thinking budget, counted here: llama-server streams the thinking about a token a piece (measured
+            # on b11783), and at the budget the Hub ends it the way Stop thinking does - only while this step is
+            # still thinking, so nothing is ever forced into an answer or a tool call (see P.thinking_fields).
+            budget = self.thinking_budget if pl.get("reasoning_control") else 0
+            if budget:
+                sent["thinking_budget"] = budget
             acc = Accumulator()
-            async for chunk in self.hub.llm.stream_chat(self.hub.main_url, pl):
-                for kind, data in acc.feed(chunk):
-                    self._forward(kind, data)
+            live = None                                   # this step, while its thinking can be ended
+            thought, budget_hit = 0, False
+            try:
+                async for chunk in self.hub.llm.stream_chat(self.hub.main_url, pl):
+                    if live is None and pl.get("reasoning_control") and chunk.get("id"):
+                        live = self.run.thinking = {"url": self.hub.main_url, "id": chunk["id"]}
+                    for kind, data in acc.feed(chunk):
+                        if kind in ("text", "tool_start") and live is not None and self.run.thinking is live:
+                            self.run.thinking = None      # it answers now: nothing left to stop
+                        elif kind == "thinking":
+                            thought += 1
+                        self._forward(kind, data)
+                    if (budget and not budget_hit and thought >= budget and live is not None
+                            and self.run.thinking is live and live["id"] not in self.run.thinking_stopped):
+                        budget_hit = True                 # once: the server forces the message, then the end tag
+                        await self.hub.llm.end_reasoning(live["url"], live["id"])
+            finally:
+                if live is not None and self.run.thinking is live:
+                    self.run.thinking = None
             res = acc.result()
+            if live is not None and P.thinking_end(res.get("reasoning") or ""):
+                if live["id"] in self.run.thinking_stopped:
+                    sent["thinking_ended"] = "stopped"
+                elif budget_hit:
+                    sent["thinking_ended"] = "budget"
         u, t = res.get("usage") or {}, res.get("timings") or {}
         self.last_prompt_tokens = int(u.get("prompt_tokens") or 0)
         if self.cloud is None and sent.get("estimated_tokens") and self.last_prompt_tokens:
@@ -610,9 +659,9 @@ class Engine:
         except BaseException:
             task.cancel()
             raise
-        if last is not None:
-            self.run.emit("started", model=self.model["id"], waited=round(time.monotonic() - t0, 2),
-                          thinking=self.thinking)
+        if last is not None:                     # (the reviewer works for the turn: the turn's model stays named)
+            self.run.emit("started", model=self.top_model or self.model["id"],
+                          waited=round(time.monotonic() - t0, 2), thinking=self.thinking)
 
     def _finish(self, name: str, cid: str, args: dict, result: ToolResult, t0: float) -> ToolResult:
         result.text = self._store_long(cid, result.text or "(no output)")
@@ -749,6 +798,14 @@ class Engine:
 DEVICE_SKIP = {"memory", "library_search"}
 
 
+def thinking_budget(settings) -> int:
+    """Settings -> Assistant's most thinking tokens in one step (0: no limit); the form saves it as text."""
+    try:
+        return max(0, int(float(settings.get("agent", "thinking_budget") or 0)))
+    except (TypeError, ValueError):
+        return 0
+
+
 def first_text(rows: list[dict]) -> str:
     """The first thing the user wrote in a conversation."""
     return next((b.get("text", "") for r in rows if r["role"] == "user" for b in r["content"]
@@ -782,11 +839,12 @@ def token_ratio(real: int, estimated: int) -> float:
 
 
 def last_token_ratio(runs: list[dict]) -> float:
-    """The ratio of a chat's latest measured model step, for its next turn's first request (1 when none)."""
+    """The ratio of a chat's latest measured model step, for its next turn's first request (1 when none). A
+    subagent's or reviewer's step (depth) measured another conversation, maybe with another model: not that one."""
     for r in reversed(runs):
         for s in reversed(r.get("steps") or []):
             est = (s.get("sent") or {}).get("estimated_tokens") if isinstance(s.get("sent"), dict) else None
-            if s.get("type") == "model" and s.get("prompt_tokens") and est:
+            if s.get("type") == "model" and not s.get("depth") and s.get("prompt_tokens") and est:
                 return token_ratio(int(s["prompt_tokens"]), int(est))
     return 1.0
 
@@ -1099,8 +1157,12 @@ class Agent:
             else:
                 messages = self.build_messages(chat, project, wd, entry, run, engine.handover_label())
                 max_steps = int(self.hub.settings.get("agent", "max_steps") or 60)
+                from .review import review as review_turn
+                # A test run (Settings -> Tests) measures the model it tests: no other model's review in its steps.
                 await engine.loop(messages, persist, max_steps=max_steps,
-                                  compact=lambda msgs: self._compact(chat["id"], engine, run, msgs))
+                                  compact=lambda msgs: self._compact(chat["id"], engine, run, msgs),
+                                  review=None if test else (lambda msgs: review_turn(self, engine, chat, project, wd,
+                                                                                     before, msgs, persist)))
                 await self._title(chat, engine)
         except asyncio.CancelledError:
             status = "cancelled"

@@ -4,7 +4,7 @@ import { AppWindow, Brain, Check, ChevronDown, ChevronRight, Code2, Download, Fi
   Sparkles } from "lucide-react";
 import { api, mediaUrl, type ArtifactRef, type Skill, type SkillCardData, type SkillDraft } from "../lib/api";
 import { bytes, seconds } from "../lib/format";
-import { toolLabel, toolSummary, type Decision, type Item, type ToolView } from "../lib/turns";
+import { toolLabel, toolSummary, type Decision, type Item, type ReviewItem, type ToolView } from "../lib/turns";
 import { useApp } from "../state";
 import { Markdown } from "./Markdown";
 import { ThinkingText } from "./ThinkingText";
@@ -18,6 +18,8 @@ export interface TurnActions {
   approve?: (callId: string, decision: Decision) => Promise<unknown>;
   /** A new chat with this skill chosen (the skill card, once the skill is added). */
   chatWithSkill?: (ref: string) => void;
+  /** End the thinking of the step that thinks now (0.30.0); resolves to whether it ended. */
+  stopThinking?: () => Promise<unknown>;
 }
 
 export function Items({ items, actions }: { items: Item[]; actions: TurnActions }) {
@@ -27,8 +29,10 @@ export function Items({ items, actions }: { items: Item[]; actions: TurnActions 
     <>
       {items.map((it, i) => {
         switch (it.kind) {
-          case "thinking":
-            return <Thinking key={i} text={it.text} live={actions.live && i === items.length - 1} />;
+          case "thinking": {
+            const live = actions.live && i === items.length - 1;
+            return <Thinking key={i} text={it.text} live={live} onStop={live ? actions.stopThinking : undefined} />;
+          }
           case "text":
             return <Markdown key={i} text={it.text} live={actions.live && it === lastText && i === items.length - 1}
               remoteImages={!auth?.internetAsks} />;
@@ -58,6 +62,8 @@ export function Items({ items, actions }: { items: Item[]; actions: TurnActions 
           case "notice":
             return <div key={i} className={`notice ${it.tone === "fault" ? "fault" : ""}`}>
               <Lamp state={it.tone === "fault" ? "fault" : it.tone === "wait" ? "wait" : "off"} />{it.text}</div>;
+          case "review":
+            return <div className="strip" key={i}><ReviewRow item={it} actions={actions} /></div>;
         }
         return null;
       })}
@@ -65,16 +71,96 @@ export function Items({ items, actions }: { items: Item[]; actions: TurnActions 
   );
 }
 
-function Thinking({ text, live }: { text: string; live?: boolean }) {
+function Thinking({ text, live, onStop }: { text: string; live?: boolean; onStop?: () => Promise<unknown> }) {
   const [open, setOpen] = useState(false);
+  const [stopping, setStopping] = useState<"" | "asked" | "missed">("");
   const words = text.trim().split(/\s+/).length;
+  const ended = /\(That is enough thinking for this step[^)]*\)\s*$/.test(text);   // its budget, or Stop thinking
+  // The model server says yes even when the stop came too late to change anything; if it still thinks a while
+  // later, the button can be pressed again.
+  useEffect(() => {
+    if (stopping !== "asked") return;
+    const t = window.setTimeout(() => setStopping((s) => (s === "asked" ? "missed" : s)), 8000);
+    return () => window.clearTimeout(t);
+  }, [stopping]);
+  const stop = async () => {
+    setStopping("asked");
+    try {
+      const r = (await onStop?.()) as { ok?: boolean } | undefined;
+      if (r && r.ok === false) setStopping("missed");
+    } catch {
+      setStopping("missed");
+    }
+  };
   return (
     <div className="thinking">
-      <button onClick={() => setOpen((o) => !o)} aria-expanded={open || !!live}>
-        <Brain size={15} /> {live ? "Thinking" : `Thought for ${words} words`}
-        {open || live ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-      </button>
+      <div className="thinking-head">
+        <button onClick={() => setOpen((o) => !o)} aria-expanded={open || !!live}>
+          <Brain size={15} /> {live ? "Thinking" : `Thought for ${words} words${ended ? ", then stopped" : ""}`}
+          {open || live ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+        </button>
+        {live && onStop && (
+          <button className="btn small thinking-stop" disabled={stopping === "asked"} onClick={stop}
+            title="It stops thinking and goes on with what it has: a tool call, or its answer">
+            {stopping === "asked" ? "Stopping..." : stopping === "missed" ? "Stop thinking (again)" : "Stop thinking"}
+          </button>
+        )}
+      </div>
       {(open || live) && <ThinkingText text={text} live={live} />}
+    </div>
+  );
+}
+
+const REVIEW_SAID: Record<ReviewItem["state"], string> = { running: "checking the work", ok: "nothing to fix",
+  problems: "found problems", failed: "did not finish" };
+const REVIEW_LAMP: Record<ReviewItem["state"], LampState> = { running: "run", ok: "run", problems: "wait", failed: "fault" };
+const LIST_ITEM = /^\s*([-*+]|\d+[.)])\s/;
+
+/** A report's lines as written: a line after a list item that is not one itself (the reviewer's "Checked: ..." and
+ * its verdict) starts a paragraph rather than running on inside the item. */
+function reportMarkdown(text: string): string {
+  const lines = text.split("\n");
+  return lines.map((l, i) => (i > 0 && LIST_ITEM.test(lines[i - 1]) && l.trim() && !LIST_ITEM.test(l)
+    && !/^\s/.test(l) ? "\n" + l : l)).join("\n");
+}
+
+/** Another model's check of the turn's work (0.30.0): its steps while it runs (its last answer is its report), the
+ * report when the chat is opened again. */
+function ReviewRow({ item, actions }: { item: ReviewItem; actions: TurnActions }) {
+  const { auth } = useApp();
+  const [open, setOpen] = useState(false);
+  const busy = item.state === "running";
+  const files = item.files?.length ?? 0, arts = item.artifacts?.length ?? 0;
+  const what = files + arts === 1 ? (item.files?.[0] ?? item.artifacts?.[0] ?? "")
+    : [files ? `${files} file${files > 1 ? "s" : ""}` : "", arts ? `${arts} artifact${arts > 1 ? "s" : ""}` : ""]
+      .filter(Boolean).join(" and ");
+  const steps = item.children && item.children.length > 0;
+  const note = open && (item.error || item.changed?.length);
+  return (
+    <div className="tool review">
+      <button className="tool-head" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+        {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+        <span className="row" style={{ gap: 8 }}>
+          <Lamp state={REVIEW_LAMP[item.state]} size="sm" pulse={busy} />
+          <span className="tool-name">Independent review</span>
+        </span>
+        <span className="tool-sum">{[REVIEW_SAID[item.state], item.model, what].filter(Boolean).join(" · ")}</span>
+        <span className="tool-time">{item.seconds != null ? seconds(item.seconds) : busy ? "running" : ""}</span>
+      </button>
+      {steps && (open || busy) && (
+        <div className="tool-body"><div className="sub-run"><Items items={item.children!} actions={{ ...actions }} /></div></div>
+      )}
+      {open && !steps && item.report && (
+        <div className="tool-body review-report">
+          <Markdown text={reportMarkdown(item.report)} remoteImages={!auth?.internetAsks} /></div>
+      )}
+      {note && (
+        <div className="tool-body review-report">
+          {item.error && <p className="small faint">It did not finish: {item.error}.</p>}
+          {item.changed?.length ? <p className="small faint">Changed in the folder while it ran (the reviewer may not
+            change files): {item.changed.join(", ")}</p> : null}
+        </div>
+      )}
     </div>
   );
 }

@@ -176,6 +176,10 @@ def to_model_messages(rows: list[dict], current_run: str | None = None, keep_ima
                     parts.append({"type": "text", "text": continue_text(b)})
                 elif t == "handover":
                     parts.append({"type": "text", "text": handover_text(b, notes=r["id"] in answered)})
+                elif t == "review":                       # the Hub's independent review (0.30.0), not the user's words
+                    from .review import review_text       # (in its own turn, rebuilt after condensing: still the task)
+                    now = bool(current_run) and r.get("run_id") == current_run and b.get("verdict") == "problems"
+                    parts.append({"type": "text", "text": review_text(b, now=now)})
             parts = docs + parts
             if not parts:
                 continue
@@ -265,10 +269,12 @@ MAX_NOTES = 20000                   # characters the user may give the notes (Se
 
 def compaction_split(rows: list[dict]) -> int | None:
     """The id of the last message to fold into the summary: everything before
-    the latest user message. None when there is nothing old enough."""
+    the latest user message (the Hub's review, stored as a user row inside the
+    turn, is not one). None when there is nothing old enough."""
+    from .review import is_review_row
     last_user = None
     for r in rows:
-        if r["role"] == "user":
+        if r["role"] == "user" and not is_review_row(r):
             last_user = r["id"]
     if last_user is None:
         return None

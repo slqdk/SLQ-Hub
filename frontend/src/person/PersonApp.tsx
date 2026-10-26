@@ -689,7 +689,9 @@ export function PersonApp() {
                       <Items items={seg.items} actions={{ openArtifact, chatWithSkill, live: true,
                         // when the turn asks first (internet), she answers once: "always" is the owner's
                         approve: (callId, decision) => api(`/hub/api/device/turns/${liveHere.runId}/approve`,
-                          { body: { call_id: callId, decision: decision === "deny" ? "deny" : "allow" } }) }} />
+                          { body: { call_id: callId, decision: decision === "deny" ? "deny" : "allow" } }),
+                        stopThinking: () => api(`/hub/api/device/turns/${liveHere.runId}/stop-thinking`,
+                          { method: "POST" }) }} />
                       {i === segs.length - 1 && state}
                     </div>
                   ) : null)}

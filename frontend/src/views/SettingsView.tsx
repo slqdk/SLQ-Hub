@@ -1318,6 +1318,12 @@ function AgentTab({ s }: { s: S }) {
         { key: "user_name", label: "Your name, as the assistant uses it", type: "text" },
         { key: "effort", label: "Thinking effort when thinking is on", type: "select",
           options: [{ value: "low", label: "A little" }, { value: "medium", label: "Normal" }, { value: "xhigh", label: "Hard" }] },
+        { key: "thinking_budget", label: "Most thinking in one step", type: "select",
+          options: [{ value: "0", label: "No limit" }, { value: "2000", label: "2,000 tokens (about 1½ minutes at 25 tokens/s)" },
+            { value: "4000", label: "4,000 tokens (about 3 minutes)" }, { value: "8000", label: "8,000 tokens (about 5 minutes)" },
+            { value: "16000", label: "16,000 tokens (about 11 minutes)" }],
+          help: "When a step has thought this much, it stops thinking and acts on what it has: a tool call to check or " +
+            "measure, or its answer. While it thinks, Stop thinking beside the thinking does the same at once." },
         { key: "max_steps", label: "Most steps in one turn", type: "number", min: 5, max: 300,
           help: "A step is one answer from the model; tool calls each take one." },
         { key: "compact_at", label: "Condense the chat at this share of the context", type: "number", min: 0.3, max: 0.95, step: 0.05 },
@@ -1330,6 +1336,15 @@ function AgentTab({ s }: { s: S }) {
             ...(models?.llm ?? []).filter((m) => m.installed).map((m) => ({ value: m.id, label: m.name }))],
           help: "Stuck: it repeats itself, three tool calls in a row fail, or it asks for help. The turn goes on with this " +
             "model (the card switches, which takes a moment) and the chat says so. Not when this model is the one working." },
+        { key: "review", label: "Have the work checked before the answer", type: "bool",
+          help: "When a turn has made or changed code, pages or documents, another model checks the work in a fresh " +
+            "context the way you would use it - runs it, opens pages and plays games - and reports. With problems, the " +
+            "model that did the work goes on from the report. Once a turn; it takes a few minutes more." },
+        { key: "review_model", label: "Who checks the work", type: "select",
+          options: [{ value: "", label: "The model it hands over to (else the model that did it)" },
+            { value: "same", label: "The model that did the work" },
+            ...(models?.llm ?? []).filter((m) => m.installed).map((m) => ({ value: m.id, label: m.name }))],
+          help: "Another model sees other mistakes than the one that made them; switching models takes a moment." },
       ]} />
       <SectionForm s={s} section="libraries" title="Libraries" fields={[
         { key: "page_images", label: "Page images for visual search", type: "select", options: [

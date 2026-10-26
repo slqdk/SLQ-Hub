@@ -9,7 +9,9 @@ sound, a PDF and notes: the card under the answer), "announce" (speech),
 "song" (music), "horn" (a sound effect), "video" (Wan 2.2 5B: ffmpeg's test
 pattern when ffmpeg is installed), "game" (slow steps, to try
 sending a message while it works), "page" (makes an artifact), "react page" (a React artifact; "react page in the
-browser" tries it with web_app), "web game" (writes a game and plays it with web_app: needs --sandbox), a test case of
+browser" tries it with web_app), "web game" (writes a game and plays it with web_app: needs --sandbox), "review
+game" (a game the independent review finds a fault in, and the fix; every turn that writes a file or an artifact is
+reviewed - the reviewer here reads the last file and finds it fine), a test case of
 Settings -> Tests (tests/dev_evals.py), "endless" (a file each step until the
 step limit: the answer is marked unfinished, with Continue), "think" (reasons first), "long thinking" (a box full of
 thinking, streamed slowly), "search" (web search), "web picture" (a picture
@@ -202,6 +204,30 @@ def responder(body: dict) -> dict:
     if "continues in a new chat" in low:      # Continue in a new chat (0.27.0): the notes, slowly enough to watch
         return {"content": "## Goal\n- Carry on with the work of the chat before.\n## Decisions and facts\n"
                            "- Everything that mattered there.\n## Next\n- The next step.", "delay": 1.5}
+    if "Your task: an independent review" in str(msgs[0].get("content") or ""):     # 0.30.0: the reviewer
+        listed = re.findall(r"^- (\S+) \((?:new|changed),", text, re.M) + re.findall(r"its source: ([^\s;]+)", text)
+        if tools_done == 0 and listed:
+            return {"content": "I read the work first.", "tool_calls": [{"name": "read_file",
+                                                                         "arguments": {"path": listed[-1]}}]}
+        if "review game" in low:
+            return {"content": "1. game/game.js:1 - `TEAMS` is used but defined nowhere: choosing a team throws "
+                               "ReferenceError: TEAMS is not defined (read the file; no data file defines it).\n"
+                               "Checked: index.html loads game.js.\nVERDICT: PROBLEMS", "delay": 1}
+        return {"content": f"Read {', '.join(listed) or 'the files'}: they do what was asked.\nVERDICT: OK"}
+    if "review game" in low:                                     # a game the review finds a fault in, then fixed
+        if "independent reviewer" in str(msgs[-1].get("content") or "") and tools_done == 2:
+            return {"content": "The reviewer is right - I check and fix it.", "tool_calls": [{"name": "edit_file",
+                    "arguments": {"path": "game/game.js", "old_string": "TEAMS.map",
+                                  "new_string": "(window.TEAMS || []).map"}}]}
+        if tools_done == 0:
+            return {"tool_calls": [{"name": "write_file", "arguments": {"path": "game/index.html", "content":
+                    "<!doctype html><title>Holdspil</title><ul id=t></ul><script src=game.js></script>\n"}}]}
+        if tools_done == 1:
+            return {"tool_calls": [{"name": "write_file", "arguments": {"path": "game/game.js", "content":
+                    "document.getElementById('t').innerHTML = TEAMS.map((x) => `<li>${x}</li>`).join('');\n"}}]}
+        if tools_done == 2:
+            return {"content": "The game is ready: **game/index.html** lists the teams."}
+        return {"content": "Fixed: `TEAMS` was not defined - the list now starts empty until the team data is there."}
     scripted = dev_evals.answer(text, msgs, tools_done)          # Settings -> Tests: each case answered well
     if scripted is not None:
         return scripted

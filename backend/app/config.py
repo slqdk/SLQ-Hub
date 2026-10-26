@@ -138,9 +138,12 @@ DEFAULTS: dict = {
         "thinking_in_projects": True,
         "thinking_in_chats": False,
         "effort": "medium",
+        "thinking_budget": 8000,           # most thinking tokens in one model step (0 = no limit): then it acts
         "tool_output_chars": 12000,
         "user_name": "",                   # how the assistant calls the user ("" = the admin user name)
         "escalate_to": "qwen3.8-27b",      # a stuck turn goes on with this model ("" = it answers with what it has)
+        "review": True,                    # a turn that made code, pages or documents is checked by another model
+        "review_model": "",                # "" = the hand-over model above (else the same), "same", or a model id
     },
     "cloud": {
         "provider": "anthropic",           # anthropic | openai (any OpenAI-compatible endpoint)

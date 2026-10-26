@@ -24,6 +24,10 @@ class Run:
         # What the user sent while the turn works ({"id", "blocks"}): the loop hands it to the model after the
         # step it is on; whatever is left when the turn ends starts the next turn.
         self.inbox: list[dict] = []
+        # The local model step that is thinking now ({"url", "id"}: its server and completion id), for Stop thinking
+        # (0.30.0); the ids the user stopped.
+        self.thinking: dict | None = None
+        self.thinking_stopped: set[str] = set()
         self._cond = asyncio.Condition()
         self._seq = 0
 
@@ -69,6 +73,17 @@ class Run:
                     timed_out = True
             if timed_out:
                 yield {"seq": sent, "type": "ping", "t": round(time.time() - self.started, 3), "data": {}}
+
+    async def stop_thinking(self, llm) -> bool:
+        """End the thinking of the step that is thinking now (the Stop thinking button). Whether it ended."""
+        live = self.thinking
+        if not live or self.finished:
+            return False
+        ok = await llm.end_reasoning(live["url"], live["id"])
+        if ok:
+            self.thinking_stopped.add(live["id"])
+            self.emit("thinking_stopped", id=live["id"])
+        return ok
 
     async def ask_approval(self, call_id: str, tool: str, arguments: dict, timeout: float = 600, **extra) -> str:
         """Wait for the user's answer to a tool call: allow, always or deny (no answer in `timeout`: deny).

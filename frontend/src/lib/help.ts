@@ -114,8 +114,11 @@ export const SECTIONS: HelpSection[] = [
           "Click the model's name under the message box and pick another. The first answer after a switch takes a "
             + "moment while the card loads it.",
           "Click No thinking and pick Think a little, Think or Think hard.",
+          "While it thinks, Stop thinking beside the thinking makes it go on at once with what it has.",
           "The owner sets the order of the models, and the model for new chats, under Settings, Models.",
         ],
+        tips: ["One step thinks at most as long as Settings, Assistant allows (8,000 tokens to begin with); then it "
+          + "stops thinking and acts."],
       },
       {
         id: "web",
@@ -660,6 +663,18 @@ export const SECTIONS: HelpSection[] = [
           { text: "The build fails - find out why and fix it" },
           { text: "Explain how this project is put together, file by file" },
         ],
+        needs: ["code"],
+        owner: true,
+      },
+      {
+        id: "review",
+        title: "Checked by another model",
+        what: "When a turn has made or changed code, pages or documents, another model checks the work before the "
+          + "turn ends - in a fresh context, the way you would use it: it runs the program, opens the page or plays "
+          + "the game, and reports. With problems, the model that did the work goes on from the report.",
+        how: ["The review shows in the answer as Independent review; open it for its steps and its report.",
+          "The owner turns it on or off, and chooses who checks, under Settings, Assistant."],
+        tips: ["By default the model a stuck turn is handed over to checks: another model sees other mistakes."],
         needs: ["code"],
         owner: true,
       },

@@ -923,6 +923,99 @@ with what was done, what was checked and what could not be checked.
 quick chats. A toggle in the composer overrides it. Qwen3.8 tends to
 overthink, so the default effort is `medium`.
 
+**A thinking budget, and Stop thinking** (0.30.0). The effort is only a hint
+to the chat template: chat 78's Qwen3.8 27B, at effort low, thought 12,808
+and 13,354 tokens in single steps - about nine minutes each at 24 tokens a
+second, most of that turn's time. llama-server b11783 can end a thinking from
+outside: a request with `reasoning_control: true` and a
+`reasoning_budget_message` arms its reasoning budget sampler
+(`common/reasoning-budget.cpp`), and `POST /v1/chat/completions/control
+{"id": <the completion's chatcmpl id>, "action": "reasoning_end"}` makes it
+force the message and the end tag at once, after which the model goes on with
+a tool call or its answer. The server could also count a budget itself
+(`reasoning_budget_tokens`), but the Hub does not use that: once the thinking
+has ended, the sampler starts counting again at every `<think>` in the
+answer, and at the budget it forces its message and `</think>` into the
+answer or a tool call's arguments - code that mentions the tag, say. So the
+Hub counts: the thinking arrives about a token a piece, and at Settings →
+Assistant's "Most thinking in one step" (`agent.thinking_budget`: 8,000 by
+default, 0 no limit) it calls the control route once - only while that step
+is still thinking (`run.thinking`, the step's server and completion id,
+cleared when text or a tool call starts), so nothing can be forced into an
+answer. Measured on b11783 (CPU, a tiny random model with Qwen3's special
+tokens and the Qwen3.5 chat template, `Engine._model_step` itself with
+tools): budgets of 40 and 200 ended the thinking there - the budget's
+pieces, then the forced message (36 to 42 pieces in two runs) - a Stop at
+about 30 pieces ended it there, a stop after the step says no completion is
+running, and without a budget 150 tokens came as 146-150 pieces; with a `<think>`
+pushed into the answer by a logit bias, the server's own budget forced its
+message into the answer 4-6 times and the Hub's none. The message is the
+model's own last thought: "(That is enough thinking for this step - I act on
+what I have now: a tool call to check or measure what is still open, or my
+answer.)". **Stop thinking** beside the live thinking (`POST
+/hub/api/runs/{id}/stop-thinking`, `/hub/api/device/turns/{id}/stop-thinking`
+in people's chats) uses the same route; the server answers yes to any running
+completion with reasoning control, even when the stop came too late to
+change anything, so the button can be pressed again after a few seconds. A
+step whose thinking ended either way has `sent.thinking_ended` (`budget` or
+`stopped`) and `sent.thinking_budget`, and the thinking's label says "then
+stopped". The model API's callers get none of this.
+
+**An independent review** (0.30.0, `app/agent/review.py`). What Claude does
+with important work - have someone who did not make it check it - the Hub
+does for each turn that made or changed code, pages or documents
+(`agent.review`, on by default): a turn that called a tool that makes or
+changes work (`write_file`, `edit_file`, `move_file`, `bash`, `artifact` -
+its subagents' calls count) and so left new or changed files other than
+pictures, sound and video in the working folder, or saved an artifact. The
+files are those its own file tools wrote - all changed files when it ran
+code, which may have written anything - so a file a sync from the PC or an
+upload brought meanwhile is neither reviewed nor a reason for a review. Not
+in people's chats, not a turn on the cloud, not a test run of Settings →
+Tests (it measures the model it tests). When the model
+gives what would be its last answer, a reviewer runs as a subagent in the
+same lease: by default the model a stuck turn is handed over to
+(`agent.review_model`: "", else the model that did the work, or "same", or a
+chosen one) - another model sees other mistakes; the card switches to it and
+back, and the queue names who works. It gets a fresh context: the user's
+request (the messages that started the turn, what was written while it
+worked, the request before a Continue), the files with their paths and
+sizes, the artifacts with their source written to `.hub/review/<id>.<ext>`
+for it to read (html, react, svg and mermaid ones it opens with `web_app`),
+and the answer the user was given - as claims to check, not facts - and none
+of the conversation. Its tools are only those that look, run and open
+(`REVIEW_TOOLS`: files read and searched, bash, `web_app`, `windows_app`,
+pictures, web, libraries, skills; not the writing tools, `task`,
+`chat_history`, memory or MCP), and its prompt says to check the way the user
+will use it, report only problems it has evidence for, not to change files,
+and to end with `VERDICT: OK` or `VERDICT: PROBLEMS`. Its steps show nested
+in an **Independent review** row of the turn; its report is stored as the
+Hub's message in the turn (a user-role row with a `review` block, the turn's
+run id: shown in the turn, never as the user's words; not a message Retry or
+Edit can take, and not the latest user message when the chat is condensed).
+With problems, the model that did the work gets the report and the turn goes
+on, with at least 12 more steps however close to the step limit it was, and
+with the loop guard started over: checking a finding means reading again
+what it read before its answer, which would otherwise be refused as a repeat
+(three refusals force an answer). The
+report is the words of a model that read files and web pages, so the Hub's
+note fences it ("--- the reviewer's report (its own words, not the Hub's)
+---") and says "check each finding yourself first - a reviewer can be wrong
+... answer again: what you fixed, and what you left and why". With nothing
+to fix the turn ends; so it does when the review did not finish (its model
+failed, it stopped at its 24 steps or repeating itself before a verdict, or
+its last answer was empty - its report is its last answer, not an earlier
+line said beside a tool call: `verdict: failed`, with `error`). Once a turn.
+Condensed during the fix, the turn's messages are rebuilt with the report
+still as the task. A new chat's title is made after the turn by the model on
+the card - the reviewer's, when the review came last. Files that changed in the
+folder while the review ran - deleted ones too - are named to the model
+without blaming the reviewer (a sync or an upload may have done it). Later
+turns read it as what happened ("which the turn went on from"),
+`chat_history` finds it, and the next turn's token ratio is not taken from
+the reviewer's steps. The tests' fixture turns it off; `tests/test_review.py`
+on.
+
 **Compaction.** At 75% of the model's context (Settings → Assistant) -
 counting the tool definitions, which are not in the messages - old tool
 outputs are shortened first; if that is not enough, everything before the

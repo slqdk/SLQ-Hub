@@ -105,7 +105,10 @@ export type Block =
   /** Continue under an unfinished turn (0.22.0): the model is told why it stopped. */
   | { type: "continue"; reason: "limit" | "stopped"; steps?: number }
   /** The first message of a chat that continues another (0.27.0, Continue in a new chat). */
-  | { type: "handover"; chat_id: number; title: string };
+  | { type: "handover"; chat_id: number; title: string }
+  /** The independent review of a turn's work (0.30.0): stored as the Hub's message in the turn, shown in it. */
+  | { type: "review"; id: string; model: string; verdict: "ok" | "problems" | "failed"; report: string; files: string[];
+      artifacts?: string[]; seconds?: number; changed?: string[]; error?: string };
 
 export interface ImageRef { sha: string; mime?: string; caption?: string }
 export interface ArtifactRef { id: string; version: number; title: string; type: string; language?: string | null }

@@ -77,6 +77,9 @@ def app(hub_env, fakes):
     t = Transports(llm=router, runner=router, comfy=router, sandbox=router, web=router, speech=router)
     application = create_app(hub_env, t, startup=False)
     application.state.router = router
+    # The independent review (0.30.0) is on by default: it would take the scripted replies of every test whose turn
+    # writes a file. tests/test_review.py turns it on.
+    application.state.hub.settings.update("agent", {"review": False})
     return application
 
 

@@ -376,7 +376,10 @@ button.file-chip:disabled { cursor: default; }
 .msg-foot .stats { margin-left: 4px; font-variant-numeric: tabular-nums; }
 
 .thinking { border-left: 2px solid var(--rule); padding: 0 0 0 12px; }
-.thinking > button { display: inline-flex; align-items: center; gap: 6px; border: 0; background: none; padding: 2px 0; color: var(--ink-2); font-family: var(--font-plate); font-weight: 600; font-size: 14px; }
+.thinking-head { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; }
+.thinking-head > button:first-child { display: inline-flex; align-items: center; gap: 6px; border: 0; background: none; padding: 2px 0; color: var(--ink-2); font-family: var(--font-plate); font-weight: 600; font-size: 14px; }
+.thinking-stop { height: 26px; padding: 0 10px; font-size: 13px; }
+.review-report { padding: 4px 14px 10px 36px; font-size: 14.5px; }
 .thinking-body { color: var(--ink-2); font-size: 14.5px; white-space: pre-wrap; margin-top: 4px; max-height: 340px; overflow: auto; }
 
 .notice { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--ink-2); }

@@ -485,7 +485,8 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
                     onOpenFile={folder ? showFiles : undefined} />
                 ) : (
                   <div className="msg-assistant" key={`la${i}`}>
-                    <Items items={seg.items} actions={{ openArtifact, chatWithSkill, runId: live.runId, live: true }} />
+                    <Items items={seg.items} actions={{ openArtifact, chatWithSkill, runId: live.runId, live: true,
+                      stopThinking: () => api(`/hub/api/runs/${live.runId}/stop-thinking`, { method: "POST" }) }} />
                     {i === tail && state}
                   </div>
                 ))}

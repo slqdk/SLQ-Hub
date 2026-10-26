@@ -75,6 +75,24 @@ class LlmClient:
         except httpx.HTTPError as exc:
             raise self._unreachable(exc) from exc
 
+    async def end_reasoning(self, base_url: str, cmpl_id: str) -> bool:
+        """End the thinking of a completion that is running now (0.30.0: Stop thinking): llama-server's reasoning
+        control forces the budget's message and the end of thinking, and the model goes on with its answer. It
+        starts nothing - the turn that holds the scheduler's ticket for this server asks it about its own request.
+        Whether the server did it (False: no such completion running, or no reasoning control on it)."""
+        try:
+            async with self.client(timeout=10) as c:
+                r = await c.post(base_url + "/v1/chat/completions/control",
+                                 json={"id": cmpl_id, "action": "reasoning_end"})
+        except httpx.HTTPError:
+            return False
+        if r.status_code >= 400:
+            return False
+        try:
+            return bool(r.json().get("success"))
+        except (ValueError, AttributeError):
+            return False
+
     async def chat(self, base_url: str, payload: dict) -> dict:
         body = {**payload, "stream": False}
         body.pop("stream_options", None)

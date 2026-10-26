@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.30.0 - 2026-10-26
+
+- **A limit on thinking, and Stop thinking.** One step now thinks at most
+  8,000 tokens (Settings → Assistant → "Most thinking in one step"; 2,000 to
+  16,000, or no limit); then it stops thinking and acts on what it has - a
+  tool call to check something, or its answer. In chat 78 single steps
+  thought for nine minutes. While it thinks, **Stop thinking** beside the
+  thinking does the same at once, in your chats and in people's.
+- **The work is checked by another model before the answer.** When a turn
+  has made or changed code, pages, documents or an artifact, another model -
+  by default the one a stuck turn is handed over to - checks it in a fresh
+  context the way you would use it: it runs the program, opens the page or
+  plays the game, and reports. With problems, the model that did the work
+  goes on from the report and fixes what holds up. It shows in the answer as
+  **Independent review**; Settings → Assistant turns it off or chooses who
+  checks ("the model that did the work" avoids switching models). It takes
+  a few minutes more, once a turn; test runs are not checked.
+
 ## 0.29.0 - 2026-10-26
 
 - **The assistant can see and play what it makes for the browser.** A new
