@@ -138,8 +138,11 @@ async def _progress(ctx: ToolContext):
 
 
 def _save_outputs(ctx: ToolContext, items: list[dict], save_as: str | None, prompt: str) -> list[str]:
+    """Each picture as a file in the working folder - images/<time>-<prompt>.png, or save_as - in a plain chat too
+    (0.32.1): one with no file name could not be changed again, so the next "change it" edited the user's original.
+    Not in a person's chat unless asked: its files go to the device and back with every message."""
     paths = []
-    if not ctx.project and not save_as:
+    if getattr(ctx.engine, "device", None) is not None and not save_as:
         return paths
     for i, it in enumerate(items):
         if save_as:
@@ -150,6 +153,14 @@ def _save_outputs(ctx: ToolContext, items: list[dict], save_as: str | None, prom
         ctx.workdir.write(rel, blobs.read(it["sha"]), "agent", "hub", f"generated {rel}")
         paths.append(rel)
     return paths
+
+
+def _saved_text(paths: list[str]) -> str:
+    """Where the pictures went, and that a further change starts from them."""
+    if not paths:
+        return ""
+    which = "that file" if len(paths) == 1 else "one of those files"
+    return f" Saved as {', '.join(paths)} - to change a picture further, edit {which}."
 
 
 def _pipeline(ctx: ToolContext):
@@ -197,7 +208,7 @@ async def image_generate(ctx: ToolContext, args: dict) -> ToolResult:
         return gpu_failure("Image generation failed", exc)
     paths = _save_outputs(ctx, items, args.get("save_as"), prompt)
     desc = ", ".join(f"{it['width']}x{it['height']} seed {it['seed']}" for it in items)
-    where = f" Saved as {', '.join(paths)}." if paths else ""
+    where = _saved_text(paths)
     used = items[0].get("prompt_used")
     enhanced = f"\nERNIE-Image's prompt enhancer turned the prompt into: {used[:2000]}" if used else ""
     other = _other_model_note(ctx, args, items[0]["model"])
@@ -226,7 +237,7 @@ async def image_edit(ctx: ToolContext, args: dict) -> ToolResult:
     except ImageError as exc:
         return gpu_failure("Image editing failed", exc)
     paths = _save_outputs(ctx, items, args.get("save_as"), args.get("prompt") or "edit")
-    where = f" Saved as {', '.join(paths)}." if paths else ""
+    where = _saved_text(paths)
     return ToolResult(f"Edited image(s) ready ({len(items)}, {_size_note(items[0])}).{where}",
                       images=[{"sha": it["sha"], "mime": "image/png"} for it in items],
                       display={"generated": [{"sha": it["sha"], "seed": it["seed"], "path": p}
@@ -335,9 +346,12 @@ def _edit_dynamic(ctx: ToolContext) -> tuple[str, dict]:
 GENERATE_TEXT = ("Generate images from a text prompt with the model chosen for this chat (Settings -> Assistant -> "
                  "Images by default). Write a detailed English prompt: subject, style, composition, lighting, any "
                  "exact text in quotes. Takes 15-90 s per image.")
-EDIT_TEXT = ("Edit images with an instruction (Qwen-Image 2.1): change, add or remove things, restyle, combine up to "
-             "10 reference images ('put the person from image 1 into the scene of image 2'). The output keeps the "
-             "first image's proportions.")
+EDIT_TEXT = ("Edit images with an instruction (Qwen-Image 2.1): change, add or remove things, restyle, combine "
+             "several reference images (up to 10; FLUX.2 klein uses the first 6). The output keeps the first "
+             "image's proportions, so put first the picture whose scene and framing should stay: images "
+             "[\"sofa.jpg\", \"dog.jpg\"] with 'put the dog from image 2 on the sofa in image 1'. To change a picture "
+             "you made or edited before, edit its newest file (the one its result named), not the original - unless "
+             "the user asks to start again from the original.")
 
 register(Tool("image_generate", GENERATE_TEXT, _generate_params(["qwen-image-2.1"]), image_generate,
               available=_images_ready, in_subagent=False, group="images", dynamic=_generate_dynamic))

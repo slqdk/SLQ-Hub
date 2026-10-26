@@ -17,7 +17,7 @@ reminder at step 15, then it writes the file), a test case of
 Settings -> Tests (tests/dev_evals.py), "endless" (a file each step until the
 step limit: the answer is marked unfinished, with Continue), "think" (reasons first), "long thinking" (a box full of
 thinking, streamed slowly), "search" (web search), "web picture" (a picture
-from the web in the answer), "picture" (an image),
+from the web in the answer), "picture" (an image), "darker" (edits the newest picture it made, by its file),
 "loop" (repeats the same searches until the Hub makes it answer), "long chat" (a long answer with a big
 tool result, to fill the context: Continue in a new chat is offered), "make a skill" (writes a skill and shows its
 card with Add skill), "window" (writes a
@@ -362,6 +362,12 @@ def responder(body: dict) -> dict:
                                                                       "title": "Pump status", "type": "html",
                                                                       "content": PAGE}}]}
         return {"content": "The page is open on the right. Tell me what to change."}
+    if "darker" in low:               # 0.32.1: changes the newest picture it made - the file its result named
+        made = re.findall(r"Saved as (images/[^\s\"\\]+\.png)", json.dumps([m.get("content") for m in msgs]))
+        if tools_done == 0 and made:
+            return {"tool_calls": [{"name": "image_edit", "arguments": {"prompt": "make it darker",
+                                                                        "images": [made[-1]]}}]}
+        return {"content": "Darker now." if made else "There is no picture of mine to change yet."}
     if "picture" in low:
         if tools_done == 0:
             return {"tool_calls": [{"name": "image_generate", "arguments": {"prompt": "a red fox in the snow", "fast": True}}]}

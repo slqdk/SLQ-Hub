@@ -364,8 +364,11 @@ export const SECTIONS: HelpSection[] = [
           { text: "Remove the person on the left", attach: "a picture" },
           { text: "Make it look like a watercolour painting", attach: "a picture" },
           { text: "Put the dog from the first picture into the living room in the second", attach: "two pictures" },
+          { text: "Now give it a red collar too" },
         ],
-        tips: ["The result keeps the first picture's proportions."],
+        tips: ["The result keeps the proportions of the picture whose scene stays - the living room above.",
+          "Each change starts from the newest version, saved under the answer; say \"from the original\" to start "
+          + "over."],
         needs: ["images.edit"],
       },
       {

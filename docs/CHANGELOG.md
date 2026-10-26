@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.32.1 - 2026-10-26
+
+- **"Change it again" now changes the picture it made, not your original.**
+  In a chat outside a project, a picture the assistant made or edited was
+  shown but never saved, and nothing named it. So the next "change it" went
+  back to the picture you attached. Made and edited pictures are now saved
+  in the chat's folder (`images/…`), shown under the answer with Open,
+  Download and Add to chat, and the assistant is told to change that newest
+  file.
+- **Combining pictures puts the scene first.** The result keeps the
+  proportions of the first picture, so the assistant is told to pass the
+  picture whose scene should stay as the first one. For example, the sofa
+  comes first in "put the dog from picture 2 on the sofa in picture 1".
+
 ## 0.32.0 - 2026-10-26
 
 - **The check of the work always ends with a report.** In chat 126 the

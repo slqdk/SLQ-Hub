@@ -1609,8 +1609,18 @@ files afterwards.
   workflows exported from ComfyUI are a possible later addition.)
 - **Classical processing** (crop, scale, rotate, convert, compress, OCR) runs
   without the GPU: Pillow in the Hub, Tesseract in the sandbox.
-- **Outputs.** Generated images appear in the chat and are saved in the
-  project's `images/` folder when the chat is in a project.
+- **Outputs.** Generated and edited images appear in the chat and are saved
+  in the working folder's `images/` (`<time>-<prompt>.png`, or `save_as`),
+  where the card under the answer shows them - in a plain chat too since
+  0.32.1. The result names the file and says that a further change starts
+  from it. Before, a plain chat's picture had no file and no name, so Søren's
+  next "change it" edited his original again: the attachment was the only
+  picture the model could name. `image_edit`'s description says to edit the
+  newest file unless the user asks to start again from the original, and to
+  put first the picture whose scene and framing should stay (the output takes
+  the first image's proportions; its example used to put the scene second).
+  Not in a person's chat: its files go to the device and back with every
+  message, so a picture there still has no file of its own.
 - **Edits and cut-outs at the original's size** (0.22.2). Qwen-Image and
   FLUX.2 klein edit at about one megapixel and return that size: both test
   runs' 768×512 ball came back at 1248×832, and one model told the user it was
