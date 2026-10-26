@@ -261,6 +261,16 @@ wb.save("budget.xlsx")
     assert res["a cut-out was made"]["detail"] == "cut.png"                # the file, not what a failure would say
     assert _check_lib(tmp_path, "images.cutout", {"images": [], "expected": geo})["a cut-out was made"] == {
         "name": "a cut-out was made", "ok": False, "level": "must", "detail": "no new picture"}
+    # Søren's test run (0.30.1): the cut-out, a crop of it, then preview.png on a chessboard (opaque) - the cut-out
+    # at the picture's size is judged, not the newest picture
+    Image.new("RGBA", (768, 512), (120, 120, 120, 255)).save(tmp_path / "preview.png")
+    cut.crop((294, 210, 474, 390)).save(tmp_path / "crop.png")
+    files = [{"path": n, "mime": "image/png"} for n in ("preview.png", "crop.png", "cut.png")]      # newest first
+    res = _check_lib(tmp_path, "images.cutout", {"images": [{"path": "cut.png"}], "files": files, "expected": geo})
+    assert res["a cut-out was made"]["detail"] == "cut.png" and all(
+        c["ok"] for c in res.values() if c["level"] != "info"), res
+    opaque = _check_lib(tmp_path, "images.cutout", {"images": [], "files": files[:1], "expected": geo})
+    assert opaque["a cut-out was made"]["detail"] == "preview.png" and not opaque["most of it is transparent, not all"]["ok"]
     # the picture the turn left is judged, whichever way it was made: the second run's model turned the ball blue
     # with its own code (no image_edit call) - pixel for pixel right
     img = Image.open(tmp_path / "in.png").convert("RGB")

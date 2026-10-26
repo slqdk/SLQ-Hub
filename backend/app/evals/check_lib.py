@@ -383,9 +383,33 @@ def _edit(inp: dict) -> None:
           "should")
 
 
+def cutout_picture(inp: dict) -> str | None:
+    """The cut-out among the pictures the turn left: the newest with a transparent part at the input's size (a
+    cut-out keeps the picture's size), else the newest with a transparent part, else the newest picture. A test run
+    of Qwen3.8 27B made its cut-out right and then preview.png - the cut-out on a chessboard, opaque by design - and
+    the newest picture alone was judged."""
+    import numpy as np
+    from PIL import Image
+    pics = [f["path"] for f in inp.get("files", [])
+            if str(f.get("mime", "")).startswith("image/") and os.path.isfile(f["path"])]
+    pics += [x["path"] for x in reversed(inp.get("images", [])) if os.path.isfile(x["path"])]
+    size = tuple(inp.get("expected", {}).get("size") or ())
+    clear: list[tuple[str, tuple[int, int]]] = []
+    for path in dict.fromkeys(pics):
+        try:
+            img = Image.open(path)
+            if img.mode in ("RGBA", "LA", "PA") or "transparency" in img.info:
+                if (np.asarray(img.convert("RGBA"))[..., 3] < 32).any():
+                    clear.append((path, img.size))
+        except OSError:
+            continue
+    same = [path for path, wh in clear if size and wh == size]
+    return (same or [path for path, _ in clear] or [None])[0] or made_picture(inp)
+
+
 @case("images.cutout")
 def _cutout(inp: dict) -> None:
-    p = made_picture(inp)
+    p = cutout_picture(inp)
     if not check("a cut-out was made", p is not None, name_of(p) or "no new picture"):
         return
     import numpy as np

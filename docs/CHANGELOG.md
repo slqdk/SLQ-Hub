@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.30.1 - 2026-10-26
+
+- **Settings → Tests judges the right cut-out.** "Remove a background" looked
+  only at the newest picture the turn left. Qwen3.8 27B made its cut-out
+  correctly and then a preview of it on a chessboard (opaque on purpose), so
+  the case failed although the cut-out was right (94.8 % transparent). It now
+  judges the newest picture with a transparent background at the original
+  size.
+
 ## 0.30.0 - 2026-10-26
 
 - **A limit on thinking, and Stop thinking.** One step now thinks at most
