@@ -1003,11 +1003,10 @@ note fences it ("--- the reviewer's report (its own words, not the Hub's)
 ---") and says "check each finding yourself first - a reviewer can be wrong
 ... answer again: what you fixed, and what you left and why". With nothing
 to fix the turn ends; so it does when the review did not finish (its model
-failed, it stopped at its 24 steps or repeating itself before a verdict, or
-its last answer was empty - its report is its last answer, not an earlier
-line said beside a tool call: `verdict: failed`, with `error`). Once a turn,
-and not when the last answer replies to what the user wrote while the turn
-worked (read in that same step): chat 126's "kan du holde en pause?" was
+failed, or its last answer was empty - its report is its last answer, not an
+earlier line said beside a tool call: `verdict: failed`, with `error`). Once
+a turn, and not when the last answer replies to what the user wrote while
+the turn worked (read in that same step): chat 126's "kan du holde en pause?" was
 answered with a status, and a review would have sent the work back to go on.
 Condensed during the fix, the turn's messages are rebuilt with the report
 still as the task. A new chat's title is made after the turn by the model on
@@ -1018,6 +1017,48 @@ turns read it as what happened ("which the turn went on from"),
 `chat_history` finds it, and the next turn's token ratio is not taken from
 the reviewer's steps. The tests' fixture turns it off; `tests/test_review.py`
 on.
+
+**A review always ends with a report** (0.32.0, `loop.WrapUp`). Chat 126's
+reviewer (Qwen3.8 Standard, after the hand-over from Fable) used all its 24
+steps in 33 minutes - 82 s a step, 234 to 5,177 tokens each; 17 of its 27
+calls were bash, and it opened the game once, at its 26th call - and gave no
+report: "did not finish". Now its prompt states its budget ("You have 24
+steps and about 15 minutes") and keeps it on what the turn made and the
+request: not doing the work again, reading other files only as far as the
+listed ones need, checking claims about data with a few samples, the checks
+that matter first, and a line on what it did not check. Near its end the
+Hub appends a message - "this review is nearly over - you have 3 steps left"
+(when 3 steps are left, counting the one it is on) or "12 minutes of your
+15 minutes have passed" (at 80 % of its time) - to stop checking and report,
+and its last step - the 24th, when its time is up, or when it repeats itself
+(the loop guard's forced answer is this message too, for the reviewer) - is
+a request without tools, so it can only answer, and a cut-off answer there
+is not continued. The time is `agent.review_minutes` (Settings → Assistant
+→ "Time for the check", 15 by default; 5 to 30, or 0 for only the steps),
+counted from the review's start - the reviewer's model switch included (8 to
+11 s on VM 222) - and looked at between steps, so a step under way finishes:
+with the 27B's long steps a review can run a few minutes over. Time spent
+waiting for the user's answer to a question (`Engine.waited`, on the review's
+clock) does not count. A report the Hub asked for is a finished report: its
+VERDICT counts, without one it is "problems" (the work's model checks it),
+empty it is `failed` ("it gave no report when the Hub asked for it"). The
+review block keeps `wrapped` ("steps" or "time") and `limit` ("24 steps",
+"15 minutes"); the review row shows "Asked to finish and report (3 of its 24
+steps left)" and "Its last step, without tools" among its steps, and once
+opened "It was asked to finish near its limit of 15 minutes, so it may not
+have checked everything" - which the work's model is told too. NOTES.md at
+the top of the folder is the work's notes, not its work: it is not among the
+reviewed files (chat 126's was, 9 KB of claims about DB1), and a turn that
+only wrote it is not reviewed. The reviewer's (and subagents') calls are not
+stored as messages, so each tool step at depth 1 keeps its call (300
+characters) and result (200, whitespace joined) with the parent's id: the
+export's transcript lists the reviewer's steps under the review (in code
+spans - a page's `<style>` read by the reviewer must not leak into the
+Markdown), and the chat view gets the runs without them. A lone surrogate in
+those (half an emoji in a call's arguments) is stored as "?"; the export's
+ZIP and the event stream write one as "?" too instead of failing. Chat 128's
+review, before this, took 11 steps and 8.4 minutes and gave its verdict -
+within the new limits.
 
 **Compaction.** At 75% of the model's context (Settings → Assistant) -
 counting the tool definitions, which are not in the messages - old tool
@@ -1109,7 +1150,13 @@ before it runs out, so the context is kept small all along, not only at 75%:
   and `artifact` now refuse text with one of the Hub's marks in it (`MARK` in
   `context.py`: `cut_text`'s, `shorten_result`'s with the reasons the code
   gives, and `clip`'s "... [N characters omitted] ...") unless the file has it
-  already, and say what the mark is. Text written with bash is not checked.
+  already, and say what the mark is. Since 0.32.0 `bash` does not run a
+  command with one in it either (chat 128: Fable copied a Python script from
+  its own earlier call, which the Hub had shortened in the context, and it
+  failed with a SyntaxError; two `write_file`s of the same copy were refused,
+  and the three failures in a row handed the turn to Qwen3.8 Standard, which
+  wrote the file in full at once). What code writes into a file is not
+  checked.
 
 **chat_history** (0.27.0, `app/agent/tools/history.py`). Search (BM25 over
 each message's text, tool calls and results; Danish letters are word
@@ -1211,8 +1258,16 @@ with the last run that used it. The UI shows a summary line under each answer
 the API and in the troubleshooting export.
 
 **Hand-over** (`Engine._stuck`). A turn is stuck when the loop guard trips,
-when three tool calls in a row fail, when the same call is made three times
-in six, or when the model calls `escalate`. A failure of the card or ComfyUI
+when three tool calls in a row fail (any call that works sets the count back
+to nought; a command that exits with another code than 0 is a failure - grep
+that finds nothing too), when the same call is made three times in six, or
+when the model calls `escalate`. Søren asked (0.32.0) whether three is too
+few: in the two hand-overs his exports show, chat 126 was the loop guard
+(the same `read_file` three times) and chat 128 the same mistake three times
+in a row (text copied with the Hub's shortening mark in it, above) that the
+stronger model got right at its first try - while five single failures
+earlier in that turn, each followed by a call that worked, did not count
+together. So it stays three. A failure of the card or ComfyUI
 (a picture, sound or video tool's `hub_fault`: ComfyUI's or the scheduler's
 error, running out of memory) does not count (0.22.1): the first test run
 handed a video turn to Qwen3.8 27B after three out-of-memory failures, which

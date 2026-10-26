@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.32.0 - 2026-10-26
+
+- **The check of the work always ends with a report.** In chat 126 the
+  reviewer used all its 24 steps in 33 minutes and gave no verdict. It now
+  has a time limit as well - Settings → Assistant → "Time for the check",
+  15 minutes by default. Near the end (3 steps before its 24, or after 80 %
+  of its time) it is told to stop checking and write its report, and its
+  last step can only answer. You always get its report and verdict, with
+  what it did not get to check. The review shows when it was asked to
+  finish.
+- **The reviewer checks the work, not the task all over again.** It is told
+  not to redo the analysis: it checks the files and artifacts the turn made
+  against your request, and checks claims about data with a few samples.
+  NOTES.md is no longer one of the files it checks. It holds the notes, not
+  the work.
+- **The export shows what the reviewer did.** It lists every call and a bit
+  of what each returned, under the review in the transcript.
+- **A script copied with the Hub's "[shortened by …]" mark in it is not
+  run.** In chat 128 such a script failed with a SyntaxError, and two file
+  writes of the same copy were refused. Together that was three failures in
+  a row, so the turn was handed over to Standard. The assistant is now told
+  what is wrong, as it already was for files.
+- **Half an emoji in a call no longer breaks the export or the live view.**
+
 ## 0.31.0 - 2026-10-26
 
 - **The work's notes as a file: NOTES.md.** The chat's notes are written into

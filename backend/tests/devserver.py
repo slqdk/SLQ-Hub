@@ -11,8 +11,9 @@ pattern when ffmpeg is installed), "game" (slow steps, to try
 sending a message while it works), "page" (makes an artifact), "react page" (a React artifact; "react page in the
 browser" tries it with web_app), "web game" (writes a game and plays it with web_app: needs --sandbox), "review
 game" (a game the independent review finds a fault in, and the fix; every turn that writes a file or an artifact is
-reviewed - the reviewer here reads the last file and finds it fine), "long work" (17 steps: the NOTES.md reminder at
-step 15, then it writes the file), a test case of
+reviewed - the reviewer here reads the last file and finds it fine), "slow review" (a reviewer that keeps reading
+until its last step, which has no tools: the Hub's two messages in the review), "long work" (17 steps: the NOTES.md
+reminder at step 15, then it writes the file), a test case of
 Settings -> Tests (tests/dev_evals.py), "endless" (a file each step until the
 step limit: the answer is marked unfinished, with Continue), "think" (reasons first), "long thinking" (a box full of
 thinking, streamed slowly), "search" (web search), "web picture" (a picture
@@ -210,11 +211,24 @@ def responder(body: dict) -> dict:
         if tools_done == 0 and listed:
             return {"content": "I read the work first.", "tool_calls": [{"name": "read_file",
                                                                          "arguments": {"path": listed[-1]}}]}
+        if "slow review" in low:          # 0.32.0: it keeps looking until its last step, which has no tools
+            if not body.get("tools"):
+                return {"content": "1. game/score.js:1 - the score is never reset between rounds (read the file).\n"
+                                   "Checked: the file loads.\nNot checked: the sound.\nVERDICT: PROBLEMS", "delay": 0.5}
+            return {"tool_calls": [{"name": "read_file", "arguments": {"path": listed[-1] if listed else "game",
+                                                                       "limit": tools_done + 1}}], "delay": 0.15}
         if "review game" in low:
             return {"content": "1. game/game.js:1 - `TEAMS` is used but defined nowhere: choosing a team throws "
                                "ReferenceError: TEAMS is not defined (read the file; no data file defines it).\n"
                                "Checked: index.html loads game.js.\nVERDICT: PROBLEMS", "delay": 1}
         return {"content": f"Read {', '.join(listed) or 'the files'}: they do what was asked.\nVERDICT: OK"}
+    if "slow review" in low:          # 0.32.0: a reviewer that reports only when the Hub asks it to
+        if "independent reviewer" in str(msgs[-1].get("content") or ""):
+            return {"content": "Fixed: the score starts at 0 each round."}
+        if tools_done == 0:
+            return {"tool_calls": [{"name": "write_file", "arguments": {"path": "game/score.js",
+                                                                        "content": "let score = 0;\n"}}]}
+        return {"content": "The score file is ready: **game/score.js**."}
     if "review game" in low:                                     # a game the review finds a fault in, then fixed
         if "independent reviewer" in str(msgs[-1].get("content") or "") and tools_done == 2:
             return {"content": "The reviewer is right - I check and fix it.", "tool_calls": [{"name": "edit_file",

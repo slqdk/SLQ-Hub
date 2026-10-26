@@ -74,6 +74,37 @@ def _fence(text: str, lang: str = "") -> str:
     return f"{ticks}{lang}\n{text.rstrip(chr(10))}\n{ticks}"
 
 
+def put(z, name: str, text: str) -> None:
+    """A text into the ZIP as UTF-8, a lone surrogate (half an emoji in a call's arguments, still in the live events)
+    as "?" rather than the whole export failing."""
+    z.writestr(name, text.encode("utf-8", "replace"))
+
+
+def _code(text: str) -> str:
+    """Inline code that a backtick in the text cannot end."""
+    ticks = "`" * (1 + max((len(m) for m in re.findall(r"`+", text)), default=0))
+    return f"{ticks} {text} {ticks}"
+
+
+def review_steps(run: dict | None, review_id: str | None) -> list[str]:
+    """What the reviewer did (0.32.0): its calls - kept in the run's steps, since its messages are not stored - and
+    the Hub telling it to finish, as Markdown lines."""
+    lines = []
+    for s in (run or {}).get("steps") or []:
+        if not review_id or s.get("parent") != review_id:
+            continue
+        if s.get("type") == "tool":                  # its result in code too: a page's <style> must not leak out
+            said = f": {_code(s['result'])}" if s.get("result") else ""
+            lines.append(f"{len(lines) + 1}. {_code(s.get('name') or '?')} {_code(s.get('call') or '{}')} - "
+                         f"{'ok' if s.get('ok') else 'failed'}, {s.get('seconds')} s{said}")
+        elif s.get("type") == "wrap_up":
+            what = "its last step, without tools" if s.get("last") else "told to finish and report"
+            why = "its steps" if s.get("why") == "steps" else "its time"
+            lines.append(f"{len(lines) + 1}. *(SLQ Hub: {what} - {why}, at step {s.get('step')} after "
+                         f"{s.get('minutes')} min)*")
+    return lines
+
+
 def _short_args(raw: str) -> str:
     """A tool call's arguments with long strings shortened (the bundle has them whole)."""
     try:
@@ -208,6 +239,11 @@ def transcript(chat: dict, project: dict | None, rows: list[dict], runs: list[di
                     b.get("verdict"), "did not finish" + (f" ({b['error']})" if b.get("error") else ""))
                 what = ", ".join([*(b.get("files") or []), *(f"artifact {a}" for a in b.get("artifacts") or [])])
                 out += [f"**Independent review** by {b.get('model')}: {said} ({b.get('seconds')} s; {what})", ""]
+                if b.get("wrapped") and b.get("limit"):
+                    out += [f"*It was asked to finish near its limit of {b['limit']}.*", ""]
+                trail = review_steps(by_run.get(row.get("run_id")), b.get("id"))
+                if trail:
+                    out += ["<details><summary>The reviewer's steps</summary>", "", *trail, "", "</details>", ""]
                 if b.get("report"):
                     out += [_fence(b["report"]), ""]
                 if b.get("changed"):
@@ -502,15 +538,15 @@ async def bundle(hub, agent, chat: dict) -> bytes:
                 "files": files,
                 "made": made,
             }
-            z.writestr("chat.json", json.dumps(chat_json, ensure_ascii=False, indent=1))
-            z.writestr("context.json", json.dumps(context, ensure_ascii=False, indent=1))
-            z.writestr("transcript.md", transcript(chat, project, rows, runs, version, paths))
+            put(z, "chat.json", json.dumps(chat_json, ensure_ascii=False, indent=1))
+            put(z, "context.json", json.dumps(context, ensure_ascii=False, indent=1))
+            put(z, "transcript.md", transcript(chat, project, rows, runs, version, paths))
             for r in live:
-                z.writestr(f"events/{r.id}.json", json.dumps(
+                put(z, f"events/{r.id}.json", json.dumps(
                     {"run": r.id, "status": r.status, "inbox_waiting": len(r.inbox), "events": merge_events(r.events)},
                     ensure_ascii=False, indent=1))
-            z.writestr("logs/queue.json", json.dumps(_queue_around(runs), ensure_ascii=False, indent=1))
-            z.writestr("logs/llama-server.txt", log_text)
+            put(z, "logs/queue.json", json.dumps(_queue_around(runs), ensure_ascii=False, indent=1))
+            put(z, "logs/llama-server.txt", log_text)
             z.writestr("README.txt", README.format(id=chat["id"], title=chat.get("title") or "", at=_when(now_iso()),
                                                    version=version, runs=len(live)))
         return buf.getvalue()

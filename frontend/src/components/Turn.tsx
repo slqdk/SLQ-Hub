@@ -135,7 +135,7 @@ function ReviewRow({ item, actions }: { item: ReviewItem; actions: TurnActions }
     : [files ? `${files} file${files > 1 ? "s" : ""}` : "", arts ? `${arts} artifact${arts > 1 ? "s" : ""}` : ""]
       .filter(Boolean).join(" and ");
   const steps = item.children && item.children.length > 0;
-  const note = open && (item.error || item.changed?.length);
+  const note = open && (item.error || item.changed?.length || (item.wrapped && item.limit));
   return (
     <div className="tool review">
       <button className="tool-head" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
@@ -157,6 +157,8 @@ function ReviewRow({ item, actions }: { item: ReviewItem; actions: TurnActions }
       {note && (
         <div className="tool-body review-report">
           {item.error && <p className="small faint">It did not finish: {item.error}.</p>}
+          {item.wrapped && item.limit && !item.error && <p className="small faint">It was asked to finish near its
+            limit of {item.limit}, so it may not have checked everything.</p>}
           {item.changed?.length ? <p className="small faint">Changed in the folder while it ran (the reviewer may not
             change files): {item.changed.join(", ")}</p> : null}
         </div>

@@ -5,10 +5,17 @@ was given (as claims to check), not the conversation, and it may read, run and o
 report is stored with the turn (a "review" block: shown in the turn, and to the model as the Hub's note, with the
 report fenced as the reviewer's own words); when it found problems, the model that did the work gets the report and
 goes on - once a turn. Chat 79 was the case: a game handed over without ever being opened, whose data file did not
-parse."""
+parse.
+
+Since 0.32.0 a review always ends with a report: chat 126's reviewer used all its 24 steps in 33 minutes - 17 of
+its 27 calls were bash, the game opened once, at the end - and gave none. Its prompt keeps it on what the turn made
+and the request (not doing the work again), its time is limited (Settings -> Assistant, 15 minutes by default), and
+near the end - 3 steps before its step limit, or at 80% of its time - the Hub tells it to finish and report; its last
+step has no tools (loop.WrapUp). NOTES.md is the work's notes, not its work: not reviewed."""
 from __future__ import annotations
 
 import asyncio
+import math
 import re
 import secrets
 import time
@@ -18,8 +25,11 @@ from ..chats import store as chats
 from ..gpu.scheduler import SchedulerError
 from ..llm.client import LlmError
 from ..projects import store as projects
+from .notes_file import NAME as NOTES_NAME
 
 REVIEW_STEPS = 24
+WRAP_UP_LEFT = 3                    # steps before its limit at which the reviewer is told to report (0.32.0)
+CLOCK = time.monotonic              # the review's clock (WrapUp): the tests turn it
 # What the reviewer may use: look, run, open - nothing that writes into the folder, makes media, asks a subagent or
 # reads the conversation it is meant not to have seen (chat_history).
 REVIEW_TOOLS = {"list_files", "read_file", "search_files", "bash", "web_app", "windows_app", "view_image", "image_ocr",
@@ -41,18 +51,31 @@ REPORT_END = "--- end of the reviewer's report ---"
 
 REVIEWER = """# Your task: an independent review
 You check another model's work before the user sees it. You see the work, not how it was made: the user's request,
-the files in the working folder, the artifacts (pages shown in the side panel) and the answer the user was given.
-- Check it the way the user will use it, before they do: run the program or its tests, open web pages, browser games
-  and html/react/svg/mermaid artifacts with web_app and play them, run Windows programs with windows_app, run code
-  with sample input, read the documents against the request.
+the files and artifacts (pages shown in the side panel) this turn made or changed, listed in the message, and the
+answer the user was given.
+- Check what was made against what was asked, the way the user will use it, before they do: run the program or its
+  tests, open web pages, browser games and html/react/svg/mermaid artifacts with web_app and play them, run Windows
+  programs with windows_app, run code with sample input, read the documents against the request.
+- Do not do the work again: you are not asked to solve the task yourself or to redo its analysis. Read other files
+  only as far as you need them to check the listed ones, and check claims about data with a few samples, not by
+  working it all out again.
 - Look for what is broken, missing or different from what was asked, and for claims in the answer that are not true.
 - Measure, do not guess: every problem you report needs its evidence - the command and its output, what a screenshot
   shows, the file and line. What you could not confirm, leave out or mark as unconfirmed.
 - Do not change, fix, create or delete files in the folder: you report, the other model fixes. Scratch files of your
   own go in .hub/tmp.
+- You have {budget}. Make the checks that matter most first - run it, open it, try what the user asked for - and
+  report once you have made them. Near the end the Hub asks for your report, and your last step has no tools.
 - Report the most important problems first, at most ten, one or two lines each with its evidence; then one line on
-  what you checked that works.
+  what you checked that works, and one on what you did not check.
 - End with exactly one line: VERDICT: OK when nothing needs fixing, or VERDICT: PROBLEMS when something does."""
+# The Hub's messages near the review's end (loop.WrapUp fills in {why}).
+WRAP_UP = ("(SLQ Hub: this review is nearly over - {why}. Stop checking now and write your report: the problems you "
+           "found, each with its evidence, what works, and what you did not check - then the VERDICT line. If one "
+           "finding needs one more check to be sure, make that check first; your last step has no tools.)")
+LAST_STEP = ("(SLQ Hub: this is the review's last step - {why} - and it has no tools. Write your report now with what "
+             "you have checked: the problems with their evidence, what works, what you did not check - and end with "
+             "the VERDICT line.)")
 
 PROMPT = """The user asked:
 {request}
@@ -67,9 +90,26 @@ def wanted(settings) -> bool:
     return bool(settings.get("agent", "review"))
 
 
+def review_seconds(settings) -> float:
+    """Settings -> Assistant's time for a review in seconds (0: no time limit; at most a day); the form saves it as
+    text."""
+    try:
+        minutes = float(settings.get("agent", "review_minutes") or 0)
+    except (TypeError, ValueError):
+        return 0.0
+    return min(minutes, 24 * 60) * 60 if math.isfinite(minutes) and minutes > 0 else 0.0
+
+
+def reviewer_text(steps: int, seconds: float) -> str:
+    from .loop import minutes_text
+    return REVIEWER.format(budget=f"{steps} steps" + (f" and about {minutes_text(seconds)}" if seconds else ""))
+
+
 def work_files(files: list[dict]) -> list[dict]:
-    """The files worth a review: not the pictures, sound and video the turn made."""
-    return [f for f in files if not str(f.get("mime") or "").startswith(MEDIA)]
+    """The files worth a review: not the pictures, sound and video the turn made, nor NOTES.md at the top of the
+    folder - the work's notes, not its work."""
+    return [f for f in files if not str(f.get("mime") or "").startswith(MEDIA)
+            and str(f.get("path") or "").lower() != NOTES_NAME.lower()]
 
 
 def made_something(steps: list[dict]) -> bool:
@@ -208,7 +248,8 @@ def work_text(files: list[dict], arts: list[dict]) -> str:
 
 def verdict(report: str, finished: bool = True) -> str:
     """ok, problems (also a finished report without the closing line: the other model checks it), or failed (no
-    report, or a reviewer that stopped - at its step limit, or repeating itself - before its verdict)."""
+    report, or one cut off by a step limit before its verdict). A report the Hub asked for - near the review's end,
+    or when it repeated itself - is a finished report (0.32.0)."""
     hits = VERDICT.findall(report or "")
     if not hits:
         return "problems" if finished and (report or "").strip() else "failed"
@@ -232,12 +273,15 @@ def review_text(block: dict, now: bool = False) -> str:
     note = (f" While the review ran, these changed in the working folder: {', '.join(block['changed'])} - the "
             "reviewer may not change files, so check them." if block.get("changed") else "")
     v = block.get("verdict")
-    if v == "ok":
-        return f"(SLQ Hub: an independent reviewer - {who}, in a fresh context - checked {what} and found nothing " \
-               f"to fix.{note})"
     if v == "failed":
         why = block.get("error") or block.get("report") or "it gave no report"
         return f"(SLQ Hub: the independent review of {what} did not finish: {why}.{note})"
+    if block.get("wrapped") and block.get("limit"):
+        note = (f" It was asked to finish near its limit of {block['limit']}, so it may not have checked "
+                f"everything.{note}")
+    if v == "ok":
+        return f"(SLQ Hub: an independent reviewer - {who}, in a fresh context - checked {what} and found nothing " \
+               f"to fix.{note})"
     head = f"(SLQ Hub: an independent reviewer - {who}, in a fresh context - checked {what}"
     if now:
         return (f"{head} after your answer.{note} Its report:\n\n{fenced(block.get('report') or '')}\n\nCheck each "
@@ -262,7 +306,7 @@ def reviewer_for(hub, engine) -> dict:
 async def review(agent, engine, chat: dict, project: dict | None, wd, before: dict | None, messages: list[dict],
                  persist) -> bool:
     """Run the review when this turn wants one. True: it found problems - the report is in messages, go on."""
-    from .loop import NO_ANSWER, Engine
+    from .loop import NO_ANSWER, Engine, WrapUp
     hub = engine.hub
     if (engine.depth or engine.device is not None or engine.ticket is None or before is None
             or engine.state.get("reviewed") or not wanted(hub.settings) or not made_something(engine.steps)):
@@ -291,7 +335,8 @@ async def review(agent, engine, chat: dict, project: dict | None, wd, before: di
     sub.top_model = engine.model["id"]
     if model["id"] == engine.model["id"]:
         sub.token_ratio = engine.token_ratio
-    system = agent.system_for(chat, project, wd, model, subagent=True) + "\n\n" + REVIEWER
+    seconds = review_seconds(hub.settings)
+    system = agent.system_for(chat, project, wd, model, subagent=True) + "\n\n" + reviewer_text(REVIEW_STEPS, seconds)
     paths, art_ids = [f["path"] for f in work], [a["id"] for a in arts]
     engine.run.emit("review", id=rid, state="started", model=label, model_id=model["id"], files=paths,
                     artifacts=art_ids)
@@ -300,6 +345,8 @@ async def review(agent, engine, chat: dict, project: dict | None, wd, before: di
         job.meta["model"] = model["id"]                # the queue says who works now
     t0 = time.monotonic()
     error = ""
+    # Near its end it is told to finish and report, and its last step has no tools: a report every time.
+    sub.wrap_up = wrap = WrapUp(WRAP_UP, LAST_STEP, seconds=seconds, left=WRAP_UP_LEFT, clock=CLOCK)
     try:
         await sub.loop([{"role": "system", "content": system}, {"role": "user", "content": prompt}],
                        persist=None, max_steps=REVIEW_STEPS)
@@ -307,10 +354,13 @@ async def review(agent, engine, chat: dict, project: dict | None, wd, before: di
         # returns when the last answer is empty (a verdict only thought, say).
         stopped = next((s["type"] for s in sub.steps if s.get("type") in ("loop", "limit")), None)
         report = (sub.answer or "").replace(NO_ANSWER, "").strip()
-        result = verdict(report, finished=stopped is None)
+        # Its last answer is a report the Hub asked for - near its end, or when it repeated itself - unless it ran
+        # into a step limit unasked (which the wrap-up leaves no room for).
+        result = verdict(report, finished=stopped != "limit")
         if result == "failed":
             error = ("it kept repeating the same steps" if stopped == "loop"
                      else f"it reached its limit of {REVIEW_STEPS} steps" if stopped == "limit"
+                     else "it gave no report when the Hub asked for it" if wrap.ended
                      else "it gave no report")
             report = ""
     except (LlmError, SchedulerError) as exc:            # its model would not load or answer: the turn ends as it is
@@ -328,6 +378,10 @@ async def review(agent, engine, chat: dict, project: dict | None, wd, before: di
         block["artifacts"] = art_ids
     if error:
         block["error"] = error
+    wrapped = wrap.warned or wrap.ended                # it was told to finish: by its steps, or by its time
+    if wrapped:
+        block["wrapped"] = wrapped
+        block["limit"] = wrap.limit(wrapped, REVIEW_STEPS)
     after_review = await asyncio.to_thread(projects.snapshot, wd.root)
     if after is not None and after_review is not None:
         changed = [f["path"] for f in projects.produced(after, after_review)]

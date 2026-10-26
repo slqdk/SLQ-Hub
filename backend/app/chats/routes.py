@@ -89,13 +89,20 @@ def context_use(hub, chat: dict, runs: list[dict]) -> dict:
     return {"used": used, "limit": limit, "condensed": bool(chat.get("summary_upto"))}
 
 
+def lean_runs(runs: list[dict]) -> list[dict]:
+    """The runs as the chat view uses them: the calls and results of subagents and the reviewer that the steps keep
+    for the export (0.32.0) left out - each chat sends all its runs whenever it is opened."""
+    return [{**r, "steps": [{k: v for k, v in s.items() if k not in ("call", "result")} for s in r.get("steps") or []]}
+            for r in runs]
+
+
 @router.get("/chats/{chat_id}")
 async def get_chat(chat_id: int, request: Request):
     chat = _chat_or_404(chat_id)
     agent = _agent(request)
     runs = store.runs_for_chat(chat_id)
     return {"chat": chat, "messages": store.messages(chat_id), "artifacts": store.list_artifacts(chat_id),
-            "runs": runs, "run": _run_info(agent.runs.active_for_chat(chat_id)),
+            "runs": lean_runs(runs), "run": _run_info(agent.runs.active_for_chat(chat_id)),
             "context": context_use(get_hub(request), chat, runs),
             "project": projects.get_project(chat["project_id"]) if chat.get("project_id") else None,
             "allowed": store.chat_permissions(chat_id)}
@@ -517,7 +524,8 @@ async def run_events(run_id: str, request: Request, after: int = 0,
             if ev["type"] == "ping":
                 yield ": ping\n\n"
                 continue
-            yield f"id: {ev['seq']}\ndata: {json.dumps(ev, ensure_ascii=False)}\n\n"
+            # (as bytes: a lone surrogate - half an emoji in a call's arguments - as "?", not a broken stream)
+            yield f"id: {ev['seq']}\ndata: {json.dumps(ev, ensure_ascii=False)}\n\n".encode("utf-8", "replace")
         yield "event: end\ndata: {}\n\n"
 
     return StreamingResponse(gen(), media_type="text/event-stream",

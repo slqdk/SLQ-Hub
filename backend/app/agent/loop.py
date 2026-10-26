@@ -16,6 +16,7 @@ import json
 import logging
 import re
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Awaitable, Callable
 
@@ -51,6 +52,7 @@ NO_ANSWER = "(The model kept repeating the same tool calls and gave no answer. A
 LOOP_REPEATS = 3
 LOOP_SAME_STEPS = 3
 REVIEW_FIX_STEPS = 12               # the steps the work has at least after a review that found problems (0.30.0)
+STEP_CALL, STEP_RESULT = 300, 200    # characters of a subagent's call and its result kept in the run's steps
 # A call the end of the context cut off (chat 21: a whole game in one write_file, 13 minutes of output, lost).
 CUT_OFF = "This call was cut off: your answer reached {where} after {chars:,} characters of its arguments, so it {what}."
 IN_PARTS = ("Write a long file in parts of at most a few hundred lines: write_file with the first part, then "
@@ -59,6 +61,68 @@ IN_PARTS = ("Write a long file in parts of at most a few hundred lines: write_fi
 
 def loop_notice(reason: str) -> str:
     return f"It was repeating itself ({reason}), so it was asked to answer with what it has."
+
+
+def utf8(text: str) -> str:
+    """Text that encodes as UTF-8: a lone surrogate (half an emoji in a call's arguments) becomes "?" - stored as it
+    is, it would make the chat fail to load."""
+    return text.encode("utf-8", "replace").decode("utf-8")
+
+
+def minutes_text(seconds: float, floor: bool = False) -> str:
+    m = int(seconds // 60) if floor else round(seconds / 60)
+    return f"{m} minute" + ("" if m == 1 else "s")
+
+
+WARN_SHARE = 0.8                    # of a WrapUp's time: then it is told to finish
+
+
+@dataclass
+class WrapUp:
+    """A subagent that must end with a report: the reviewer (0.32.0) - chat 126's review used all its 24 steps in 33
+    minutes and gave none. Near its end - `left` steps before its step limit, or after WARN_SHARE of `seconds` of
+    work - the Hub tells it to finish and report (`warn`, with {why}), and its last step - at the step limit, after
+    `seconds`, or when it is stuck in a loop - has no tools, so it can only answer (`last`, with {why}). The time is
+    checked between steps and leaves out waiting for the user's answer to a question (Engine.waited)."""
+    warn: str
+    last: str
+    seconds: float = 0.0               # 0: no time limit
+    left: int = 3
+    clock: Callable[[], float] = time.monotonic
+    start: float = 0.0                 # set when it is made
+    worked: float = 0.0                # seconds of work at the latest look
+    warned: str = ""                   # why it was told to finish: "steps" or "time"
+    ended: str = ""                    # why its last step came: "steps" or "time"
+
+    def __post_init__(self) -> None:
+        self.start = self.clock()
+
+    def due(self, step: int, max_steps: int, waited: float) -> tuple[str, str] | None:
+        """("last", why) when this step must be the last, ("warn", why) when it is time to say so, else None."""
+        self.worked = max(0.0, self.clock() - self.start - waited)
+        if step >= max_steps:
+            return "last", "steps"
+        if self.seconds and self.worked >= self.seconds:
+            return "last", "time"
+        if not self.warned:
+            if max_steps - step < self.left:
+                return "warn", "steps"
+            if self.seconds and self.worked >= self.seconds * WARN_SHARE:
+                return "warn", "time"
+        return None
+
+    def limit(self, why: str, max_steps: int) -> str:
+        return f"{max_steps} steps" if why == "steps" else minutes_text(self.seconds)
+
+    def warning(self, why: str, left: int) -> str:
+        reason = (f"you have {left} steps left" if why == "steps"
+                  else f"{minutes_text(self.worked, floor=True)} of your {minutes_text(self.seconds)} have passed")
+        return self.warn.format(why=reason)
+
+    def last_text(self, why: str, max_steps: int) -> str:
+        reason = {"steps": f"you have used your {max_steps} steps",
+                  "time": f"your {minutes_text(self.seconds)} are up"}.get(why, "you are repeating the same steps")
+        return self.last.format(why=reason)
 
 
 def _ensure_tools_loaded() -> None:
@@ -134,6 +198,8 @@ class Engine:
         self.device = None
         self.only: set[str] | None = None   # the only tools it may have (the reviewer's: review.REVIEW_TOOLS)
         self.top_model: str | None = None   # the turn's model, when this engine works for it with another (reviewer)
+        self.wrap_up: WrapUp | None = None  # it must end with a report (the reviewer): told so near its end
+        self.waited = 0.0                    # seconds spent waiting for the user's answer to a question (its clock)
         self.answer = ""                     # what the latest model step said (the loop returns the last non-empty)
         self.read_user_at = 0                # the step that read what the user wrote while the turn worked
         # NOTES.md in long work (0.31.0): whether to remind, the file as it was when last looked at, and when.
@@ -230,9 +296,10 @@ class Engine:
                 by_name = {t.name: t for t in tools}
                 schemas = self.schemas(tools)
                 self.schema_tokens = C.schema_tokens(schemas)
-            forced = bool(self.must_answer)
-            if forced:                            # stuck in a loop: no tools this time, only an answer
-                messages.append({"role": "user", "content": MUST_ANSWER})
+            forced_text = self._forced_text(messages, step, max_steps)
+            forced = bool(forced_text)
+            if forced:                            # stuck in a loop, or the reviewer's last step: only an answer
+                messages.append({"role": "user", "content": forced_text})
             try:
                 try:
                     res = await self._model_step(messages, [] if forced else schemas, step)
@@ -253,8 +320,8 @@ class Engine:
                     self.steps.append({"type": "refit", "step": step, "tokens": real, "context": room,
                                        "depth": self.depth})
                     messages = await self._fit(messages, compact)
-                    if forced and (messages[-1].get("content") != MUST_ANSWER):   # condensing rebuilt them
-                        messages.append({"role": "user", "content": MUST_ANSWER})
+                    if forced and (messages[-1].get("content") != forced_text):   # condensing rebuilt them
+                        messages.append({"role": "user", "content": forced_text})
                     res = await self._model_step(messages, [] if forced else schemas, step)
             except asyncio.CancelledError:
                 await self._save_partial(persist)
@@ -273,7 +340,7 @@ class Engine:
             messages.append(msg)
             notes = [self.pending_notice] if self.pending_notice else []
             self.pending_notice = ""
-            if forced:
+            if forced and self.must_answer:
                 notes.append(loop_notice(self.must_answer))
             blocks: list[dict] = [{"type": "notice", "text": n} for n in notes]   # shown, never sent to a model
             if res.get("reasoning"):
@@ -295,7 +362,9 @@ class Engine:
             if not calls:
                 if self.run.inbox and not self.depth and step < max_steps:
                     continue                      # the user wrote meanwhile: answer that too, in this turn
-                if res.get("finish_reason") == "length" and step < max_steps:
+                # The reviewer's last step is its last, cut off or not: its report is what it wrote.
+                last = forced and self.wrap_up is not None
+                if res.get("finish_reason") == "length" and step < max_steps and not last:
                     messages.append({"role": "user", "content": "(Your answer was cut off at the length limit. "
                                                                 "Continue exactly where you stopped.)"})
                     continue
@@ -640,12 +709,17 @@ class Engine:
         cancelled - the user pressed Stop - or fails, the turn is ending, so the card stays given up (the outer
         release() is then a no-op on it) rather than being taken back only to be let go again."""
         ticket = self.ticket
-        if ticket is not None:
-            await ticket.pause()
-        decision = await self.run.ask_approval(cid, name, args, **extra)    # Stop while waiting propagates from here
-        self.emit("approval_answered", id=cid, decision=decision)           # the buttons go, even while it queues
-        if ticket is not None and ticket.paused:
-            await self._resume(ticket)
+        clock = self.wrap_up.clock if self.wrap_up is not None else time.monotonic
+        t0 = clock()
+        try:
+            if ticket is not None:
+                await ticket.pause()
+            decision = await self.run.ask_approval(cid, name, args, **extra)    # Stop while waiting propagates
+            self.emit("approval_answered", id=cid, decision=decision)           # the buttons go, even if it queues
+            if ticket is not None and ticket.paused:
+                await self._resume(ticket)
+        finally:
+            self.waited += clock() - t0                 # the user's time, not the work's (WrapUp)
         return decision
 
     async def _resume(self, ticket) -> None:
@@ -675,8 +749,11 @@ class Engine:
     def _finish(self, name: str, cid: str, args: dict, result: ToolResult, t0: float) -> ToolResult:
         result.text = self._store_long(cid, result.text or "(no output)")
         secs = round(time.monotonic() - t0, 2)
-        self.steps.append({"type": "tool", "name": name, "ok": not result.is_error, "seconds": secs,
-                           "depth": self.depth})
+        rec = {"type": "tool", "name": name, "ok": not result.is_error, "seconds": secs, "depth": self.depth}
+        if self.depth:     # a subagent's or the reviewer's calls are kept nowhere else: the export shows them (0.32.0)
+            rec.update(parent=self.parent, call=utf8(json.dumps(args, ensure_ascii=False)[:STEP_CALL]),
+                       result=utf8(" ".join((result.text or "").split())[:STEP_RESULT]))
+        self.steps.append(rec)
         self.emit("tool_result", id=cid, name=name, ok=not result.is_error, text=result.text[:6000],
                   images=result.images, display=result.display, seconds=secs)
         self._watch(name, args, result)
@@ -703,6 +780,33 @@ class Engine:
         note = f"It was reminded to write what it found in {name} (step {step})."
         self.pending_notice = f"{self.pending_notice} {note}".strip()
         self.emit("notes_reminder", step=step, name=name)
+
+    def _forced_text(self, messages: list[dict], step: int, max_steps: int) -> str:
+        """The Hub's message for a step without tools, or "" when this step may use them: a model stuck in a loop
+        must answer, and a subagent that must end with a report (wrap_up: the reviewer) is told near its end to
+        finish - its last step only answers."""
+        w = self.wrap_up
+        if self.must_answer:
+            return w.last_text("loop", max_steps) if w is not None else MUST_ANSWER
+        if w is None:
+            return ""
+        due = w.due(step, max_steps, self.waited)
+        if due is None:
+            return ""
+        kind, why = due
+        rec = {"type": "wrap_up", "why": why, "step": step, "minutes": round(w.worked / 60, 1), "depth": self.depth,
+               "parent": self.parent}
+        shown = {"why": why, "step": step, "worked": round(w.worked), "limit": w.limit(why, max_steps)}
+        if kind == "warn":
+            w.warned = why
+            messages.append({"role": "user", "content": w.warning(why, max_steps - step + 1)})
+            self.steps.append(rec)
+            self.emit("wrap_up", left=max_steps - step + 1, **shown)
+            return ""
+        w.ended = why
+        self.steps.append({**rec, "last": True})
+        self.emit("wrap_up", last=True, **shown)
+        return w.last_text(why, max_steps)
 
     def _loop(self, reason: str) -> None:
         """The model is stuck: its next step must be an answer, without tools."""

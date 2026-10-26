@@ -442,6 +442,19 @@ async def test_a_mark_of_shortened_context_is_not_written_into_a_file(signed_in,
         {"content": "Done."}]
     run = await finish(app, await say(signed_in, c["id"], "Tilføj en linje"))
     assert [e["data"]["ok"] for e in run.events if e["type"] == "tool_result"] == [True]
+    # chat 128: a script copied from its own shortened call is not run either (it failed with a SyntaxError)
+    script = "python3 << 'EOF'\nteams = {'Coventry': 'Coventry City', 'Crystal Pal... [shortened by 4273 characters]\nEOF"
+    fakes.llama["replies"] = [{"tool_calls": [{"name": "bash", "arguments": {"command": script}}]},
+                              {"tool_calls": [{"name": "bash", "arguments": {"command": "grep -c id: data.js"}}]},
+                              {"content": "Done."}]
+    fakes.llama["requests"].clear()
+    fakes.sandbox["execs"].clear()
+    run = await finish(app, await say(signed_in, c["id"], "Lav listen"))
+    res = [e["data"] for e in run.events if e["type"] == "tool_result"]
+    assert [r["ok"] for r in res] == [False, True]
+    assert res[0]["text"].startswith('Not run: the command has "... [shortened by 4273 characters]" in it. That is '
+                                     "the Hub's mark for text left out of what you were shown")
+    assert [x["cmd"] for x in fakes.sandbox["execs"]] == ["grep -c id: data.js"]
 
 
 def test_every_mark_the_hub_makes_is_known_to_the_guard():

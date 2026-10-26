@@ -1345,6 +1345,13 @@ function AgentTab({ s }: { s: S }) {
             { value: "same", label: "The model that did the work" },
             ...(models?.llm ?? []).filter((m) => m.installed).map((m) => ({ value: m.id, label: m.name }))],
           help: "Another model sees other mistakes than the one that made them; switching models takes a moment." },
+        { key: "review_minutes", label: "Time for the check", type: "select",
+          options: [{ value: "5", label: "5 minutes" }, { value: "10", label: "10 minutes" },
+            { value: "15", label: "15 minutes" }, { value: "20", label: "20 minutes" }, { value: "30", label: "30 minutes" },
+            { value: "0", label: "No time limit (only its 24 steps)" }],
+          help: "Near the end - or 3 steps before its 24 - the reviewer is asked to finish, and its last step can only " +
+            "answer: you always get its report and verdict, with what it did not get to check. The time is looked at " +
+            "between its steps, so a slow model can go a few minutes over." },
         { key: "notes_file", label: "Keep the work's notes in NOTES.md", type: "bool",
           help: "A file in the chat's or project's folder: the Hub writes the chat's notes there when it condenses the " +
             "chat or continues it in a new one, reminds the assistant to write what it found in long work, and tells " +

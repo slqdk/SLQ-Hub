@@ -675,7 +675,9 @@ export const SECTIONS: HelpSection[] = [
           + "turn ends - in a fresh context, the way you would use it: it runs the program, opens the page or plays "
           + "the game, and reports. With problems, the model that did the work goes on from the report.",
         how: ["The review shows in the answer as Independent review; open it for its steps and its report.",
-          "The owner turns it on or off, and chooses who checks, under Settings, Assistant."],
+          "It has 24 steps and a time limit - 15 minutes unless the owner changes it; near the end it is asked to "
+          + "finish, so it always ends with a report and a verdict.",
+          "The owner turns it on or off, and chooses who checks and for how long, under Settings, Assistant."],
         tips: ["By default the model a stuck turn is handed over to checks: another model sees other mistakes."],
         needs: ["code"],
         owner: true,

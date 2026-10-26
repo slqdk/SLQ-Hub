@@ -106,9 +106,11 @@ export type Block =
   | { type: "continue"; reason: "limit" | "stopped"; steps?: number }
   /** The first message of a chat that continues another (0.27.0, Continue in a new chat). */
   | { type: "handover"; chat_id: number; title: string }
-  /** The independent review of a turn's work (0.30.0): stored as the Hub's message in the turn, shown in it. */
+  /** The independent review of a turn's work (0.30.0): stored as the Hub's message in the turn, shown in it.
+   * wrapped/limit (0.32.0): it was told to finish near its limit of steps or time ("24 steps", "15 minutes"). */
   | { type: "review"; id: string; model: string; verdict: "ok" | "problems" | "failed"; report: string; files: string[];
-      artifacts?: string[]; seconds?: number; changed?: string[]; error?: string };
+      artifacts?: string[]; seconds?: number; changed?: string[]; error?: string; wrapped?: "steps" | "time";
+      limit?: string };
 
 export interface ImageRef { sha: string; mime?: string; caption?: string }
 export interface ArtifactRef { id: string; version: number; title: string; type: string; language?: string | null }

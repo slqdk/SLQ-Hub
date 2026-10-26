@@ -45,6 +45,12 @@ async def bash(ctx: ToolContext, args: dict) -> ToolResult:
     cmd = (args.get("command") or "").strip()
     if not cmd:
         return ToolResult("command is required", is_error=True)
+    from .files import copied_mark
+    mark = copied_mark(cmd)
+    if mark:     # chat 128: a script copied from its own shortened call ran and failed with a SyntaxError (0.32.0)
+        return ToolResult(f"Not run: the command has \"{mark}\" in it. That is the Hub's mark for text left out of "
+                          "what you were shown - code with it in it is broken. Write that part in full (read the "
+                          "file or the source again if you need its text).", is_error=True)
     s = ctx.settings.get("sandbox")
     timeout = max(1, min(int(args.get("timeout") or s.get("timeout_s", 120)), int(s.get("max_timeout_s", 1800))))
     sub = args.get("cwd") or "."

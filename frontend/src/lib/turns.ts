@@ -42,7 +42,7 @@ export type Item =
 /** The independent review of the turn's work (0.30.0): another model's check, its steps while it runs. */
 export interface ReviewItem { kind: "review"; id: string; state: "running" | "ok" | "problems" | "failed"; model?: string;
   files?: string[]; artifacts?: string[]; report?: string; seconds?: number; changed?: string[]; error?: string;
-  children?: Item[] }
+  wrapped?: string; limit?: string; children?: Item[] }
 
 export interface UserTurn { type: "user"; message: Message }
 export interface AssistantTurn { type: "assistant"; key: string; runId: string | null; items: Item[]; run?: RunRecord;
@@ -80,7 +80,7 @@ export function isReview(m: Message): boolean {
 
 function reviewItem(b: Extract<Block, { type: "review" }>): ReviewItem {
   return { kind: "review", id: b.id, state: b.verdict, model: b.model, files: b.files, artifacts: b.artifacts,
-    report: b.report, seconds: b.seconds, changed: b.changed, error: b.error };
+    report: b.report, seconds: b.seconds, changed: b.changed, error: b.error, wrapped: b.wrapped, limit: b.limit };
 }
 
 export function findTool(items: Item[], id: string): ToolView | undefined {
@@ -302,6 +302,14 @@ function applyStream(items: Item[], ev: RunEvent): void {
     case "notes_reminder":                   // NOTES.md in long work (0.31.0)
       items.push({ kind: "notice", tone: "info", text: `It was reminded to write what it found in ${d.name} (step ${d.step}).` });
       break;
+    case "wrap_up": {                        // the reviewer near its end (0.32.0): told to finish, then a last step
+      const limit = String(d.limit ?? ""), time = d.why === "time";
+      items.push({ kind: "notice", tone: "info", text: d.last
+        ? `Its last step, without tools - only its report (its ${limit} ${time ? "are up" : "are used"}).`
+        : `Asked to finish and report (${time ? `after ${Math.floor(Number(d.worked) / 60)} of its ${limit}`
+          : `${d.left} of its ${limit} left`}).` });
+      break;
+    }
     case "review": {
       if (d.state === "started") {
         items.push({ kind: "review", id: d.id, state: "running", model: d.model, files: d.files,
@@ -309,7 +317,7 @@ function applyStream(items: Item[], ev: RunEvent): void {
       } else {
         const r = items.find((it): it is ReviewItem => it.kind === "review" && it.id === d.id);
         if (r) Object.assign(r, { state: d.verdict, report: d.report, seconds: d.seconds, changed: d.changed,
-          error: d.error });
+          error: d.error, wrapped: d.wrapped, limit: d.limit });
       }
       break;
     }
