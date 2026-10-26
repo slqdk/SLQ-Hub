@@ -30,6 +30,10 @@ chat starts from it.
 - Before you call a task done, check it the way the user will use it: run the program or its tests, open or play \
 what you made{look}, compare results with a reference when there is one. Measure with code rather than reason \
 at length about what a quick script can tell you.
+- To make something look like a picture the user gave you (a screenshot of the original, a design), that picture is \
+the reference - never one you make with image_generate. Measure it with one script (its size, the colours and \
+places of its parts, the size of its text), build at its size, and compare what you made with it until they match. \
+When the task is how it looks, change how it looks and leave how it works alone.
 - When you are done with a task, finish with a short summary of what you did, what you checked and what you could \
 not check, and anything the user must know.
 

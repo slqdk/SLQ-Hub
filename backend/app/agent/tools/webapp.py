@@ -13,7 +13,7 @@ import time
 from pathlib import Path
 
 import httpx
-from PIL import Image
+from PIL import Image, ImageOps
 
 from ...chats import store as chats
 from .base import Tool, ToolContext, ToolResult, clip, obj, register
@@ -193,11 +193,16 @@ def _steps(raw) -> list[dict]:
     return raw
 
 
+def _fit(size) -> list[int]:
+    """A size within the screens the browser opens (320x240 to 2560x1600)."""
+    return [max(320, min(2560, int(size[0]))), max(240, min(1600, int(size[1])))]
+
+
 def _screen(raw, default: tuple[int, int]) -> list[int]:
     m = re.fullmatch(r"\s*(\d{3,4})\s*[x×*]\s*(\d{3,4})\s*", str(raw or ""))
     if not m:
         return list(default)
-    return [max(320, min(2560, int(m.group(1)))), max(240, min(1600, int(m.group(2))))]
+    return _fit((m.group(1), m.group(2)))
 
 
 def _sees(ctx: ToolContext) -> bool:
@@ -241,6 +246,42 @@ def _report(res: dict, shots: int, sees: bool, name: str) -> str:
     if res.get("text") and not sees:
         lines.append("Text on the page:\n" + clip(res["text"], 2000)[0])
     return "\n".join(lines)
+
+
+def _original(ctx: ToolContext, ref, area_raw) -> tuple[bytes | None, tuple[int, int] | None, tuple | None]:
+    """compare's picture (a path in the working folder, or an attached picture's id), its size - the page opens at
+    it unless screen says otherwise - and compare_area's box in it. Raises ValueError."""
+    ref = str(ref or "").strip()
+    if not ref:
+        if area_raw not in (None, "", []):
+            raise ValueError("compare_area is a part of compare's picture: give compare (the picture) too")
+        return None, None, None
+    from .compare import area_box
+    from .images import _image_bytes
+    try:
+        data, _ = _image_bytes(ctx, ref)
+        with Image.open(io.BytesIO(data)) as img:
+            size = ImageOps.exif_transpose(img).size          # as compare turns it (a phone's photo)
+    except FileNotFoundError as exc:
+        raise ValueError(f"compare: no such picture in the working folder: {ref}") from exc
+    except (OSError, SyntaxError, Image.DecompressionBombError) as exc:
+        raise ValueError(f"compare: {ref} is not a picture the Hub can read ({exc})") from exc
+    return data, size, area_box(area_raw, size)
+
+
+def _compared(last: bytes | None, original: bytes, ref: str, area, images: list) -> str:
+    """The page's last screenshot against compare's picture (or the part of it compare_area gave), and the picture
+    of the two (0.35.0)."""
+    if last is None:
+        return f"Not compared with {ref}: there was no screenshot of the page."
+    from .compare import compare
+    from .images import _shown
+    try:
+        report, picture, _ = compare(last, original, area)
+    except (OSError, ValueError, SyntaxError, Image.DecompressionBombError) as exc:
+        return f"Not compared with {ref}: {exc}"
+    images.append(_shown(picture, "compared.png"))
+    return f"The last screenshot against {ref}:\n{report}"
 
 
 def _timeout(raw) -> int:
@@ -303,6 +344,7 @@ async def web_app(ctx: ToolContext, args: dict) -> ToolResult:
         try:
             steps = _steps(args.get("steps"))
             timeout = _timeout(args.get("timeout"))
+            original, original_size, area = _original(ctx, args.get("compare"), args.get("compare_area"))
             if aid:
                 root = wd.resolve(f"{out_rel}/page")
                 name = _artifact_page(ctx, aid, root, internet.asking(ctx.settings))
@@ -313,9 +355,10 @@ async def web_app(ctx: ToolContext, args: dict) -> ToolResult:
         except ValueError as exc:                     # JSON in steps that is not JSON is one too
             return ToolResult(str(exc), is_error=True)
         site = wd.rel(root)
+        default = _fit(original_size) if original_size else (PANEL if aid else SCREEN)    # compare's: its size
         req = {"root": wd.sandbox_path if site == "." else f"{wd.sandbox_path}/{site}",
                "path": path.resolve().relative_to(root.resolve()).as_posix(), "steps": steps,
-               "screen": _screen(args.get("screen"), PANEL if aid else SCREEN), "timeout": timeout,
+               "screen": _screen(args.get("screen"), default), "timeout": timeout,
                "out": f"{wd.sandbox_path}/{out_rel}", "online": bool(ctx.online)}
         if aid:                                       # the panel's frame: popups only while the internet is allowed
             req["sandbox"] = FRAME + ("" if internet.asking(ctx.settings) else " allow-popups")
@@ -335,6 +378,7 @@ async def web_app(ctx: ToolContext, args: dict) -> ToolResult:
             return ToolResult(f"The browser gave no result{why}, exit code {res.get('exit_code')}:\n{detail}",
                               is_error=True)
         images: list = []
+        last = None
         try:
             from .images import _shown
             for i in range(1, min(MAX_SHOTS, len(answer.get("shots") or [])) + 1):
@@ -345,6 +389,7 @@ async def web_app(ctx: ToolContext, args: dict) -> ToolResult:
                 with Image.open(io.BytesIO(data)) as img:
                     img.verify()
                 images.append(_shown(data, f"page-{i}.png"))
+                last = data
         except (OSError, ValueError, SyntaxError, Image.DecompressionBombError):
             pass                                      # the report, with the pictures that were whole
     finally:
@@ -353,6 +398,8 @@ async def web_app(ctx: ToolContext, args: dict) -> ToolResult:
     text = _report(answer, len(images), sees, name)
     if images and sees:
         text += "\nThe screenshots are shown below; click coordinates are pixels in them."
+    if original is not None:
+        text += "\n\n" + _compared(last, original, args.get("compare"), area, images)
     return ToolResult(text, images=images, is_error=not answer.get("ok"))     # the user sees them in any case
 
 
@@ -368,7 +415,12 @@ TEXT = ("Open a web page, browser app or game in a browser (Chromium) and see it
         "down, as in a game); {\"move\": [x, y]}; {\"scroll\": [x, y, 300]}; {\"wait\": 2}; {\"shot\": \"label\"}; "
         "{\"eval\": \"window.game.score\"} (a JavaScript expression's value - check state you cannot see). "
         "Coordinates are pixels in the screenshots. Each call opens the page afresh, so give every step for what you "
-        "want to see in one call.")
+        "want to see in one call. To make a page look like a picture - a screenshot of an original the user gave - "
+        "give compare: that picture's path; the page opens at its size and the last screenshot is compared with it: "
+        "how much matches, where it differs most with the colours on each side, and the two side by side with the "
+        "differences marked. compare_area compares one part of the picture only (\"x,y,width,height\" in its "
+        "pixels): to get one part right (the title bar), or when the rest differs on purpose (a photo you do not "
+        "have).")
 PARAMS = obj({"target": {"type": "string", "description": "An .html file in the working folder, or a folder with "
                                                           "index.html"},
               "artifact": {"type": "string", "description": "Instead of target: an html, react, svg or mermaid "
@@ -380,7 +432,13 @@ PARAMS = obj({"target": {"type": "string", "description": "An .html file in the 
                                                           "artifact; 390x844 for a phone)"},
               "root": {"type": "string", "description": "The folder served as the site's root, if not the page's "
                                                         "own (one that holds the page)"},
-              "timeout": {"type": "integer", "description": "Seconds for the whole run (default 30, max 120)"}})
+              "timeout": {"type": "integer", "description": "Seconds for the whole run (default 30, max 120)"},
+              "compare": {"type": "string", "description": "A picture in the working folder (e.g. an attached "
+                                                           "screenshot of the original) to compare the last "
+                                                           "screenshot with"},
+              "compare_area": {"type": "string", "description": "Only this part of compare's picture: "
+                                                                "\"x,y,width,height\" in its pixels, e.g. "
+                                                                "\"0,0,640,60\""}})
 ASKS = (" While the user has you ask before going online, the page loads only its own files - anything from the web "
         "(a CDN, an API) is blocked and listed as such.")
 

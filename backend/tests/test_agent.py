@@ -944,15 +944,17 @@ async def test_dense_text_is_fitted_by_the_real_token_count(signed_in, app, fake
 
 async def test_a_request_the_model_server_refuses_as_too_long_is_fitted_again(signed_in, app, fakes, monkeypatch):
     """Three hex dumps arrive in one step: the last step measured plain text, so the estimate says the next request
-    fits. The model server refuses it with its real size; that size sets the ratio and the request is shortened."""
+    fits. The model server refuses it with its real size; that size sets the ratio and the request is shortened.
+    (14,400: the estimate of the second request - the base prompt and three dumps - must fit three quarters of it;
+    0.35.0's working rule took it over 14,000's.)"""
     hub = app.state.hub
-    monkeypatch.setattr(hub.catalog, "context_per_request", lambda model_id: 14000)
+    monkeypatch.setattr(hub.catalog, "context_per_request", lambda model_id: 14400)
     c = await new_chat(signed_in)
     wd = hub.extras["agent"].workdir(chats.get_chat(c["id"]))
     for i in range(3):
         wd.write(f"hex{i}.txt", f"HEX {i}\n" + "0f a3 " * 800 + "\n", author="test", origin="test", message="hex")
     sizes: list = []
-    fakes.llama["responder"] = counting(14000, [
+    fakes.llama["responder"] = counting(14400, [
         {"content": "Reading the three dumps.",
          "tool_calls": [{"name": "read_file", "arguments": {"path": f"hex{i}.txt"}} for i in range(3)]},
         {"content": "The dumps differ at byte 4."}], sizes, hex_cost=3.0)

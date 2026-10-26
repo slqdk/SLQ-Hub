@@ -135,6 +135,9 @@ async def test_the_working_rules_are_in_the_prompt(signed_in, app, fakes):
     # 0.33.0: Søren's CM98 folder was 14 files side by side, a test script among them
     assert "Keep the folder in order, the way the user will look for things" in system
     assert "documentation and write-ups (a file format described, a report) in docs/" in system       # (0.34.0)
+    # 0.35.0: chat 135 made a "reference" with image_generate, and rewrote game.js twice while the task was the look
+    assert "that picture is the reference - never one you make with image_generate" in system
+    assert "When the task is how it looks, change how it looks and leave how it works alone." in system
     assert "Do not move the user's own files unless they ask. Scratch and test files go in .hub/tmp/" in system
 
 
@@ -167,6 +170,124 @@ async def test_a_page_is_opened_and_its_report_read(signed_in, app, fakes):
     assert "The page's alert (dismissed): Game over" in text
     assert "No uncaught errors" not in text
     assert not (folder / ".hub" / "web").exists() or not any((folder / ".hub" / "web").iterdir())
+
+
+def picture(w: int, h: int, bar: tuple | None = None) -> bytes:
+    """A dark screen with a bar across its top, as a title bar."""
+    from PIL import ImageDraw
+    img = Image.new("RGB", (w, h), (40, 40, 40))
+    if bar:
+        ImageDraw.Draw(img).rectangle((0, 0, w - 1, h * 50 // 480), fill=bar)
+    buf = io.BytesIO()
+    img.save(buf, "PNG")
+    return buf.getvalue()
+
+
+RED, BLUE = (170, 2, 15), (1, 32, 218)
+
+
+def test_a_page_against_the_picture_it_should_look_like():
+    """0.35.0 - Søren's chat 135: three screenshots of the original to copy, and no way to set the page beside
+    them. How much matches, where it differs most with the colours on each side, and a picture of the two."""
+    from app.agent.tools.compare import compare
+    original = picture(640, 480, RED)
+    text, shown, figures = compare(original, original)
+    assert figures["same"] == 100.0 and figures["mean_difference"] == 0 and "No area differs much" in text
+    text, shown, figures = compare(picture(640, 480, BLUE), original)              # the club's colour wrong
+    assert 85 < figures["same"] < 95
+    assert "- x 0-80, y 0-80: 36% match - original #aa020f, page #0120da" in text, text
+    assert len(figures["cells"]) == 6 and "y 80-160" not in text                    # only where it differs
+    with Image.open(io.BytesIO(shown)) as img:
+        assert img.size == (640 * 3 + 16, 480)                                     # original | page | marked
+        assert img.getpixel((2 * 648 + 10, 10))[0] > 200 and img.getpixel((2 * 648 + 10, 300))[0] < 120
+    text, _, figures = compare(picture(1280, 960, RED), original)                   # the page at another size
+    assert "compared at the original's size. Open the page at it (screen: \"640x480\")" in text
+    assert figures["same"] > 99
+    near = Image.new("RGB", (640, 480), (52, 52, 52))                               # 12 off everywhere: the same
+    buf = io.BytesIO()
+    near.save(buf, "PNG")
+    _, shown, figures = compare(buf.getvalue(), picture(640, 480))
+    assert figures["same"] == 100.0
+    with Image.open(io.BytesIO(shown)) as img:                                     # and no red for it
+        r, g, b = img.convert("RGB").getpixel((2 * 648 + 10, 300))
+        assert r == g == b, (r, g, b)
+
+
+def test_one_part_of_the_picture():
+    """compare_area: the title bar alone, or all but the original's photo - which the page does not have, and which
+    would otherwise fill the report. Places stay the original's pixels."""
+    from app.agent.tools.compare import area_box, compare
+    size = (640, 480)
+    assert area_box(None, size) is None and area_box("", size) is None and area_box([], size) is None
+    assert area_box("0,0,640,60", size) == (0, 0, 640, 60) == area_box([0, 0, 640, 60], size)
+    assert area_box("[0, 0, 640, 60]", size) == area_box("0 0 640 60", size) == (0, 0, 640, 60)
+    assert area_box("600,-10,100,100", size) == (600, 0, 640, 90)                    # clipped to the picture
+    for bad in ("0,0,640", "the title bar", "700,0,10,10", "0,0,1,1"):
+        with pytest.raises(ValueError):
+            area_box(bad, size)
+    with pytest.raises(ValueError, match=r'give x,y,width,height in the picture\'s pixels, e.g. "0,0,640,60"'):
+        area_box("top", size)
+    original = picture(640, 480, RED)
+    page = Image.new("RGB", size, (90, 90, 90))                                       # the right bar, not the photo
+    from PIL import ImageDraw
+    ImageDraw.Draw(page).rectangle((0, 0, 639, 50), fill=RED)
+    buf = io.BytesIO()
+    page.save(buf, "PNG")
+    page = buf.getvalue()
+    text, _, figures = compare(page, original)
+    assert figures["same"] < 15
+    text, shown, figures = compare(page, original, (0, 0, 640, 50))
+    assert text.startswith("Compared with the original (640x480), x 0-640, y 0-50 of it: 100.0% of the pixels match")
+    assert "No area differs much" in text and text.endswith("(red: where they differ) - that part of them.")
+    with Image.open(io.BytesIO(shown)) as img:
+        assert img.size == (640, 50 * 3 + 16)                                        # a strip: one above the other
+    text, shown, figures = compare(picture(640, 480, BLUE), original, area_box("100,0,200,100", size))
+    assert "x 100-300, y 0-100 of it" in text and figures["cells"]
+    assert all(100 <= c["box"][0] < c["box"][2] <= 300 and c["box"][3] <= 100 for c in figures["cells"])
+    assert "- x 100-120, y 0-20: 0% match - original #aa020f, page #0120da" in text, text          # 20x20 cells
+    text, shown, _ = compare(picture(640, 480, BLUE), original, area_box("10,10,20,20", size))   # small: larger
+    with Image.open(io.BytesIO(shown)) as img:
+        assert img.size == (80 * 3 + 16, 80)
+
+
+async def test_a_page_is_compared_with_the_original(signed_in, app, fakes):
+    browser(app, fakes)
+    c = await new_chat(signed_in)
+    folder = app.state.hub.env.workspace_dir / "chats" / str(c["id"])
+    game(folder)
+    (folder / ".hub" / "attachments").mkdir(parents=True)
+    (folder / ".hub" / "attachments" / "original.png").write_bytes(picture(640, 480, RED))
+    fake_pageshot(app, fakes, {**OPENED, "errors": [], "failed": [], "dialogs": [], "steps": []})
+    call(fakes, {"target": "game", "compare": ".hub/attachments/original.png"})
+    run = await finish(app, await say(signed_in, c["id"], "Få det til at ligne originalen"))
+    res = result_of(run, "web_app")
+    assert fakes.sandbox["pageshot"]["screen"] == [640, 480]                       # at the original's size
+    assert "The last screenshot against .hub/attachments/original.png:\nCompared with the original (640x480)" \
+        in res["text"]
+    assert "The page's screenshot is 42x30 and the original 640x480" in res["text"]
+    assert "Where it differs most" in res["text"] and len(res["images"]) == 3       # the two shots and the picture
+    tool = next(t for t in fakes.llama["requests"][0]["tools"] if t["function"]["name"] == "web_app")["function"]
+    assert "compare" in tool["parameters"]["properties"] and "give compare: that picture's path" in tool["description"]
+    call(fakes, {"target": "game", "compare": "nope.png"})                            # no such picture: said, no run
+    run = await finish(app, await say(signed_in, c["id"], "Igen"))
+    res = result_of(run, "web_app")
+    assert not res["ok"] and res["text"] == "compare: no such picture in the working folder: nope.png"
+    assert "compare_area" in tool["parameters"]["properties"]
+    assert "compare_area compares one part" in tool["description"]
+    call(fakes, {"target": "game", "compare": ".hub/attachments/original.png", "compare_area": "0,0,640,60"})
+    run = await finish(app, await say(signed_in, c["id"], "Titlen"))
+    res = result_of(run, "web_app")
+    assert "Compared with the original (640x480), x 0-640, y 0-60 of it:" in res["text"]
+    runs = len(fakes.sandbox["execs"])
+    for args, error in (({"compare_area": "0,0,640,60"}, "compare_area is a part of compare's picture: give compare "
+                                                         "(the picture) too"),
+                        ({"compare": ".hub/attachments/original.png", "compare_area": "the top"},
+                         "compare_area 'the top': give x,y,width,height in the picture's pixels")):
+        call(fakes, {"target": "game", **args})
+        run = await finish(app, await say(signed_in, c["id"], "Igen"))
+        res = result_of(run, "web_app")
+        assert not res["ok"] and res["text"].startswith(error), res["text"]
+    assert len(fakes.sandbox["execs"]) == runs                                         # no browser run for those
 
 
 async def test_a_clean_page_says_so_and_a_blind_model_reads_its_text(signed_in, app, fakes, monkeypatch):

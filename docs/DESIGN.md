@@ -609,7 +609,7 @@ message's time with the conversation.
 | `list_files`, `read_file`, `write_file`, `edit_file`, `search_files`, `move_file`, `delete_file` | The project's folder (or the chat's scratch folder). Every write is checked in as a sync revision, so everything can be restored. `read_file` on an image puts the image in front of the model. `write_file` with `append: true` adds to a file's end (0.16.2): a long file goes in parts. |
 | `bash` | Runs in the sandbox in the project folder, with a timeout and output limits. Long output goes to a file, and the model gets the head, the tail and the path. C# with the .NET 10 SDK (0.15.1, below). |
 | `windows_app` | A Windows desktop program (Windows Forms or WPF on .NET 10) run under Wine on a virtual screen in the sandbox, built first if it is a project: screenshots when its first window is up, at each `shot` step and at the end; steps click (by position or by the text on the screen), type, press keys, drag, scroll and wait (0.16.0, "Windows programs on a virtual screen" below). The owner's chats, where the sandbox has Wine. |
-| `web_app` | A web page, browser app or game from the working folder - or an HTML, React, SVG or Mermaid artifact, as the side panel runs it - opened in Chromium in the sandbox: screenshots, the console, uncaught errors with file and line, failed requests, alert texts; steps click (by position, CSS selector or text), type, press and hold keys, move, scroll, wait and evaluate JavaScript (0.29.0, "Web pages in a browser" below). The owner's chats, where the sandbox has the browser. |
+| `web_app` | A web page, browser app or game from the working folder - or an HTML, React, SVG or Mermaid artifact, as the side panel runs it - opened in Chromium in the sandbox: screenshots, the console, uncaught errors with file and line, failed requests, alert texts; steps click (by position, CSS selector or text), type, press and hold keys, move, scroll, wait and evaluate JavaScript (0.29.0, "Web pages in a browser" below); the last screenshot compared with a picture of the original, whole or a part of it (0.35.0). The owner's chats, where the sandbox has the browser. |
 | `view_image`, `image_transform`, `image_ocr` | Look at an image; crop, resize, rotate, convert and compress (Pillow); Tesseract OCR (dan+eng). |
 | `image_generate`, `image_edit`, `image_remove_background` | ComfyUI through the queue (the lease switches residency). |
 | `speech_generate`, `music_generate`, `sound_generate` | Audio files in the working folder (0.13.0, section 8): speech on the CPU (the speech service), music and sound effects in ComfyUI through the queue. Offered when a model for them is downloaded. |
@@ -924,6 +924,33 @@ is stopped, and runs older than ten minutes are swept).
   from building), asked every few minutes before a turn writes its prompt.
   The self-test opens a small page offline, types Danish letters into it and
   clicks its button by its text.
+- **Compared with the original** (0.35.0, `compare` and `compare_area`,
+  `app/agent/tools/compare.py`). Chat 135 was to make Søren's CM98 page look
+  exactly like three screenshots of the game. It made a "reference" with
+  image_generate, sampled one pixel per bash call, rewrote game.js twice and
+  never set its page beside the screenshots. `compare: "<picture>"` opens the
+  page at the picture's size (unless `screen` says otherwise) and compares the
+  last screenshot with it. The page is scaled to the picture's size when they
+  differ, and the report says so. The report gives:
+  - the share of pixels within 24 per colour channel (screenshots are often
+    JPEG), and the mean difference;
+  - the six cells that match least, from a grid of about 48 cells as square as
+    the area allows (8x6 for 640x480). Each cell gives its place in the
+    picture's pixels and the colour most of it has on each side (each
+    channel's median, so text over a face leaves the face);
+  - a picture: original | page | the page in grey with red only where a pixel
+    counts as different. A strip wider than twice its height is shown one
+    above the other, and a small area larger, pixel for pixel, up to 4x.
+
+  `compare_area: "x,y,width,height"` compares only that part, with places
+  still in the picture's pixels. It is for one part to get right (a title
+  bar), or for the parts a photo the page does not have leaves free: the
+  original's photo otherwise fills the six cells. The picture and the area are
+  checked before the browser runs. `compare_area` without `compare` is an
+  error. Measured on CM98 rebuilt part for part from the screenshots (not in
+  this repo): the whole screen matched 75% without the photo, the rows of
+  buttons 89-94%, the title bar 82%. The rest was the font and JPEG smear
+  along 1-pixel edges.
 
 **How it works** (0.29.0). Four rules in the base prompt bring it closer to
 how Claude works: for a known file format, protocol, game or program, look
@@ -944,6 +971,12 @@ docs?"), the structure that is there already followed; a single file and
 NOTES.md at the top), do not move the user's own files unless asked, and put
 scratch and test files in `.hub/tmp/` - which Files, the card under the answer
 and SLQ Sync leave out. An existing folder is tidied by asking for it.
+Since 0.35.0 a sixth, from chat 135. To make something look like a picture the
+user gave, that picture is the reference, never one made with image_generate.
+Measure it with one script (its size, the colours and places of its parts, the
+size of its text), build at its size, and compare until they match (`web_app`'s
+`compare`). When the task is the look, change the look and leave how it works
+alone: chat 135 rewrote game.js twice and ended up debugging the data.
 
 **Thinking.** The default is on for agent turns in projects and off for
 quick chats. A toggle in the composer overrides it. Qwen3.8 tends to

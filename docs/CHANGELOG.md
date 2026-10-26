@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.35.0 - 2026-10-26
+
+- **The assistant can set its page beside the original.** In chat 135 you
+  gave it three screenshots of Championship Manager 98 to copy. It made its
+  own "reference" picture with image_generate, sampled single pixels, and
+  rewrote game.js twice. It never compared its page with your screenshots.
+  Now `web_app` takes a picture to compare with. The page opens at the
+  picture's size, and the assistant gets:
+  - how much of the page matches,
+  - where it differs most, with the colour on each side,
+  - a picture of the original and the page side by side, with the
+    differences marked in red.
+
+  It can compare one part only, like the title bar. That is useful when the
+  original has a photo behind it that the page doesn't have.
+- **A picture you give it is the reference.** The assistant is told:
+  - never to make a reference with image_generate,
+  - to measure your picture in one script (size, colours, where things are,
+    text sizes),
+  - to build at its size and compare until they match,
+  - when the task is how it looks, to change the look and leave how it
+    works alone.
+
 ## 0.34.0 - 2026-10-26
 
 - **A project's total now includes chats moved into it.** CM98 said 2.04 kr
