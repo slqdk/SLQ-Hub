@@ -19,6 +19,14 @@ export function seconds(s: number | null | undefined): string {
   return `${Math.floor(m / 60)} h ${m % 60} min`;
 }
 
+/** How long something worked, roughly: "45 s", "12 min", "2 h 22 min". */
+export function worked(s: number | null | undefined): string {
+  const v = Math.max(0, Math.round(s ?? 0));
+  if (v < 60) return `${v} s`;
+  const m = Math.round(v / 60);
+  return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`;
+}
+
 export function ago(iso: string | number | null | undefined): string {
   if (!iso) return "";
   const t = typeof iso === "number" ? iso * 1000 : Date.parse(iso);

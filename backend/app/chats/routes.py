@@ -51,8 +51,10 @@ async def list_chats(request: Request, project_id: int | None = None, q: str = "
                      limit: int = 200):
     rows = store.list_chats(project_id, q.strip(), max(1, min(limit, 1000)), all_projects=all)
     agent = _agent(request)
+    more = store.runs_overview([r["id"] for r in rows]) if project_id is not None and not all else {}
     for r in rows:
         r["running"] = agent.runs.active_for_chat(r["id"]) is not None
+        r.update(more.get(r["id"], {}))
     return rows
 
 

@@ -177,6 +177,120 @@ async def test_a_projects_total_stays_when_its_chats_go(signed_in, app, fakes):
     assert after["turns"] == 2 and after["energy_wh"] == total["energy_wh"]
 
 
+def owner_rows(project_id: int) -> dict:
+    with db.connect() as con:
+        r = con.execute("SELECT COALESCE(SUM(turns), 0) turns, COALESCE(SUM(energy_wh), 0) energy_wh, "
+                        "COALESCE(SUM(cost), 0) cost FROM usage_daily WHERE who='owner' AND project_id=?",
+                        (project_id,)).fetchone()
+    return dict(r)
+
+
+async def test_a_chat_moved_into_a_project_takes_its_usage_along(signed_in, app, fakes):
+    """0.33.1 - Søren's CM98 said 2.04 kr while one of its chats alone said 2.72 kr: that chat had done its work
+    before it was moved in (0.31.0), counted for the owner without a project."""
+    ticking(app)
+    fakes.llama["replies"] = [{"content": "Done."}, {"content": "T"}]
+    c = await new_chat(signed_in)
+    await finish(app, await say(signed_in, c["id"], "go"))
+    await finish(app, await say(signed_in, c["id"], "again"))
+    mine = (await signed_in.get("/hub/api/usage", params={"period": "all"})).json()
+    before = next(x for x in mine["rows"] if x["who"] == "owner")
+    spent = owner_rows(0)
+    assert spent["turns"] == 2 and spent["cost"] > 0
+    r = await signed_in.post(f"/hub/api/chats/{c['id']}/move", json={"new_project": "CM98"})
+    assert r.status_code == 200, r.text
+    pid = r.json()["project"]["id"]
+    listed = (await signed_in.get("/hub/api/chats", params={"project_id": pid})).json()[0]
+    total = (await signed_in.get(f"/hub/api/projects/{pid}")).json()["usage"]
+    assert total["turns"] == 2 and abs(total["cost"] - listed["cost"]) < 1e-4       # the page and its chat agree
+    assert abs(total["energy_wh"] - listed["energy_wh"]) < 1e-2 and total["since"] == usage.today()
+    assert owner_rows(0)["turns"] == 0 and owner_rows(0)["cost"] < 1e-4             # moved, not doubled
+    mine = (await signed_in.get("/hub/api/usage", params={"period": "all"})).json()
+    after = next(x for x in mine["rows"] if x["who"] == "owner")
+    assert after["turns"] == before["turns"] and abs(after["cost"] - before["cost"]) < 1e-4
+    await finish(app, await say(signed_in, c["id"], "more"))                        # a turn after the move
+    assert (await signed_in.get(f"/hub/api/projects/{pid}")).json()["usage"]["turns"] == 3
+    assert usage.settle_moved_chats() == 0                                          # once only
+
+
+async def test_a_chat_moved_before_takes_its_usage_along_once(signed_in, app, fakes):
+    """Chats moved on 0.31.0-0.33.0 left their usage behind: when the Hub starts, the turns that ended before the
+    move - the time of the revision the move made - go to the project; turns after it counted there already."""
+    import json as _json
+    import time as _time
+    ticking(app)
+    fakes.llama["replies"] = [{"content": "Done."}, {"content": "T"}]
+    c = await new_chat(signed_in)
+    await finish(app, await say(signed_in, c["id"], "go"))
+    await finish(app, await say(signed_in, c["id"], "again"))
+    title = (await signed_in.get(f"/hub/api/chats/{c['id']}")).json()["chat"]["title"]
+    p = (await signed_in.post("/hub/api/projects", json={"name": "CM98"})).json()
+    _time.sleep(1.1)
+    with db.connect() as con:                                                       # as 0.31.0 left a move
+        con.execute("INSERT INTO sync_revs (project_id, rev, author, origin, message, created_at) "
+                    "VALUES (?, 1, 'user', 'web', ?, ?)", (p["id"], f'moved in from the chat "{title}"', db.utcnow()))
+        settings = _json.loads(con.execute("SELECT settings FROM chats WHERE id=?", (c["id"],)).fetchone()[0])
+        con.execute("UPDATE chats SET project_id=?, settings=? WHERE id=?",
+                    (p["id"], _json.dumps({**settings, "moved_from": f"/workspace/chats/{c['id']}"}), c["id"]))
+    _time.sleep(1.1)
+    await finish(app, await say(signed_in, c["id"], "more"))                        # counted for the project already
+    assert (await signed_in.get(f"/hub/api/projects/{p['id']}")).json()["usage"]["turns"] == 1
+    assert usage.settle_moved_chats() == 2
+    assert (await signed_in.get(f"/hub/api/projects/{p['id']}")).json()["usage"]["turns"] == 3
+    assert owner_rows(0)["turns"] == 0
+    assert usage.settle_moved_chats() == 0                                          # once only
+
+
+async def test_a_projects_overview_says_what_each_chat_did(signed_in, app, fakes):
+    """0.34.0 - Søren: more about each chat on the project's page - its answers, the models that worked, the time,
+    the card's energy, the tokens, and how its last turn ended."""
+    from .test_agent import last_user
+    ticking(app)
+    hub = app.state.hub
+    hub.settings.update("models", {"default": "qwen3.6-35b-a3b"})
+    p = (await signed_in.post("/hub/api/projects", json={"name": "CM98"})).json()
+    n = {"i": 0}
+
+    def responder(body):
+        if "short title" in last_user(body):
+            return {"content": "T"}
+        system = str(body["messages"][0].get("content") or "")
+        if "Your task: an independent review" in system:
+            return {"content": "Played it.\nVERDICT: OK"}
+        said = last_user(body)
+        if "prove" in said:                                   # the fast model hands over, the 27B answers
+            return ({"content": "Big."} if body["model"] == "qwen3.8-27b" else
+                    {"tool_calls": [{"name": "escalate", "arguments": {"reason": "too hard"}}]})
+        if "endless" in said:                                 # one more file every step: the step limit
+            n["i"] += 1
+            return {"tool_calls": [{"name": "write_file", "arguments": {"path": f"part{n['i']}.txt", "content": "x"}}]}
+        if body["messages"][-1]["role"] == "tool":
+            return {"content": "Done."}
+        return {"tool_calls": [{"name": "write_file", "arguments": {"path": "game.js", "content": "let a = 1;\n"}}]}
+    fakes.llama["responder"] = responder
+    handed = await new_chat(signed_in, project_id=p["id"])
+    await finish(app, await say(signed_in, handed["id"], "prove it"))
+    hub.settings.update("agent", {"max_steps": 2})
+    limited = await new_chat(signed_in, project_id=p["id"])
+    await finish(app, await say(signed_in, limited["id"], "endless parts"))
+    hub.settings.update("agent", {"max_steps": 60, "review": True, "review_model": "same"})
+    reviewed = await new_chat(signed_in, project_id=p["id"])
+    await finish(app, await say(signed_in, reviewed["id"], "make the game"))
+    await finish(app, await say(signed_in, reviewed["id"], "and again"))
+    empty = await new_chat(signed_in, project_id=p["id"])
+    rows = {r["id"]: r for r in (await signed_in.get("/hub/api/chats", params={"project_id": p["id"]})).json()}
+    one = rows[handed["id"]]
+    assert one["turns"] == 1 and one["models"] == ["qwen3.6-35b-a3b", "qwen3.8-27b"]   # in the order they worked
+    assert one["tokens_in"] > 0 and one["tokens_out"] > 0 and one["seconds"] >= 0 and one["energy_wh"] > 0
+    assert one["last"] == {"status": "done"}
+    assert rows[limited["id"]]["last"] == {"status": "done", "unfinished": "limit"}
+    two = rows[reviewed["id"]]
+    assert two["turns"] == 2 and two["models"] == ["qwen3.6-35b-a3b"] and two["last"]["review"] == "ok"
+    assert rows[empty["id"]]["turns"] == 0 and rows[empty["id"]]["models"] == [] and rows[empty["id"]]["last"] == {}
+    plain = (await signed_in.get("/hub/api/chats")).json()                         # the sidebar's list stays plain
+    assert not any("models" in r or "turns" in r for r in plain)
+
+
 async def test_the_price_and_the_rest_of_the_pc_are_settings(signed_in, app, fakes):
     m = ticking(app)
     r = await signed_in.put("/hub/api/settings", json={"section": "costs", "values": {"price_per_kwh": "2.5",

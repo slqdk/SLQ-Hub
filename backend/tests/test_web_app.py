@@ -134,6 +134,7 @@ async def test_the_working_rules_are_in_the_prompt(signed_in, app, fakes):
     assert "what you did, what you checked and what you could not check" in system
     # 0.33.0: Søren's CM98 folder was 14 files side by side, a test script among them
     assert "Keep the folder in order, the way the user will look for things" in system
+    assert "documentation and write-ups (a file format described, a report) in docs/" in system       # (0.34.0)
     assert "Do not move the user's own files unless they ask. Scratch and test files go in .hub/tmp/" in system
 
 

@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.34.0 - 2026-10-26
+
+- **A project's total now includes chats moved into it.** CM98 said 2.04 kr
+  while one of its chats alone said 2.72 kr. That chat had done its work
+  before you moved it in, and its use stayed outside the project. A moved
+  chat now takes its use along. Chats moved before this update are settled
+  once when the Hub starts. Settings → Usage keeps the same totals.
+- **More about each chat on a project's page.** Under each title you see:
+  - its answers,
+  - the models that worked, in order (e.g. "Qwen3.8 Fable (U) → Qwen3.8
+    Standard" after a hand-over),
+  - how long its turns took,
+  - the card's energy,
+  - tokens read and written,
+  - whether the last turn didn't finish or failed, and what the last review
+    found.
+- **Docs get a folder of their own.** The assistant puts documentation and
+  write-ups, such as a file format described or a report, in `docs/`.
+  NOTES.md stays at the top.
+
 ## 0.33.0 - 2026-10-26
 
 - **Files show when they changed.** Every file in the Files panel shows its

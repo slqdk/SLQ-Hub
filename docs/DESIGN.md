@@ -250,11 +250,28 @@ cost and seconds. Any other job is counted when it finishes (`job_finished`):
 an app's call on the model API under "key:<name>" with the tokens its handler
 noted on the job, library indexing under "library", loading models under
 "system". The queue log keeps each job's energy too. Rows stay when chats go.
+A chat moved into a project (0.31.0) takes its rows along (0.34.0): its
+turns - counted for the owner without a project - count for the project
+(`usage.move_chat`, in the move's transaction), so the project's total is
+what its chats used; the totals per who stay as they were. Søren's CM98 said
+2.04 kr while one of its six chats alone said 2.72 kr: that chat had done its
+work before it was moved in. Chats moved before 0.34.0 are settled when the
+Hub starts (`settle_moved_chats`, once: `usage_moved` in the chat's settings),
+the turns that ended before the move's revision in the project ('moved in
+from the chat "<title>"'); one without such a revision (no files, or renamed
+since) keeps its turns where they were.
 
 **Where it shows.** Under each answer: time, tokens, energy and cost. A chat's
 ⋯ menu: its total (answers from before 0.24.0 carry no energy and are said to
 be unmeasured). A project's page: its total since counting began (chats
-deleted since included) and each chat's cost. Settings → Usage: the card's
+deleted since included) and each chat's cost - and, since 0.34.0, under its
+title what each chat did: its answers, the models that worked in the order
+they did (each turn's first and those it was handed over to, a cloud model by
+its name), the time its turns took, the card's energy, the tokens read and
+written, and how its last turn ended when that needs a look (not finished at
+the step limit, stopped, failed) and the last review's verdict; "No answers
+yet" for an empty chat (`store.runs_overview`, from the runs' steps with
+SQLite's JSON functions). Settings → Usage: the card's
 draw now and its limit, then per who for today, this month or all time -
 answers and jobs, tokens read and written, time on the card, energy, cost - with
 a total; the price and the rest of the PC's watts. `usage.who_total(who,
@@ -922,7 +939,8 @@ Since 0.33.0 a fifth, from Søren's CM98 folder - fourteen files side by side,
 a test script among them: keep the folder in order the way the user will look
 for things (a program, site or game of several files in a folder of its own,
 extracted or converted data in `data/`, the scripts that make it in
-`scripts/`, the structure that is there already followed; a single file and
+`scripts/`, documentation and write-ups in `docs/` (0.34.0, Søren: "what about
+docs?"), the structure that is there already followed; a single file and
 NOTES.md at the top), do not move the user's own files unless asked, and put
 scratch and test files in `.hub/tmp/` - which Files, the card under the answer
 and SLQ Sync leave out. An existing folder is tidied by asking for it.

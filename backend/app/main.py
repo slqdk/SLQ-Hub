@@ -47,6 +47,8 @@ def create_app(env: Env | None = None, transports: Transports | None = None, sta
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     hub = build_hub(env, transports)
     auth.ensure_admin(env.admin_user, env.admin_password_hash)
+    from . import usage
+    usage.settle_moved_chats()                   # chats moved into a project before 0.33.1 bring their usage along
     hub.extras["downloads"] = Downloads(hub.catalog, transport=hub.transports.web)
     _install_features(hub)
 

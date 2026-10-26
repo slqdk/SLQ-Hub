@@ -139,7 +139,12 @@ export interface Chat { id: number; project_id: number | null; title: string; se
   created_at: string; updated_at: string; test_run?: string | null }
 export interface ChatListItem { id: number; project_id: number | null; title: string; updated_at: string;
   created_at: string; project_name: string | null; running: boolean;
-  energy_wh?: number | null; cost?: number | null }       // a project's chats: what each used of the card (0.24.0)
+  energy_wh?: number | null; cost?: number | null;        // a project's chats: what each used of the card (0.24.0)
+  // and for the project's overview (0.34.0): answers, tokens, the time its turns took, the models that worked (ids;
+  // a cloud model by its name) and how the last turn ended
+  turns?: number | null; tokens_in?: number | null; tokens_out?: number | null; seconds?: number | null;
+  models?: string[];
+  last?: { status?: string; unfinished?: "limit" | "stopped"; review?: "ok" | "problems" | "failed" } }
 
 /** A file an answer made or changed in the working folder (a person's: on the device). */
 export interface ProducedFile { path: string; size: number; mime: string; new?: boolean; skipped?: string }

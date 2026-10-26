@@ -58,9 +58,17 @@ def get_chat(chat_id: int) -> dict | None:
 
 
 def list_chats(project_id: int | None = None, q: str = "", limit: int = 200, all_projects: bool = False) -> list[dict]:
-    # a project's chats come with what each used of the card (its runs' energy and cost, 0.24.0)
-    spent = (", (SELECT SUM(json_extract(r.usage, '$.energy_wh')) FROM runs r WHERE r.chat_id=c.id) energy_wh"
-             ", (SELECT SUM(json_extract(r.usage, '$.cost')) FROM runs r WHERE r.chat_id=c.id) cost"
+    # a project's chats come with what each used of the card (its runs' energy and cost, 0.24.0) - and, for the
+    # project's overview (0.34.0), its answers, tokens and the time its turns took
+    runs = "FROM runs r WHERE r.chat_id=c.id"
+    spent = (f", (SELECT SUM(json_extract(r.usage, '$.energy_wh')) {runs}) energy_wh"
+             f", (SELECT SUM(json_extract(r.usage, '$.cost')) {runs}) cost"
+             f", (SELECT COUNT(*) {runs} AND r.ended_at IS NOT NULL) turns"
+             f", (SELECT SUM(MAX(0, COALESCE(json_extract(r.usage, '$.prompt_tokens'), 0)"
+             f" - COALESCE(json_extract(r.usage, '$.cached_tokens'), 0))) {runs}) tokens_in"
+             f", (SELECT SUM(COALESCE(json_extract(r.usage, '$.completion_tokens'), 0)) {runs}) tokens_out"
+             f", (SELECT SUM((julianday(r.ended_at) - julianday(r.started_at)) * 86400) {runs}"
+             f" AND r.ended_at IS NOT NULL) seconds"
              if project_id is not None and not all_projects else "")
     sql = ("SELECT c.id, c.project_id, c.title, c.updated_at, c.created_at, p.name project_name" + spent +
            " FROM chats c LEFT JOIN projects p ON p.id=c.project_id WHERE c.archived=0 AND c.test_run IS NULL")
@@ -78,6 +86,41 @@ def list_chats(project_id: int | None = None, q: str = "", limit: int = 200, all
     params.append(limit)
     with db.connect() as con:
         return [dict(r) for r in con.execute(sql, params).fetchall()]
+
+
+def runs_overview(chat_ids: list[int]) -> dict[int, dict]:
+    """For a project's overview (0.34.0): each chat's models in the order they worked - each turn's first, and the
+    ones a turn was handed over to - and how its last turn ended: unfinished (the step limit, or stopped), failed,
+    and the independent review's verdict. From the runs' steps, read by SQLite's JSON functions."""
+    out: dict[int, dict] = {}
+    if not chat_ids:
+        return out
+    with db.connect() as con:
+        for cid in chat_ids:
+            rows = con.execute("SELECT id, status, model FROM runs WHERE chat_id=? ORDER BY started_at, rowid",
+                               (cid,)).fetchall()
+            models: list[str] = []
+            for r in rows:
+                handed = [x[0] for x in con.execute(       # (a cloud model by its name, a local one by its id)
+                    "SELECT json_extract(value, '$.model') FROM json_each((SELECT steps FROM runs WHERE id=?)) "
+                    "WHERE json_extract(value, '$.type')='escalated'", (r["id"],))]
+                for m in [r["model"], *handed]:
+                    if m and m not in models:
+                        models.append(m)
+            last: dict = {}
+            if rows:
+                r = rows[-1]
+                marks = {x[0]: x[1] for x in con.execute(
+                    "SELECT json_extract(value, '$.type'), json_extract(value, '$.verdict') FROM json_each("
+                    "(SELECT steps FROM runs WHERE id=?)) WHERE json_extract(value, '$.type') IN ('limit', 'review') "
+                    "AND COALESCE(json_extract(value, '$.depth'), 0)=0", (r["id"],))}
+                last = {"status": r["status"]}
+                if "limit" in marks or r["status"] == "cancelled":
+                    last["unfinished"] = "limit" if "limit" in marks else "stopped"
+                if marks.get("review"):
+                    last["review"] = marks["review"]
+            out[cid] = {"models": models, "last": last}
+    return out
 
 
 def update_chat(chat_id: int, title: str | None = None, settings: dict | None = None,
@@ -117,15 +160,17 @@ def move_to_project(chat_id: int, project_id: int, moved_from: str, renamed: dic
     """A chat becomes one of a project's (0.31.0); moved_from - its own folder before, as the sandbox saw it - and
     the attachments renamed on the way stay in its settings for the system prompt (the conversation shows paths
     there)."""
+    from .. import usage
     c = get_chat(chat_id)
     if not c:
         return None
-    settings = {**c["settings"], "moved_from": moved_from}
+    settings = {**c["settings"], "moved_from": moved_from, "usage_moved": True}
     if renamed:
         settings["moved_renamed"] = dict(list(renamed.items())[:20])
-    with db.connect() as con:
+    with db.transaction() as con:                 # its usage goes with it (0.33.1): the project's total is its chats'
         con.execute("UPDATE chats SET project_id=?, settings=?, updated_at=? WHERE id=?",
                     (project_id, json.dumps(settings), db.utcnow(), chat_id))
+        usage.move_chat(con, chat_id, project_id)
     return get_chat(chat_id)
 
 

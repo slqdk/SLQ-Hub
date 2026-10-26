@@ -1,8 +1,8 @@
 // A project: its chats, files, settings, history and sync devices.
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Download, Menu, MessageSquarePlus, Plus } from "lucide-react";
 import { api, type ChatListItem, type Library, type Project, type Revision, type Skill } from "../lib/api";
-import { ago, bytes, energy, money, tokens } from "../lib/format";
+import { ago, bytes, energy, money, tokens, worked } from "../lib/format";
 import { linkProps, navigate } from "../lib/router";
 import { useApp } from "../state";
 import { Files } from "../components/Files";
@@ -60,8 +60,39 @@ export function ProjectView({ id, tab }: { id: number; tab?: string }) {
   );
 }
 
+const REVIEW_SAID: Record<string, string> = { ok: "review: nothing to fix", problems: "review: problems found",
+  failed: "review did not finish" };
+
+/** What a chat of the project has done (0.34.0): its answers, the models that worked, the time, the card's energy,
+ * the tokens - and how its last turn ended, when that needs a look. */
+function ChatFacts({ chat: c, names }: { chat: ChatListItem; names: Map<string, string> }) {
+  const n = c.turns ?? 0;
+  if (!n && !c.running) return <div className="meta chat-facts">No answers yet</div>;
+  const facts = [
+    n ? `${n} answer${n === 1 ? "" : "s"}` : "",
+    (c.models ?? []).map((m) => names.get(m) ?? m).join(" → "),
+    c.seconds ? `${worked(c.seconds)} working` : "",
+    c.energy_wh ? energy(c.energy_wh) : "",
+    c.tokens_in || c.tokens_out ? `${tokens(c.tokens_in)} tokens read, ${tokens(c.tokens_out)} written` : "",
+  ].filter(Boolean);
+  const last = c.running ? undefined : c.last;
+  const flags = [
+    last?.unfinished && <span key="u" className="chat-flag"><Lamp state="wait" size="sm" />
+      {last.unfinished === "limit" ? "not finished: the step limit" : "stopped before it was done"}</span>,
+    last?.status === "error" && <span key="e" className="chat-flag fault"><Lamp state="fault" size="sm" />the last answer failed</span>,
+    last?.review && <span key="r" className="chat-flag">{REVIEW_SAID[last.review] ?? `review: ${last.review}`}</span>,
+  ].filter(Boolean);
+  return (
+    <div className="meta chat-facts">
+      {[...facts, ...flags].map((f, i) => <span key={i}>{i > 0 && " · "}{f}</span>)}
+    </div>
+  );
+}
+
 function ProjectChats({ project }: { project: Project }) {
+  const { models } = useApp();
   const [chats, setChats] = useState<ChatListItem[] | null>(null);
+  const names = useMemo(() => new Map((models?.llm ?? []).map((m) => [m.id, m.name])), [models]);
   useEffect(() => {
     api<ChatListItem[]>("/hub/api/chats", { query: { project_id: project.id } }).then(setChats, () => setChats([]));
   }, [project.id]);
@@ -85,11 +116,15 @@ function ProjectChats({ project }: { project: Project }) {
         {chats === null ? <Empty>Loading</Empty> : chats.length === 0 ? (
           <Empty>No chats yet. A chat here works in the project's files.</Empty>
         ) : chats.map((c) => (
-          <a key={c.id} className="list-row" style={{ color: "inherit", textDecoration: "none" }} {...linkProps({ name: "chat", id: c.id })}>
-            <span className="grow ellipsis"><b>{c.title}</b></span>
+          <a key={c.id} className="list-row chat-row" style={{ color: "inherit", textDecoration: "none" }} {...linkProps({ name: "chat", id: c.id })}>
+            <span className="grow chat-row-main">
+              <b className="ellipsis">{c.title}</b>
+              <ChatFacts chat={c} names={names} />
+            </span>
             {c.running && <Lamp state="run" pulse title="Working" />}
             {c.cost != null && <span className="meta num" title={`${energy(c.energy_wh)} on the card`}>{money(c.cost)}</span>}
-            <span className="meta">{ago(c.updated_at)}</span>
+            <span className="meta" title={`Started ${new Date(c.created_at).toLocaleString(undefined,
+              { dateStyle: "medium", timeStyle: "short" })}`}>{ago(c.updated_at)}</span>
           </a>
         ))}
       </div>
