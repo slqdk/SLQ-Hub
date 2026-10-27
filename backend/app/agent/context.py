@@ -78,12 +78,20 @@ def _size(n: int) -> str:
 
 
 def continue_text(block: dict) -> str:
-    """What the model is told when the user presses Continue under an unfinished turn (0.22.0): why it stopped."""
+    """What the model is told when the user presses Continue under an unfinished turn (0.22.0): why it stopped. In
+    the cloud (0.37.0) the cloud model takes over, also after a turn that ended with an answer."""
+    whose = "the" if block.get("cloud") else "your"            # in the cloud, another model's turn
     if block.get("reason") == "limit":
-        why = (f"Your last turn ended at the step limit ({int(block.get('steps') or 0)} steps, the most one turn may "
-               "take) before the work was done.")
+        why = (f"{whose.capitalize()} last turn ended at the step limit ({int(block.get('steps') or 0)} steps, the "
+               "most one turn may take) before the work was done.")
+    elif block.get("reason") == "stopped":
+        why = f"They stopped {whose} last turn before it was done."
     else:
-        why = "They stopped your last turn before it was done."
+        why = "They do not think the local model will get the work done."
+    if block.get("cloud"):
+        return (f"(SLQ Hub: the user pressed Continue in the cloud: you take this work over from the local model. "
+                f"{why} Check the state of what was made before you change it - what works, what is missing or "
+                "wrong - then finish the task. Do not start over.)")
     return (f"(SLQ Hub: the user pressed Continue. {why} Go on from where you stopped: check the state of what you "
             "were making before you change it, and do not start over.)")
 

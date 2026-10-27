@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.37.0 - 2026-10-27
+
+You asked for these when the local model cannot finish on its own. Both work
+in chats of projects with "Let hard tasks go to the cloud model" on, with a
+cloud model set up in Settings → Cloud.
+
+- **Continue in the cloud.** The last answer has a "Continue in the cloud"
+  button. The cloud model takes the work over from there and finishes it - also
+  when the local model gave an answer you are not happy with. The chat shows
+  "Continued in the cloud".
+- **The cloud model in the model menu.** The chat's model menu lists the cloud
+  model, e.g. "claude-opus-5-5 (cloud)". Pick it, and the chat's turns run in
+  the cloud from the first step: your card stays free. A turn in the cloud is
+  not checked by the independent review (the review runs on your card).
+
 ## 0.36.0 - 2026-10-27
 
 For checking TwinCAT code with a real compiler, as you asked in chat 139. Both

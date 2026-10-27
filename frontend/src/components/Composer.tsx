@@ -3,7 +3,7 @@
 // skills for this chat (0.23.0: picked by hand - the Skills button, or / and a
 // skill's name in the message box).
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUp, BookOpen, Brain, Check, Cpu, FileText, FolderOpen, Image as ImageIcon, Paperclip, Plus, Settings2,
+import { ArrowUp, BookOpen, Brain, Check, Cloud, Cpu, FileText, FolderOpen, Image as ImageIcon, Paperclip, Plus, Settings2,
   Sparkles, Square, Wand2, X } from "lucide-react";
 import { upload, type ModelEntry, type Skill, type Upload } from "../lib/api";
 import { clearDraft, NEW_SKILL_TEXT, peekDraft, SKILL_MAKER } from "../lib/draft";
@@ -312,7 +312,7 @@ export function Composer({ running, onSend, onStop, settings, onSettings, models
             </>
           )}
         </MenuButton>
-        <MenuButton up anchorClassName="shrink" label={<><Cpu size={15} /> <span className="ellipsis chip-model">{model?.name ?? "No model"}</span></>}
+        <MenuButton up anchorClassName="shrink" label={<>{model?.kind === "cloud" ? <Cloud size={15} /> : <Cpu size={15} />} <span className="ellipsis chip-model">{model?.name ?? "No model"}</span></>}
           title={`Model: ${model?.name ?? "none"}`}>
           {(close) => (
             <>
@@ -320,8 +320,9 @@ export function Composer({ running, onSend, onStop, settings, onSettings, models
               {models.map((m) => (
                 <button key={m.id} className="menu-item" role="menuitemradio" aria-checked={m.id === model?.id}
                   onClick={() => { onSettings({ model: m.id }); close(); }}>
-                  {m.id === model?.id ? <Check size={15} /> : <Cpu size={15} />}
-                  <span>{m.name}<small>{m.loaded ? "Loaded now" : "Switching to it takes a moment"}</small></span>
+                  {m.id === model?.id ? <Check size={15} /> : m.kind === "cloud" ? <Cloud size={15} /> : <Cpu size={15} />}
+                  <span>{m.name}<small>{m.kind === "cloud" ? "In the cloud: your card stays free, no review"
+                    : m.loaded ? "Loaded now" : "Switching to it takes a moment"}</small></span>
                 </button>
               ))}
             </>

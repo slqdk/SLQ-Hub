@@ -1418,6 +1418,34 @@ in a Settings → Tests run (it measures its model).
 - **Visibility.** Every escalation shows a notice with the model and the
   reason, and the run's steps record it.
 
+**The cloud from a turn's start** (0.37.0; Søren: "how can I ask the
+assistant to give the job to the cloud, if I feel it can't finish on its
+own?" - the model decides when to call `escalate`, and from Fable it reaches
+the stronger local model first). Where a hand-over to the cloud is allowed
+(the same rule: a web chat in a project with cloud escalation on, Settings →
+Cloud set up), the user can send a turn there directly:
+
+- **Continue in the cloud**, a button under the last answer: `POST
+  /hub/api/chats/{id}/continue` with `cloud: true` - also under a finished
+  turn - stores a `continue` block with `cloud: true` (and why the last turn
+  ended: `limit`, `stopped` or `done`) and starts a turn with `options.cloud`.
+  The model reads "the user pressed Continue in the cloud: you take this work
+  over from the local model … check the state of what was made … finish the
+  task", and the system prompt's "# Escalated" part. Refused (409) where the
+  cloud is not allowed, or before there is anything to continue.
+- **The cloud model in the chat's model menu**: the chat's settings say
+  `model: "cloud"` (`loop.CLOUD`), the menu names it after Settings → Cloud's
+  model with "(cloud)". Each turn then runs in the cloud, its system prompt
+  saying the user chose that model ("# Cloud model") rather than that a local
+  model gave up. If the project stops allowing the cloud, the turn runs on the
+  local default and its answer says why.
+
+Such a turn (`Engine.start_in_cloud`) never queues for the card: no `queued`
+event, `started` names the cloud model, a `cloud` step records it, there is no
+hand-over, no title (the title is made by the local model) and no independent
+review (it runs on the card) - as after a hand-over to the cloud. Subagents
+use the cloud too.
+
 ### People's chats: device turns (0.11.0)
 
 A person (an account the owner added, `users.role = 'member'`) keeps their

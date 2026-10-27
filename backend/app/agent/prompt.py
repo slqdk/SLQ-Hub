@@ -229,6 +229,7 @@ def system_prompt(*, user: str, model_name: str, folder_text: str, sandbox_path:
                   skills: list[dict], project: dict | None, summary: str = "", images_available: bool = True,
                   tz: str | None = None, handover_to: str = "", subagent: bool = False,
                   cloud_model: str = "", taken_over_from: str = "", memory: bool = True, code: bool = True,
+                  cloud_chosen: bool = False,
                   dropped: int = 0, sound: list[str] | None = None, internet_asks: bool = False,
                   windows: bool = False, video: bool = False, web: bool = False) -> str:
     now = datetime.now(ZoneInfo(tz) if tz else local_tz())
@@ -254,7 +255,11 @@ def system_prompt(*, user: str, model_name: str, folder_text: str, sandbox_path:
         text += ("\n\n# Help\nIf a task is clearly beyond you (you keep failing, or it needs knowledge or "
                  f"reasoning you lack), call escalate with a short reason; {handover_to} takes over this turn. "
                  "Do not escalate simple things.")
-    if cloud_model:
+    if cloud_model and cloud_chosen:             # the cloud model chosen in the chat's model menu (0.37.0)
+        text += (f"\n\n# Cloud model\nYou are {cloud_model}, a cloud model the user chose for this chat. Earlier "
+                 "answers in it may come from local models on this server: check what they made rather than trust "
+                 "it.")
+    elif cloud_model:
         text += (f"\n\n# Escalated\nThis turn was handed over to you, {cloud_model}, a cloud model, because the "
                  "local model could not finish it. Everything above was done by the local model. Continue the "
                  "task from where it stands and finish it.")

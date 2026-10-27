@@ -51,6 +51,14 @@ MUST_ANSWER = ("(SLQ Hub: you are repeating the same steps and getting the same 
 NO_ANSWER = "(The model kept repeating the same tool calls and gave no answer. Ask again, or try another model.)"
 LOOP_REPEATS = 3
 LOOP_SAME_STEPS = 3
+# The cloud from a turn's start (0.37.0): "Continue in the cloud", or the cloud model chosen in the chat's model menu
+# (its settings' model is CLOUD) - where a hand-over to the cloud is allowed: web chats in projects that let hard tasks
+# go to the cloud, with Settings -> Cloud set up.
+CLOUD = "cloud"
+NO_CLOUD = ("The cloud model is only for chats in projects that let hard tasks go to the cloud (the project's "
+            "settings), with a cloud model set up in Settings -> Cloud.")
+CLOUD_OFF = ("This chat's model is the cloud model, but this chat cannot use the cloud now (the project does not let "
+             "hard tasks go to the cloud, or Settings -> Cloud is not set up), so {model} answered.")
 REVIEW_FIX_STEPS = 12               # the steps the work has at least after a review that found problems (0.30.0)
 STEP_CALL, STEP_RESULT = 300, 200    # characters of a subagent's call and its result kept in the run's steps
 # A call the end of the context cut off (chat 21: a whole game in one write_file, 13 minutes of output, lost).
@@ -877,6 +885,12 @@ class Engine:
         elif loop:
             self._loop(reason)
 
+    def start_in_cloud(self, reason: str) -> None:
+        """The whole turn on the cloud model (0.37.0: the user chose it): no card - nothing to give back, nobody to
+        hand over to, and no independent review (it needs the card, as after a hand-over to the cloud)."""
+        self.cloud = cloudmod.CloudClient(self.hub.settings, transport=self.hub.transports.web)
+        self.steps.append({"type": "cloud", "model": self.cloud.label, "reason": reason})
+
     async def _escalate(self, messages: list[dict], reason: str) -> None:
         self.must_answer, self.repeats, self.same_steps, self.fail_streak, self.recent = "", 0, {}, 0, []
         self.cloud = cloudmod.CloudClient(self.hub.settings, transport=self.hub.transports.web)
@@ -1115,7 +1129,7 @@ class Agent:
 
     def system_for(self, chat: dict, project: dict | None, wd: projects.Workdir, entry: dict, *,
                    handover_to: str = "", subagent: bool = False, cloud_model: str = "",
-                   taken_over_from: str = "", device=None) -> str:
+                   taken_over_from: str = "", device=None, cloud_chosen: bool = False) -> str:
         skills = self.skills_for(chat, project, device)
         images = self.hub.extras.get("images")
         audio = self.hub.extras.get("audio")
@@ -1146,17 +1160,20 @@ class Agent:
                              summary="" if subagent else chat.get("summary") or "",
                              images_available=bool(images and images.available()),
                              handover_to=handover_to, subagent=subagent, cloud_model=cloud_model,
+                             cloud_chosen=cloud_chosen,
                              taken_over_from=taken_over_from, sound=sound, video=video,
                              internet_asks=internet.asking(self.hub.settings), windows=windows_tool.ready(self.hub),
                              web=webapp_tool.ready(self.hub))
 
     def build_messages(self, chat: dict, project: dict | None, wd: projects.Workdir, entry: dict, run: Run,
-                       handover_to: str = "", taken_over_from: str = "") -> list[dict]:
-        sp = self.system_for(chat, project, wd, entry, handover_to=handover_to, taken_over_from=taken_over_from)
+                       handover_to: str = "", taken_over_from: str = "", cloud_model: str = "",
+                       cloud_chosen: bool = False) -> list[dict]:
+        sp = self.system_for(chat, project, wd, entry, handover_to=handover_to, taken_over_from=taken_over_from,
+                             cloud_model=cloud_model, cloud_chosen=cloud_chosen)
         rows = chats.messages(chat["id"], after_id=int(chat.get("summary_upto") or 0))
         keep_from = rows[-12]["id"] if len(rows) > 12 else 0
         return [{"role": "system", "content": sp},
-                *C.to_model_messages(rows, run.id, keep_from, vision=vision(entry),
+                *C.to_model_messages(rows, run.id, keep_from, vision=vision(entry) or bool(cloud_model),
                                      keep_results_from=C.results_from(rows, run.id))]
 
     async def _compact(self, chat_id: int, engine: Engine, run: Run, messages: list[dict]) -> list[dict]:
@@ -1314,6 +1331,11 @@ class Agent:
             await asyncio.to_thread(materialize, self.hub.extras["skills"], self.skills_for(chat, project), wd.root)
             escalation = bool(project and project["settings"].get("cloud_escalation")
                               and cloudmod.configured(self.hub.settings))
+            chose_cloud = (chat.get("settings") or {}).get("model") == CLOUD
+            if options.get("cloud") and not escalation:
+                raise RuntimeError(NO_CLOUD)
+            in_cloud = escalation and (bool(options.get("cloud")) or chose_cloud)
+            cloud_label = cloudmod.CloudClient(self.hub.settings).label if in_cloud else ""
             mcp = self.hub.extras.get("mcp")
             if mcp is not None:
                 await mcp.ensure_started()
@@ -1322,22 +1344,28 @@ class Agent:
             await windows_tool.refresh(self.hub)          # whether windows_app is there, before the prompt says so
             await webapp_tool.refresh(self.hub)           # and web_app
             holder: dict = {}
-            run.emit("queued", position=None, current=self.hub.scheduler.current)
-            pos_task = asyncio.get_running_loop().create_task(self._report_position(run, holder))
             t0 = time.monotonic()
             test = bool(options.get("test"))              # a test run's turn (Settings -> Tests) lets chats go first
-            ticket = await self.hub.scheduler.acquire(
-                "tests" if test else "web", "agent", self.hub.model_need(entry["id"]),
-                "background" if test else "interactive", label=chat["title"][:80],
-                lease=True, meta={"chat_id": chat["id"], "model": entry["id"], "cancel": run.task.cancel,
-                                  "run_id": run.id},
-                on_job=lambda j: holder.setdefault("job", j))
-            pos_task.cancel()
+            if not in_cloud:                              # the cloud needs no card: it is not queued for
+                run.emit("queued", position=None, current=self.hub.scheduler.current)
+                pos_task = asyncio.get_running_loop().create_task(self._report_position(run, holder))
+                ticket = await self.hub.scheduler.acquire(
+                    "tests" if test else "web", "agent", self.hub.model_need(entry["id"]),
+                    "background" if test else "interactive", label=chat["title"][:80],
+                    lease=True, meta={"chat_id": chat["id"], "model": entry["id"], "cancel": run.task.cancel,
+                                      "run_id": run.id},
+                    on_job=lambda j: holder.setdefault("job", j))
+                pos_task.cancel()
             waited = round(time.monotonic() - t0, 2)
             run.status = "running"
-            run.emit("started", model=entry["id"], waited=waited, thinking=thinking)
+            run.emit("started", model=cloud_label or entry["id"], waited=waited, thinking=thinking)
             engine = Engine(self.hub, run, chat, project, wd, entry, ticket, thinking=thinking, effort=effort,
                             escalation=escalation)
+            if in_cloud:
+                engine.start_in_cloud("the user continued in the cloud" if options.get("cloud")
+                                      else "the chat's model is the cloud model")
+            elif chose_cloud:                             # the project's switch went off since it was chosen
+                engine.pending_notice = CLOUD_OFF.format(model=Catalog.label(entry))
             engine.token_ratio = last_token_ratio(chats.runs_for_chat(chat["id"]))   # the last turn's measure
             from . import notes_file                      # NOTES.md as it was when the turn started (0.31.0)
             engine.remind_notes = notes_file.wanted(self.hub.settings) and not test
@@ -1354,7 +1382,9 @@ class Agent:
             if options.get("handover_from"):              # Continue in a new chat (0.27.0): the notes, nothing else
                 await self._write_handover(engine, int(options["handover_from"]), persist)
             else:
-                messages = self.build_messages(chat, project, wd, entry, run, engine.handover_label())
+                messages = self.build_messages(chat, project, wd, entry, run, engine.handover_label(),
+                                               cloud_model=cloud_label,
+                                               cloud_chosen=in_cloud and not options.get("cloud"))
                 max_steps = int(self.hub.settings.get("agent", "max_steps") or 60)
                 from .review import review as review_turn
                 # A test run (Settings -> Tests) measures the model it tests: no other model's review in its steps.

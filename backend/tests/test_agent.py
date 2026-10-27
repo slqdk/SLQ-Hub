@@ -773,6 +773,60 @@ async def test_the_model_can_escalate_to_the_cloud(signed_in, app, fakes):
     assert len(fakes.llama["requests"]) == 1                      # no title: the card was given back
 
 
+async def test_continue_in_the_cloud(signed_in, app, fakes):
+    """0.37.0: Continue in the cloud, also under a finished turn - the cloud model takes the work over from its first
+    step, told why, with no card (nothing queued, no title, no review); refused where the cloud is not allowed."""
+    plain = await new_chat(signed_in)
+    fakes.llama["replies"] = [{"content": "local try"}, {"content": "Title"}]
+    await finish(app, await say(signed_in, plain["id"], "hi"))
+    r = await signed_in.post(f"/hub/api/chats/{plain['id']}/continue", json={"cloud": True})
+    assert r.status_code == 409 and "projects that let hard tasks go to the cloud" in r.json()["detail"]
+    c = await _cloud_project(signed_in, app)
+    r = await signed_in.post(f"/hub/api/chats/{c['id']}/continue", json={"cloud": True})
+    assert r.status_code == 409                                   # nothing to continue yet
+    fakes.llama["replies"] = [{"content": "I could not finish."}, {"content": "T"}]
+    await finish(app, await say(signed_in, c["id"], "prove it"))
+    local = len(fakes.llama["requests"])
+    fakes.cloud["replies"] = [{"content": "The cloud finished it."}]
+    r = await signed_in.post(f"/hub/api/chats/{c['id']}/continue", json={"cloud": True})
+    assert r.status_code == 200, r.text
+    assert r.json()["message"]["content"] == [{"type": "continue", "reason": "done", "cloud": True}]
+    run = await finish(app, r.json()["run_id"])
+    assert run.status == "done", run.events[-1]
+    assert texts(run) == "The cloud finished it."
+    assert len(fakes.llama["requests"]) == local                  # the card was not used
+    assert not any(e["type"] in ("queued", "escalated") for e in run.events)
+    assert next(e for e in run.events if e["type"] == "started")["data"]["model"] == "openai:big-model"
+    cloud = fakes.cloud["requests"][-1]
+    assert "# Escalated" in cloud["messages"][0]["content"]
+    assert "escalate" not in {t["function"]["name"] for t in cloud["tools"]}
+    assert "pressed Continue in the cloud" in json.dumps(cloud["messages"][-1])
+    assert "They do not think the local model will get the work done" in json.dumps(cloud["messages"][-1])
+    assert any(s.get("type") == "cloud" for s in chats.runs_for_chat(c["id"])[-1]["steps"])
+
+
+async def test_the_cloud_model_as_the_chats_model(signed_in, app, fakes):
+    """0.37.0: "cloud" as the chat's model (its model menu): each turn runs on the cloud from its first step, the
+    prompt saying the user chose it. When the project no longer allows the cloud, the local default answers and the
+    answer says so."""
+    c = await _cloud_project(signed_in, app)
+    r = await signed_in.patch(f"/hub/api/chats/{c['id']}", json={"settings": {"model": "cloud"}})
+    assert r.json()["settings"]["model"] == "cloud"
+    fakes.cloud["replies"] = [{"content": "From the cloud."}]
+    run = await finish(app, await say(signed_in, c["id"], "hello"))
+    assert run.status == "done" and texts(run) == "From the cloud."
+    assert fakes.llama.get("requests", []) == []                 # no card at all, not even for a title
+    system = fakes.cloud["requests"][0]["messages"][0]["content"]
+    assert "# Cloud model" in system and "# Escalated" not in system
+    await signed_in.patch(f"/hub/api/projects/{c['project_id']}", json={"settings": {"cloud_escalation": False}})
+    fakes.llama["replies"] = [{"content": "Locally."}, {"content": "T"}]
+    run = await finish(app, await say(signed_in, c["id"], "again"))
+    assert run.status == "done" and texts(run) == "Locally."
+    last = [m for m in chats.messages(c["id"]) if m["role"] == "assistant"][-1]
+    assert any(b["type"] == "notice" and "cannot use the cloud now" in b["text"] for b in last["content"])
+    assert len(fakes.cloud["requests"]) == 1
+
+
 async def test_repeated_failures_escalate_automatically(signed_in, app, fakes):
     c = await _cloud_project(signed_in, app)
     fakes.llama["replies"] = [{"tool_calls": [{"name": "read_file", "arguments": {"path": "missing.txt"}}]}]

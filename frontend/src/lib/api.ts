@@ -103,7 +103,7 @@ export type Block =
   | { type: "tool_result"; tool_call_id: string; name: string; text: string; images?: ImageRef[]; is_error?: boolean;
       display?: Display | null }
   /** Continue under an unfinished turn (0.22.0): the model is told why it stopped. */
-  | { type: "continue"; reason: "limit" | "stopped"; steps?: number }
+  | { type: "continue"; reason: "limit" | "stopped" | "done"; steps?: number; cloud?: boolean }
   /** The first message of a chat that continues another (0.27.0, Continue in a new chat). */
   | { type: "handover"; chat_id: number; title: string }
   /** The independent review of a turn's work (0.30.0): stored as the Hub's message in the turn, shown in it.

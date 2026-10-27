@@ -266,8 +266,9 @@ def transcript(chat: dict, project: dict | None, rows: list[dict], runs: list[di
                     extra = f"{b['lines']} lines" if b.get("lines") else _size(int(b.get("size") or 0))
                     out += [f"*(file from the folder: {b.get('path')}, {extra})*", ""]
                 elif t == "continue":
-                    why = f"the step limit, {b.get('steps')} steps" if b.get("reason") == "limit" else "stopped"
-                    out += [f"*(pressed Continue: the last turn was not done - {why})*", ""]
+                    why = {"limit": f"the last turn was not done - the step limit, {b.get('steps')} steps",
+                           "stopped": "the last turn was not done - stopped"}.get(b.get("reason"), "the last turn ended")
+                    out += [f"*(pressed Continue{' in the cloud' if b.get('cloud') else ''}: {why})*", ""]
                 elif t == "handover":
                     out += [f"*(continued from the chat \"{b.get('title') or ''}\")*", ""]
             continue

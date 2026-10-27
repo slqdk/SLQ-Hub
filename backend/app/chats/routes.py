@@ -300,21 +300,35 @@ def unfinished(run: dict | None) -> dict | None:
 
 class ContinueIn(BaseModel):
     options: dict = {}                   # model, thinking, effort for this turn
+    cloud: bool = False                  # Continue in the cloud (0.37.0): the cloud model takes the work over
 
 
 @router.post("/chats/{chat_id}/continue")
 async def continue_turn(chat_id: int, body: ContinueIn, request: Request):
-    """Continue under an unfinished turn: a message that tells the model why it stopped, then a new turn."""
-    _chat_or_404(chat_id)
+    """Continue under an unfinished turn: a message that tells the model why it stopped, then a new turn. In the
+    cloud (0.37.0) also under a finished one - the user thinks the local model will not get it done - where a
+    hand-over to the cloud is allowed."""
+    chat = _chat_or_404(chat_id)
     _not_moving(request, chat_id)
     if _agent(request).runs.active_for_chat(chat_id):
         raise HTTPException(409, "this chat is already working on an answer")
     runs = store.runs_for_chat(chat_id)
     why = unfinished(runs[-1] if runs else None)
-    if why is None:
+    if body.cloud:
+        from ..agent import cloud as cloudmod
+        from ..agent.loop import NO_CLOUD
+        project = projects.get_project(chat["project_id"]) if chat.get("project_id") else None
+        if not (project and project["settings"].get("cloud_escalation")
+                and cloudmod.configured(get_hub(request).settings)):
+            raise HTTPException(409, NO_CLOUD)
+        if not runs:
+            raise HTTPException(409, "There is nothing to continue yet - write what you want")
+    elif why is None:
         raise HTTPException(409, "The last answer is finished - write what you want next")
-    msg = store.add_message(chat_id, "user", [{"type": "continue", **why}])
-    return {"message": msg, "run_id": _start(request, chat_id, body.options)}
+    block = {"type": "continue", **(why or {"reason": "done"}), **({"cloud": True} if body.cloud else {})}
+    msg = store.add_message(chat_id, "user", [block])
+    options = {**body.options, "cloud": True} if body.cloud else body.options
+    return {"message": msg, "run_id": _start(request, chat_id, options)}
 
 
 HANDOVER_SKIP = {"skills", "dotnet", "tmp", "home"}      # under .hub: made again, or not needed

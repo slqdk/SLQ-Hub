@@ -195,7 +195,8 @@ function ProjectSettings({ project, onSaved }: { project: Project; onSaved: (p: 
       </div>
       <SwitchRow checked={s.cloud_escalation} onChange={(v) => setS({ ...s, cloud_escalation: v })}
         title="Let hard tasks go to the cloud model">
-        When the local model gets stuck in a chat here, the turn is handed to the cloud model set in Settings, Cloud.
+        When the local model gets stuck in a chat here, the turn is handed to the cloud model set in Settings, Cloud. You
+        can also press Continue in the cloud under an answer, or pick the cloud model in a chat's model menu.
         {cloudReady === false && " No cloud model is set up yet."} Calls from other apps never leave the Hub.
       </SwitchRow>
       <div className="field"><span>Libraries the assistant can search here</span>

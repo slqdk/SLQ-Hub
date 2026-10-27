@@ -1,9 +1,9 @@
 // A chat: history, the live turn, and the composer.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
-import { Copy, Download, FileText, FolderInput, FolderOpen, Menu, MessageSquarePlus, MoreHorizontal, NotebookPen, Pencil, RotateCcw,
-  ShieldCheck, Trash2 } from "lucide-react";
+import { Cloud, Copy, Download, FileText, FolderInput, FolderOpen, Menu, MessageSquarePlus, MoreHorizontal, NotebookPen, Pencil,
+  RotateCcw, ShieldCheck, Trash2 } from "lucide-react";
 import { api, mediaUrl, type ArtifactRef, type Block, type ChatData, type ChatSettings, type Library, type Message,
-  type ProducedFile, type RunEvent, type RunRecord, type Settings, type Skill, type Upload } from "../lib/api";
+  type ModelEntry, type ProducedFile, type RunEvent, type RunRecord, type Settings, type Skill, type Upload } from "../lib/api";
 import { clearDraftSkills, peekDraftSkills, setDraft as setMessageDraft } from "../lib/draft";
 import { energy, money, seconds, tokens } from "../lib/format";
 import { linkProps, navigate } from "../lib/router";
@@ -215,6 +215,13 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
   });
 
   const llms = useMemo(() => (models?.llm ?? []).filter((m) => m.installed), [models]);
+  // The cloud model (0.37.0): in the model menu and as Continue in the cloud, where a turn may go to the cloud -
+  // a project that lets hard tasks go there, with Settings -> Cloud set up.
+  const cloudCfg = settings?.cloud ?? {};
+  const cloudOk = !!project?.settings.cloud_escalation && !!cloudCfg.api_key
+    && (cloudCfg.provider === "anthropic" || !!cloudCfg.base_url);
+  const chatModels = useMemo(() => cloudOk ? [...llms, { id: "cloud", name: `${cloudCfg.model || "Cloud model"} (cloud)`,
+    kind: "cloud", installed: true, downloads: [], files: [] } as ModelEntry] : llms, [llms, cloudOk, cloudCfg.model]);
   // Picture models: downloaded, and not a turbo that needs its base (that one is for fast drafts).
   const pictureModels = useMemo(() => (models?.comfy ?? []).filter((m) => m.installed && !(m.requires ?? []).length), [models]);
   const pictureDefault = project?.settings.image_model ?? (settings?.images?.model as string | undefined) ?? "qwen-image-2.1";
@@ -297,9 +304,9 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
     }
   };
 
-  const continueTurn = async () => {
+  const continueTurn = async (cloud = false) => {
     try {
-      const r = await api<{ run_id: string }>(`/hub/api/chats/${chatId}/continue`, { body: {} });
+      const r = await api<{ run_id: string }>(`/hub/api/chats/${chatId}/continue`, { body: cloud ? { cloud: true } : {} });
       await load();
       attach(r.run_id);
     } catch (e) {
@@ -482,12 +489,14 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
                 {(!t.runId || lastPart.get(t.runId) === i) && (() => {
                   const files = folder ? producedFiles(t.run) : [];
                   const why = unfinished(t.run);
-                  const go = why && !running && t === lastAssistant ? continueTurn : undefined;
+                  const go = why && !running && t === lastAssistant ? () => continueTurn() : undefined;
                   return files.length ? <FilesCard files={files} handlers={fileHandlers} unfinished={why} onContinue={go} />
                     : why ? <UnfinishedNote why={why} onContinue={go} /> : null;
                 })()}
                 <TurnFoot turn={t} names={modelNames} canRetry={!running && t === lastAssistant}
-                  stats={!t.runId || lastPart.get(t.runId) === i} onRetry={() => retry()} />
+                  stats={!t.runId || lastPart.get(t.runId) === i} onRetry={() => retry()}
+                  onCloud={cloudOk && !running && t === lastAssistant && effective.model !== "cloud"
+                    ? () => continueTurn(true) : undefined} />
                 {!running && t === lastAssistant && isLong(data?.context) && <LongChatHint onContinue={handover} />}
               </div>
             ))}
@@ -518,7 +527,7 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
       <div className="composer-wrap">
         <div className="column">
           <Composer running={running} onSend={send} onStop={stop} settings={effective} onSettings={changeSettings}
-            models={llms} pictureModels={pictureModels} pictureDefault={pictureDefault} libraries={libraries} skills={skills} autoFocus
+            models={chatModels} pictureModels={pictureModels} pictureDefault={pictureDefault} libraries={libraries} skills={skills} autoFocus
             placeholder={running ? "Add something while it works" : project ? `Ask about ${project.name}, or give it a task` : undefined}
             refs={folder ? refs : []} onRemoveRef={(p) => onRefs((r) => r.filter((x) => x !== p))} onOpenRef={(p) => showFiles(p)}
             onBrowseFiles={folder ? () => showFiles() : undefined} browseLabel={project ? "Project files" : "This chat's files"}
@@ -586,7 +595,8 @@ export function UserMessage({ message, editing, canEdit, onEdit, onCancel, onSav
   const files = message.content.filter((b) => b.type === "image" || b.type === "file" || b.type === "file_ref");
   const whileWorking = message.content.some((b) => b.type === "text" && b.while_working);
   const [value, setValue] = useState(text);
-  if (isContinue(message)) return <div className="msg-continued" role="note">Continued</div>;
+  if (isContinue(message)) return <div className="msg-continued" role="note">
+    {message.content.some((b) => b.type === "continue" && b.cloud) ? "Continued in the cloud" : "Continued"}</div>;
   const from = message.content.find((b) => b.type === "handover") as { chat_id: number; title: string } | undefined;
   if (from) return (
     <div className="msg-continued msg-handover" role="note">
@@ -697,8 +707,8 @@ export function ChatSpent({ runs }: { runs: RunRecord[] }) {
   );
 }
 
-export function TurnFoot({ turn, names, canRetry, onRetry, stats = true }: { turn: AssistantTurn; names: Record<string, string>;
-  canRetry: boolean; onRetry: () => void; stats?: boolean }) {
+export function TurnFoot({ turn, names, canRetry, onRetry, stats = true, onCloud }: { turn: AssistantTurn;
+  names: Record<string, string>; canRetry: boolean; onRetry: () => void; stats?: boolean; onCloud?: () => void }) {
   const { toast } = useApp();
   return (
     <div className="msg-foot">
@@ -707,6 +717,8 @@ export function TurnFoot({ turn, names, canRetry, onRetry, stats = true }: { tur
       {canRetry && <button className="icon-btn small" aria-label="Answer again" onClick={onRetry}><RotateCcw size={14} /></button>}
       <span className="stats">{stats ? runStats(turn.run, names) : ""}</span>
       {stats && turn.run?.status === "error" && turn.run.error && <span className="notice fault" style={{ fontSize: 13 }}>{turn.run.error}</span>}
+      {onCloud && <button className="btn quiet small" onClick={onCloud}
+        title="The cloud model takes the work over from here (Settings, Cloud)"><Cloud size={14} /> Continue in the cloud</button>}
     </div>
   );
 }

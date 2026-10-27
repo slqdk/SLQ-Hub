@@ -610,13 +610,17 @@ def main() -> None:
               static_dir=dist if (dist / "index.html").is_file() else None, speech_url="http://speech:7100")
     fakes = {"sup": {}, "llama": {"responder": responder},
              "comfy": {"audio_seconds": 3.0, "video_bytes": _test_clip(base)},
-             "sandbox": {"handler": sandbox_handler(data / "workspace")}, "mcp": {}, "speech": {}}
+             "sandbox": {"handler": sandbox_handler(data / "workspace")}, "mcp": {}, "speech": {},
+             # Settings -> Cloud: OpenAI-compatible, base URL http://cloud.test/v1, any key (0.37.0)
+             "cloud": {"responder": lambda body: {"content": "The cloud model took it over and finished the work "
+                                                             "(a fake answer from cloud.test)."}}}
     router = HostRouter({"supervisor": make_supervisor(fakes["sup"]), "llm": make_llama(fakes["llama"]),
                          "comfy": make_comfy(fakes["comfy"]), "sandbox:7000": make_sandbox(fakes["sandbox"]),
                          "searxng": make_searxng(), "mcp.test": make_mcp_http(fakes["mcp"]),
                          "huggingface.co": make_hf(HF_DEMO), "civitai.com": make_civitai(CIVITAI_DEMO),
                          "delivery.civitai.test": make_civitai_delivery(CIVITAI_DEMO),
-                         "speech:7100": make_speech(fakes["speech"])}, streaming=("llm",))
+                         "speech:7100": make_speech(fakes["speech"]), "cloud.test": make_llama(fakes["cloud"])},
+                        streaming=("llm",))
     t = Transports(llm=router, runner=router, comfy=router, sandbox=None if a.sandbox else router, web=router,
                    speech=router)
     app = create_app(env, t, startup=False)
