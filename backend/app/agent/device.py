@@ -49,13 +49,13 @@ KEEP_S = 3600                          # a finished turn's folder and files wait
 MAX_INPUT = 120 * 1024 * 1024          # decoded files and pictures sent with one turn
 MAX_FILES_IN = 500
 MAX_MESSAGES = 2000
-MAX_OUT_FILE = 25 * 1024 * 1024
-MAX_OUT_TOTAL = 100 * 1024 * 1024
+MAX_OUT_FILE = 100 * 1024 * 1024        # one file the device fetches (0.38.0: was 25 MB)
+MAX_OUT_TOTAL = 250 * 1024 * 1024
 MAX_OUT_FILES = 50
 MAX_ACTIVE = 2                         # turns one person may have running at once (a phone and a PC)
 MAX_WAITING = 4                        # finished turns of one person still waiting for their device; older go
 BLOCK_TYPES = {"text", "image", "file", "thinking", "tool_call", "tool_result", "continue"}
-SETTING_KEYS = {"model", "thinking", "effort", "image_model"}
+SETTING_KEYS = {"model", "thinking", "effort", "image_model", "level"}
 LEDGERS = "device-turns"               # data/device-turns/<turn>: the stored files a turn will delete, for a sweep
                                        # after a restart (not in the turn's folder: the person's code may write there)
 
@@ -71,6 +71,7 @@ class DeviceInfo:
     name: str
     code: bool
     dropped: int = 0
+    left: list = field(default_factory=list)          # files on the device too big to send each time: (path, size)
     history: list = field(default_factory=list)       # the conversation the device sent (chat_history searches it)
     artifacts: dict = field(default_factory=dict)     # id -> {"title", "type", "version", "content"}
     shas: set = field(default_factory=set)            # stored files of this turn (tools may use these only)
@@ -389,6 +390,18 @@ def outputs(turn: DeviceTurn) -> list[dict]:
     return out
 
 
+def left_on_device(body: dict) -> list[tuple[str, int]]:
+    """The chat's files the device kept back - over what one message may carry (0.38.0): the model is told of them."""
+    out = []
+    for f in (body.get("left") or [])[:50] if isinstance(body.get("left"), list) else []:
+        if isinstance(f, dict) and isinstance(f.get("path"), str) and f["path"].strip():
+            try:
+                out.append((f["path"][:300], max(0, int(f.get("size") or 0))))
+            except (TypeError, ValueError):
+                continue
+    return out
+
+
 def removed(turn: DeviceTurn) -> list[str]:
     """Files the device sent that are gone now (the assistant deleted or moved them): the device deletes them too."""
     return sorted(rel for rel in turn.inputs if not os.path.lexists(turn.folder / rel))
@@ -404,7 +417,7 @@ async def run_turn(hub, turn: DeviceTurn, body: dict, rows: list[dict], wd: proj
     ephemeral = images.EPHEMERAL.set(True)               # ComfyUI keeps no copy of this chat's pictures
     status, error, engine, ticket, pos_task = "done", None, None, None, None
     device = DeviceInfo(user_id=turn.user["id"], name=auth.display_name(turn.user), code=False, shas=turn.shas,
-                        history=rows)
+                        history=rows, left=left_on_device(body))
     for a in body.get("artifacts") or []:
         if isinstance(a, dict) and isinstance(a.get("id"), str) and isinstance(a.get("content"), str):
             device.artifacts[a["id"]] = {"title": str(a.get("title") or a["id"]), "type": str(a.get("type") or "html"),
@@ -431,6 +444,9 @@ async def run_turn(hub, turn: DeviceTurn, body: dict, rows: list[dict], wd: proj
         run.status = "running"
         run.emit("started", model=entry["id"], waited=waited, thinking=thinking)
         engine = Engine(hub, run, chat, None, wd, entry, ticket, thinking=thinking, effort=effort)
+        engine.level = agent.level_of(chat, None, {})[0]
+        if engine.level != "extra" and engine.thinking_budget:          # as in the owner's turns (0.38.0)
+            engine.thinking_budget = max(1, engine.thinking_budget // 2)
         engine.device = device
         engine.steps.append({"type": "queue", "seconds": waited})
 

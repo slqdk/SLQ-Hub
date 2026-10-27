@@ -273,7 +273,7 @@ async def test_a_projects_overview_says_what_each_chat_did(signed_in, app, fakes
     hub.settings.update("agent", {"max_steps": 2})
     limited = await new_chat(signed_in, project_id=p["id"])
     await finish(app, await say(signed_in, limited["id"], "endless parts"))
-    hub.settings.update("agent", {"max_steps": 60, "review": True, "review_model": "same"})
+    hub.settings.update("agent", {"max_steps": 60, "level_chats": "extra", "level_projects": "extra", "review_model": "same"})
     reviewed = await new_chat(signed_in, project_id=p["id"])
     await finish(app, await say(signed_in, reviewed["id"], "make the game"))
     await finish(app, await say(signed_in, reviewed["id"], "and again"))

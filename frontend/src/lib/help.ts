@@ -106,19 +106,23 @@ export const SECTIONS: HelpSection[] = [
       },
       {
         id: "model",
-        title: "Choose the model, and how hard it thinks",
-        what: "Under the message box: the model chip chooses the model for this chat, the brain chip how much it "
-          + "thinks first (for models that can). Thinking takes longer and helps with hard problems, maths and "
+        title: "Choose the model, and how hard it works",
+        what: "Under the message box: the model chip chooses the model for this chat, the Effort chip how hard it "
+          + "works - Quick answers straight away, Think thinks first (for models that can), Extra thinks hardest and "
+          + "has another model check the work. Thinking takes longer and helps with hard problems, maths and "
           + "planning.",
         how: [
           "Click the model's name under the message box and pick another. The first answer after a switch takes a "
             + "moment while the card loads it.",
-          "Click No thinking and pick Think a little, Think or Think hard.",
+          "Click the Effort chip and pick Quick, Think or Extra. For a model with thinking levels, the same menu sets "
+            + "how hard Think thinks (Think a little, Think, Think hard); Extra always takes the hardest.",
+          "The owner sets the default for plain chats and for projects under Settings, Assistant; a project can have "
+            + "its own in its settings.",
           "While it thinks, Stop thinking beside the thinking makes it go on at once with what it has.",
           "The owner sets the order of the models, and the model for new chats, under Settings, Models.",
         ],
-        tips: ["One step thinks at most as long as Settings, Assistant allows (8,000 tokens to begin with); then it "
-          + "stops thinking and acts."],
+        tips: ["One step at Extra thinks at most as long as Settings, Assistant allows (8,000 tokens to begin with), at "
+          + "Think half as long; then it stops thinking and acts."],
       },
       {
         id: "web",
@@ -680,7 +684,8 @@ export const SECTIONS: HelpSection[] = [
         how: ["The review shows in the answer as Independent review; open it for its steps and its report.",
           "It has 24 steps and a time limit - 15 minutes unless the owner changes it; near the end it is asked to "
           + "finish, so it always ends with a report and a verdict.",
-          "The owner turns it on or off, and chooses who checks and for how long, under Settings, Assistant."],
+          "It runs at the Effort Extra (the chip under the message box; the default for projects). The owner "
+          + "chooses who checks and for how long under Settings, Assistant."],
         tips: ["By default the model a stuck turn is handed over to checks: another model sees other mistakes."],
         needs: ["code"],
         owner: true,

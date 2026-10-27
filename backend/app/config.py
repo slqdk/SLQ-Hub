@@ -135,14 +135,13 @@ DEFAULTS: dict = {
     "agent": {
         "max_steps": 60,
         "compact_at": 0.75,                # share of the model's context
-        "thinking_in_projects": True,
-        "thinking_in_chats": False,
+        "level_chats": "quick",            # effort in plain chats (0.38.0): quick | think | extra (extra: + review)
+        "level_projects": "extra",         # and in projects; a project or a chat can choose its own
         "effort": "medium",
         "thinking_budget": 8000,           # most thinking tokens in one model step (0 = no limit): then it acts
         "tool_output_chars": 12000,
         "user_name": "",                   # how the assistant calls the user ("" = the admin user name)
         "escalate_to": "qwen3.8-27b",      # a stuck turn goes on with this model ("" = it answers with what it has)
-        "review": True,                    # a turn that made code, pages or documents is checked by another model
         "review_model": "",                # "" = the hand-over model above (else the same), "same", or a model id
         "review_minutes": 15,              # the review's time: then it is asked for its report (0 = only its steps)
         "notes_file": True,                # NOTES.md in the working folder: written, reminded of, read first (0.31.0)

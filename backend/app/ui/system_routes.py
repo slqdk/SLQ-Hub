@@ -114,7 +114,7 @@ def _for_people(hub) -> dict:
     """The few settings a person's chat needs (defaults for the composer)."""
     s = hub.settings
     return {"models": {"default": s.get("models", "default")},
-            "agent": {"thinking_in_chats": s.get("agent", "thinking_in_chats"), "effort": s.get("agent", "effort")},
+            "agent": {"level_chats": s.get("agent", "level_chats"), "effort": s.get("agent", "effort")},
             "images": {"model": s.get("images", "model")}}
 
 

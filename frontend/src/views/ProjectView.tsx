@@ -1,4 +1,5 @@
 // A project: its chats, files, settings, history and sync devices.
+import { LEVEL_OPTIONS } from "../lib/effort";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Download, Menu, MessageSquarePlus, Plus } from "lucide-react";
 import { api, type ChatListItem, type Library, type Project, type Revision, type Skill } from "../lib/api";
@@ -181,11 +182,13 @@ function ProjectSettings({ project, onSaved }: { project: Project; onSaved: (p: 
             <option value="">The default model</option>
             {llms.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
           </select></label>
-        <label className="field"><span>Thinking</span>
-          <select className="select" value={s.thinking == null ? "" : s.thinking ? "on" : "off"}
-            onChange={(e) => setS({ ...s, thinking: e.target.value === "" ? null : e.target.value === "on" })}>
-            <option value="">The default (on in projects)</option><option value="on">On</option><option value="off">Off</option>
-          </select></label>
+        <label className="field"><span>Effort</span>
+          <select className="select" value={s.level ?? (s.thinking == null ? "" : s.thinking ? "think" : "quick")}
+            onChange={(e) => setS({ ...s, level: e.target.value || null, thinking: null })}>
+            <option value="">As in Settings, Assistant</option>
+            {LEVEL_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+          <small>A chat can still pick another with the Effort button.</small></label>
         <label className="field"><span>Model for pictures</span>
           <select className="select" value={s.image_model ?? ""} onChange={(e) => setS({ ...s, image_model: e.target.value || null })}>
             <option value="">As in Settings, Assistant</option>

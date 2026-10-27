@@ -5,6 +5,7 @@ import { Cloud, Copy, Download, FileText, FolderInput, FolderOpen, Menu, Message
 import { api, mediaUrl, type ArtifactRef, type Block, type ChatData, type ChatSettings, type Library, type Message,
   type ModelEntry, type ProducedFile, type RunEvent, type RunRecord, type Settings, type Skill, type Upload } from "../lib/api";
 import { clearDraftSkills, peekDraftSkills, setDraft as setMessageDraft } from "../lib/draft";
+import { levelOf } from "../lib/effort";
 import { energy, money, seconds, tokens } from "../lib/format";
 import { linkProps, navigate } from "../lib/router";
 import { buildTurns, isContinue, liveSegments, newLive, reduceLive, toolLabel, unfinished, waitsForAnswer, type AssistantTurn,
@@ -233,10 +234,14 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
     const def = settings?.models?.default ?? models?.defaults?.default ?? llms[0]?.id ?? "";
     const model = cs.model ?? ps?.model ?? def;
     // The chat's choice, the project's, the model's own (Settings -> Models), then Settings -> Assistant.
-    const mode = llms.find((m) => m.id === model)?.thinking_mode;
-    const thinking = cs.thinking ?? ps?.thinking ?? (mode ? mode === "on" : undefined)
-      ?? (project ? agent.thinking_in_projects : agent.thinking_in_chats) ?? false;
-    return { model, thinking: !!thinking, effort: cs.effort ?? agent.effort ?? "medium",
+    const entry = llms.find((m) => m.id === model);
+    // Effort (0.38.0): the chat's, the project's, then Settings -> Assistant (a model's own thinking mode only
+    // changes whether a default level thinks - as the Hub reads it).
+    const level = levelOf(cs, ps, project ? agent.level_projects : agent.level_chats);
+    const chosen = cs.level != null || typeof cs.thinking === "boolean";
+    const mode = entry?.thinking_mode;
+    const thinking = !chosen && (mode === "on" || mode === "off") ? mode === "on" : level !== "quick";
+    return { model, thinking, level, effort: cs.effort ?? entry?.thinking?.default_effort ?? agent.effort ?? "medium",
       skills: cs.skills ?? [], libraries: cs.libraries ?? [], image_model: cs.image_model ?? null };
   }, [data, draft, project, settings, models, llms]);
 

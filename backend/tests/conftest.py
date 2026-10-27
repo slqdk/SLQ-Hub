@@ -79,7 +79,7 @@ def app(hub_env, fakes):
     application.state.router = router
     # The independent review (0.30.0) is on by default: it would take the scripted replies of every test whose turn
     # writes a file. tests/test_review.py turns it on.
-    application.state.hub.settings.update("agent", {"review": False})
+    application.state.hub.settings.update("agent", {"level_chats": "quick", "level_projects": "think"})
     return application
 
 

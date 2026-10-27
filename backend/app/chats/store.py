@@ -27,7 +27,8 @@ from PIL import Image
 from .. import db
 from ..projects import blobs
 
-CHAT_DEFAULTS = {"model": None, "thinking": None, "effort": None, "skills": [], "libraries": [], "image_model": None}
+CHAT_DEFAULTS = {"model": None, "thinking": None, "effort": None, "skills": [], "libraries": [], "image_model": None,
+                 "level": None}                 # effort (0.38.0): quick | think | extra; None = the project's or Settings'
 
 
 def _chat(r) -> dict:

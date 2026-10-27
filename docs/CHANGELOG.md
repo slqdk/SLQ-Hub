@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.38.0 - 2026-10-27
+
+- **Effort: Quick, Think or Extra.** One chip under the message box replaces
+  the thinking chip, as you suggested. Quick answers straight away. Think thinks
+  first, each step at most half the thinking budget. Extra thinks hardest and
+  also gets the independent review. A model with thinking levels shows them in
+  the same menu for Think. Settings → Assistant sets the default for plain
+  chats (Quick) and for projects (Extra), instead of the two thinking switches
+  and the review switch. A project can have its own in its settings. In chat
+  145 the review took 12-14 minutes of each turn; now it runs only at Extra.
+- **A video made in a person's chat is not lost when it fails to arrive.**
+  Sanne's video disappeared because the phone did not get the file, and the Hub
+  still deleted its copy. Now the phone tries three times, and the Hub keeps the
+  answer's files for an hour until the phone has them. Opening the chat again
+  fetches what is missing. A file the phone has but cannot play says "this
+  browser cannot play it - download it" instead of "not there any more".
+- **Files of up to 100 MB reach a person's device** (was 25 MB), 250 MB per
+  answer. Files too big to send with every message stay on the phone, and the
+  assistant is told which ones they are.
+
 ## 0.37.0 - 2026-10-27
 
 You asked for these when the local model cannot finish on its own. Both work

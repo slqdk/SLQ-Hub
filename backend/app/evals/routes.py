@@ -30,7 +30,7 @@ async def overview(request: Request):
     hub = get_hub(request)
     return {"areas": [{"id": a, "title": title} for a, title in AREAS], "cases": await t.cases(),
             "models": t.models(), "default_model": hub.settings.get("models", "default"),
-            "thinking_in_chats": bool(hub.settings.get("agent", "thinking_in_chats")),
+            "thinking_in_chats": hub.settings.get("agent", "level_chats") in ("think", "extra"),
             "internet_asks": hub.settings.get("web", "access") == "ask",
             "running": t.running(), "live": t.live, "runs": t.runs()}
 

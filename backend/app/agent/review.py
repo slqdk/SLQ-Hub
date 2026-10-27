@@ -92,10 +92,6 @@ The answer the user was given (claims to check, not facts):
 {answer}"""
 
 
-def wanted(settings) -> bool:
-    return bool(settings.get("agent", "review"))
-
-
 def review_seconds(settings) -> float:
     """Settings -> Assistant's time for a review in seconds (0: no time limit; at most a day); the form saves it as
     text."""
@@ -317,7 +313,8 @@ async def review(agent, engine, chat: dict, project: dict | None, wd, before: di
     from .loop import NO_ANSWER, Engine, WrapUp
     hub = engine.hub
     if (engine.depth or engine.device is not None or engine.ticket is None or before is None
-            or engine.state.get("reviewed") or not wanted(hub.settings) or not made_something(engine.steps)):
+            or engine.state.get("reviewed") or engine.level != "extra"
+            or not made_something(engine.steps)):
         return False
     after = await asyncio.to_thread(projects.snapshot, wd.root)
     work = (own_work(work_files(projects.produced(before, after)), touched(engine.run, wd))

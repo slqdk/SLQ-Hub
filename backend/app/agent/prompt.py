@@ -286,12 +286,16 @@ def system_prompt(*, user: str, model_name: str, folder_text: str, sandbox_path:
     return text
 
 
-def device_folder_text(sandbox_path: str, code: bool = False) -> str:
+def device_folder_text(sandbox_path: str, code: bool = False, left: list | None = None) -> str:
     """A person's chat: their files live on their own device, the server keeps nothing."""
     text = (f"This chat's files live on the user's own device. For this answer they are in a temporary folder "
             f"({sandbox_path}): what the user attached is in .hub/attachments/, and the files you create or change "
             "here are sent to the user's device when you finish. Nothing stays on the server, and there is no "
             "memory across chats.")
+    if left:
+        text += (" These files of the chat stayed on the device - too big to send with every message - so they are "
+                 "not in the folder now: " + ", ".join(f"{p} ({s / 2**20:.0f} MB)" for p, s in left[:20])
+                 + ". To work on one, ask the user to attach it.")
     if code:
         text += (" bash may touch only this folder (no shared memory either, so Python multiprocessing does not "
                  "work), and nothing it starts keeps running after the command.")

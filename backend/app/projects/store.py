@@ -25,7 +25,7 @@ from .. import db
 from . import syncstore
 
 PROJECT_DEFAULTS = {"model": None, "cloud_escalation": False, "skills": [], "libraries": [], "thinking": None,
-                    "image_model": None}
+                    "image_model": None, "level": None}    # level (0.38.0): the project's effort; None = Settings'
 TEXT_LIMIT = 2_000_000
 
 

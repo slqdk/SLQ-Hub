@@ -1,6 +1,7 @@
 // The Hub for a person the owner added (Settings, People): the same chat as
 // the owner's - models, pictures, thinking, tools, artifacts - with the chats
 // and their files kept on this device. The Hub only answers.
+import { levelOf } from "../lib/effort";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CircleHelp, Download, FileText, FolderOpen, KeyRound, LogOut, Menu, MessageSquarePlus, MoreHorizontal, Pencil,
   Search, Sparkles, Trash2, Upload as UploadIcon, User as UserIcon, X } from "lucide-react";
@@ -235,7 +236,7 @@ export function PersonApp() {
     const newMeta = { ...current.meta, updated: Date.now(),
       title: current.meta.title === "New chat" && result.title ? result.title : current.meta.title };
     await S.saveChat(newMeta, merged);
-    await T.forget(turnId);
+    if (!problems.length) await T.forget(turnId);     // else the Hub keeps the files (an hour): the card fetches again
     forgetPending();
     await loadMedia(merged);
     setChat((c) => (c && c.meta.id === meta.id ? { meta: newMeta, data: merged } : c));
@@ -246,7 +247,8 @@ export function PersonApp() {
     liveArtifacts.current.clear();
     refreshChats();
     if (result.status === "error" && result.error) toast(result.error, "fault");
-    if (problems.length) toast(`Could not keep: ${problems.join(", ")}`, "fault");
+    if (problems.length) toast(`Not on this device yet: ${problems.join(", ")}. The Hub keeps it for an hour - `
+      + "open the chat again to fetch it.", "fault");
   }, [loadMedia, pendingKey, refreshChats, toast]);
 
   // An answer that was being written when the page was closed or reloaded.
@@ -280,9 +282,13 @@ export function PersonApp() {
     const cs = { ...(chat?.meta.settings ?? {}), ...(chat ? {} : draft) } as Partial<ChatSettings>;
     const def = (settings?.models?.default as string | undefined) ?? llms[0]?.id ?? "";
     const model = cs.model ?? def;
-    const mode = llms.find((m: ModelEntry) => m.id === model)?.thinking_mode;
-    const thinking = cs.thinking ?? (mode ? mode === "on" : undefined) ?? !!settings?.agent?.thinking_in_chats;
-    return { model, thinking: !!thinking, effort: cs.effort ?? (settings?.agent?.effort as string | undefined) ?? "medium",
+    const entry = llms.find((m: ModelEntry) => m.id === model);
+    const level = levelOf(cs, null, settings?.agent?.level_chats);       // effort (0.38.0)
+    const chosen = cs.level != null || typeof cs.thinking === "boolean";
+    const mode = entry?.thinking_mode;
+    const thinking = !chosen && (mode === "on" || mode === "off") ? mode === "on" : level !== "quick";
+    return { model, thinking, level,
+      effort: cs.effort ?? entry?.thinking?.default_effort ?? (settings?.agent?.effort as string | undefined) ?? "medium",
       skills: cs.skills ?? [], libraries: [], image_model: cs.image_model ?? null };
   }, [chat, draft, settings, llms]);
 
@@ -444,25 +450,45 @@ export function PersonApp() {
 
   // ---- the files an answer made: from this device's store
   const chatKey = chat?.meta.id ?? "";
-  const fileSrc = useCallback(async (f: ProducedFile): Promise<string | null> => {
+  const fetched = useRef(new Set<string>());                      // files asked of the Hub again this session
+  const fileSrc = useCallback(async (f: ProducedFile, runId?: string | null): Promise<string | null> => {
     if (!chatKey) return null;
     const key = `${chatKey}\n${f.path}\n${f.size}`;
     const have = fileUrls.current.get(key);
     if (have) return have;
-    const local = await S.getFile(chatKey, f.path);
+    let local = await S.getFile(chatKey, f.path);
+    if (!local && runId && !fetched.current.has(`${runId}\n${f.path}`)) {   // it did not arrive: the Hub may still have it
+      fetched.current.add(`${runId}\n${f.path}`);
+      if (await T.fetchFile(runId, chatKey, f.path, f.mime)) {
+        local = await S.getFile(chatKey, f.path);
+        void T.forget(runId);
+      }
+    }
     if (!local) return null;
-    const u = URL.createObjectURL(local.blob);
+    // A type on the blob: iPhone browsers will not play a video from a blob without one.
+    const blob = local.blob.type ? local.blob : new Blob([local.blob], { type: local.mime || f.mime || "" });
+    const u = URL.createObjectURL(blob);
     fileUrls.current.set(key, u);
     return u;
   }, [chatKey]);
-  const fileHandlers: FileHandlers = {
-    src: fileSrc,
-    download: async (f) => {
-      const u = await fileSrc(f);
-      if (u) saveUrl(u, f.path.split("/").pop() || "file");
-      else toast(`${f.path} is not on this device any more.`, "fault");
-    },
-    open: () => setPanel({ kind: "files" }),
+  const handlerCache = useRef(new Map<string, FileHandlers>());
+  const handlersFor = (runId?: string | null): FileHandlers => {
+    const key = `${chatKey}\n${runId ?? ""}`;
+    let h = handlerCache.current.get(key);
+    if (!h) {
+      h = {
+        src: (f) => fileSrc(f, runId),
+        download: async (f) => {
+          const u = await fileSrc(f, runId);
+          if (u) saveUrl(u, f.path.split("/").pop() || "file");
+          else toast(`${f.path} is not on this device.`, "fault");
+        },
+        open: () => setPanel({ kind: "files" }),
+        missing: "not on this device",
+      };
+      handlerCache.current.set(key, h);
+    }
+    return h;
   };
 
   const loadArtifact = useCallback(async (id: string, version?: number): Promise<Artifact> => {
@@ -673,7 +699,7 @@ export function PersonApp() {
                     const files = producedFiles(t.run);
                     const why = unfinished(t.run);
                     const go = why && !busy && t === lastAssistant ? () => void continueTurn(why) : undefined;
-                    return files.length ? <FilesCard files={files} handlers={fileHandlers} unfinished={why} onContinue={go} />
+                    return files.length ? <FilesCard files={files} handlers={handlersFor(t.runId)} unfinished={why} onContinue={go} />
                       : why ? <UnfinishedNote why={why} onContinue={go} /> : null;
                   })()}
                   <TurnFoot turn={t} names={modelNames} canRetry={!busy && t === lastAssistant}
@@ -706,6 +732,7 @@ export function PersonApp() {
         <div className="composer-wrap">
           <div className="column">
             <Composer running={running} onSend={send} onStop={stop} settings={effective} onSettings={changeSettings}
+              reviewOnExtra={false}
               models={llms} pictureModels={pictureModels} pictureDefault={pictureDefault} libraries={[]} skills={skills}
               autoFocus showLibraries={false} uploader={uploader}
               onManageSkills={() => { setPanel(null); setHelp(null); setSkillsPage(true); }}

@@ -34,7 +34,7 @@ def test_the_request_turns_reasoning_control_on():
 
 async def test_a_turn_stops_thinking_at_its_budget(signed_in, app, fakes):
     streaming(app)
-    await signed_in.put("/hub/api/settings", json={"section": "agent", "values": {"thinking_in_chats": True,
+    await signed_in.put("/hub/api/settings", json={"section": "agent", "values": {"level_chats": "extra",
                                                                                     "thinking_budget": "20"}})
     fakes.llama["replies"] = [{"reasoning": "x" * 900, "pace": 0.002, "content": "Done."}, {"content": "Title"}]
     c = await new_chat(signed_in)
@@ -62,15 +62,22 @@ async def test_a_turn_stops_thinking_at_its_budget(signed_in, app, fakes):
     assert body["reasoning_control"] is True and len(fakes.llama["controls"]) == 1
     step = [s for s in chats.runs_for_chat(c["id"])[-1]["steps"] if s.get("type") == "model"][0]
     assert "thinking_budget" not in step["sent"] and "thinking_ended" not in step["sent"]
-    await signed_in.put("/hub/api/settings", json={"section": "agent", "values": {"thinking_in_chats": False}})
+    await signed_in.put("/hub/api/settings", json={"section": "agent", "values": {"level_chats": "quick"}})
     fakes.llama["requests"].clear()
     await finish(app, await say(signed_in, c["id"], "Without thinking"))
     assert "reasoning_control" not in fakes.llama["requests"][0]
+    # 0.38.0: Think has half the budget a step, Extra all of it
+    await signed_in.put("/hub/api/settings", json={"section": "agent", "values": {"level_chats": "think",
+                                                                                    "thinking_budget": 8000}})
+    fakes.llama["replies"] = [{"reasoning": "x" * 90, "content": "ok"}]
+    await finish(app, await say(signed_in, c["id"], "Think a bit"))
+    step = [s for s in chats.runs_for_chat(c["id"])[-1]["steps"] if s.get("type") == "model"][0]
+    assert step["sent"]["thinking_budget"] == 4000
 
 
 async def test_stop_thinking_ends_it_at_once(signed_in, app, fakes):
     streaming(app)
-    await signed_in.put("/hub/api/settings", json={"section": "agent", "values": {"thinking_in_chats": True}})
+    await signed_in.put("/hub/api/settings", json={"section": "agent", "values": {"level_chats": "think"}})
     fakes.llama["replies"] = [{"reasoning": "pondering " * 200, "pace": 0.02, "content": "Here it is."},
                               {"content": "Title"}]
     c = await new_chat(signed_in)
@@ -103,7 +110,7 @@ async def test_stop_thinking_ends_it_at_once(signed_in, app, fakes):
 
 async def test_a_stopped_thinking_is_not_ended_again_at_the_budget(signed_in, app, fakes):
     streaming(app)
-    await signed_in.put("/hub/api/settings", json={"section": "agent", "values": {"thinking_in_chats": True,
+    await signed_in.put("/hub/api/settings", json={"section": "agent", "values": {"level_chats": "think",
                                                                                     "thinking_budget": 8}})
     fakes.llama["replies"] = [{"reasoning": "pondering " * 100, "pace": 0.03, "content": "Here."},
                               {"content": "Title"}]
@@ -123,3 +130,60 @@ async def test_a_stopped_thinking_is_not_ended_again_at_the_budget(signed_in, ap
 async def test_stop_thinking_needs_a_live_answer(signed_in):
     assert (await signed_in.post("/hub/api/runs/run_nope/stop-thinking")).status_code == 404
     assert (await signed_in.post("/hub/api/device/turns/run_nope/stop-thinking")).status_code in (401, 403, 404)
+
+
+# ---------------------------------------------------------------- effort (0.38.0)
+
+async def test_the_effort_level_decides_thinking_its_level_and_the_review(signed_in, app, monkeypatch):
+    """Quick / Think / Extra: the chat's choice, then the project's, then Settings (plain chats / projects); a choice
+    from before 0.38.0 (thinking on/off) still counts; a model's own thinking mode decides only the defaults; Extra
+    thinks at the model's highest level."""
+    hub = app.state.hub
+    agent = hub.extras["agent"]
+    real = hub.catalog.get_llm
+    monkeypatch.setattr(hub.catalog, "get_llm", lambda mid: {**real(mid), "thinking": {
+        "efforts": ["low", "high", "medium"], "default_effort": "medium"}} if real(mid) else None)
+    hub.settings.update("agent", {"level_chats": "quick", "level_projects": "extra"})
+    chat = {"settings": {}}
+    project = {"settings": {}}
+    assert agent.level_of(chat, None, {}) == ("quick", False)
+    assert agent.level_of(chat, project, {}) == ("extra", False)
+    assert agent.level_of({"settings": {"level": "think"}}, project, {}) == ("think", True)
+    assert agent.level_of(chat, {"settings": {"level": "think"}}, {}) == ("think", False)
+    assert agent.level_of({"settings": {"thinking": True}}, None, {}) == ("think", True)      # before 0.38.0
+    assert agent.level_of({"settings": {"thinking": False}}, project, {}) == ("quick", True)
+    assert agent.level_of(chat, None, {"level": "extra"}) == ("extra", True)
+    _, thinking, effort = agent.resolve(chat, None, {})
+    assert thinking is False
+    _, thinking, effort = agent.resolve({"settings": {"level": "think"}}, None, {})
+    assert thinking is True and effort == "medium"                       # the model's default level
+    _, thinking, effort = agent.resolve({"settings": {"level": "think", "effort": "low"}}, None, {})
+    assert effort == "low"                                               # the level chosen in the menu
+    _, thinking, effort = agent.resolve({"settings": {"level": "extra", "effort": "low"}}, None, {})
+    assert thinking is True and effort == "high"                         # Extra: the highest, whatever was chosen
+    monkeypatch.setattr(hub.catalog, "get_llm", lambda mid: {**real(mid), "thinking_mode": "off"} if real(mid) else None)
+    assert agent.resolve(chat, project, {})[1] is False                  # a model that never thinks by default
+    assert agent.resolve({"settings": {"level": "think"}}, project, {})[1] is True     # unless the chat says so
+
+
+async def test_only_extra_has_the_independent_review(signed_in, app, fakes):
+    """A turn that made a file is reviewed at Extra, not at Think - the chat's choice over Settings'."""
+    from .test_agent import finish, new_chat, say
+    app.state.hub.settings.update("agent", {"level_chats": "extra", "review_model": "same"})
+
+    def responder(body):
+        msgs = body["messages"]
+        if "Your task: an independent review" in str(msgs[0].get("content")):
+            return {"content": "Checked.\nVERDICT: OK"}
+        if not body.get("tools"):
+            return {"content": "Title"}
+        if msgs[-1]["role"] == "tool":
+            return {"content": "Wrote it."}
+        return {"tool_calls": [{"name": "write_file", "arguments": {"path": "a.txt", "content": "x"}}]}
+    fakes.llama["responder"] = responder
+    c = await new_chat(signed_in, settings={"level": "think"})
+    run = await finish(app, await say(signed_in, c["id"], "write it"))
+    assert run.status == "done" and not any(e["type"] == "review" for e in run.events)
+    c = await new_chat(signed_in)
+    run = await finish(app, await say(signed_in, c["id"], "write it"))
+    assert any(e["type"] == "review" for e in run.events), [e["type"] for e in run.events]

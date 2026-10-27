@@ -41,7 +41,7 @@ def responder(main: list[dict], reviewer: list[dict], seen: dict, hook=None):
 
 
 def on(app, **values) -> None:
-    app.state.hub.settings.update("agent", {"review": True, **values})
+    app.state.hub.settings.update("agent", {"level_chats": "extra", "level_projects": "extra", **values})
 
 
 def folder(app, chat_id: int):
@@ -149,7 +149,7 @@ async def test_what_is_not_reviewed(signed_in, app, fakes):
     fakes.llama["responder"] = responder([{"content": "Svar."}], FOUND, seen, synced)
     await finish(app, await say(signed_in, c["id"], "Et spørgsmål"))
     assert "reviewer" not in seen and (folder(app, c["id"]) / "notes.md").exists()
-    app.state.hub.settings.update("agent", {"review": False})
+    app.state.hub.settings.update("agent", {"level_chats": "quick", "level_projects": "think"})
     fakes.llama["responder"] = responder(MAIN[:2], FOUND, seen)
     await finish(app, await say(signed_in, c["id"], "Spillet"))               # off
     assert "reviewer" not in seen

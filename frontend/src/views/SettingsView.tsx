@@ -1,4 +1,5 @@
 // Settings: models, the queue, apps and keys, the agent, memory, MCP, cloud, system (skills have their own page).
+import { LEVEL_OPTIONS } from "../lib/effort";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { ChevronDown, ChevronUp, Copy, Download, Menu, Plus, RefreshCw, X } from "lucide-react";
 import { api, type ApiKey, type Person, type HFLookup, type HFSearchHit, type ImageLookup, type McpServerConfig, type McpStatus,
@@ -228,7 +229,7 @@ function ModelsTab({ s }: { s: S }) {
         onDownload={download} onCancel={cancel}
         note="Run on the card through ComfyUI and take minutes per clip. Once one is downloaded, ask for a video in any chat - from a description, or with a picture attached to start from. Choose which one is used in Assistant, Video."
         extra={(m) => <><span className="tag">GPU</span>{deleteButton(m)}</>} />}
-      {advanced && <ModelSettings model={advanced} thinkingInChats={!!s.data?.settings.agent?.thinking_in_chats}
+      {advanced && <ModelSettings model={advanced} thinkingInChats={(s.data?.settings.agent?.level_chats ?? "quick") !== "quick"}
         onClose={() => setAdvanced(null)} onSaved={() => { setAdvanced(null); refreshModels(); }} />}
       {addingHF && <AddFromHF onClose={() => setAddingHF(false)} onAdded={() => { setAddingHF(false); refreshModels(); }} />}
       {addingImage && models.sdxl && <AddImageModel choices={models.sdxl} onClose={() => setAddingImage(false)}
@@ -1329,18 +1330,18 @@ function AgentTab({ s }: { s: S }) {
         { key: "compact_at", label: "Condense the chat at this share of the context", type: "number", min: 0.3, max: 0.95, step: 0.05 },
         { key: "tool_output_chars", label: "Longest tool output shown to the model (characters)", type: "number", min: 2000, max: 100000,
           help: "Longer output is saved to a file the model can read in parts." },
-        { key: "thinking_in_chats", label: "Think before answering in plain chats", type: "bool" },
-        { key: "thinking_in_projects", label: "Think before answering in projects", type: "bool" },
+        { key: "level_chats", label: "Effort in plain chats", type: "select", options: LEVEL_OPTIONS,
+          help: "The Effort button under the message box changes it for a chat. Think and Extra: for models that think." },
+        { key: "level_projects", label: "Effort in projects", type: "select", options: LEVEL_OPTIONS,
+          help: "A project can have its own (its settings), a chat its own. Extra: when a turn has made or changed code, " +
+            "pages or documents, another model checks the work in a fresh context the way you would use it - runs it, " +
+            "opens pages and plays games - and reports; with problems, the model goes on from the report." },
         { key: "escalate_to", label: "When the model gets stuck, hand over to", type: "select",
           options: [{ value: "", label: "Nobody: it answers with what it has" },
             ...(models?.llm ?? []).filter((m) => m.installed).map((m) => ({ value: m.id, label: m.name }))],
           help: "Stuck: it repeats itself, three tool calls in a row fail, or it asks for help. The turn goes on with this " +
             "model (the card switches, which takes a moment) and the chat says so. Not when this model is the one working." },
-        { key: "review", label: "Have the work checked before the answer", type: "bool",
-          help: "When a turn has made or changed code, pages or documents, another model checks the work in a fresh " +
-            "context the way you would use it - runs it, opens pages and plays games - and reports. With problems, the " +
-            "model that did the work goes on from the report. Once a turn; it takes a few minutes more." },
-        { key: "review_model", label: "Who checks the work", type: "select",
+        { key: "review_model", label: "Who checks the work (Extra)", type: "select",
           options: [{ value: "", label: "The model it hands over to (else the model that did it)" },
             { value: "same", label: "The model that did the work" },
             ...(models?.llm ?? []).filter((m) => m.installed).map((m) => ({ value: m.id, label: m.name }))],

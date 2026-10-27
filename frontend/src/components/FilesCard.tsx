@@ -18,6 +18,7 @@ export interface FileHandlers {
   open?: (f: ProducedFile) => void;                             // in the side panel
   add?: (f: ProducedFile) => void;                              // put it in the next message
   added?: (f: ProducedFile) => boolean;
+  missing?: string;                                             // what a file that is not there is called
 }
 
 /** The files a run made or changed (its "files" steps). */
@@ -96,6 +97,7 @@ function FileRow({ file, handlers }: { file: ProducedFile; handlers: FileHandler
   const media = !file.skipped && (kind === "audio" || kind === "video" || kind === "image");
   const [src, setSrc] = useState<string | null>(null);
   const [gone, setGone] = useState(false);
+  const [unplayable, setUnplayable] = useState(false);       // there, but this browser cannot show it (0.38.0)
   useEffect(() => {
     let alive = true;
     if (!media) return;
@@ -126,16 +128,17 @@ function FileRow({ file, handlers }: { file: ProducedFile; handlers: FileHandler
         </div>
         <div className="small faint num">
           {bytes(file.size)} · {file.skipped ? file.skipped : file.new === false ? "changed" : "new"}
-          {gone && " · not there any more"}
+          {gone && ` · ${handlers.missing ?? "not there any more"}`}
+          {unplayable && !gone && " · this browser cannot play it - download it"}
         </div>
-        {media && src && !gone && (
+        {media && src && !gone && !unplayable && (
           kind === "audio" ? <audio className="files-card-audio" controls preload="metadata" src={src}
-            onError={() => setGone(true)} aria-label={`Play ${name}`} />
-          : kind === "video" ? <video className="files-card-video" controls preload="metadata" src={src}
-            onError={() => setGone(true)} aria-label={`Play ${name}`} />
+            onError={() => setUnplayable(true)} aria-label={`Play ${name}`} />
+          : kind === "video" ? <video className="files-card-video" controls preload="metadata" playsInline src={src}
+            onError={() => setUnplayable(true)} aria-label={`Play ${name}`} />
           : <button className="files-card-pic" onClick={() => (handlers.open ? handlers.open(file) : openTab())}
               aria-label={`Show ${name}`}>
-              <img src={src} alt={name} loading="lazy" onError={() => setGone(true)} /></button>
+              <img src={src} alt={name} loading="lazy" onError={() => setUnplayable(true)} /></button>
         )}
       </div>
       {!file.skipped && !gone && (

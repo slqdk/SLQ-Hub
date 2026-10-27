@@ -51,6 +51,11 @@ MUST_ANSWER = ("(SLQ Hub: you are repeating the same steps and getting the same 
 NO_ANSWER = "(The model kept repeating the same tool calls and gave no answer. Ask again, or try another model.)"
 LOOP_REPEATS = 3
 LOOP_SAME_STEPS = 3
+# Effort (0.38.0, Søren): one choice for how hard a turn works, in the chat (the composer), its project and Settings
+# -> Assistant (plain chats / projects). quick: no thinking; think: thinking at the chosen level, half the thinking
+# budget a step; extra: thinking at the model's highest level, the whole budget, and the independent review.
+LEVELS = ("quick", "think", "extra")
+EFFORT_RANK = ("minimal", "low", "medium", "high", "xhigh", "max")
 # The cloud from a turn's start (0.37.0): "Continue in the cloud", or the cloud model chosen in the chat's model menu
 # (its settings' model is CLOUD) - where a hand-over to the cloud is allowed: web chats in projects that let hard tasks
 # go to the cloud, with Settings -> Cloud set up.
@@ -206,6 +211,7 @@ class Engine:
         self.device = None
         self.only: set[str] | None = None   # the only tools it may have (the reviewer's: review.REVIEW_TOOLS)
         self.mcp_checks = False              # with `only`: also the MCP tools the review may use (mcp.tools)
+        self.level = "quick"                 # the turn's effort (Agent.level_of): extra has the independent review
         self.top_model: str | None = None   # the turn's model, when this engine works for it with another (reviewer)
         self.wrap_up: WrapUp | None = None  # it must end with a report (the reviewer): told so near its end
         self.keeps_model = True              # a hand-over becomes the chat's model (not in a Settings -> Tests run)
@@ -1099,6 +1105,19 @@ class Agent:
         run.task = asyncio.get_running_loop().create_task(self._turn(run, options or {}), name=run.id)
         return run
 
+    def level_of(self, chat: dict, project: dict | None, options: dict) -> tuple[str, bool]:
+        """The turn's effort level, and whether the user chose it for the chat or the message (not a default - a
+        model's own thinking mode, Settings -> Models, still decides those). A `thinking` choice from before 0.38.0
+        reads as quick or think."""
+        cs, ps = chat.get("settings") or {}, (project or {}).get("settings") or {}
+        for src, chosen in ((options, True), (cs, True), (ps, False)):
+            if src.get("level") in LEVELS:
+                return src["level"], chosen
+            if isinstance(src.get("thinking"), bool):
+                return ("think" if src["thinking"] else "quick"), chosen
+        default = self.hub.settings.get("agent", "level_projects" if project else "level_chats")
+        return (default if default in LEVELS else "quick"), False
+
     def resolve(self, chat: dict, project: dict | None, options: dict) -> tuple[dict, bool | None, str | None]:
         s = self.hub.settings
         cs, ps = chat.get("settings") or {}, (project or {}).get("settings") or {}
@@ -1110,16 +1129,17 @@ class Agent:
             entry = self.hub.catalog.get_llm(fallback)
             if not entry or not self.hub.catalog.installed(entry):
                 raise RuntimeError(f"the model {model_id} is not downloaded (Settings -> Models)")
-        thinking = options.get("thinking")
-        if thinking is None:
-            thinking = cs.get("thinking")
-        if thinking is None:
-            thinking = ps.get("thinking")
-        if thinking is None and entry.get("thinking_mode") in ("on", "off"):     # Settings -> Models
+        level, chosen = self.level_of(chat, project, options)
+        thinking = level != "quick"
+        if not chosen and entry.get("thinking_mode") in ("on", "off"):          # Settings -> Models
             thinking = entry["thinking_mode"] == "on"
-        if thinking is None:
-            thinking = bool(s.get("agent", "thinking_in_projects" if project else "thinking_in_chats"))
-        effort = options.get("effort") or cs.get("effort") or s.get("agent", "effort")
+        known = (entry.get("thinking") or {})
+        levels = [e for e in known.get("efforts") or [] if isinstance(e, str)]
+        if level == "extra" and levels:                   # the model's highest level
+            effort = max(levels, key=lambda e: EFFORT_RANK.index(e) if e in EFFORT_RANK else 2)
+        else:
+            effort = (options.get("effort") or cs.get("effort") or known.get("default_effort")
+                      or s.get("agent", "effort"))
         return entry, thinking, effort
 
     def skills_for(self, chat: dict | None, project: dict | None, device=None) -> list[dict]:
@@ -1139,7 +1159,7 @@ class Agent:
         video = bool(video_pipe and video_pipe.available()) and not subagent
         if device is not None:                   # a person's chat: their name, no memory, code if allowed
             return system_prompt(user=device.name, model_name=Catalog.label(entry),
-                                 folder_text=device_folder_text(wd.sandbox_path, device.code),
+                                 folder_text=device_folder_text(wd.sandbox_path, device.code, device.left),
                                  sandbox_path=wd.sandbox_path, memory_index=[], skills=skills, project=None,
                                  images_available=bool(images and images.available()), handover_to=handover_to,
                                  subagent=subagent, taken_over_from=taken_over_from, memory=False,
@@ -1361,6 +1381,9 @@ class Agent:
             run.emit("started", model=cloud_label or entry["id"], waited=waited, thinking=thinking)
             engine = Engine(self.hub, run, chat, project, wd, entry, ticket, thinking=thinking, effort=effort,
                             escalation=escalation)
+            engine.level = self.level_of(chat, project, options)[0]
+            if engine.level != "extra" and engine.thinking_budget:      # Think: half the budget a step (0.38.0)
+                engine.thinking_budget = max(1, engine.thinking_budget // 2)
             if in_cloud:
                 engine.start_in_cloud("the user continued in the cloud" if options.get("cloud")
                                       else "the chat's model is the cloud model")

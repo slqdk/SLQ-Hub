@@ -33,8 +33,12 @@ function dataUrl(b: Blob): Promise<string> {
 export async function request(meta: S.ChatMeta, data: S.ChatData): Promise<Record<string, unknown>> {
   let total = 0;
   const files: { path: string; mime: string; data: string }[] = [];
+  const left: { path: string; size: number }[] = [];       // too big to send each time: the model is told (0.38.0)
   for (const f of (await S.listFiles(meta.id)).sort((a, b) => b.at - a.at)) {    // the newest first
-    if (total + f.size > MAX_SEND) continue;
+    if (total + f.size > MAX_SEND) {
+      left.push({ path: f.path, size: f.size });
+      continue;
+    }
     total += f.size;
     files.push({ path: f.path, mime: f.mime, data: await dataUrl(f.blob) });
   }
@@ -57,7 +61,7 @@ export async function request(meta: S.ChatMeta, data: S.ChatData): Promise<Recor
   }
   const artifacts = Object.values(data.artifacts).map((versions) => versions[versions.length - 1])
     .map(({ id, title, type, version, content }) => ({ id, title, type, version, content }));
-  return { title: meta.title, settings: meta.settings, files, blobs, artifacts,
+  return { title: meta.title, settings: meta.settings, files, left, blobs, artifacts,
     messages: data.messages.map((m) => ({ role: m.role, content: m.content, created_at: m.created_at })) };
 }
 
@@ -130,17 +134,29 @@ export async function collect(turnId: string, chat: string, result: DeviceResult
       problems.push(`${f.path} (${f.skipped})`);
       continue;
     }
-    try {
-      const r = await fetch(`/hub/api/device/turns/${turnId}/file?path=${encodeURIComponent(f.path)}`, { credentials: "same-origin" });
-      if (!r.ok) throw new Error(String(r.status));
-      const blob = await r.blob();
-      await S.putFile({ chat, path: f.path, mime: f.mime, size: blob.size, blob, at: Date.now() });
-    } catch {
-      problems.push(f.path);
-    }
+    if (!(await fetchFile(turnId, chat, f.path, f.mime))) problems.push(f.path);
   }
   for (const path of result.removed ?? []) await S.deleteFile(chat, path);
   return problems;
+}
+
+/** One file of an answer from the Hub into this device's store, tried three times (a phone on the move drops
+ * connections). The Hub keeps an answer's files until the device says it has them (forget), an hour at most. */
+export async function fetchFile(turnId: string, chat: string, path: string, mime?: string): Promise<boolean> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const r = await fetch(`/hub/api/device/turns/${turnId}/file?path=${encodeURIComponent(path)}`,
+        { credentials: "same-origin" });
+      if (r.status === 404) return false;                       // the Hub has let it go
+      if (!r.ok) throw new Error(String(r.status));
+      const blob = await r.blob();
+      await S.putFile({ chat, path, mime: mime || blob.type, size: blob.size, blob, at: Date.now() });
+      return true;
+    } catch {
+      await new Promise((ok) => setTimeout(ok, 700 * 3 ** attempt));
+    }
+  }
+  return false;
 }
 
 /** The device has everything: the Hub deletes the turn's folder and files. */

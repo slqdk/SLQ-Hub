@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUp, BookOpen, Brain, Check, Cloud, Cpu, FileText, FolderOpen, Image as ImageIcon, Paperclip, Plus, Settings2,
   Sparkles, Square, Wand2, X } from "lucide-react";
 import { upload, type ModelEntry, type Skill, type Upload } from "../lib/api";
+import { LEVEL_LABEL, LEVELS, levelText, type Level } from "../lib/effort";
 import { clearDraft, NEW_SKILL_TEXT, peekDraft, SKILL_MAKER } from "../lib/draft";
 import { bytes } from "../lib/format";
 import { Lamp, MenuButton } from "./ui";
@@ -14,6 +15,7 @@ export interface ComposerSettings {
   model: string;
   thinking: boolean;
   effort: string;
+  level: Level;                    // effort (0.38.0): quick | think | extra
   skills: string[];
   libraries: number[];
   image_model: string | null;      // null: the project's or Settings' model for pictures
@@ -29,13 +31,14 @@ const shortPath = (p: string) => p.split("/").slice(-2).join("/");
 
 export function Composer({ running, onSend, onStop, settings, onSettings, models, pictureModels = [], pictureDefault,
   libraries, skills, placeholder, autoFocus, refs = [], onRemoveRef, onOpenRef, onBrowseFiles, browseLabel,
-  uploader = upload, showLibraries = true, onManageSkills }: {
+  uploader = upload, showLibraries = true, onManageSkills, reviewOnExtra = true }: {
   running: boolean;
   onSend: (text: string, uploads: Upload[]) => Promise<boolean>;
   onStop: () => void;
   settings: ComposerSettings;
   onSettings: (patch: Partial<ComposerSettings>) => void;
   models: ModelEntry[];
+  reviewOnExtra?: boolean;          // Extra also has the independent review (not in a person's chats)
   pictureModels?: ModelEntry[];     // downloaded models that make pictures
   pictureDefault?: string;          // what this chat uses when it has no choice of its own
   libraries: { id: number; name: string }[];
@@ -159,7 +162,6 @@ export function Composer({ running, onSend, onStop, settings, onSettings, models
   const model = models.find((m) => m.id === settings.model) ?? models[0];
   const efforts = model?.thinking?.efforts ?? [];
   const canThink = (model?.capabilities ?? []).includes("thinking");
-  const thinkLabel = !canThink || !settings.thinking ? "No thinking" : EFFORT_LABEL[settings.effort] ?? "Think";
   const extras = settings.libraries.length;
   const groups: [string, Skill[]][] = [["Yours", skills.filter((k) => k.mine)],
     ["Shared by the family", skills.filter((k) => !k.mine && !k.builtin)], ["From SLQ Hub", skills.filter((k) => k.builtin)]];
@@ -349,32 +351,33 @@ export function Composer({ running, onSend, onStop, settings, onSettings, models
             )}
           </MenuButton>
         )}
-        {canThink && (
-          <MenuButton up className={`picker${settings.thinking ? " on" : ""}`}
-            label={<><Brain size={15} /> <span className="hide-narrow">{thinkLabel}</span></>} title={`Thinking: ${thinkLabel}`}>
-            {(close) => (
-              <>
-                <button className="menu-item" role="menuitemradio" aria-checked={!settings.thinking}
-                  onClick={() => { onSettings({ thinking: false }); close(); }}>
-                  {!settings.thinking ? <Check size={15} /> : <span style={{ width: 15 }} />}
-                  <span>No thinking<small>Fastest; fine for most questions</small></span></button>
-                {efforts.length === 0 && (                  /* a model that thinks on/off, with no effort levels */
-                  <button className="menu-item" role="menuitemradio" aria-checked={!!settings.thinking}
-                    onClick={() => { onSettings({ thinking: true }); close(); }}>
-                    {settings.thinking ? <Check size={15} /> : <span style={{ width: 15 }} />}
-                    <span>Think<small>Reasons before it answers</small></span></button>
-                )}
-                {efforts.map((e) => (
-                  <button key={e} className="menu-item" role="menuitemradio" aria-checked={settings.thinking && settings.effort === e}
-                    onClick={() => { onSettings({ thinking: true, effort: e }); close(); }}>
-                    {settings.thinking && settings.effort === e ? <Check size={15} /> : <span style={{ width: 15 }} />}
-                    <span>{EFFORT_LABEL[e] ?? e}<small>{e === "low" ? "A short look first" : e === "xhigh" ? "For hard problems; slow" : "Reasons before it answers"}</small></span>
-                  </button>
-                ))}
-              </>
-            )}
-          </MenuButton>
-        )}
+        <MenuButton up className={`picker${settings.level !== "quick" ? " on" : ""}`}
+          label={<><Brain size={15} /> <span className="hide-narrow">{LEVEL_LABEL[settings.level]}</span></>}
+          title={`Effort: ${LEVEL_LABEL[settings.level]}`}>
+          {(close) => (
+            <>
+              <div className="menu-head">Effort</div>
+              {LEVELS.map((lv) => (
+                <button key={lv} className="menu-item" role="menuitemradio" aria-checked={settings.level === lv}
+                  disabled={lv === "think" && !canThink} onClick={() => { onSettings({ level: lv }); close(); }}>
+                  {settings.level === lv ? <Check size={15} /> : <span style={{ width: 15 }} />}
+                  <span>{LEVEL_LABEL[lv]}<small>{levelText(lv, canThink, reviewOnExtra)}</small></span></button>
+              ))}
+              {canThink && efforts.length > 0 && (                  /* a model with thinking levels: they set Think */
+                <>
+                  <div className="menu-sub">How hard Think thinks</div>
+                  {efforts.map((e) => (
+                    <button key={e} className="menu-item" role="menuitemradio"
+                      aria-checked={settings.level === "think" && settings.effort === e}
+                      onClick={() => { onSettings({ level: "think", effort: e }); close(); }}>
+                      {settings.level === "think" && settings.effort === e ? <Check size={15} /> : <span style={{ width: 15 }} />}
+                      <span>{EFFORT_LABEL[e] ?? e}</span></button>
+                  ))}
+                </>
+              )}
+            </>
+          )}
+        </MenuButton>
         <span className="spacer" />
         {running && <button className="send stop" onClick={onStop} aria-label="Stop" title="Stop"><Square size={14} fill="currentColor" /></button>}
         {(!running || hasContent) && (

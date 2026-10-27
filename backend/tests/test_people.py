@@ -477,3 +477,18 @@ async def test_an_owners_picture_is_not_deleted_by_a_persons_turn(signed_in, app
             "blobs": [{"sha": "p1", "name": "px.png", "mime": "image/png", "data": base64.b64encode(PNG_1x1).decode()}]})
         await phone.post(f"/hub/api/device/turns/{res['id']}/done", headers={"Origin": "http://hub"})
     assert blobs.exists(owner_pic) and chats.get_upload(owner_pic) is not None
+
+
+def test_files_left_on_the_device_are_named_to_the_model():
+    """0.38.0: a file the device keeps back (over what one message may carry) is named in the prompt; a file it
+    fetches may now be 100 MB."""
+    from app.agent.device import MAX_OUT_FILE, left_on_device
+    from app.agent.prompt import device_folder_text
+    assert MAX_OUT_FILE == 100 * 2**20
+    left = left_on_device({"left": [{"path": "big.mp4", "size": 80 * 2**20}, {"path": 3}, "x",
+                                    {"path": "a.wav", "size": "bad"}]})
+    assert left == [("big.mp4", 80 * 2**20)]
+    text = device_folder_text("/workspace/device/r1", False, left)
+    assert "big.mp4 (80 MB)" in text and "ask the user to attach it" in text
+    assert "stayed on the device" not in device_folder_text("/workspace/device/r1", False, [])
+    assert left_on_device({"left": "nope"}) == [] and left_on_device({}) == []

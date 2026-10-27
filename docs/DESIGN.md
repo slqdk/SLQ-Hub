@@ -1027,6 +1027,23 @@ given page reached 77%.
 quick chats. A toggle in the composer overrides it. Qwen3.8 tends to
 overthink, so the default effort is `medium`.
 
+**Effort: Quick, Think, Extra** (0.38.0, Søren: "it would be nice if it did
+not always run an independent agent"). One choice replaces the thinking
+toggle and `agent.review`: `quick` no thinking; `think` thinking at the level
+chosen in the menu (a model's `thinking.efforts`; else its `default_effort`)
+and half the thinking budget a step; `extra` thinking at the model's highest
+level, the whole budget, and the independent review. `Agent.level_of`: the
+message's options, the chat's settings (`level`), the project's, then
+Settings → Assistant (`level_chats`, default quick; `level_projects`, default
+extra). A `thinking` true/false stored before 0.38.0 reads as think/quick. A
+model's own thinking mode (Settings → Models) decides whether a *default*
+level thinks, not a level the user chose. `Engine.level` gates the review.
+Chat 145 measured why: each of its two turns spent 12-14 minutes in the
+review and 6 minutes in single steps that thought up to the 8,000-token
+budget; Qwen3.8 ignores `reasoning_effort`, so "Think a little" changed
+nothing for it - the budget is what shortens its thinking. A person's chat
+has the same levels; Extra there has no review (people's turns have none).
+
 **A thinking budget, and Stop thinking** (0.30.0). The effort is only a hint
 to the chat template: chat 78's Qwen3.8 27B, at effort low, thought 12,808
 and 13,354 tokens in single steps - about nine minutes each at 24 tokens a
@@ -1067,8 +1084,8 @@ stopped". The model API's callers get none of this.
 
 **An independent review** (0.30.0, `app/agent/review.py`). What Claude does
 with important work - have someone who did not make it check it - the Hub
-does for each turn that made or changed code, pages or documents
-(`agent.review`, on by default): a turn that called a tool that makes or
+does for each turn at the effort Extra (0.38.0; before it, `agent.review`,
+on by default) that made or changed code, pages or documents: a turn that called a tool that makes or
 changes work (`write_file`, `edit_file`, `move_file`, `bash`, `artifact` -
 its subagents' calls count) and so left new or changed files other than
 pictures, sound and video in the working folder, or saved an artifact. The
@@ -1467,12 +1484,23 @@ chats in the browser. Each answer is a **device turn**
    summary to fold old messages into, the oldest are left out until the
    context fits (the system prompt says how many).
 3. Events stream from `/events`. The result carries the new messages, the
-   files the assistant made or changed (25 MB each, 100 MB in all), the
-   files it deleted (`removed`), the artifacts, the steps and the title.
-4. The browser fetches the pictures (`/blob/<sha>`) and files (`/file`),
-   saves the chat, then calls `/done`. The Hub deletes the folder, drops the
-   run from memory and deletes every stored file the turn created. A reload
-   in between picks the turn up again (the pending turn is in localStorage).
+   files the assistant made or changed (100 MB each, 250 MB in all since
+   0.38.0; 25 and 100 before), the files it deleted (`removed`), the
+   artifacts, the steps and the title.
+4. The browser fetches the pictures (`/blob/<sha>`) and files (`/file`, three
+   tries each since 0.38.0), saves the chat, then calls `/done`. The Hub
+   deletes the folder, drops the run from memory and deletes every stored file
+   the turn created. A reload in between picks the turn up again (the pending
+   turn is in localStorage). Since 0.38.0 a file that did not arrive keeps the
+   turn on the Hub (no `/done`, an hour at most, `KEEP_S`): the files card
+   under the answer fetches it again from `/file` when the chat is opened, and
+   then says `/done`. Sanne's video (chat "Søren and I as alpacas") was lost
+   that way before: the fetch failed, a toast said so, and `/done` deleted it.
+   A file the device has but cannot play shows "this browser cannot play it"
+   rather than "not there any more", and a blob without a type gets the
+   file's (iPhone browsers will not play a typeless video blob). Files over
+   what one message carries (60 MB) stay on the device; the request lists
+   them (`left`) and the prompt names them.
 
 What the Hub keeps: nothing of the content. No chat, run, prompt or artifact
 rows are written. Stored files are content-addressed and shared, so a turn
@@ -1895,7 +1923,7 @@ routing), and the system prompt says what each costs.
 - **Files.** Named from the text (`tredive-sekunder-tilbage.mp3`, then
   `-2`, ...), in a project under `audio/`. `save_as` may name a file (a path
   in the folder or a sandbox path) or a folder. In a person's chat a file must
-  fit the 25 MB a device turn sends back: a FLAC over 120 s is refused before
+  fit the 100 MB a device turn sends back (25 MB before 0.38.0): a FLAC over 120 s is refused before
   the card works on it, and a result too big says so.
 
 ### Voices and remakes (0.18.0)
@@ -2163,7 +2191,7 @@ sound, with ComfyUI's own nodes only (the image is unchanged):
   frames, size, model, quality, seed and the seconds on the card, and says
   there is no sound; the description shows how to put `music_generate` or
   `sound_generate` under it with ffmpeg. In a person's chat ComfyUI keeps
-  nothing (history and output deleted), and a file over 25 MB is said not to
+  nothing (history and output deleted), and a file over 100 MB is said not to
   reach her device. Not in subagents. Settings → Assistant → Video chooses
   the model for a description and for a picture (first-to-last uses the
   picture model when it can, else one that can); the tool's description says

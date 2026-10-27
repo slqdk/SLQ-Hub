@@ -133,7 +133,7 @@ export interface Message { id: number; chat_id: number; role: "user" | "assistan
   run_id: string | null; created_at: string }
 
 export interface ChatSettings { model: string | null; thinking: boolean | null; effort: string | null; skills: string[];
-  libraries: number[]; image_model: string | null }
+  libraries: number[]; image_model: string | null; level?: string | null }
 export interface Chat { id: number; project_id: number | null; title: string; settings: ChatSettings; summary?: string;
   summary_upto?: number;
   created_at: string; updated_at: string; test_run?: string | null }
@@ -168,7 +168,7 @@ export interface ChatData { chat: Chat; messages: Message[]; artifacts: Artifact
   allowed?: { tool: string; created_at: string }[] }      // "Allow in this chat" answers
 
 export interface ProjectSettings { model: string | null; cloud_escalation: boolean; skills: string[]; libraries: number[];
-  thinking: boolean | null; image_model: string | null }
+  thinking: boolean | null; image_model: string | null; level?: string | null }
 export interface Project { id: number; name: string; instructions: string; settings: ProjectSettings; created_at: string;
   updated_at: string; archived?: number; chats?: number; head?: number; usage?: UsageTotals }
 /** What was used of the card (0.24.0): answers, other jobs, tokens read / written / from the cache, energy (Wh), cost
