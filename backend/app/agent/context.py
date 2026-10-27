@@ -22,7 +22,6 @@ SHORTENED = re.compile(r"\n?\[(?:\.\.\. )?(\d+) (?:more )?characters - [^;\]]*; 
 LOOK_IT_UP = "look it up whole with chat_history, or call the tool again"
 
 
-
 def renamed(b: dict) -> str:
     """An attachment saved under another name because an older, different file has its name (0.35.2): chat 138 was
     told "unpack .hub/attachments/cm98-reference.zip" and unpacked the older kit of that name, not the one attached."""
@@ -31,6 +30,7 @@ def renamed(b: dict) -> str:
         return ""
     return (f" - an older, different file is .hub/attachments/{name}; this attachment is {path}, and a request "
             f"that names {name} means this one")
+
 
 def shorten_result(text: str, head: int, why: str) -> str:
     """A tool result cut to its first `head` characters, with what is left out and where to get it whole. Shortening
