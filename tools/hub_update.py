@@ -81,7 +81,8 @@ PROJECT = "slq-hub"
 BUILT = ("hub", "llm", "comfyui", "sandbox", "speech")  # services with their own image
 # Folders the services mount, made (owned by uid 1000, the containers' user) before they start: Docker would
 # create a missing one as root, and the Hub could not download into it.
-FOLDERS = ("data", "models/llm", "models/comfy", "models/speech", "comfy/input", "comfy/output", "comfy/user")
+FOLDERS = ("data", "models/llm", "models/comfy", "models/speech", "comfy/input", "comfy/output", "comfy/user",
+           "windows/storage", "windows/oem", "windows/shared")
 KEEP = 3
 TIMEOUT = 300
 POLL = float(os.environ.get("HUB_UPDATE_POLL", "3"))
@@ -670,6 +671,31 @@ def ensure_folders(root: Path = HUB_ROOT) -> list[str]:
     return made
 
 
+def ensure_windows_password(path: Path | None = None) -> str | None:
+    """With the Windows container's profile on (COMPOSE_PROFILES=windows, 0.39.0) and no WINDOWS_PASSWORD in .env,
+    write a random one there - Windows would otherwise get dockur's default password, with RDP open to the LAN.
+    Returns the new password, or None when nothing was needed."""
+    path = path or ENV_FILE
+    env = read_env(path)
+    profiles = {p.strip() for p in env.get("COMPOSE_PROFILES", "").split(",")}
+    if "windows" not in profiles or env.get("WINDOWS_PASSWORD"):
+        return None
+    import secrets
+    password = secrets.token_urlsafe(12)
+    text = path.read_text(encoding="utf-8")
+    path.write_text(text + ("" if text.endswith("\n") or not text else "\n") + f"WINDOWS_PASSWORD={password}\n",
+                    encoding="utf-8")
+    return password
+
+
+def say_windows_password() -> None:
+    new = ensure_windows_password()
+    if new:
+        user = read_env().get("WINDOWS_USER") or "hub"
+        out.ok(f"Windows: a password for RDP was written to {ENV_FILE} (WINDOWS_PASSWORD) - user {user}, "
+               f"password {new}")
+
+
 FIREWALL = ((ROOT / "deploy" / "firewall" / "slq-hub-firewall.sh", Path("/usr/local/sbin/slq-hub-firewall.sh"), 0o755),
             (ROOT / "deploy" / "firewall" / "slq-hub-firewall.service",
              Path("/etc/systemd/system/slq-hub-firewall.service"), 0o644))
@@ -965,6 +991,7 @@ def _finish_update(args, state: dict) -> int:
         out.ok(f"Backup : {tar.name} ({human(tar.stat().st_size)})")
 
     out.head("Starting the new version...")
+    say_windows_password()
     made = ensure_folders()
     if made:
         out.ok("Folders: made " + ", ".join(made))
@@ -1114,6 +1141,8 @@ def main(argv: list[str] | None = None) -> int:
         if not ENV_FILE.is_file():
             out.bad(f"{ENV_FILE} does not exist - run install.sh first.")
             return 1
+        say_windows_password()
+        ensure_folders()
         return run([*compose_args(), *argv[1:]], capture=False).returncode
     if not argv or argv[0].startswith("-"):
         argv = ["update", *argv]

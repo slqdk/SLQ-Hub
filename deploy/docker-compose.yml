@@ -175,6 +175,45 @@ services:
       sbx:
         ipv4_address: 172.31.250.20
 
+  # Windows in a VM inside a container (dockur/windows, on the VM's KVM - nested virtualisation on Proxmox), for
+  # Windows-only tools the owner installs and lets the Hub use, such as an MCP server (0.39.0). Off unless .env has
+  # COMPOSE_PROFILES=windows. It sits on the sandbox's network under the sandbox's firewall rules: the internet yes,
+  # the LAN, the other containers and the VM no. The owner reaches it with RDP on the VM's address, the Hub at
+  # 172.31.250.30. The first start downloads and installs Windows by itself (20-30 minutes).
+  windows:
+    image: docker.io/dockurr/windows:${WINDOWS_TAG:-latest}
+    container_name: slq-hub-windows
+    profiles: ["windows"]
+    restart: unless-stopped
+    devices:
+      - /dev/kvm
+      - /dev/net/tun
+    cap_add:
+      - NET_ADMIN
+    stop_grace_period: 2m                 # Windows shuts down properly on a stop
+    environment:
+      VERSION: ${WINDOWS_VERSION:-10l}
+      RAM_SIZE: ${WINDOWS_RAM:-8G}
+      CPU_CORES: ${WINDOWS_CORES:-4}
+      DISK_SIZE: ${WINDOWS_DISK:-64G}
+      USERNAME: ${WINDOWS_USER:-hub}
+      PASSWORD: ${WINDOWS_PASSWORD:-}     # update.sh writes one into .env when the profile is on and it is missing
+      LANGUAGE: ${WINDOWS_LANGUAGE:-English}
+      REGION: ${WINDOWS_REGION:-da-DK}
+      KEYBOARD: ${WINDOWS_KEYBOARD:-da-DK}
+    ports:
+      - "${WINDOWS_RDP_PORT:-3389}:3389/tcp"
+      - "${WINDOWS_RDP_PORT:-3389}:3389/udp"
+      - "127.0.0.1:8006:8006"             # the web viewer, for the installation: ssh -L 8006:127.0.0.1:8006 <vm>
+    volumes:
+      - ${HUB_ROOT:-/srv/slq-hub}/windows/storage:/storage     # its disk; not in the backups
+      - ${HUB_ROOT:-/srv/slq-hub}/windows/oem:/oem             # copied to C:\OEM; an install.bat there runs at setup
+      - ${HUB_ROOT:-/srv/slq-hub}/windows/shared:/shared       # the Shared folder (Z:) in Windows
+    dns: [1.1.1.1, 9.9.9.9]               # as the sandbox: the firewall drops a LAN resolver
+    networks:
+      sbx:
+        ipv4_address: 172.31.250.30
+
 networks:
   # The Hub and SearXNG: both reach the internet (web pages, downloads, search engines).
   core: {}

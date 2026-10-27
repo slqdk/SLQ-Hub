@@ -370,6 +370,38 @@ What Wine shows is close to Windows, not the same (fonts, some controls). To
 use a program, ask for it "published": the folder with its .exe goes into the
 chat's (or project's) files; it runs on a PC with the .NET 10 Desktop Runtime.
 
+## 12. Windows in a container (optional)
+
+For Windows-only tools the Hub should use - an MCP server on Windows, say
+(Settings → MCP servers) - the VM can run Windows itself, in a container
+(dockur/windows: a Windows VM on the VM's KVM). Off unless you turn it on.
+
+1. Nested virtualisation: on the Proxmox host
+   `cat /sys/module/kvm_amd/parameters/nested` gives `1`, and the Hub VM's CPU
+   type is **host**. In the VM, `ls /dev/kvm` must exist (stop and start the
+   VM after changing the CPU type).
+2. Room: Windows takes 8 GB of the VM's RAM and up to 64 GB of disk (plus the
+   ISO, about 5 GB) under `/srv/slq-hub/windows/storage` - not in the backups.
+3. In `/srv/slq-hub/.env`: `COMPOSE_PROFILES=windows`, and if you like
+   `WINDOWS_VERSION` (`10l` Windows 10 LTSC is the default, `11l` Windows 11
+   LTSC), `WINDOWS_USER` and `WINDOWS_PASSWORD`. Without a password the next
+   step writes a random one into `.env` and shows it.
+4. `sudo bash update.sh compose up -d windows`. The first start downloads and
+   installs Windows by itself (20-30 minutes; follow it with
+   `sudo bash update.sh compose logs -f windows`, or the web viewer through
+   `ssh -L 8006:127.0.0.1:8006 <vm>` and http://localhost:8006).
+5. Connect with Remote Desktop to the VM's address (port 3389), as
+   `WINDOWS_USER` with `WINDOWS_PASSWORD`. Activate Windows with your own key.
+
+Windows is on the sandbox's network under the sandbox's firewall rules: it
+reaches the internet (updates, downloads), not the LAN, the other containers
+or the VM. The Hub reaches it at `172.31.250.30` - an MCP server in Windows on
+port 8765 is `http://172.31.250.30:8765/mcp` in Settings → MCP servers.
+Files: `/srv/slq-hub/windows/shared` is the Shared folder (Z:) in Windows,
+and `/srv/slq-hub/windows/oem` is copied to `C:\OEM` at the installation - an
+`install.bat` there runs at its end (put it there before the first start).
+Stop it with `sudo bash update.sh compose stop windows`; it shuts down properly.
+
 ## Daily operation
 
 All commands run in the VM from `/opt/slq-hub`:

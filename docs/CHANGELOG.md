@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.39.0 - 2026-10-27
+
+- **Windows in a container on the Hub's VM (optional).** For Windows-only
+  tools the Hub should use - such as a TwinCAT build server for checking PLC
+  code with the real compiler. Turn it on with `COMPOSE_PROFILES=windows` in
+  `.env`, then `sudo bash update.sh compose up -d windows`. It installs Windows
+  10 LTSC by itself (or the version you choose) and logs its user on. You
+  reach it with Remote Desktop on the VM's address. It gets the sandbox's
+  firewall rules: internet yes, your LAN and the Hub's other containers no.
+  The Hub reaches it at `172.31.250.30`. If `.env` has no
+  `WINDOWS_PASSWORD`, update.sh writes a random one there and shows it. See
+  INSTALL.md, section 12.
+
 ## 0.38.0 - 2026-10-27
 
 - **Effort: Quick, Think or Extra.** One chip under the message box replaces

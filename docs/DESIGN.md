@@ -69,9 +69,13 @@ Proxmox host
     ├── speech     Text to speech on the CPU (Chatterbox, Røst; CPU PyTorch).
     │              No GPU. Internal only, no way out.
     ├── searxng    Web search for the agent. Internal only.
-    └── sandbox    Ubuntu with Python, Node, .NET 10 (C#), ImageMagick, Tesseract, ffmpeg …
-                   runs the agent's commands as uid 1000 in /workspace.
-                   Own network, blocked from the LAN by the VM's firewall.
+    ├── sandbox    Ubuntu with Python, Node, .NET 10 (C#), ImageMagick, Tesseract, ffmpeg …
+    │              runs the agent's commands as uid 1000 in /workspace.
+    │              Own network, blocked from the LAN by the VM's firewall.
+    └── windows    Optional (0.39.0, profile "windows"): Windows in a KVM VM inside a
+                   container (dockur/windows), for Windows-only tools the owner serves
+                   to the Hub - an MCP server. On sbx at .30 under the sandbox's rules;
+                   RDP published for the owner.
 ```
 
 Networks:
@@ -91,6 +95,21 @@ Networks:
 - `sbx` — hub and sandbox only. The sandbox is not on `core`, has no Docker
   socket, and `DOCKER-USER` rules on the VM drop its traffic to private
   ranges (internet stays open for `pip install`, `git clone`, …).
+- The optional `windows` container (0.39.0; Søren: "I want it all on the
+  Ubuntu VM" - TwinCAT's compiler runs only in XAE on Windows, so checking
+  PLC code for real needs a Windows) is on `sbx` at 172.31.250.30, and the
+  firewall gives that address the sandbox's rules (`SANDBOX_IPS`): Windows
+  reaches the internet, not the LAN, the containers or the VM; the Hub's
+  connections to it (an MCP server in it) and RDP from the LAN (published
+  port 3389) are not new from it, so they pass. dockur/windows runs a QEMU/KVM
+  VM in the container (`/dev/kvm`, `/dev/net/tun`, `NET_ADMIN`), installs the
+  chosen Windows by itself (`WINDOWS_VERSION`, default `10l`, Windows 10 LTSC)
+  and logs its user on, which XAE-like tools need. `update.sh` writes a random
+  `WINDOWS_PASSWORD` into `.env` when the profile is on and none is set
+  (dockur's default is `admin`). Its disk is `windows/storage`, outside
+  `data/`, so not in the backups. Nothing in the repo installs anything into
+  it: what runs there is the owner's (an `install.bat` in `windows/oem` runs
+  at the end of the installation).
 
 All of this was tested with Docker 29.9.1, the compose file's networks and
 the real firewall script outside the VM (0.15.0): before the rules a model

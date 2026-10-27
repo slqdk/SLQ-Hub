@@ -5,10 +5,12 @@
 # slq-hub-firewall.service every time Docker starts.
 #
 # The sandbox container has a fixed address (172.31.250.20, see
-# deploy/docker-compose.yml). New connections FROM it are dropped when they
+# deploy/docker-compose.yml), and so has the optional Windows container
+# (172.31.250.30, 0.39.0). New connections FROM them are dropped when they
 # go to private ranges, your LAN (HUB_LAN_CIDRS), the other containers, or
-# the VM itself. The internet stays open (pip, npm, git clone, web pages).
-# Replies to connections the Hub opens TO the sandbox are not new, so they pass.
+# the VM itself. The internet stays open (pip, npm, git clone, web pages,
+# Windows' own updates). Replies to connections the Hub opens TO them are not
+# new, so they pass - and so do replies to RDP from the LAN to Windows.
 #
 # The model containers - llm (172.31.251.11), comfyui (.12) and speech (.13)
 # on the "inner" network - need nothing from outside it: new connections from
@@ -19,7 +21,7 @@
 # iptables. Rules are added only when missing (-C), so it is safe to re-run.
 set -euo pipefail
 
-SANDBOX_IP="${SANDBOX_IP:-172.31.250.20}"
+SANDBOX_IPS="${SANDBOX_IPS:-172.31.250.20 172.31.250.30}"
 INNER_NET="${INNER_NET:-172.31.251.0/24}"
 MODEL_IPS="${MODEL_IPS:-172.31.251.11 172.31.251.12 172.31.251.13}"
 ENV_FILE="${HUB_ENV_FILE:-/srv/slq-hub/.env}"
@@ -55,15 +57,19 @@ seen=" "
 for net in $nets; do
     [[ -z "$net" || "$seen" == *" $net "* ]] && continue
     seen+="$net "
-    add DOCKER-USER -s "$SANDBOX_IP" -d "$net" -m conntrack --ctstate NEW -j DROP
+    for ip in $SANDBOX_IPS; do
+        add DOCKER-USER -s "$ip" -d "$net" -m conntrack --ctstate NEW -j DROP
+    done
 done
 # The VM itself (its LAN address and the Docker gateways) is INPUT, not FORWARD.
-add INPUT -s "$SANDBOX_IP" -m conntrack --ctstate NEW -j DROP
+for ip in $SANDBOX_IPS; do
+    add INPUT -s "$ip" -m conntrack --ctstate NEW -j DROP
+done
 
 for ip in $MODEL_IPS; do
     add DOCKER-USER -s "$ip" ! -d "$INNER_NET" -m conntrack --ctstate NEW -j DROP
     add INPUT -s "$ip" -m conntrack --ctstate NEW -j DROP
 done
 
-echo "slq-hub-firewall: sandbox $SANDBOX_IP blocked from:$seen and the VM itself"
+echo "slq-hub-firewall: sandbox and Windows ($SANDBOX_IPS) blocked from:$seen and the VM itself"
 echo "slq-hub-firewall: model containers ($MODEL_IPS) blocked from everything outside $INNER_NET"

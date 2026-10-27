@@ -474,3 +474,32 @@ def test_an_update_cut_off_before_the_install_is_put_back_by_the_next(hu, monkey
     hu.lock_file().write_text(json.dumps({**gone, "pid": hu.os.getpid()}))
     hu.recover_cut_off(args())
     assert hu.lock_file().exists() and not hu.calls
+
+
+def test_the_windows_container_gets_a_password_when_its_profile_is_on(hu, tmp_path):
+    """0.39.0: with COMPOSE_PROFILES=windows and no WINDOWS_PASSWORD, a random one is written into .env (RDP is open
+    to the LAN, and dockur's default password is admin); once there it is kept."""
+    env = tmp_path / ".env"
+    env.write_text("HUB_PORT=8080\n")
+    assert hu.ensure_windows_password(env) is None                         # the profile is off: nothing
+    env.write_text("HUB_PORT=8080\nCOMPOSE_PROFILES=windows")
+    pw = hu.ensure_windows_password(env)
+    assert pw and len(pw) >= 12 and env.read_text().endswith(f"\nWINDOWS_PASSWORD={pw}\n")
+    assert hu.read_env(env)["COMPOSE_PROFILES"] == "windows" and hu.read_env(env)["WINDOWS_PASSWORD"] == pw
+    assert hu.ensure_windows_password(env) is None                         # kept from then on
+    env.write_text("COMPOSE_PROFILES=other, windows\nWINDOWS_PASSWORD=mine\n")
+    assert hu.ensure_windows_password(env) is None and hu.read_env(env)["WINDOWS_PASSWORD"] == "mine"
+    assert {"windows/storage", "windows/oem", "windows/shared"} <= set(hu.FOLDERS)
+
+
+def test_windows_is_under_the_sandbox_rules():
+    """The Windows container: only with its profile, on the sandbox's network at its fixed address, with KVM - and
+    the firewall gives its address the sandbox's rules (no LAN, no containers, no VM; internet open)."""
+    root = TOOLS.parent
+    compose = (root / "deploy" / "docker-compose.yml").read_text()
+    svc = compose.split("\n  windows:\n", 1)[1].split("\nnetworks:\n", 1)[0]
+    assert 'profiles: ["windows"]' in svc and "ipv4_address: 172.31.250.30" in svc and "- /dev/kvm" in svc
+    assert "- /dev/net/tun" in svc and "dns: [1.1.1.1, 9.9.9.9]" in svc and '"127.0.0.1:8006:8006"' in svc
+    fw = (root / "deploy" / "firewall" / "slq-hub-firewall.sh").read_text()
+    assert 'SANDBOX_IPS="${SANDBOX_IPS:-172.31.250.20 172.31.250.30}"' in fw
+    assert 'add DOCKER-USER -s "$ip" -d "$net" -m conntrack --ctstate NEW -j DROP' in fw
