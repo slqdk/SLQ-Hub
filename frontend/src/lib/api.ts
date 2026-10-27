@@ -257,11 +257,11 @@ export interface SkillCardData { draft: string; name: string; title: string; des
   size: number; replaces: boolean; ref: string }
 export interface SkillDraft extends SkillCardData { text: string; added: number | null; expires: number }
 export interface MemoryFile { path: string; title: string; size: number }
-export interface McpStatus { name: string; transport: string; enabled: boolean; trusted: boolean; status: string;
-  error: string; server: { name?: string; version?: string };
-  tools: { name: string; agent_name: string; description: string }[] }
+export interface McpStatus { name: string; transport: string; enabled: boolean; trusted: boolean; review?: boolean;
+  status: string; error: string; server: { name?: string; version?: string };
+  tools: { name: string; agent_name: string; description: string; only_looks?: boolean; files?: string[] }[] }
 export interface McpServerConfig { name: string; transport: "http" | "stdio"; url?: string; headers?: Record<string, string>;
-  command?: string; env?: Record<string, string>; enabled: boolean; trusted?: boolean; timeout_s?: number }
+  command?: string; env?: Record<string, string>; enabled: boolean; trusted?: boolean; review?: boolean; timeout_s?: number }
 
 export interface Library { id: number; name: string; description: string; docs: number; ready: number; busy: number;
   errors: number; bytes: number; pages: number; created_at: string }

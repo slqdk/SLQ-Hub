@@ -1573,7 +1573,9 @@ function McpTab({ s }: { s: S }) {
     <div>
       <p className="lead">MCP servers give the assistant more tools. An HTTP server is reached at its URL; a command server
         runs inside the sandbox (no LAN access), for example <span className="mono">npx -y @modelcontextprotocol/server-memory</span>.
-        Their tools ask before they run, unless you trust the server.</p>
+        Their tools ask before they run, unless you trust the server. A tool may take files from the chat's folder (the
+        Hub sends them along). You can let the independent review use a trusted server's tools that only look - a build
+        on another PC, say.</p>
       <div className="row" style={{ marginBottom: 10 }}>
         <button className="btn primary" onClick={() => setEdit({ cfg: { ...NEW_SERVER }, index: -1 })}><Plus size={15} /> Add a server</button>
         <button className="btn" disabled={reloading} onClick={async () => { setReloading(true); try { setStatus(await api("/hub/api/mcp/reload", { method: "POST" })); } finally { setReloading(false); } }}>
@@ -1590,7 +1592,11 @@ function McpTab({ s }: { s: S }) {
                 {cfg.trusted && <span className="tag">trusted</span>}
                 <div className="meta mono ellipsis">{cfg.transport === "stdio" ? cfg.command : cfg.url}</div>
                 {st?.error && <div className="meta" style={{ color: "var(--fault)" }}>{st.error}</div>}
-                {st && st.tools.length > 0 && <div className="meta">{st.tools.length} tools: {st.tools.map((t) => t.name).join(", ")}</div>}
+                {st && st.tools.length > 0 && <div className="meta">{st.tools.length} tools: {st.tools.map((t) =>
+                  t.name + (t.only_looks ? " (only looks)" : "") + (t.files?.length ? " (gets files)" : "")).join(", ")}</div>}
+                {st && cfg.trusted && cfg.review && <div className="meta">{st.tools.some((t) => t.only_looks)
+                  ? "The independent review may use the tools that only look."
+                  : "None of its tools says it only looks, so the review gets none of them."}</div>}
               </div>
               <Switch checked={cfg.enabled} label={`${cfg.name} enabled`} onChange={(v) => write(servers.map((x, j) => (j === i ? { ...x, enabled: v } : x)))} />
               <button className="btn quiet small" onClick={() => setEdit({ cfg: { ...cfg }, index: i })}>Edit</button>
@@ -1662,8 +1668,13 @@ function McpEditor({ cfg, existing, onClose, onSave, onDelete }: { cfg: McpServe
             <KeyValues value={c.env ?? {}} keyLabel="NAME" onChange={(env) => setC({ ...c, env })} /></div>
         </>
       )}
-      <SwitchRow checked={!!c.trusted} onChange={(v) => setC({ ...c, trusted: v })} title="Trust this server">
+      <SwitchRow checked={!!c.trusted} onChange={(v) => setC({ ...c, trusted: v, review: v && c.review })}
+        title="Trust this server">
         Its tools run without asking first.</SwitchRow>
+      <SwitchRow checked={!!c.review} disabled={!c.trusted} onChange={(v) => setC({ ...c, review: v })}
+        title="The independent review may use it">
+        The review that checks the assistant's work before you see it gets this server's tools that only look - a build
+        or a test run, say. Only for a trusted server: the review does not stop to ask.</SwitchRow>
     </Modal>
   );
 }

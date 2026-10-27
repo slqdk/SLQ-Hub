@@ -12,6 +12,26 @@ A small client of our own (initialize, tools/list, tools/call, ping) rather
 than the SDK: it is all the Hub needs and easy to test. Calls to an MCP tool
 ask the user first unless the server is marked trusted or the user chose
 "Always allow" for that tool.
+
+Files from the working folder (0.36.0): a tool argument whose schema has
+"format": "slq-hub-file" (a string, or the items of an array of strings) names
+files in the chat's working folder. The model gives their paths; the Hub reads
+them and sends their content with the call in params._meta["slq-hub/files"]: a
+list of {param, arg (the path as the model gave it), path (the file's path in
+the folder), name, size, data (base64)}. Only files inside the folder: a link is
+followed only when it leads to a file inside it, and `path` is where that file
+is. At most MAX_COUNT files, 20 MB a file and 50 MB a call; a file named twice
+for one argument goes once. A server on another machine - a build PC - gets the
+code without the model copying it into its arguments, and a server that does
+not know the convention sees the paths.
+
+A tool marked readOnlyHint (its annotations) only looks (Tool.only_looks): the
+independent review may use it when its server is trusted and the owner lets the
+review use that server ("review" in its settings). The review should not wait
+for the user, and an untrusted server's tools would ask. Unlike the Hub's own
+look-ups such a call is not refused when it is repeated: its result can change
+with nothing changed in the chat (a build after a file was changed on the PC, a
+live value).
 """
 from __future__ import annotations
 
@@ -20,6 +40,7 @@ import base64
 import itertools
 import json
 import logging
+import os
 import re
 import time
 
@@ -32,6 +53,11 @@ log = logging.getLogger("hub.mcp")
 PROTOCOL = "2025-06-18"
 RETRY_AFTER_S = 60
 NAME_RE = re.compile(r"[^A-Za-z0-9_-]+")
+FILE_FORMAT = "slq-hub-file"            # an argument naming files in the working folder (0.36.0)
+FILE_META = "slq-hub/files"             # where their content goes: params._meta[FILE_META]
+MAX_FILE = 20 * 1024 * 1024
+MAX_FILES = 50 * 1024 * 1024            # all of one call's files together
+MAX_COUNT = 1000                        # files in one call
 
 
 class McpError(RuntimeError):
@@ -86,12 +112,13 @@ class HttpConnection:
 
     async def request(self, method: str, params: dict | None = None, timeout: float = 120) -> dict:
         rid = next(self._ids)
-        body = {"jsonrpc": "2.0", "id": rid, "method": method, "params": params or {}}
+        body = await _encoded({"jsonrpc": "2.0", "id": rid, "method": method, "params": params or {}},
+                              _with_files(params))
         return await asyncio.wait_for(self._post(body, rid), timeout)
 
-    async def _post(self, body: dict, rid: int) -> dict:
+    async def _post(self, body: bytes, rid: int) -> dict:
         try:
-            async with self.client.stream("POST", self.url, json=body, headers=self._headers()) as r:
+            async with self.client.stream("POST", self.url, content=body, headers=self._headers()) as r:
                 if r.headers.get("mcp-session-id"):
                     self.session_id = r.headers["mcp-session-id"]
                 if r.status_code == 404 and self.session_id:
@@ -144,9 +171,13 @@ class SandboxConnection:
         self._reader: asyncio.Task | None = None
         self.dead = False
 
-    async def _call(self, path: str, body: dict) -> dict:
+    async def _call(self, path: str, body: dict | bytes) -> dict:
         try:
-            r = await self.client.post(self.base_url + path, json=body)
+            if isinstance(body, bytes):
+                r = await self.client.post(self.base_url + path, content=body,
+                                           headers={"Content-Type": "application/json"})
+            else:
+                r = await self.client.post(self.base_url + path, json=body)
         except httpx.HTTPError as exc:
             raise McpError(f"the sandbox is not answering ({exc.__class__.__name__})") from exc
         if r.status_code >= 400:
@@ -209,7 +240,10 @@ class SandboxConnection:
             await self._write(reply)
 
     async def _write(self, obj: dict) -> None:
-        await self._call("/proc/write", {"id": self.pid, "data": json.dumps(obj, ensure_ascii=False) + "\n"})
+        """One message on the server's stdin: a line of JSON, itself a string in the request to the sandbox."""
+        def body() -> bytes:
+            return _dumps({"id": self.pid, "data": json.dumps(obj, ensure_ascii=False) + "\n"})
+        await self._call("/proc/write", await asyncio.to_thread(body) if _with_files(obj.get("params")) else body())
 
     async def request(self, method: str, params: dict | None = None, timeout: float = 120) -> dict:
         if self.dead:
@@ -240,6 +274,84 @@ class SandboxConnection:
 
 def slug(s: str) -> str:
     return NAME_RE.sub("_", s or "").strip("_") or "x"
+
+
+def file_params(schema) -> list[tuple[str, bool]]:
+    """The tool's top-level arguments that name working-folder files: (name, a list of them)."""
+    props = schema.get("properties") if isinstance(schema, dict) else None
+    out = []
+    for name, p in (props if isinstance(props, dict) else {}).items():
+        if not isinstance(p, dict):
+            continue
+        if p.get("format") == FILE_FORMAT:
+            out.append((name, False))
+        elif isinstance(p.get("items"), dict) and p["items"].get("format") == FILE_FORMAT:
+            out.append((name, True))
+    return out
+
+
+def read_files(wd, args: dict, params: list[tuple[str, bool]]) -> list[dict]:
+    """The files the arguments name, read from the working folder the way the ZIP download reads them: the path is
+    resolved inside the folder (a link only when it stays inside), then the file opened without following a link on
+    the way, regular files only. Raises ValueError with a message for the model."""
+    files, total, seen = [], 0, set()
+    for name, many in params:
+        value = args.get(name)
+        if value in (None, "", []):
+            continue
+        paths = value if many and isinstance(value, list) else [value]
+        for path in paths:
+            if not isinstance(path, str) or not path.strip():
+                raise ValueError(f"{name}: give the path of a file in your working folder")
+            rel = wd.rel(wd.resolve(path))
+            if (name, rel) in seen:
+                continue
+            seen.add((name, rel))
+            if len(files) >= MAX_COUNT:
+                raise ValueError(f"more than {MAX_COUNT} files for one call")
+            try:
+                fd = wd.open_inside(rel)
+            except FileNotFoundError:
+                raise ValueError(f"{path}: there is no such file in your working folder") from None
+            except OSError as exc:
+                raise ValueError(f"{path}: cannot be read ({exc.strerror or exc})") from None
+            with os.fdopen(fd, "rb") as f:
+                data = f.read(MAX_FILE + 1)
+            if len(data) > MAX_FILE:
+                raise ValueError(f"{path} is larger than {MAX_FILE // 2**20} MB")
+            total += len(data)
+            if total > MAX_FILES:
+                raise ValueError(f"the files for one call are larger than {MAX_FILES // 2**20} MB together")
+            files.append({"param": name, "arg": path, "path": rel, "name": rel.rsplit("/", 1)[-1],
+                          "size": len(data), "data": base64.b64encode(data).decode()})
+    return files
+
+
+def _only_looks(spec: dict) -> bool:
+    """The server says the tool does not change anything (MCP annotations.readOnlyHint)."""
+    ann = spec.get("annotations") if isinstance(spec, dict) else None
+    return bool(isinstance(ann, dict) and ann.get("readOnlyHint") is True)
+
+
+def _tool_spec(t) -> dict | None:
+    """A tool as tools/list gave it, kept when it has a name; a description or title that is not text is dropped
+    (a server's mistake must not take the Settings page or the turn down)."""
+    if not isinstance(t, dict) or not isinstance(t.get("name"), str) or not t["name"].strip():
+        return None
+    return {**t, **{k: "" for k in ("description", "title") if k in t and not isinstance(t[k], str)}}
+
+
+def _dumps(obj) -> bytes:
+    return json.dumps(obj, separators=(",", ":")).encode()
+
+
+async def _encoded(obj: dict, files: bool) -> bytes:
+    """A message as JSON - off the event loop when files go with it (up to 50 MB of them, as base64)."""
+    return await asyncio.to_thread(_dumps, obj) if files else _dumps(obj)
+
+
+def _with_files(params: dict | None) -> bool:
+    return isinstance(params, dict) and isinstance(params.get("_meta"), dict) and FILE_META in params["_meta"]
 
 
 def _clean_schema(schema) -> dict:
@@ -305,7 +417,8 @@ class McpServer:
                 tools, cursor = [], None
                 for _ in range(20):
                     res = await self.conn.request("tools/list", {"cursor": cursor} if cursor else {}, timeout=30)
-                    tools += [t for t in res.get("tools") or [] if isinstance(t, dict) and t.get("name")]
+                    listed = res.get("tools")
+                    tools += [t for t in map(_tool_spec, listed if isinstance(listed, list) else []) if t]
                     cursor = res.get("nextCursor")
                     if not cursor:
                         break
@@ -322,14 +435,17 @@ class McpServer:
                 await self._close()
                 raise
 
-    async def call(self, hub, tool: str, args: dict, timeout: float) -> dict:
+    async def call(self, hub, tool: str, args: dict, timeout: float, meta: dict | None = None) -> dict:
+        params = {"name": tool, "arguments": args}
+        if meta:
+            params["_meta"] = meta
         for attempt in (1, 2):
             if self.status != "ready" or self.conn is None or self.conn.dead:
                 await self.start(hub)
                 if self.status != "ready":
                     raise McpError(f"the MCP server {self.name} is not running: {self.error}")
             try:
-                return await self.conn.request("tools/call", {"name": tool, "arguments": args}, timeout=timeout)
+                return await self.conn.request("tools/call", params, timeout=timeout)
             except McpError:
                 if attempt == 2 or not (self.conn and self.conn.dead):
                     raise
@@ -391,10 +507,12 @@ class McpManager:
         for c in self.configs():
             s = self.servers.get(slug(c["name"]))
             out.append({"name": c["name"], "transport": c.get("transport", "http"), "enabled": c.get("enabled", True),
-                        "trusted": bool(c.get("trusted")), "status": s.status if s else "stopped",
-                        "error": s.error if s else "", "server": s.info if s else {},
+                        "trusted": bool(c.get("trusted")), "review": bool(c.get("review")),
+                        "status": s.status if s else "stopped", "error": s.error if s else "",
+                        "server": s.info if s else {},
                         "tools": [{"name": t["name"], "agent_name": self.tool_name(c["name"], t["name"]),
-                                   "description": (t.get("description") or "")[:300]}
+                                   "description": (t.get("description") or "")[:300], "only_looks": _only_looks(t),
+                                   "files": [n for n, _ in file_params(t.get("inputSchema"))]}
                                   for t in (s.tools if s else [])]})
         return out
 
@@ -402,25 +520,45 @@ class McpManager:
     def tool_name(server: str, tool: str) -> str:
         return f"mcp__{slug(server)}__{slug(tool)}"[:64]
 
-    def tools(self) -> list[Tool]:
+    def tools(self, review: bool = False) -> list[Tool]:
+        """The running servers' tools for the agent. review: those the independent review may use (0.36.0) - the
+        tools that only look, of trusted servers the owner lets the review use."""
         out = []
         for key, s in self.servers.items():
             if s.status != "ready" or not s.cfg.get("enabled", True):
                 continue
+            if review and not (s.cfg.get("trusted") and s.cfg.get("review")):
+                continue
             for t in s.tools:
+                if review and not _only_looks(t):
+                    continue
                 name = self.tool_name(s.name, t["name"])
 
                 async def handler(ctx: ToolContext, args: dict, _s=s, _t=t["name"]) -> ToolResult:
                     return await self._call(ctx, _s, _t, args)
                 desc = (t.get("description") or t.get("title") or t["name"]).strip()
-                out.append(Tool(name, f"[MCP server {s.name}] {desc}"[:1500], _clean_schema(t.get("inputSchema")),
-                                handler, needs_approval=not s.cfg.get("trusted"), group="mcp"))
+                files = [n for n, _ in file_params(t.get("inputSchema"))]
+                note = (f" (Give {', '.join(files)} as paths in your working folder: the Hub sends those files' "
+                        f"content to the server.)" if files else "")
+                # Not read_only: the loop would refuse a repeated build or a live value read again (Tool.only_looks).
+                out.append(Tool(name, f"[MCP server {s.name}] {desc}"[:1500 - len(note)] + note,
+                                _clean_schema(t.get("inputSchema")), handler,
+                                needs_approval=not s.cfg.get("trusted"), group="mcp", only_looks=_only_looks(t),
+                                sends_files=tuple(files)))
         return out
 
     async def _call(self, ctx: ToolContext, server: McpServer, tool: str, args: dict) -> ToolResult:
         timeout = float(server.cfg.get("timeout_s") or 300)
+        spec = next((t for t in server.tools if t.get("name") == tool), {})
+        params = file_params(spec.get("inputSchema"))
+        meta = None
+        if params:
+            try:
+                meta = {FILE_META: await asyncio.to_thread(read_files, ctx.workdir, args, params)}
+            except ValueError as exc:
+                return ToolResult(f"MCP {server.name}/{tool}: {exc}", is_error=True)
         try:
-            res = await server.call(self.hub, tool, args, timeout)
+            res = await server.call(self.hub, tool, args, timeout, meta=meta)
         except (McpError, asyncio.TimeoutError) as exc:
             return ToolResult(f"MCP {server.name}/{tool}: {exc or 'timed out'}", is_error=True)
         texts, images = [], []

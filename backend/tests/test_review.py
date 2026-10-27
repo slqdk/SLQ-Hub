@@ -648,3 +648,28 @@ def test_the_parts():
     assert "Check each finding" in to_model_messages([row], "r9")[0]["content"]
     assert "which the turn went on from" in to_model_messages([row], "r10")[0]["content"]
     assert json.dumps(R.review_text({"verdict": "failed", "error": "the reviewer's model failed (x)"}))
+
+
+async def test_the_reviewer_may_build_with_the_servers_it_is_allowed(signed_in, app, fakes):
+    """0.36.0: the reviewer gets the MCP tools that only look (readOnlyHint) of trusted servers the owner lets the
+    review use - a TwinCAT build on the user's PC is how PLC code is checked. Not a server that asks first (the review
+    should not wait for the user), not one the owner did not let it use, never a tool that changes something."""
+    on(app)
+    for trusted, review, expect in ((True, True, {"mcp__calc__build"}), (True, False, set()), (False, True, set())):
+        await signed_in.put("/hub/api/settings", json={"section": "mcp", "values": {"servers": [
+            {"name": "calc", "transport": "http", "url": "http://mcp.test/mcp", "enabled": True,
+             "trusted": trusted, "review": review}]}})
+        status = (await signed_in.post("/hub/api/mcp/reload")).json()
+        assert (status[0]["trusted"], status[0]["review"]) == (trusted, review)
+        seen: dict = {}
+        fakes.llama["responder"] = responder(MAIN[:2], [{"content": "Checked.\nVERDICT: OK"}], seen)
+        c = await new_chat(signed_in, settings={"model": "qwen3.6-35b-a3b"})
+        run = await finish(app, await say(signed_in, c["id"], "Lav et spil"))
+        assert run.status == "done"
+        mcp_tools = {t for t in tools_of(seen["reviewer"][0]) if t.startswith("mcp__")}
+        assert mcp_tools == expect, (trusted, review, mcp_tools)
+        if trusted:                                            # the one working has all of them
+            assert {"mcp__calc__add", "mcp__calc__build"} <= tools_of(seen["main"][0])
+        told = "Tools named mcp__... are the user's own servers' tools" in seen["reviewer"][0]["messages"][0]["content"]
+        assert told == bool(expect)                            # told about them only when it has them
+    await app.state.hub.extras["mcp"].close()

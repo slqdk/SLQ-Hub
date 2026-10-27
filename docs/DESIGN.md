@@ -520,8 +520,11 @@ has no answer to mark; the user's own message can be edited and sent again.
 **Loop guard.** Small models can get stuck repeating a step (chat 7: Ornith
 1.5 9B fetched the same two pages 52 times). Tools that only look things up
 are marked `read_only` (web_search, web_fetch, read_file, list_files,
-search_files, view_image, image_ocr, skill, library_search). Each turn keeps
-an epoch that every other tool call advances. A read-only call repeated with
+search_files, view_image, image_ocr, skill, library_search). MCP tools are
+not, even those whose server says they only look (0.36.0): a build after the
+user changed a file on their PC, or a live value read again, can give another
+result with nothing changed in the chat. Each turn keeps an epoch that every
+other tool call advances. A read-only call repeated with
 the same arguments in the same epoch is refused with a result that says so; a
 failed one may be retried once. After three refusals, or the same step (text
 and calls) three times, the next request goes without tools and with a note
@@ -620,7 +623,7 @@ message's time with the conversation.
 | `artifact` | Create or update an HTML, React, SVG, Mermaid, Markdown or code artifact, with versions. Shown in the side panel in a sandboxed iframe. React and Babel are served locally, so it works offline. |
 | `todo_write` | A visible checklist for long tasks. It helps a 27B model keep track of them. |
 | `task` | A subagent with a fresh context and the tools except artifact, todo_write, image and sound generation, task and escalate, inside the same lease. Its steps show nested under the call; only its report goes back. |
-| MCP tools | From configured servers: streamable HTTP, or stdio servers that run inside the sandbox through a pipe in the sandbox daemon. These ask first, with "Always allow" per tool. |
+| MCP tools | From configured servers: streamable HTTP, or stdio servers that run inside the sandbox through a pipe in the sandbox daemon. These ask first, with "Always allow" per tool. Since 0.36.0 a server can ask for files from the working folder, and the review can use its tools that only look (below, "MCP tools and the working folder"). |
 | `escalate` | Present when someone can take over: the stronger local model (Settings → Assistant), or the cloud where escalation is on. Its description names who. |
 
 **Approval.** Everything inside the sandbox runs without asking: files,
@@ -633,6 +636,37 @@ chat's ⋯ menu lists what was allowed there ("Allowed in this chat"), each
 with Take back (`GET /hub/api/chats/{id}` → `allowed`, `DELETE
 /hub/api/chats/{id}/allowed[?tool=]`). While a question waits, the turn's
 lease is given up (section 3).
+
+**MCP tools and the working folder** (0.36.0, `app/agent/mcp.py`; Søren, chat
+139: TwinCAT code should be compiled for real, and TwinCAT runs on a Windows PC,
+not in the sandbox). A tool argument whose JSON schema has `"format":
+"slq-hub-file"` - a string, or the items of an array of strings - names files
+in the chat's working folder. The model gives the paths; the Hub reads the
+files and sends them with the call in `params._meta["slq-hub/files"]`: a list
+of `{param, arg, path, name, size, data}` - `arg` the path as the model gave
+it, `path` the file's path in the folder, the content in base64. `read_files`
+resolves each path inside the folder (a link is followed only when it leads to
+a file inside it, and `path` is then where that file is) and opens it with
+`Workdir.open_inside`, which follows no link on the way. A file named twice for
+one argument goes once; at most 1,000 files, 20 MB a file and 50 MB a call; the
+request is encoded off the event loop. The tool's description gets a line
+saying so, a missing file or one outside the folder is the model's error before
+anything reaches the server, and a server that asks first lists the files on
+its approval card - their content leaves the Hub with the call. A server on
+another machine - the TwinCAT build server on Søren's 4026 PC - gets the code
+without the model copying a 30 KB XML file into its arguments (minutes of
+output for a local model), and a server that does not know the convention just
+sees the paths. `_meta` is the protocol's own place for such data on a request.
+
+A tool whose annotations say `readOnlyHint: true` only looks
+(`Tool.only_looks`). The independent review gets those tools of a server that
+is trusted and that the owner lets the review use - the server's switch "The
+independent review may use it" (`review` in its settings, off by default). The
+review should not wait for the user to answer an approval, and the owner
+decides which servers belong to checking work: a build server, not a memory
+server. These tools are not `read_only` in the loop guard's sense (below):
+their result can change with nothing changed in the chat. Settings → MCP marks
+them "only looks", and the ones that take files "gets files".
 
 **Internet for the assistant** (0.15.0, `app/agent/internet.py`). Settings →
 Assistant → Web → "Internet for the assistant": **Allowed** (the default, as
@@ -1056,7 +1090,10 @@ and the answer the user was given - as claims to check, not facts - and none
 of the conversation. Its tools are only those that look, run and open
 (`REVIEW_TOOLS`: files read and searched, bash, `web_app`, `windows_app`,
 pictures, web, libraries, skills; not the writing tools, `task`,
-`chat_history`, memory or MCP), and its prompt says to check the way the user
+`chat_history` or memory; of MCP only the tools that only look, of trusted
+servers the owner lets the review use - since 0.36.0, so it can build what was
+made on the user's own build server, and its prompt mentions them only then),
+and its prompt says to check the way the user
 will use it, report only problems it has evidence for, not to change files,
 and to end with `VERDICT: OK` or `VERDICT: PROBLEMS`. Its steps show nested
 in an **Independent review** row of the turn; its report is stored as the

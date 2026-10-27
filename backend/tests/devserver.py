@@ -18,7 +18,8 @@ Settings -> Tests (tests/dev_evals.py), "endless" (a file each step until the
 step limit: the answer is marked unfinished, with Continue), "think" (reasons first), "long thinking" (a box full of
 thinking, streamed slowly), "search" (web search), "web picture" (a picture
 from the web in the answer), "picture" (an image), "darker" (edits the newest picture it made, by its file),
-"hand it over" (Qwen3.6 35B-A3B hands the turn to Qwen3.8 27B, which the chat then keeps),
+"hand it over" (Qwen3.6 35B-A3B hands the turn to Qwen3.8 27B, which the chat then keeps), "plc build" (writes
+src/Main.st and gives it to the fake MCP server's build tool, which takes files: asked first, the question lists it),
 "loop" (repeats the same searches until the Hub makes it answer), "long chat" (a long answer with a big
 tool result, to fill the context: Continue in a new chat is offered), "make a skill" (writes a skill and shows its
 card with Add skill), "window" (writes a
@@ -285,6 +286,14 @@ def responder(body: dict) -> dict:
         return {"content": "The form opens, the greeting shows the name, and the list has the three pumps."}
     if "web picture" in low:                            # a picture from the web in the answer (a link while asking)
         return {"content": "Here is one from the web:\n\n![a red fox](https://example.com/fox.jpg)\n\nThat is all."}
+    if "plc build" in low:                              # 0.36.0: an MCP tool that takes files; its question lists them
+        if tools_done == 0:
+            return {"tool_calls": [{"name": "write_file", "arguments": {
+                "path": "src/Main.st", "content": "PROGRAM Main\nVAR\n    count : INT;\nEND_VAR\ncount := count + 1;\n"
+                                                  "END_PROGRAM\n"}}]}
+        if tools_done == 1:
+            return {"tool_calls": [{"name": "mcp__calc__build", "arguments": {"files": ["src/Main.st"], "target": "plc"}}]}
+        return {"content": "The build server got **src/Main.st**."}
     if "files" in low:
         if tools_done == 0:
             return {"content": "I will write the script first.", "tool_calls": [{"name": "write_file", "arguments": {

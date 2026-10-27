@@ -7,6 +7,8 @@ import json
 import re
 import time
 
+import pytest
+
 from app import db
 from app.chats import store as chats
 
@@ -538,7 +540,11 @@ async def test_mcp_over_http_asks_first_and_can_be_always_allowed(signed_in, app
     assert r.json()["settings"]["mcp"]["servers"][0]["headers"]["Authorization"] == "********"
     status = (await signed_in.post("/hub/api/mcp/reload")).json()
     assert status[0]["status"] == "ready", status
-    assert [t["agent_name"] for t in status[0]["tools"]] == ["mcp__calc__add", "mcp__calc__picture"]
+    assert [t["agent_name"] for t in status[0]["tools"]] == ["mcp__calc__add", "mcp__calc__picture",
+                                                              "mcp__calc__build"]
+    assert [(t["only_looks"], t["files"]) for t in status[0]["tools"]] == [(False, []), (False, []),
+                                                                          (True, ["files"])]
+    assert status[0]["trusted"] is False and status[0]["review"] is False
     # Saving the page again with the mask keeps the real header.
     await signed_in.put("/hub/api/settings", json={"section": "mcp", "values": {"servers": [
         {**server, "headers": {"Authorization": "********"}}]}})
@@ -553,7 +559,7 @@ async def test_mcp_over_http_asks_first_and_can_be_always_allowed(signed_in, app
     run = app.state.hub.extras["agent"].runs.get(run_id)
     await until(lambda: any(e["type"] == "approval_needed" for e in run.events))
     ask = next(e for e in run.events if e["type"] == "approval_needed")["data"]
-    assert ask["tool"] == "mcp__calc__add" and ask["arguments"] == {"a": 2, "b": 3}
+    assert ask["tool"] == "mcp__calc__add" and ask["arguments"] == {"a": 2, "b": 3} and "sends" not in ask
     r = await signed_in.post(f"/hub/api/runs/{run_id}/approve", json={"call_id": ask["id"], "decision": "always"})
     assert r.status_code == 200
     await finish(app, run_id)
@@ -618,6 +624,108 @@ async def test_a_declined_tool_call_is_reported_to_the_model(signed_in, app, fak
     await signed_in.post(f"/hub/api/runs/{run_id}/approve", json={"call_id": ask["id"], "decision": "deny"})
     await finish(app, run_id)
     assert "declined" in fakes.llama["requests"][1]["messages"][-1]["content"]
+
+
+async def test_an_mcp_tool_gets_files_from_the_working_folder(signed_in, app, fakes):
+    """0.36.0: an argument with format slq-hub-file names files in the working folder; the Hub sends their content
+    in params._meta (a build server on another PC gets the code without the model copying it into the call)."""
+    await signed_in.put("/hub/api/settings", json={"section": "mcp", "values": {"servers": [
+        {"name": "calc", "transport": "http", "url": "http://mcp.test/mcp", "enabled": True, "trusted": True}]}})
+    await signed_in.post("/hub/api/mcp/reload")
+    c = await new_chat(signed_in)
+    root = app.state.hub.extras["agent"].workdir(chats.get_chat(c["id"])).root
+    (root / "src").mkdir(parents=True)
+    (root / "src" / "Axis.st").write_text("FUNCTION_BLOCK Axis\nEND_FUNCTION_BLOCK\n")
+    build = {"name": "mcp__calc__build", "arguments": {"files": ["src/Axis.st", "./src/Axis.st"], "target": "x"}}
+    fakes.llama["replies"] = [{"tool_calls": [build]},
+                              {"tool_calls": [build]},          # again: a build may differ (a file changed on the PC)
+                              {"tool_calls": [{"name": "mcp__calc__build", "arguments": {"files": ["src/None.st"]}}]},
+                              {"tool_calls": [{"name": "mcp__calc__build", "arguments": {"files": ["../../x.st"]}}]},
+                              {"content": "built"}, {"content": "T"}]
+    run = await finish(app, await say(signed_in, c["id"], "build it"))
+    assert run.status == "done"
+    calls = [m for m in fakes.mcp["calls"] if m.get("method") == "tools/call"]
+    assert len(calls) == 2                                    # the missing and the outside file never reach it
+    files = calls[0]["params"]["_meta"]["slq-hub/files"]
+    assert [(f["param"], f["arg"], f["path"], f["name"], f["size"]) for f in files] == [
+        ("files", "src/Axis.st", "src/Axis.st", "Axis.st", 39)]            # named twice, sent once
+    assert calls[0]["params"]["arguments"] == build["arguments"] and calls[1]["params"] == calls[0]["params"]
+    results = [m["content"][0] for m in chats.messages(c["id"]) if m["role"] == "tool"]
+    assert results[0]["text"] == "src/Axis.st 39 FUNCTION_BLOCK Axis" and not results[0]["is_error"]
+    assert (results[1]["text"], results[1]["is_error"]) == (results[0]["text"], False)   # not refused as a repeat
+    assert results[2]["is_error"] and "src/None.st: there is no such file in your working folder" in results[2]["text"]
+    assert results[3]["is_error"] and "outside the working folder" in results[3]["text"]
+    tool = next(t for t in fakes.llama["requests"][0]["tools"] if t["function"]["name"] == "mcp__calc__build")
+    assert "Give files as paths in your working folder" in tool["function"]["description"]
+    assert tool["function"]["parameters"]["properties"]["files"]["items"]["format"] == "slq-hub-file"
+    await app.state.hub.extras["mcp"].close()
+
+
+def test_mcp_files_are_counted_and_each_sent_once(tmp_path, monkeypatch):
+    """read_files: a file named twice for one argument goes once (for another argument it goes again), a link is
+    followed only to a file inside the folder (`path` is where the file is, `arg` what was given), and one call
+    takes at most MAX_COUNT files."""
+    from app.agent import mcp
+    from app.projects.store import Workdir
+    ws = tmp_path / "ws"
+    (ws / "w").mkdir(parents=True)
+    wd = Workdir(ws / "w", None, ws)
+    (wd.root / "a.st").write_text("A")
+    (wd.root / "b.st").write_text("BB")
+    (wd.root / "link.st").symlink_to("b.st")
+    (tmp_path / "secret.txt").write_text("no")
+    (wd.root / "out.st").symlink_to(tmp_path / "secret.txt")
+    params = mcp.file_params({"properties": {"files": {"type": "array", "items": {"format": "slq-hub-file"}},
+                                             "main": {"type": "string", "format": "slq-hub-file"}}})
+    assert params == [("files", True), ("main", False)]
+    got = mcp.read_files(wd, {"files": ["a.st", "./a.st", "b.st", "link.st"], "main": "a.st"}, params)
+    assert [(f["param"], f["arg"], f["path"], f["size"]) for f in got] == [
+        ("files", "a.st", "a.st", 1), ("files", "b.st", "b.st", 2), ("main", "a.st", "a.st", 1)]
+    got = mcp.read_files(wd, {"files": ["link.st"]}, params)
+    assert [(f["arg"], f["path"], f["name"]) for f in got] == [("link.st", "b.st", "b.st")]
+    with pytest.raises(ValueError, match="outside the working folder"):
+        mcp.read_files(wd, {"files": ["out.st"]}, params)
+    monkeypatch.setattr(mcp, "MAX_COUNT", 2)
+    with pytest.raises(ValueError, match="more than 2 files for one call"):
+        mcp.read_files(wd, {"files": ["a.st", "b.st"], "main": "a.st"}, params)
+
+
+async def test_an_mcp_tool_that_asks_says_which_files_it_sends(signed_in, app, fakes):
+    """0.36.0: the approval card of a call that takes files lists them - their content leaves the Hub with it."""
+    await signed_in.put("/hub/api/settings", json={"section": "mcp", "values": {"servers": [
+        {"name": "calc", "transport": "http", "url": "http://mcp.test/mcp", "enabled": True}]}})
+    await signed_in.post("/hub/api/mcp/reload")
+    c = await new_chat(signed_in)
+    root = app.state.hub.extras["agent"].workdir(chats.get_chat(c["id"])).root
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "Main.st").write_text("PROGRAM Main\nEND_PROGRAM\n")
+    fakes.llama["replies"] = [{"tool_calls": [{"name": "mcp__calc__build",
+                                               "arguments": {"files": ["Main.st", "Main.st"]}}]},
+                              {"content": "ok"}, {"content": "T"}]
+    run_id = await say(signed_in, c["id"], "build")
+    run = app.state.hub.extras["agent"].runs.get(run_id)
+    await until(lambda: any(e["type"] == "approval_needed" for e in run.events))
+    ask = next(e for e in run.events if e["type"] == "approval_needed")["data"]
+    assert ask["sends"] == ["Main.st"]
+    await signed_in.post(f"/hub/api/runs/{run_id}/approve", json={"call_id": ask["id"], "decision": "allow"})
+    run = await finish(app, run_id)
+    assert run.status == "done"
+    await app.state.hub.extras["mcp"].close()
+
+
+async def test_a_server_whose_tool_list_has_no_text_where_text_belongs(signed_in, app, fakes):
+    """A tool without a usable name is left out, a description that is not text is dropped: neither takes the
+    Settings page or the turn down."""
+    fakes.mcp["tools"] = [{"name": 7, "description": "x"}, {"name": "ok", "description": {"en": "x"}, "title": 3},
+                          {"name": "  "}, "junk"]
+    await signed_in.put("/hub/api/settings", json={"section": "mcp", "values": {"servers": [
+        {"name": "odd", "transport": "http", "url": "http://mcp.test/mcp", "enabled": True, "trusted": True}]}})
+    status = (await signed_in.post("/hub/api/mcp/reload")).json()
+    assert status[0]["status"] == "ready", status
+    assert [(t["name"], t["description"]) for t in status[0]["tools"]] == [("ok", "")]
+    tool = app.state.hub.extras["mcp"].tools()[0]
+    assert tool.name == "mcp__odd__ok" and tool.description == "[MCP server odd] ok"
+    await app.state.hub.extras["mcp"].close()
 
 
 async def test_mcp_over_stdio_in_the_sandbox(signed_in, app, fakes):

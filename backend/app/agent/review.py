@@ -34,6 +34,9 @@ CLOCK = time.monotonic              # the review's clock (WrapUp): the tests tur
 # reads the conversation it is meant not to have seen (chat_history).
 REVIEW_TOOLS = {"list_files", "read_file", "search_files", "bash", "web_app", "windows_app", "view_image", "image_ocr",
                 "web_search", "web_fetch", "library_search", "skill"}
+# Besides these, the MCP tools the review may use (mcp.tools(review=True), 0.36.0): the tools that say they only
+# look (readOnlyHint), of trusted servers the owner lets the review use - a build on the user's PC is how TwinCAT
+# code gets checked. The review should not wait for the user to answer an approval, so untrusted servers stay out.
 # The calls that make or change work. A turn without one is not reviewed, whatever else changed the working folder
 # while it ran (a sync from the user's PC, an upload in the Files panel).
 MAKES = {"write_file", "edit_file", "move_file", "bash", "artifact"}
@@ -55,7 +58,7 @@ the files and artifacts (pages shown in the side panel) this turn made or change
 answer the user was given.
 - Check what was made against what was asked, the way the user will use it, before they do: run the program or its
   tests, open web pages, browser games and html/react/svg/mermaid artifacts with web_app and play them, run Windows
-  programs with windows_app, run code with sample input, read the documents against the request.
+  programs with windows_app, run code with sample input, read the documents against the request.{mcp}
 - Do not do the work again: you are not asked to solve the task yourself or to redo its analysis. Read other files
   only as far as you need them to check the listed ones, and check claims about data with a few samples, not by
   working it all out again.
@@ -69,6 +72,9 @@ answer the user was given.
 - Report the most important problems first, at most ten, one or two lines each with its evidence; then one line on
   what you checked that works, and one on what you did not check.
 - End with exactly one line: VERDICT: OK when nothing needs fixing, or VERDICT: PROBLEMS when something does."""
+# Only when it has such tools (0.36.0).
+MCP_LINE = ("\n  Tools named mcp__... are the user's own servers' tools that only look (a build on their machine, a test "
+            "run):\n  use one when it is the way to check what was made.")
 # The Hub's messages near the review's end (loop.WrapUp fills in {why}).
 WRAP_UP = ("(SLQ Hub: this review is nearly over - {why}. Stop checking now and write your report: the problems you "
            "found, each with its evidence, what works, and what you did not check - then the VERDICT line. If one "
@@ -100,9 +106,11 @@ def review_seconds(settings) -> float:
     return min(minutes, 24 * 60) * 60 if math.isfinite(minutes) and minutes > 0 else 0.0
 
 
-def reviewer_text(steps: int, seconds: float) -> str:
+def reviewer_text(steps: int, seconds: float, mcp: bool = False) -> str:
+    """The reviewer's instructions; mcp: it has tools of the user's MCP servers."""
     from .loop import minutes_text
-    return REVIEWER.format(budget=f"{steps} steps" + (f" and about {minutes_text(seconds)}" if seconds else ""))
+    return REVIEWER.format(budget=f"{steps} steps" + (f" and about {minutes_text(seconds)}" if seconds else ""),
+                           mcp=MCP_LINE if mcp else "")
 
 
 def work_files(files: list[dict]) -> list[dict]:
@@ -332,11 +340,14 @@ async def review(agent, engine, chat: dict, project: dict | None, wd, before: di
     sub = Engine(hub, engine.run, chat, project, wd, model, engine.ticket, depth=1, parent=rid, thinking=thinking,
                  effort=effort)
     sub.only = REVIEW_TOOLS
+    sub.mcp_checks = True                              # the MCP tools the review may use: a build, a test run
     sub.top_model = engine.model["id"]
     if model["id"] == engine.model["id"]:
         sub.token_ratio = engine.token_ratio
     seconds = review_seconds(hub.settings)
-    system = agent.system_for(chat, project, wd, model, subagent=True) + "\n\n" + reviewer_text(REVIEW_STEPS, seconds)
+    mcp = hub.extras.get("mcp")
+    system = (agent.system_for(chat, project, wd, model, subagent=True) + "\n\n"
+              + reviewer_text(REVIEW_STEPS, seconds, mcp=bool(mcp is not None and mcp.tools(review=True))))
     paths, art_ids = [f["path"] for f in work], [a["id"] for a in arts]
     engine.run.emit("review", id=rid, state="started", model=label, model_id=model["id"], files=paths,
                     artifacts=art_ids)

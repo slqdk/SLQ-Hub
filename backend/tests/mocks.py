@@ -698,24 +698,35 @@ def make_sandbox(state: dict) -> FastAPI:
     return app
 
 
-def mcp_reply(msg: dict, flavour: str) -> dict | None:
-    """The fake MCP server's answers (both transports)."""
+def mcp_reply(msg: dict, flavour: str, state: dict | None = None) -> dict | None:
+    """The fake MCP server's answers (both transports); state["tools"] replaces its tool list."""
     if "id" not in msg:
         return None                                       # a notification
     method = msg.get("method")
     if method == "initialize":
         result = {"protocolVersion": msg["params"]["protocolVersion"], "capabilities": {"tools": {}},
                   "serverInfo": {"name": f"fake-{flavour}", "version": "1.0"}}
+    elif method == "tools/list" and (state or {}).get("tools") is not None:
+        result = {"tools": state["tools"]}
     elif method == "tools/list":
         result = {"tools": [
             {"name": "add", "description": "Add two numbers",
              "inputSchema": {"$schema": "http://json-schema.org/draft-07/schema#", "type": "object",
                              "properties": {"a": {"type": "number"}, "b": {"type": "number"}}, "required": ["a", "b"]}},
-            {"name": "picture", "description": "Return a small picture", "inputSchema": {"type": "object"}}]}
+            {"name": "picture", "description": "Return a small picture", "inputSchema": {"type": "object"}},
+            {"name": "build", "description": "Build the files", "annotations": {"readOnlyHint": True},
+             "inputSchema": {"type": "object", "properties": {
+                 "files": {"type": "array", "items": {"type": "string", "format": "slq-hub-file"}},
+                 "target": {"type": "string"}}, "required": ["files"]}}]}
     elif method == "tools/call":
         name, args = msg["params"]["name"], msg["params"].get("arguments") or {}
         if name == "add":
             result = {"content": [{"type": "text", "text": str(args.get("a", 0) + args.get("b", 0))}]}
+        elif name == "build":
+            import base64
+            got = (msg["params"].get("_meta") or {}).get("slq-hub/files") or []
+            result = {"content": [{"type": "text", "text": "; ".join(
+                f"{f['path']} {f['size']} {base64.b64decode(f['data']).decode()[:19]}" for f in got) or "no files"}]}
         elif name == "picture":
             import base64
             result = {"content": [{"type": "text", "text": "here"},
@@ -740,7 +751,7 @@ def make_mcp_http(state: dict) -> FastAPI:
             return JSONResponse({"error": "unauthorised"}, status_code=401)
         msg = await request.json()
         state["calls"].append(msg)
-        reply = mcp_reply(msg, "http")
+        reply = mcp_reply(msg, "http", state)
         if reply is None:
             return Response(status_code=202)
         headers = {"Mcp-Session-Id": "sess-1"} if msg.get("method") == "initialize" else {}

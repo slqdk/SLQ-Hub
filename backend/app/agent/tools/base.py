@@ -78,6 +78,13 @@ class Tool:
     # Only looks things up: the same call again, with nothing changed in between, gives the same result
     # (the loop refuses such repeats - small models can get stuck repeating a call).
     read_only: bool = False
+    # Changes nothing, by its server's word (an MCP tool's readOnlyHint, 0.36.0), but unlike read_only the same call
+    # may give another result later - a build after the user changed a file on their PC, a live value. Only for
+    # choosing the independent review's tools; the loop does not refuse its repeats.
+    only_looks: bool = False
+    # The arguments that name files in the working folder whose content goes with the call (MCP, 0.36.0): the
+    # approval card lists those files.
+    sends_files: tuple[str, ...] = ()
     # Description and parameters that depend on the turn (which models are downloaded, the chat's choice).
     dynamic: Callable[[ToolContext], tuple[str, dict]] | None = None
 

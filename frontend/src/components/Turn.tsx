@@ -258,6 +258,9 @@ function Approval({ tool, answer }: { tool: ToolView;
         </> : <>
           <p><b>{toolLabel(tool.name)}</b> wants to run. It reaches outside the sandbox, so it asks first.</p>
           {tool.args && Object.keys(tool.args).length > 0 && <pre>{JSON.stringify(tool.args, null, 2)}</pre>}
+          {tool.sends && tool.sends.length > 0 && <p>The content of {tool.sends.length === 1 ? "this file" :
+            `these ${tool.sends.length} files`} from the chat's folder goes with it: <span className="mono">
+            {tool.sends.join(", ")}</span></p>}
         </>}
         <div className="row wrap">
           <button className="btn primary small" disabled={busy} onClick={() => reply("allow")}>Allow once</button>

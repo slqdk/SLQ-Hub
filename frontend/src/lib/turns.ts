@@ -19,6 +19,7 @@ export interface ToolView {
   subagent?: { description: string; finished: boolean };
   ask?: AskInfo;                               // what the turn asks before this call (internet set to ask first)
   canChat?: boolean;                           // "Allow in this chat" is offered (the owner's chats)
+  sends?: string[];                            // files from the chat's folder whose content goes with the call (MCP)
 }
 
 /** Internet for the assistant, asking first: what a call wants and what "always" would allow. */
@@ -264,6 +265,7 @@ function applyStream(items: Item[], ev: RunEvent): void {
         t.state = "approval";
         t.ask = d.ask;
         t.canChat = !!(d.can_chat || d.ask?.can_chat);
+        t.sends = Array.isArray(d.sends) ? d.sends.map(String) : undefined;
       }
       break;
     }

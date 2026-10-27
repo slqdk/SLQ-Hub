@@ -197,6 +197,7 @@ class Engine:
         # when allowed, artifacts and files go back to the device.
         self.device = None
         self.only: set[str] | None = None   # the only tools it may have (the reviewer's: review.REVIEW_TOOLS)
+        self.mcp_checks = False              # with `only`: also the MCP tools the review may use (mcp.tools)
         self.top_model: str | None = None   # the turn's model, when this engine works for it with another (reviewer)
         self.wrap_up: WrapUp | None = None  # it must end with a report (the reviewer): told so near its end
         self.keeps_model = True              # a hand-over becomes the chat's model (not in a Settings -> Tests run)
@@ -254,8 +255,11 @@ class Engine:
             except Exception:  # noqa: BLE001 - a broken check hides the tool, nothing more
                 continue
         mcp = self.hub.extras.get("mcp")
-        if mcp is not None and self.device is None and self.only is None:
-            out += mcp.tools()
+        if mcp is not None and self.device is None:
+            if self.only is None:
+                out += mcp.tools()
+            elif self.mcp_checks:            # the reviewer: a build or a test run on the user's server (0.36.0)
+                out += mcp.tools(review=True)
         return out
 
     async def _inbox(self, messages: list[dict], persist: Persist) -> None:
@@ -644,7 +648,9 @@ class Engine:
                         allowed = decision in ("allow", "always", "chat")
                         once = decision == "allow" or not owner
                 if allowed and tool.needs_approval and not ok_here(name):
-                    decision = await self._ask(cid, name, args, can_chat=chat_id is not None, **where)
+                    sends = named_files(args, tool.sends_files)      # their content goes too: the card says so
+                    decision = await self._ask(cid, name, args, can_chat=chat_id is not None, **where,
+                                               **({"sends": sends} if sends else {}))
                     remember(decision, name)
                     allowed = decision in ("allow", "always", "chat")
                 if not allowed:
@@ -1041,6 +1047,17 @@ def remember_in_chat(chat_id: int, tool: str) -> None:
     with db.connect() as con:
         con.execute("INSERT OR REPLACE INTO chat_permissions (chat_id, tool, created_at) VALUES (?,?,?)",
                     (chat_id, tool, db.utcnow()))
+
+
+def named_files(args: dict, params: tuple[str, ...]) -> list[str]:
+    """The paths a call's file arguments name (Tool.sends_files), each once: what the approval card lists."""
+    out: list[str] = []
+    for p in params:
+        value = args.get(p)
+        for path in value if isinstance(value, list) else [value]:
+            if isinstance(path, str) and path.strip() and path not in out:
+                out.append(path)
+    return out
 
 
 class Agent:

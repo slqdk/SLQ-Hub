@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.36.0 - 2026-10-27
+
+For checking TwinCAT code with a real compiler, as you asked in chat 139. Both
+changes work for any MCP server, not only TwinCAT.
+
+- **An MCP tool can get files from the chat's folder.** A server can mark an
+  argument as "files in the working folder". The assistant then gives the
+  paths, and the Hub sends the files along with the call. A build server on
+  your TwinCAT PC gets the code without the assistant copying it into the call.
+  Only files inside the chat's folder go, up to 20 MB a file and 50 MB a call.
+  When the server asks first, the question lists the files.
+- **The independent review can use your servers' checking tools.** A new switch
+  on a server, "The independent review may use it", gives the review that
+  server's tools that say they only look - a TwinCAT build, say - so it can
+  compile what was made. Only for a trusted server, because the review should
+  not stop and wait for you. Settings → MCP marks those tools "only looks", and
+  tools that take files "gets files".
+- A server whose tool list has a tool without a proper name or description no
+  longer breaks Settings → MCP or the turn.
+
 ## 0.35.2 - 2026-10-27
 
 - **The comparison comes first in the browser check's result.** In long
