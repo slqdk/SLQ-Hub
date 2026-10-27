@@ -268,6 +268,8 @@ async def test_a_page_is_compared_with_the_original(signed_in, app, fakes):
     assert "The last screenshot against .hub/attachments/original.png:\nCompared with the original (640x480)" \
         in res["text"]
     assert "The page's screenshot is 42x30 and the original 640x480" in res["text"]
+    assert res["text"].startswith("The last screenshot against .hub/attachments/original.png:\nCompared")   # (0.35.2)
+    assert "\n\nOpened game/index.html" in res["text"]
     assert "Where it differs most" in res["text"] and len(res["images"]) == 3       # the two shots and the picture
     tool = next(t for t in fakes.llama["requests"][0]["tools"] if t["function"]["name"] == "web_app")["function"]
     assert "compare" in tool["parameters"]["properties"] and "give compare: that picture's path" in tool["description"]
@@ -710,3 +712,14 @@ def test_the_selftest_line():
     assert cli.web_verdict(missed, False)[0] == "WARN"
     assert cli.web_verdict({"ok": False, "error": "the browser failed: TimeoutError"}, False) == (
         "FAIL", "web pages", "the browser failed: TimeoutError", "docker compose logs sandbox")
+
+
+def test_an_attachment_with_a_taken_name_is_told_apart():
+    """0.35.2 - chat 138: the new kit was saved as .hub/attachments/8ff2ac8d-cm98-reference.zip because chat 136's
+    older cm98-reference.zip was there, and the assistant unpacked the older one the user's words named."""
+    from app.agent.context import renamed
+    assert renamed({"type": "file", "name": "kit.zip", "path": ".hub/attachments/kit.zip"}) == ""
+    assert renamed({"type": "image", "name": "a.png", "path": "pics/a.png", "ref": True}) == ""
+    note = renamed({"type": "file", "name": "kit.zip", "path": ".hub/attachments/8ff2ac8d-kit.zip"})
+    assert note == (" - an older, different file is .hub/attachments/kit.zip; this attachment is "
+                    ".hub/attachments/8ff2ac8d-kit.zip, and a request that names kit.zip means this one")

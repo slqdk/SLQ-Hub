@@ -952,6 +952,11 @@ is stopped, and runs older than ten minutes are swept).
   buttons 89-94%, the title bar 82%. The rest was the font and JPEG smear
   along 1-pixel edges.
 
+  Since 0.35.2 the comparison opens the result. Clearing keeps an older tool
+  result's first 400 characters, and chat 138's figures, at the end, were
+  gone by its summary ("I didn't get the final percentages into this
+  thread").
+
 **How it works** (0.29.0). Four rules in the base prompt bring it closer to
 how Claude works: for a known file format, protocol, game or program, look
 for its documentation and existing tools first (chats 74-79 spent hours on

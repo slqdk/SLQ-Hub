@@ -22,6 +22,16 @@ SHORTENED = re.compile(r"\n?\[(?:\.\.\. )?(\d+) (?:more )?characters - [^;\]]*; 
 LOOK_IT_UP = "look it up whole with chat_history, or call the tool again"
 
 
+
+def renamed(b: dict) -> str:
+    """An attachment saved under another name because an older, different file has its name (0.35.2): chat 138 was
+    told "unpack .hub/attachments/cm98-reference.zip" and unpacked the older kit of that name, not the one attached."""
+    name, path = b.get("name"), b.get("path") or ""
+    if not name or b.get("ref") or path in ("", f".hub/attachments/{name}"):
+        return ""
+    return (f" - an older, different file is .hub/attachments/{name}; this attachment is {path}, and a request "
+            f"that names {name} means this one")
+
 def shorten_result(text: str, head: int, why: str) -> str:
     """A tool result cut to its first `head` characters, with what is left out and where to get it whole. Shortening
     a shortened one again changes nothing unless it cuts deeper - and keeps the count and the pointer: the same text
@@ -164,12 +174,13 @@ def to_model_messages(rows: list[dict], current_run: str | None = None, keep_ima
                     if part:
                         parts.append(part)
                     what = "Image from the working folder" if b.get("ref") else "Attached image"
-                    note = f"[{what}: {b.get('path') or b.get('name')}]"
+                    note = f"[{what}: {b.get('path') or b.get('name')}{renamed(b)}]"
                     parts.append({"type": "text", "text": note if part else note + " (not shown - use view_image "
                                                                                     "to look at it)"})
                 elif t == "file":
                     parts.append({"type": "text", "text": f"[Attached file: {b.get('path') or b.get('name')} "
-                                                          f"({b.get('size', 0)} bytes) - read it with read_file]"})
+                                                          f"({b.get('size', 0)} bytes) - read it with read_file"
+                                                          f"{renamed(b)}]"})
                 elif t == "file_ref":
                     docs.append({"type": "text", "text": _file_ref(b, fresh)})
                 elif t == "continue":

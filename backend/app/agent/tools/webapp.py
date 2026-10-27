@@ -398,8 +398,8 @@ async def web_app(ctx: ToolContext, args: dict) -> ToolResult:
     text = _report(answer, len(images), sees, name)
     if images and sees:
         text += "\nThe screenshots are shown below; click coordinates are pixels in them."
-    if original is not None:
-        text += "\n\n" + _compared(last, original, args.get("compare"), area, images)
+    if original is not None:                          # first: when old results are cut to their start (0.35.2), the
+        text = _compared(last, original, args.get("compare"), area, images) + "\n\n" + text   # figures stay
     return ToolResult(text, images=images, is_error=not answer.get("ok"))     # the user sees them in any case
 
 

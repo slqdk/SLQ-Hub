@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.35.2 - 2026-10-27
+
+- **The comparison comes first in the browser check's result.** In long
+  turns the Hub shortens older tool results to their first lines. The
+  comparison with the original came last, so it was cut away. In chat 138
+  the assistant ended by saying it couldn't tell you its own figures. Now
+  the figures are the first thing in the result.
+- **A new attachment with a taken name is told apart.** You attached the
+  new CM98 kit, but an older `cm98-reference.zip` was already in the
+  project, so the new one was saved as `8ff2ac8d-cm98-reference.zip`. The
+  message said to unpack `cm98-reference.zip`, and the assistant unpacked
+  the old kit. Now the assistant is told that the older file has that name,
+  and that a request naming it means the one just attached.
+
 ## 0.35.1 - 2026-10-26
 
 - **A reference in the folder is used, not redone.** In chat 136 the CM98
