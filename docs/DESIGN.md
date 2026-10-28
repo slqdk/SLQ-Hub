@@ -1588,7 +1588,9 @@ category's name (at most 40 characters). One place per owner, so a shared
 skill is listed in its owner's category for everyone who sees it; the Hub's
 own are listed under "SLQ Hub", the rest under "No category". Renaming a
 category moves all the caller's skills in it; replacing a skill keeps its
-category, deleting it forgets it. The lists (Skills page, composer, project
+category, deleting it forgets it. A skill with `metadata:` `category:` in
+its front matter is placed there when it arrives (0.44.0), unless its owner
+has placed it already. The lists (Skills page, composer, project
 settings) group by category in the browser (`lib/skills.ts`).
 
 **Choosing.** A chat's `settings.skills` and its project's hold refs (a

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.44.0 - 2026-10-28
+
+- **A skill can bring its own category.** A skill whose SKILL.md says
+  `metadata:` / `category: Billeder` lands in that category when you import
+  it - handy for a set of skills. Once you move it, your choice stands, also
+  when you import a new version.
+- **A long question card scrolls.** A skill with many questions no longer
+  pushes the message box off a phone's screen: the card scrolls instead.
+
 ## 0.43.0 - 2026-10-28
 
 - **Question cards.** When a choice is yours and there are real options, the

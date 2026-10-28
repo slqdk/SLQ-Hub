@@ -929,6 +929,7 @@ div.tests-result-head { cursor: default; }
 .qcard-head { display: flex; align-items: center; gap: 8px; font-size: 13.5px; margin-bottom: 6px; }
 .qcard-head .grow { flex: 1; min-width: 0; }
 .qcard.compact { display: flex; align-items: center; gap: 8px; padding: 6px 10px; font-size: 13px; }
+.composer .qcard:not(.compact) { max-height: min(46vh, 440px); overflow-y: auto; }   /* many questions on a phone: the card scrolls, the message box stays */
 .qcard.compact .ellipsis { flex: 1; min-width: 0; color: var(--ink-2); }
 .qlist { display: flex; flex-direction: column; gap: 10px; }
 .q-text { font-size: 14px; font-weight: 600; margin-bottom: 5px; }

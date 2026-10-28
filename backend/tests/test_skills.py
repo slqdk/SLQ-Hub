@@ -299,6 +299,19 @@ async def test_a_skill_made_with_the_assistant_is_checked_and_added_from_its_car
 
 # ---------------------------------------------------------------- people
 
+def test_a_skill_can_name_its_category(tmp_path):
+    """0.44.0: metadata: category: in the front matter puts an imported skill there - once; the owner decides after."""
+    s = Skills(tmp_path / "skills")
+    text = b"---\nname: billede-med-dyr\ndescription: Dyr.\nmetadata:\n  category: Billeder\n---\nDo it.\n"
+    s.install(OWNER, text, "SKILL.md")
+    assert s.entry(OWNER, "billede-med-dyr")["category"] == "Billeder"
+    s.set_category(OWNER, "billede-med-dyr", "Mine billeder")
+    s.install(OWNER, text, "SKILL.md")                                              # replaced: the owner's stands
+    assert s.entry(OWNER, "billede-med-dyr")["category"] == "Mine billeder"
+    s.install(MARIA, text, "SKILL.md")                                              # each owner gets their own
+    assert s.entry(MARIA, "@5/billede-med-dyr")["category"] == "Billeder"
+
+
 async def test_categories_over_the_api(signed_in, app, fakes):
     r = await signed_in.post("/hub/api/skills", files={"file": ("SKILL.md", md("pdf-guide"), "text/markdown")})
     assert r.status_code == 200, r.text

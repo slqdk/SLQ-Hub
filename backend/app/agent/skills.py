@@ -441,7 +441,24 @@ class Skills:
             shutil.rmtree(d)
         tmp.rename(d)
         self._set_shared(person, name, was_shared if existed else shared)
+        self._category_from(d, person)
         return ref_of(person, name)
+
+    def _category_from(self, d: Path, person: int | None) -> None:
+        """A skill that names its category (`metadata:` `category:` in its front matter, 0.44.0) lands in it - unless
+        its owner has put it in one already: a set of skills imports sorted, and the owner's choice stands."""
+        cats = self._categories(person)
+        if d.name in cats:
+            return
+        try:
+            meta, _ = parse_front_matter((d / "SKILL.md").read_text(encoding="utf-8", errors="replace"))
+            name = self.clean_category((meta.get("metadata") or {}).get("category")
+                                       if isinstance(meta.get("metadata"), dict) else "")
+        except (OSError, ValueError):
+            return
+        if name:
+            cats[d.name] = name
+            self._save_categories(person, cats)
 
     def _set_shared(self, person: int | None, name: str, on: bool) -> None:
         if person is None:
