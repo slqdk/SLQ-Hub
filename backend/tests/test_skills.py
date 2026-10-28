@@ -89,6 +89,39 @@ def test_each_has_their_own_skills_and_sees_what_the_family_shares(tmp_path):
     assert "@5/jule-frokost" not in refs(OWNER) and not (tmp_path / "skills" / "@5").exists()
 
 
+def test_categories_are_kept_by_each_skills_owner(tmp_path):
+    """0.41.0: the owner of a skill puts it into a category; who sees it - the owner, or the family when shared -
+    sees it there. Renaming a category moves all of one's own skills in it; a deleted skill leaves its category."""
+    s = Skills(tmp_path / "skills")
+    for name in ("tc-plc", "tc-motion", "pdf-guide"):
+        s.install(OWNER, md(name), "SKILL.md")
+    s.install(MARIA, md("jule"), "SKILL.md")
+    cat = lambda who: {x["ref"]: x["category"] for x in s.visible(who)}             # noqa: E731
+    assert s.set_category(OWNER, "tc-plc", "  TwinCAT   PLC ") == "TwinCAT PLC"
+    s.set_category(OWNER, "tc-motion", "TwinCAT PLC")
+    s.set_category(OWNER, "pdf-guide", "Documents")
+    s.set_category(MARIA, "@5/jule", "Food")
+    assert cat(OWNER) == {"tc-plc": "TwinCAT PLC", "tc-motion": "TwinCAT PLC", "pdf-guide": "Documents",
+                          "hub/skill-creator": ""}
+    s.set_shared(OWNER, "tc-plc", True)
+    s.set_shared(OWNER, "pdf-guide", False)
+    assert cat(MARIA)["tc-plc"] == "TwinCAT PLC" and cat(MARIA)["@5/jule"] == "Food" and "pdf-guide" not in cat(MARIA)
+    for who, ref in ((MARIA, "tc-plc"), (OWNER, "@5/jule"), (OWNER, "hub/skill-creator")):
+        with pytest.raises(PermissionError):
+            s.set_category(who, ref, "Mine now")
+    with pytest.raises(ValueError):
+        s.set_category(OWNER, "tc-plc", "x" * 41)
+    assert s.rename_category(OWNER, "twincat plc", "TwinCAT") == 2
+    assert s.rename_category(MARIA, "TwinCAT", "Hers") == 0                          # only one's own skills move
+    assert cat(OWNER)["tc-motion"] == "TwinCAT" and cat(MARIA)["tc-plc"] == "TwinCAT"
+    assert s.set_category(OWNER, "pdf-guide", "") == "" and cat(OWNER)["pdf-guide"] == ""
+    s.delete(OWNER, "tc-motion")
+    s.install(OWNER, md("tc-motion"), "SKILL.md")
+    assert cat(OWNER)["tc-motion"] == ""                                            # made again: in none
+    s.install(OWNER, md("tc-plc", "Changed."), "SKILL.md")                           # replaced: keeps its category
+    assert cat(OWNER)["tc-plc"] == "TwinCAT"
+
+
 def test_the_format_is_claudes_both_ways(tmp_path):
     s = Skills(tmp_path / "skills")
     # a skill downloaded from Claude: one folder with SKILL.md at its top (and macOS litter)
@@ -265,6 +298,24 @@ async def test_a_skill_made_with_the_assistant_is_checked_and_added_from_its_car
 
 
 # ---------------------------------------------------------------- people
+
+async def test_categories_over_the_api(signed_in, app, fakes):
+    r = await signed_in.post("/hub/api/skills", files={"file": ("SKILL.md", md("pdf-guide"), "text/markdown")})
+    assert r.status_code == 200, r.text
+    r = await signed_in.patch("/hub/api/skills/one", params={"ref": "pdf-guide"}, json={"category": "Documents"})
+    assert r.status_code == 200 and r.json()["category"] == "Documents"
+    listed = {x["ref"]: x for x in (await signed_in.get("/hub/api/skills")).json()}
+    assert listed["pdf-guide"]["category"] == "Documents" and listed["pdf-guide"]["shared"] is False
+    r = await signed_in.patch("/hub/api/skills/one", params={"ref": "pdf-guide"}, json={"shared": True})
+    listed = {x["ref"]: x for x in (await signed_in.get("/hub/api/skills")).json()}
+    assert listed["pdf-guide"]["category"] == "Documents" and listed["pdf-guide"]["shared"] is True
+    r = await signed_in.post("/hub/api/skills/categories/rename", json={"old": "documents", "new": "Docs"})
+    assert r.json() == {"moved": 1}
+    r = await signed_in.patch("/hub/api/skills/one", params={"ref": "hub/skill-creator"}, json={"category": "X"})
+    assert r.status_code == 403
+    r = await signed_in.patch("/hub/api/skills/one", params={"ref": "pdf-guide"}, json={"category": "y" * 41})
+    assert r.status_code == 400
+
 
 async def test_people_make_share_and_use_their_own_skills(signed_in, app, fakes):
     for name in ("haiku-writer", "owner-private"):

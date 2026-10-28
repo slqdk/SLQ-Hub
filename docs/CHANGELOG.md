@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.41.0 - 2026-10-28
+
+- **Skills in categories.** As you make more skills, put each into a category
+  from its ⋯ menu → Category: pick one you have or type a new one. Private and
+  shared skills alike; the family sees your shared ones under your categories.
+  The Skills page lists them by category - each can be folded away, and the
+  pencil by a category renames it for all your skills in it at once - with a
+  search over names, descriptions and categories once there are more than a
+  few. The Skills button by the message box and a project's settings list
+  them by category too. The Hub's own skills are under "SLQ Hub", the rest
+  under "No category" until you place them.
+
 ## 0.40.0 - 2026-10-28
 
 - **The PC gets one folder of a project, not all of it.** Before, the

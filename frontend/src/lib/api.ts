@@ -252,7 +252,8 @@ export interface ApiKey { id: number; name: string; prefix: string; priority: st
  *  "hub/<name>"). */
 export interface Skill { ref: string; name: string; title: string; description: string; files: string[]; size: number;
   kind: "owner" | "person" | "hub"; owner_id: number | null; mine: boolean; shared: boolean; builtin: boolean;
-  updated: string; by: string }
+  updated: string; by: string;
+  category?: string }    // 0.41.0: as its owner set it; "" or none = no category
 /** What skill_propose shows in the chat: a skill the assistant made, to add with Add skill. */
 export interface SkillCardData { draft: string; name: string; title: string; description: string; files: string[];
   size: number; replaces: boolean; ref: string }

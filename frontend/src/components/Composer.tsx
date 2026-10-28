@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUp, BookOpen, Brain, Check, Cloud, Cpu, FileText, FolderOpen, Image as ImageIcon, Paperclip, Plus, Settings2,
   Sparkles, Square, Wand2, X } from "lucide-react";
 import { upload, type ModelEntry, type Skill, type Upload } from "../lib/api";
+import { byCategory } from "../lib/skills";
 import { LEVEL_LABEL, LEVELS, levelText, type Level } from "../lib/effort";
 import { clearDraft, NEW_SKILL_TEXT, peekDraft, SKILL_MAKER } from "../lib/draft";
 import { bytes } from "../lib/format";
@@ -163,8 +164,7 @@ export function Composer({ running, onSend, onStop, settings, onSettings, models
   const efforts = model?.thinking?.efforts ?? [];
   const canThink = (model?.capabilities ?? []).includes("thinking");
   const extras = settings.libraries.length;
-  const groups: [string, Skill[]][] = [["Yours", skills.filter((k) => k.mine)],
-    ["Shared by the family", skills.filter((k) => !k.mine && !k.builtin)], ["From SLQ Hub", skills.filter((k) => k.builtin)]];
+  const groups = byCategory(skills);                 // by category (0.41.0), as on the Skills page
   const pictureId = settings.image_model ?? pictureDefault;
   const picture = pictureModels.find((m) => m.id === pictureId) ?? pictureModels[0];
   const pictureDefaultName = pictureModels.find((m) => m.id === pictureDefault)?.name ?? pictureDefault;

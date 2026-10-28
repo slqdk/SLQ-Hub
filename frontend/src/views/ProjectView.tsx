@@ -3,6 +3,7 @@ import { LEVEL_OPTIONS } from "../lib/effort";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Download, Menu, MessageSquarePlus, Plus } from "lucide-react";
 import { api, syncFolderOf, type ChatListItem, type Library, type Project, type Revision, type Skill } from "../lib/api";
+import { byCategory } from "../lib/skills";
 import { ago, bytes, energy, money, tokens, worked } from "../lib/format";
 import { linkProps, navigate } from "../lib/router";
 import { useApp } from "../state";
@@ -210,10 +211,14 @@ function ProjectSettings({ project, onSaved }: { project: Project; onSaved: (p: 
       <div className="field"><span>Skills in every chat of this project</span>
         {skills.length === 0 ? <small>No skills yet (Skills in the sidebar).</small> : <>
           <small>Chats here use these as well as the ones chosen in the chat itself.</small>
-          <div className="row wrap">{skills.map((k) => (
-            <label key={k.ref} className="check" title={k.description}><input type="checkbox" checked={s.skills.includes(k.ref)}
-              onChange={() => setS({ ...s, skills: toggle(s.skills, k.ref) })} /> {k.title}
-              {!k.mine && !k.builtin && <span className="faint"> ({k.by})</span>}</label>))}</div></>}</div>
+          {byCategory(skills).map(([cat, list]) => (
+            <div key={cat} className="skill-pick-group">
+              {skills.some((k) => k.category) && <div className="small muted">{cat}</div>}
+              <div className="row wrap">{list.map((k) => (
+                <label key={k.ref} className="check" title={k.description}><input type="checkbox"
+                  checked={s.skills.includes(k.ref)} onChange={() => setS({ ...s, skills: toggle(s.skills, k.ref) })} />
+                  {" "}{k.title}{!k.mine && !k.builtin && <span className="faint"> ({k.by})</span>}</label>))}</div>
+            </div>))}</>}</div>
       <div className="row"><button className="btn primary" onClick={save}>Save changes</button><span className="grow" />
         <ConfirmButton onConfirm={remove} confirmText="Delete the project and its chats?">Delete project</ConfirmButton></div>
     </div>

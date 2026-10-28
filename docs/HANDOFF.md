@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.40.0, 2026-10-28)
+## State (0.41.0, 2026-10-28)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -361,6 +361,14 @@ older projects (no `sync_folder`, or ".") sync as a whole as before. Søren's
 answers: uploads and attachments both to hub/, the name chosen at creation,
 always on for new projects; no migration of project 4 - he makes a new
 project. DESIGN §7 "The synced folder". Item 81.
+0.41.0, Søren: "inddele skills i kategorier.. både private og delte" - he
+will make many. A skill's owner puts it into a category (`.categories.json`
+in the owner's folder of skills, beside `.shared.json`/`.disabled.json`), so a
+shared skill shows in its owner's category for everyone; the Skills page, the
+composer's Skills menu and a project's settings list by category (the Hub's
+own under "SLQ Hub", the rest under "No category"), the page with a search,
+folding and renaming a category for all one's skills in it. Seen in a browser
+here (dev server); not yet on the VM.
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
 host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU

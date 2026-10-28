@@ -34,6 +34,7 @@ MAX_SKILL_BYTES = 50 * 1024 * 1024
 MAX_FILES = 500
 DRAFT_DAYS = 14
 REF_RE = re.compile(r"^(?:(?P<hub>hub)/|@(?P<user>\d+)/)?(?P<name>[a-z0-9][a-z0-9._-]{0,63})$")
+CATEGORY_MAX = 40          # characters of a category's name (0.41.0)
 
 
 def parse_front_matter(text: str) -> tuple[dict, str]:
@@ -172,7 +173,66 @@ class Skills:
         return sorted(d for d in base.iterdir() if d.is_dir() and NAME_RE.match(d.name)
                       and (d / "SKILL.md").is_file())
 
-    def _entry(self, d: Path, kind: str, person: int | None, shared: bool, mine: bool) -> dict:
+    # ------------------------------------------------------------ categories (0.41.0)
+    def _categories(self, person: int | None) -> dict[str, str]:
+        """folder name -> category, as the skills' owner set them - .categories.json in their folder of skills. One
+        place per owner, so a shared skill shows in its owner's category for everyone who sees it."""
+        try:
+            data = json.loads((self._home(person) / ".categories.json").read_text())
+        except (OSError, ValueError):
+            return {}
+        return {k: v for k, v in data.items() if isinstance(k, str) and isinstance(v, str) and v} \
+            if isinstance(data, dict) else {}
+
+    def _save_categories(self, person: int | None, cats: dict[str, str]) -> None:
+        home = self._home(person)
+        home.mkdir(parents=True, exist_ok=True)
+        tmp = home / f".categories.json.{secrets.token_hex(4)}.tmp"
+        tmp.write_text(json.dumps(dict(sorted(cats.items())), ensure_ascii=False, indent=1))
+        tmp.replace(home / ".categories.json")
+
+    @staticmethod
+    def clean_category(name: str | None) -> str:
+        """A category's name as kept: spaces folded, at most CATEGORY_MAX characters; "" is none."""
+        name = " ".join(str(name or "").split())
+        if len(name) > CATEGORY_MAX:
+            raise ValueError(f"A category's name is at most {CATEGORY_MAX} characters.")
+        return name
+
+    def set_category(self, who: dict | None, ref: str, category: str | None) -> str:
+        """One of your skills into a category ("" or None: out of any). -> the category as kept."""
+        d = self._own(who, ref)
+        name = self.clean_category(category)
+        person = self._person(who)
+        cats = self._categories(person)
+        if name:
+            cats[d.name] = name
+        else:
+            cats.pop(d.name, None)
+        self._save_categories(person, cats)
+        return name
+
+    def rename_category(self, who: dict | None, old: str, new: str | None) -> int:
+        """Every one of your skills in category old (any case) into new ("": out of any). -> how many moved."""
+        person = self._person(who)
+        old_key = " ".join(str(old or "").split()).casefold()
+        name = self.clean_category(new)
+        if not old_key:
+            raise ValueError("Which category?")
+        cats = self._categories(person)
+        mine = {d.name for d in self._dirs(self._home(person))}
+        moved = [k for k, v in cats.items() if v.casefold() == old_key and k in mine]
+        for k in moved:
+            if name:
+                cats[k] = name
+            else:
+                cats.pop(k)
+        if moved:
+            self._save_categories(person, cats)
+        return len(moved)
+
+    def _entry(self, d: Path, kind: str, person: int | None, shared: bool, mine: bool,
+               category: str = "") -> dict:
         meta, _ = parse_front_matter((d / "SKILL.md").read_text(encoding="utf-8", errors="replace"))
         files = sorted(p.relative_to(d).as_posix() for p in d.rglob("*")
                        if p.is_file() and p.name != "SKILL.md" and not p.name.startswith("."))
@@ -181,7 +241,7 @@ class Skills:
         desc = meta.get("description") if isinstance(meta.get("description"), str) else ""
         return {"ref": ref_of(person, d.name, kind == "hub"), "name": d.name, "title": title,
                 "description": desc[:1024], "files": files[:200], "size": size, "kind": kind,
-                "owner_id": person, "mine": mine, "shared": shared, "builtin": kind == "hub",
+                "owner_id": person, "mine": mine, "shared": shared, "builtin": kind == "hub", "category": category,
                 "updated": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime((d / "SKILL.md").stat().st_mtime)),
                 # older name for the same: shared with the family (the composer once listed "switched off" ones)
                 "enabled": shared}
@@ -197,11 +257,12 @@ class Skills:
         homes: list[int | None] = [me] + ([None] if me is not None else []) + [p for p in self._people() if p != me]
         for person in homes:
             shared = self._shared_names(person)
+            cats = self._categories(person)
             kind = "owner" if person is None else "person"
             for d in self._dirs(self._home(person)):
                 mine = person == me
                 if mine or d.name in shared:
-                    out.append(self._entry(d, kind, person, d.name in shared, mine))
+                    out.append(self._entry(d, kind, person, d.name in shared, mine, cats.get(d.name, "")))
         out += [self._entry(d, "hub", None, True, False) for d in self._dirs(self.builtin)]
         return out
 
@@ -361,6 +422,9 @@ class Skills:
         d = self._own(who, ref)
         shutil.rmtree(d)
         self._set_shared(self._person(who), d.name, False)
+        cats = self._categories(self._person(who))
+        if cats.pop(d.name, None) is not None:              # a skill made again by that name starts in none
+            self._save_categories(self._person(who), cats)
 
     def forget_person(self, person_id: int) -> None:
         """A person removed: their skills go too (chats that chose a shared one simply lose it)."""

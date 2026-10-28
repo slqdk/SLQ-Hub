@@ -90,17 +90,36 @@ async def put_skill(ref: str, body: SkillText, request: Request):
 
 
 class SkillPatch(BaseModel):
-    shared: bool
+    shared: bool | None = None
+    category: str | None = None             # 0.41.0: "" takes it out of any
 
 
 @router.patch("/skills/one")
 async def patch_skill(ref: str, body: SkillPatch, request: Request):
-    """Share one of your skills with the family, or take it back."""
+    """Share one of your skills with the family, or take it back; put it into a category."""
+    out: dict = {"ok": True}
     try:
-        _store(request).set_shared(_who(request), ref, body.shared)
+        if body.shared is not None:
+            _store(request).set_shared(_who(request), ref, body.shared)
+        if body.category is not None:
+            out["category"] = _store(request).set_category(_who(request), ref, body.category)
     except (FileNotFoundError, PermissionError, ValueError) as exc:
         _fail(exc)
-    return {"ok": True}
+    return out
+
+
+class CategoryRename(BaseModel):
+    old: str
+    new: str = ""
+
+
+@router.post("/skills/categories/rename")
+async def rename_category(body: CategoryRename, request: Request):
+    """A category of yours renamed - or emptied with new "" - for all your skills in it at once."""
+    try:
+        return {"moved": _store(request).rename_category(_who(request), body.old, body.new)}
+    except ValueError as exc:
+        _fail(exc)
 
 
 @router.delete("/skills/one")

@@ -1,14 +1,18 @@
 // Skills (0.23.0): yours, the family's shared ones and the Hub's own. Make one with the assistant from your own files,
 // import one from Claude, download one for Claude, share yours with the family. A chat uses a skill only when it is
-// chosen for it (the Skills button by the message box, or / and its name).
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Download, Menu, MessageSquarePlus, MoreHorizontal, Pencil, Sparkles, Trash2, Upload as UploadIcon,
-  Wand2 } from "lucide-react";
+// chosen for it (the Skills button by the message box, or / and its name). Since 0.41.0 listed by category - each
+// owner puts their skills into categories, private and shared alike - with a search over them all.
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChevronDown, ChevronRight, Download, Menu, MessageSquarePlus, MoreHorizontal, Pencil, Search, Sparkles, Tag,
+  Trash2, Upload as UploadIcon, Wand2 } from "lucide-react";
 import { api, type Skill } from "../lib/api";
+import { byCategory, categoryNames, HUB_CATEGORY, NO_CATEGORY, skillMatches } from "../lib/skills";
 import { ago, bytes } from "../lib/format";
 import { NEW_SKILL_TEXT, SKILL_MAKER } from "../lib/draft";
 import { useApp } from "../state";
 import { Empty, MenuButton, Modal, Switch } from "../components/ui";
+
+const CLOSED_KEY = "hub:skill-categories-closed";      // the categories folded away, in this browser
 
 /** The owner's Skills page (a person's app shows SkillsContent in its own frame). */
 export function SkillsView({ onNewChat }: { onNewChat: (text: string, skills: string[]) => void }) {
@@ -28,6 +32,16 @@ export function SkillsContent({ onNewChat }: { onNewChat: (text: string, skills:
   const { toast } = useApp();
   const [skills, setSkills] = useState<Skill[] | null>(null);
   const [view, setView] = useState<{ skill: Skill; text: string; edit: boolean } | null>(null);
+  const [query, setQuery] = useState("");
+  const [closed, setClosed] = useState<string[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem(CLOSED_KEY) ?? "[]");
+    } catch {
+      return [];
+    }
+  });
+  const [placing, setPlacing] = useState<{ skill: Skill; text: string } | null>(null);   // its category
+  const [renaming, setRenaming] = useState<{ old: string; text: string } | null>(null);
   const input = useRef<HTMLInputElement>(null);
   const load = useCallback(async () => {
     try {
@@ -85,6 +99,37 @@ export function SkillsContent({ onNewChat }: { onNewChat: (text: string, skills:
       toast((e as Error).message, "fault");
     }
   };
+  const toggle = (cat: string) => {
+    const next = closed.includes(cat) ? closed.filter((c) => c !== cat) : [...closed, cat];
+    setClosed(next);
+    try {
+      localStorage.setItem(CLOSED_KEY, JSON.stringify(next));
+    } catch { /* private window: it is forgotten, that is all */ }
+  };
+  const place = async () => {
+    if (!placing) return;
+    try {
+      const r = await api<{ category: string }>("/hub/api/skills/one", { method: "PATCH",
+        query: { ref: placing.skill.ref }, body: { category: placing.text } });
+      toast(r.category ? `${placing.skill.title} is under ${r.category}` : `${placing.skill.title} has no category now`, "run");
+      setPlacing(null);
+      changed();
+    } catch (e) {
+      toast((e as Error).message, "fault");
+    }
+  };
+  const rename = async () => {
+    if (!renaming) return;
+    try {
+      const r = await api<{ moved: number }>("/hub/api/skills/categories/rename",
+        { body: { old: renaming.old, new: renaming.text } });
+      toast(`${r.moved} skill${r.moved === 1 ? "" : "s"} moved`, "run");
+      setRenaming(null);
+      changed();
+    } catch (e) {
+      toast((e as Error).message, "fault");
+    }
+  };
   const remove = async (skill: Skill) => {
     try {
       await api("/hub/api/skills/one", { method: "DELETE", query: { ref: skill.ref } });
@@ -94,9 +139,8 @@ export function SkillsContent({ onNewChat }: { onNewChat: (text: string, skills:
     }
   };
 
-  const mine = (skills ?? []).filter((k) => k.mine);
-  const family = (skills ?? []).filter((k) => !k.mine && !k.builtin);
-  const builtin = (skills ?? []).filter((k) => k.builtin);
+  const groups = useMemo(() => byCategory((skills ?? []).filter((k) => skillMatches(k, query))), [skills, query]);
+  const names = useMemo(() => categoryNames(skills ?? []), [skills]);
   const row = (k: Skill) => (
     <div className="list-row skill-row" key={k.ref}>
       <span className="kind"><Sparkles size={16} /></span>
@@ -118,6 +162,8 @@ export function SkillsContent({ onNewChat }: { onNewChat: (text: string, skills:
             {k.mine && <button className="menu-item" onClick={() => { close(); onNewChat(`Improve the skill ${k.title}: `,
               [SKILL_MAKER, k.ref]); }}><Wand2 size={15} />
               <span>Improve with the assistant<small>A chat with the skill maker and this skill</small></span></button>}
+            {k.mine && <button className="menu-item" onClick={() => { close(); setPlacing({ skill: k, text: k.category ?? "" }); }}>
+              <Tag size={15} /><span>Category<small>{k.category || "None yet"}</small></span></button>}
             <button className="menu-item" onClick={() => { close(); open(k, k.mine); }}>
               <Pencil size={15} /> {k.mine ? "Edit SKILL.md" : "Read SKILL.md"}</button>
             <a className="menu-item" href={`/hub/api/skills/zip?ref=${encodeURIComponent(k.ref)}`} download={`${k.name}.zip`}
@@ -137,7 +183,8 @@ export function SkillsContent({ onNewChat }: { onNewChat: (text: string, skills:
     <div>
       <p className="lead">A skill is a set of instructions, with the knowledge that goes with them, for one kind of task.
         A chat uses a skill only when you choose it there: the <b>Skills</b> button by the message box, or type <b>/</b> and
-        its name. Skills are in the format Claude uses, so they move between the two.</p>
+        its name. Skills are in the format Claude uses, so they move between the two. Put yours into categories from
+        their <b>⋯</b> menu - the family sees your shared ones under the same.</p>
       <div className="row wrap" style={{ marginBottom: 16, gap: 8 }}>
         <button className="btn primary" onClick={() => onNewChat(NEW_SKILL_TEXT, [SKILL_MAKER])}><Wand2 size={15} /> New skill</button>
         <button className="btn" onClick={() => input.current?.click()}><UploadIcon size={15} /> Import</button>
@@ -147,20 +194,51 @@ export function SkillsContent({ onNewChat }: { onNewChat: (text: string, skills:
           onChange={(e) => { const f = e.target.files?.[0]; if (f) importFile(f); e.target.value = ""; }} />
       </div>
 
-      <h2 className="section-title">Yours</h2>
-      <div className="list">
-        {skills === null ? <Empty>Loading</Empty> : mine.length === 0
-          ? <Empty>No skills of your own yet. Make one with the assistant from your own files, or import one.</Empty>
-          : mine.map(row)}
-      </div>
-      {family.length > 0 && <>
-        <h2 className="section-title">Shared by the family</h2>
-        <div className="list">{family.map(row)}</div>
-      </>}
-      {builtin.length > 0 && <>
-        <h2 className="section-title">From SLQ Hub</h2>
-        <div className="list">{builtin.map(row)}</div>
-      </>}
+      {skills !== null && skills.length > 4 && <label className="skill-search">
+        <Search size={15} />
+        <input className="input" type="search" placeholder="Find a skill - its name, description or category"
+          value={query} onChange={(e) => setQuery(e.target.value)} aria-label="Find a skill" /></label>}
+      {skills === null ? <Empty>Loading</Empty> : !skills.some((k) => k.mine) && !query
+        ? <Empty>No skills of your own yet. Make one with the assistant from your own files, or import one.</Empty> : null}
+      {skills !== null && query && groups.length === 0 && <Empty>No skill matches "{query}".</Empty>}
+      {groups.map(([cat, list]) => {
+        const open = !!query || !closed.includes(cat);
+        const own = cat !== NO_CATEGORY && cat !== HUB_CATEGORY && list.some((k) => k.mine);
+        return (
+          <section key={cat} className="skill-cat">
+            <h2 className="section-title">
+              <button className="skill-cat-toggle" onClick={() => toggle(cat)} aria-expanded={open}>
+                {open ? <ChevronDown size={16} /> : <ChevronRight size={16} />} {cat}
+                <span className="muted small">{list.length}</span></button>
+              {own && <button className="icon-btn small" title={`Rename the category ${cat}`}
+                aria-label={`Rename the category ${cat}`} onClick={() => setRenaming({ old: cat, text: cat })}>
+                <Pencil size={13} /></button>}
+            </h2>
+            {open && <div className="list">{list.map(row)}</div>}
+          </section>
+        );
+      })}
+
+      <datalist id="skill-categories">{names.map((c) => <option key={c} value={c} />)}</datalist>
+      {placing && <Modal title={`Category for ${placing.skill.title}`} onClose={() => setPlacing(null)}
+        footer={<><button className="btn" onClick={() => setPlacing(null)}>Cancel</button>
+          <button className="btn primary" onClick={place}>Save</button></>}>
+        <label className="field"><span>Category</span>
+          <input className="input" list="skill-categories" autoFocus value={placing.text} maxLength={40}
+            placeholder="e.g. TwinCAT, Pictures, Documents" onChange={(e) => setPlacing({ ...placing, text: e.target.value })}
+            onKeyDown={(e) => e.key === "Enter" && place()} />
+          <small>Pick one you have, or type a new one. Empty: no category.
+            {placing.skill.shared ? " The family sees it under the same." : ""}</small></label>
+      </Modal>}
+      {renaming && <Modal title={`Rename ${renaming.old}`} onClose={() => setRenaming(null)}
+        footer={<><button className="btn" onClick={() => setRenaming(null)}>Cancel</button>
+          <button className="btn primary" onClick={rename}>Rename</button></>}>
+        <label className="field"><span>New name</span>
+          <input className="input" list="skill-categories" autoFocus value={renaming.text} maxLength={40}
+            onChange={(e) => setRenaming({ ...renaming, text: e.target.value })}
+            onKeyDown={(e) => e.key === "Enter" && rename()} />
+          <small>All your skills in it move. A name you have already joins the two; empty: they get no category.</small></label>
+      </Modal>}
 
       {view && <Modal title={view.edit ? `Edit ${view.skill.title}` : view.skill.title} onClose={() => setView(null)} wide
         footer={view.edit ? <><button className="btn" onClick={() => setView(null)}>Cancel</button>

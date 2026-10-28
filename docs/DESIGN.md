@@ -1571,6 +1571,15 @@ skills, the others' shared ones (with who made them) and the Hub's; only the
 maker changes, shares or deletes a skill. A removed person's skills go with
 them.
 
+**Categories (0.41.0).** The maker puts a skill into a category:
+`.categories.json` beside the sharing files maps its folder name to the
+category's name (at most 40 characters). One place per owner, so a shared
+skill is listed in its owner's category for everyone who sees it; the Hub's
+own are listed under "SLQ Hub", the rest under "No category". Renaming a
+category moves all the caller's skills in it; replacing a skill keeps its
+category, deleting it forgets it. The lists (Skills page, composer, project
+settings) group by category in the browser (`lib/skills.ts`).
+
 **Choosing.** A chat's `settings.skills` and its project's hold refs (a
 person's device chat sends hers with each turn). `turn_skills` resolves them
 for whoever runs the turn, drops refs that are gone or not theirs to see,
