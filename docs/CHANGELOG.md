@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.45.1 - 2026-10-28
+
+- **The Skills menu closes when you pick a skill.** Choosing (or taking off)
+  a skill in the Skills menu by the message box closes the menu; the skill
+  shows above the message box as before.
+
 ## 0.45.0 - 2026-10-28
 
 - **Categories are folders.** In the Skills menu by the message box, on the

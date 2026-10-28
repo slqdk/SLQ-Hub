@@ -333,7 +333,8 @@ export function Composer({ running, onSend, onStop, settings, onSettings, models
             <>
               <div className="menu-head">Skills for this chat</div>
               {skills.length === 0 && <div className="menu-item faint" style={{ cursor: "default" }}>No skills yet</div>}
-              <SkillFolders groups={groups} chosen={settings.skills} onToggle={toggleSkill} />
+              <SkillFolders groups={groups} chosen={settings.skills}
+                onToggle={(ref) => { toggleSkill(ref); close(); }} />
               {(canMake || onManageSkills) && <div className="menu-sep" />}
               {canMake && <button className="menu-item" onClick={() => { close(); makeSkill(); }}><Wand2 size={15} />
                 <span>Make a skill<small>Attach your files and say what it is for; the assistant writes it</small></span></button>}
