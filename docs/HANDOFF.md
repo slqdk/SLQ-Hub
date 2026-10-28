@@ -348,7 +348,8 @@ Hub before it arrives, and files up to 100 MB reach a person's device. Item
 `windows`) on the sandbox's network and firewall rules, for the TwinCAT build
 server on the Hub's own VM - Søren wants everything on the Ubuntu VM. VM 222
 got +100 GB (617 GB, `ubuntu-lv` grown) and has `/dev/kvm` (CPU type host, 12
-`svm`). Item 80.
+`svm`). Item 80. On 2026-10-28 Søren decided not to go on with the Windows VM:
+the container stays behind its profile, off, and nothing on VM 222 uses it.
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
 host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU
@@ -1018,7 +1019,9 @@ the host if the VM ever stops by itself.
     is broken") would show it: the export's `web_app` calls and their reports.
     Also: Download all on Søren's phone (Chrome on Android saves the ZIP), a
     whole-folder ZIP of chat 79's folder (some 30 MB of DB1 files and JSON).
-80. **0.39.0's Windows container on VM 222**: `COMPOSE_PROFILES=windows` in
+80. **Not pursued (Søren, 2026-10-28)** - kept here in case it is taken up again; if it stays unused, remove
+    the `windows` service, `.30` from `SANDBOX_IPS`, `windows/*` from `FOLDERS` and INSTALL.md section 12.
+    **0.39.0's Windows container on VM 222**: `COMPOSE_PROFILES=windows` in
     `.env`, `sudo bash update.sh compose up -d windows`; the password is shown
     once. Check: Windows 10 LTSC installs by itself (logs; web viewer through
     the SSH tunnel), RDP from the LAN works, Windows reaches the internet but
