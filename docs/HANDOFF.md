@@ -391,7 +391,8 @@ not on the VM - whether Qwen uses ask_user only for real options is the thing
 to watch (export a chat where it asks too much or not at all).
 0.44.0: a skill's `metadata.category` places it on import (`Skills._category_from`, only when its owner has not
 placed it), and the composer's question card scrolls past 46% of the screen. Made with it, outside the repo: four
-picture skills for Søren (billede-med-dyr/-juletema/-halloween/-paaske, category Billeder): seven questions each,
+picture skills for Søren, in English as the app is (picture-animals/-christmas/-halloween/-easter, category
+Pictures; the Danish billede-med-* drafts replaced): seven questions each,
 image_edit with qwen-image-2.1 on an attached picture, else image_generate with the chat's model (not Chroma1-HD).
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
