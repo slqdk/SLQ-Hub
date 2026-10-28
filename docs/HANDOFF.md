@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.41.0, 2026-10-28)
+## State (0.42.0, 2026-10-28)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -369,6 +369,15 @@ composer's Skills menu and a project's settings list by category (the Hub's
 own under "SLQ Hub", the rest under "No category"), the page with a search,
 folding and renaming a category for all one's skills in it. Seen in a browser
 here (dev server); not yet on the VM.
+0.42.0, from Søren's phone screenshot of chat 158 (rows of "bash curl -s
+https://www.linkedin.co..."): a finished step's row shows what came of it
+(`toolOutcome` in `lib/turns.ts`, from the stored result: bash's last line of
+output or why it failed, a fetch's page and size, a search's count, the file
+tools' own first line), red when it failed; bash, web_app and windows_app take
+an `about` the chat shows at the head of the row (`tools/base.py` ABOUT; bash
+requires it, so llama-server's grammar should make Qwen write it - not seen on
+the card yet). Old chats get the outcome line too; the about only where the
+model gave one.
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
 host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU

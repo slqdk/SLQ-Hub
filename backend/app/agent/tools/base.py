@@ -107,6 +107,14 @@ def register(tool: Tool) -> Tool:
     return tool
 
 
+# What a call is for, in the user's words (0.42.0): the chat shows it at the head of the call's row instead of the
+# command, with what came of it under it. On the tools whose input says little to the user: bash, web_app,
+# windows_app. The tools themselves ignore it.
+ABOUT = {"type": "string", "description": "What this does, for the user: 3-8 words in the language of the "
+                                          "conversation (e.g. \"Check the PLC code\") - the chat shows it "
+                                          "instead of the command"}
+
+
 def obj(properties: dict[str, Any], required: list[str] | None = None) -> dict:
     return {"type": "object", "properties": properties, "required": required or [], "additionalProperties": False}
 

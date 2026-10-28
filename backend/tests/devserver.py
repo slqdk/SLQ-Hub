@@ -300,7 +300,7 @@ def responder(body: dict) -> dict:
                 "path": "fib.py", "content": "def fib(n):\n    a, b = 0, 1\n    for _ in range(n):\n        a, b = b, a + b\n"
                                              "    return a\n\nprint([fib(i) for i in range(10)])\n"}}]}
         if tools_done == 1:
-            return {"tool_calls": [{"name": "bash", "arguments": {"command": "python fib.py"}}]}
+            return {"tool_calls": [{"name": "bash", "arguments": {"about": "Run the Fibonacci script", "command": "python fib.py"}}]}
         return {"content": "The script `fib.py` is in the chat's folder and prints the first ten Fibonacci numbers."}
     if "jingle" in low:
         if tools_done == 0:
@@ -395,7 +395,7 @@ def responder(body: dict) -> dict:
             return {"content": "I will write the game first.", "delay": 3, "tool_calls": [
                 {"name": "write_file", "arguments": {"path": "game.js", "content": "console.log('jump')\n"}}]}
         if tools_done == 1:
-            return {"delay": 3, "tool_calls": [{"name": "bash", "arguments": {"command": "node game.js"}}]}
+            return {"delay": 3, "tool_calls": [{"name": "bash", "arguments": {"about": "Try the game", "command": "node game.js"}}]}
         return {"content": "The game runs.", "delay": 2}
     asked = " ".join(m["content"] for m in msgs if m["role"] == "user" and isinstance(m["content"], str)).lower()
     if "loop" in asked:                                 # a small model stuck repeating itself (the Hub stops it)
@@ -424,7 +424,7 @@ def responder(body: dict) -> dict:
         return {"content": "The subagent found it: yearly service, seals every six months."}
     if "install" in low:                                # code that needs the internet (asks when Settings says so)
         if tools_done == 0:
-            return {"tool_calls": [{"name": "bash", "arguments": {"command": "pip install rich", "internet": True}}]}
+            return {"tool_calls": [{"name": "bash", "arguments": {"about": "Install rich", "command": "pip install rich", "internet": True}}]}
         return {"content": "Installed rich."}
     if "read dr.dk" in low:
         if tools_done == 0:

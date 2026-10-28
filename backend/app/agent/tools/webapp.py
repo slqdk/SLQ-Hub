@@ -16,7 +16,7 @@ import httpx
 from PIL import Image, ImageOps
 
 from ...chats import store as chats
-from .base import Tool, ToolContext, ToolResult, clip, obj, register
+from .base import ABOUT, Tool, ToolContext, ToolResult, clip, obj, register
 from .shell import SandboxError, sandbox_exec
 
 MAX_STEPS, MAX_SHOTS = 40, 8
@@ -421,7 +421,7 @@ TEXT = ("Open a web page, browser app or game in a browser (Chromium) and see it
         "differences marked. compare_area compares one part of the picture only (\"x,y,width,height\" in its "
         "pixels): to get one part right (the title bar), or when the rest differs on purpose (a photo you do not "
         "have).")
-PARAMS = obj({"target": {"type": "string", "description": "An .html file in the working folder, or a folder with "
+PARAMS = obj({"about": ABOUT, "target": {"type": "string", "description": "An .html file in the working folder, or a folder with "
                                                           "index.html"},
               "artifact": {"type": "string", "description": "Instead of target: an html, react, svg or mermaid "
                                                             "artifact's id"},

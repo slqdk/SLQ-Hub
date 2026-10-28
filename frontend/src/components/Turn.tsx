@@ -4,7 +4,8 @@ import { AppWindow, Brain, Check, ChevronDown, ChevronRight, Code2, Download, Fi
   Sparkles } from "lucide-react";
 import { api, mediaUrl, type ArtifactRef, type Skill, type SkillCardData, type SkillDraft } from "../lib/api";
 import { bytes, seconds } from "../lib/format";
-import { toolLabel, toolSummary, type Decision, type Item, type ReviewItem, type ToolView } from "../lib/turns";
+import { toolAbout, toolLabel, toolOutcome, toolSummary, type Decision, type Item, type ReviewItem,
+  type ToolView } from "../lib/turns";
 import { useApp } from "../state";
 import { Markdown } from "./Markdown";
 import { ThinkingText } from "./ThinkingText";
@@ -173,16 +174,23 @@ function ToolRow({ tool, actions }: { tool: ToolView; actions: TurnActions }) {
   const [open, setOpen] = useState(false);
   const busy = tool.state === "running" || tool.state === "streaming";
   const lamp = tool.state === "done" ? "off" : STATE_LAMP[tool.state];
-  const summary = toolSummary(tool) || (tool.state === "streaming" ? "..." : "");
+  const given = toolSummary(tool);
+  // (0.42.0) While it runs: what it was given. Finished: what came of it - red when it failed. What the model said
+  // the call is for ("about") heads the row, with that line under it.
+  const finished = (tool.state === "done" || tool.state === "error") && tool.result != null;
+  const summary = finished ? toolOutcome(tool) : given || (tool.state === "streaming" ? "..." : "");
+  const about = tool.subagent ? "" : toolAbout(tool);
+  const sum = <span className={`tool-sum${tool.state === "error" ? " bad" : ""}`}>{tool.subagent ? "" : summary}</span>;
   return (
     <div className="tool">
-      <button className="tool-head" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+      <button className={`tool-head${about ? " two" : ""}`} onClick={() => setOpen((o) => !o)} aria-expanded={open}
+        title={given ? `${toolLabel(tool.name)}: ${given}` : undefined}>
         {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
         <span className="row" style={{ gap: 8 }}>
           <Lamp state={tool.state === "done" ? "run" : lamp} size="sm" pulse={busy} />
-          <span className="tool-name">{tool.subagent ? `Subagent: ${tool.subagent.description}` : toolLabel(tool.name)}</span>
+          {!about && <span className="tool-name">{tool.subagent ? `Subagent: ${tool.subagent.description}` : toolLabel(tool.name)}</span>}
         </span>
-        <span className="tool-sum">{tool.subagent ? "" : summary}</span>
+        {about ? <span className="tool-text"><span className="tool-name">{about}</span>{sum}</span> : sum}
         <span className="tool-time">{tool.state === "approval" ? "waiting for you" : tool.seconds != null ? seconds(tool.seconds)
           : busy ? (tool.progress ? `${tool.progress.value}/${tool.progress.max}` : "running") : ""}</span>
       </button>

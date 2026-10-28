@@ -12,7 +12,7 @@ import time
 import httpx
 from PIL import Image
 
-from .base import Tool, ToolContext, ToolResult, clip, obj, register
+from .base import ABOUT, Tool, ToolContext, ToolResult, clip, obj, register
 from .shell import SandboxError, sandbox_exec
 
 MAX_STEPS, MAX_SHOTS = 40, 8
@@ -175,7 +175,7 @@ TEXT = ("Run a Windows desktop program (Windows Forms or WPF on .NET 10) on a vi
         "for what you want to see in one call. It runs under Wine (64-bit, as Windows 8.1): close to Windows, not "
         "identical - fonts and some controls look a little different, so the user should still try it on a real "
         "PC.")
-PARAMS = obj({"target": {"type": "string", "description": "Project (.csproj) or its folder, or a built .dll/.exe"},
+PARAMS = obj({"about": ABOUT, "target": {"type": "string", "description": "Project (.csproj) or its folder, or a built .dll/.exe"},
               "steps": {"type": "array", "items": {"type": "object"},
                         "description": "e.g. [{\"click\": [120, 80]}, {\"type\": \"42\"}, {\"click\": \"Start\"}, "
                                        "{\"shot\": \"running\"}]"},

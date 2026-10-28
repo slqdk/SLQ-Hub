@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import httpx
 
-from .base import Tool, ToolContext, ToolResult, clip, obj, register
+from .base import ABOUT, Tool, ToolContext, ToolResult, clip, obj, register
 
 
 class SandboxError(RuntimeError):
@@ -87,7 +87,7 @@ BASH_TEXT = ("Run a bash command in the sandbox (Ubuntu with Python 3 + numpy/pa
              "has internet access but no access to the local network, and runs as an unprivileged user. Each call "
              "is a fresh shell (cd and variables do not carry over; files do). Use it to run code, tests, "
              "conversions and installs (pip install --user is not needed: pip install works).")
-BASH_PARAMS = {"command": {"type": "string"},
+BASH_PARAMS = {"about": ABOUT, "command": {"type": "string"},
                "timeout": {"type": "integer", "description": "Seconds (default 120, max 1800)"},
                "cwd": {"type": "string", "description": "Sub-folder of the working folder to start in"}}
 
@@ -95,7 +95,7 @@ BASH_PARAMS = {"command": {"type": "string"},
 def _bash_dynamic(ctx: ToolContext) -> tuple[str, dict]:
     from .. import internet
     if not internet.asking(ctx.settings):
-        return BASH_TEXT, obj(BASH_PARAMS, ["command"])
+        return BASH_TEXT, obj(BASH_PARAMS, ["about", "command"])
     text = BASH_TEXT.replace("has internet access but no access to the local network",
                              "has no access to the local network and, unless the call says internet: true, no "
                              "network at all (no connections, not even to localhost, and no DNS)")
@@ -105,7 +105,7 @@ def _bash_dynamic(ctx: ToolContext) -> tuple[str, dict]:
             "Allowed once, whatever the command leaves running is stopped when it ends.",
             obj({**BASH_PARAMS, "internet": {"type": "boolean", "description": "The command needs the internet "
                                                                                 "(the user is asked)."}},
-                ["command"]))
+                ["about", "command"]))
 
 
-register(Tool("bash", BASH_TEXT, obj(BASH_PARAMS, ["command"]), bash, dynamic=_bash_dynamic))
+register(Tool("bash", BASH_TEXT, obj(BASH_PARAMS, ["about", "command"]), bash, dynamic=_bash_dynamic))

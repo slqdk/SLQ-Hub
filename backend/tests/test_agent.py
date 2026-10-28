@@ -87,6 +87,8 @@ async def test_a_simple_turn_streams_saves_and_titles(signed_in, app, fakes):
     assert first["chat_template_kwargs"] == {"enable_thinking": False}      # plain chats answer without thinking
     names = {t["function"]["name"] for t in first["tools"]}
     assert {"bash", "read_file", "write_file", "web_search", "memory", "artifact", "task"} <= names
+    bash = next(t["function"]["parameters"] for t in first["tools"] if t["function"]["name"] == "bash")
+    assert list(bash["properties"])[:2] == ["about", "command"] and bash["required"] == ["about", "command"]
     assert "escalate" not in names                                         # only in projects that allow it
     title_req = fakes.llama["requests"][1]
     assert "short title" in last_user(title_req) and "tools" not in title_req
@@ -95,7 +97,7 @@ async def test_a_simple_turn_streams_saves_and_titles(signed_in, app, fakes):
 async def test_tools_work_in_the_chat_folder(signed_in, app, fakes):
     fakes.llama["replies"] = [
         {"tool_calls": [{"name": "write_file", "arguments": {"path": "hello.py", "content": "print('hi')\n"}}]},
-        {"tool_calls": [{"name": "bash", "arguments": {"command": "python hello.py"}}]},
+        {"tool_calls": [{"name": "bash", "arguments": {"about": "Run the script", "command": "python hello.py"}}]},
         {"content": "It prints hi."},
         {"content": "Hello script"},
     ]
@@ -110,6 +112,7 @@ async def test_tools_work_in_the_chat_folder(signed_in, app, fakes):
     third = fakes.llama["requests"][2]["messages"]
     assert third[-1]["role"] == "tool" and "ran: python hello.py" in third[-1]["content"]
     assert third[-2]["tool_calls"][0]["function"]["name"] == "bash"
+    assert fakes.sandbox["execs"][0]["cmd"] == "python hello.py"           # "about" is for the chat, not the shell
     kinds = [e["type"] for e in run.events]
     assert kinds.count("tool_call") == 2 and kinds.count("tool_result") == 2
 

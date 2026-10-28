@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.42.0 - 2026-10-28
+
+- **A step says what came of it.** A finished step in an answer no longer
+  shows only what it was given (`bash curl -s "https://www.linkedin.co...`).
+  It shows what came of it: the last line a command printed, "Failed
+  (exit 6): curl: (6) Could not resolve host ...", "Timed out", "An HTML page,
+  45 KB", "Created fib.py (124 bytes, 8 lines)", "3 results - first: ...",
+  the page a fetch read and its size. A failure is red. While a step runs it
+  still shows its command, and the full input and result are one click
+  away as before.
+- **Commands say what they are for.** The assistant now gives every bash
+  command a few words for you - "Run the tests", "Henter LinkedIn-profilen" -
+  in the chat's language. They head the step's row, with the outcome under
+  them. Pages and Windows programs it tries (web_app, windows_app) can have
+  them too.
+
 ## 0.41.0 - 2026-10-28
 
 - **Skills in categories.** As you make more skills, put each into a category

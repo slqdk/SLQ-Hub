@@ -391,6 +391,81 @@ export function reduceLive(live: LiveRun, ev: RunEvent): LiveRun {
   return next;
 }
 
+/** What the model said a call is for (0.42.0: bash, web_app, windows_app take "about"), or "". */
+export function toolAbout(t: ToolView): string {
+  const v = t.args?.about;
+  return typeof v === "string" ? v.replace(/\s+/g, " ").trim().slice(0, 120) : "";
+}
+
+const oneLine = (s: string, max = 160) => s.replace(/\s+/g, " ").trim().slice(0, max);
+const lastLine = (s: string) => s.split("\n").map((x) => x.trim()).filter(Boolean).pop() ?? "";
+const firstLine = (s: string) => s.split("\n").map((x) => x.trim()).find(Boolean) ?? "";
+const size = (n: number) => (n < 1024 ? `${n} B` : n < 1024 * 1024 ? `${Math.round(n / 1024)} KB` : `${(n / 1048576).toFixed(1)} MB`);
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+/** "403 Forbidden" out of an HTTP error's text, or "". */
+const httpStatus = (s: string) => s.match(/\b([45]\d\d)(?: ([A-Z][A-Za-z ]{2,30}?))?['"\s,)]/)?.slice(1).filter(Boolean).join(" ") ?? "";
+
+/** What came of bash: its last line of output, or why it failed. */
+function bashOutcome(r: string, failed: boolean): string {
+  const head = r.split("\n")[0];
+  const code = head.match(/^exit code (\S+?),?\s/)?.[1];
+  if (code === undefined) return oneLine(firstLine(r));               // the sandbox did not run it
+  if (/TIMED OUT/.test(head)) return "Timed out - stopped";
+  const part = (name: string) => r.match(new RegExp(`(?:^|\\n)${name}:\\n([\\s\\S]*?)(?=\\n(?:stdout|stderr):\\n|\\n\\(This command ran without|$)`))?.[1] ?? "";
+  const out = part("stdout"), err = part("stderr");
+  if (failed) {
+    const why = lastLine(err) || lastLine(out);
+    return `Failed (exit ${code})${why ? `: ${oneLine(why)}` : ""}`;
+  }
+  if (!out.trim()) return err.trim() ? oneLine(lastLine(err)) : "Done - no output";
+  const t = out.trimStart().slice(0, 300).toLowerCase();
+  if (t.startsWith("<!doctype") || t.startsWith("<html")) return `An HTML page, ${size(out.length)}`;
+  if ((t.startsWith("{") || t.startsWith("[")) && out.length > 200) return `JSON, ${size(out.length)}`;
+  const lines = out.split("\n").filter((x) => x.trim()).length;
+  return oneLine(lastLine(out)) + (lines >= 5 ? ` (${plural(lines, "line")})` : "");
+}
+
+/** A finished call in a line (0.42.0): what came of it - shown in its row instead of what it was given; red when it
+ *  failed. The full input and result stay one click away. */
+export function toolOutcome(t: ToolView): string {
+  const r = (t.result ?? "").trim();
+  const failed = t.state === "error";
+  if (!r) return failed ? "Failed" : "Done";
+  const a = t.args ?? {};
+  const s = (k: string) => (typeof a[k] === "string" ? (a[k] as string) : "");
+  const first = firstLine(r);
+  if (failed && t.name !== "bash") return oneLine(httpStatus(first) ? `Failed: ${httpStatus(first)}` : first);
+  switch (t.name) {
+    case "bash": return bashOutcome(r, failed);
+    case "read_file": {
+      if (first.endsWith(":") && r.includes("\n")) return `${s("path")} - ${plural(r.split("\n").length - 1, "line")}`;
+      return oneLine(first);
+    }
+    case "web_fetch": {
+      const m = r.match(/^Content of (\S+):\n\n([\s\S]*)$/);
+      if (!m) return oneLine(first);
+      let host = m[1];
+      try { host = new URL(m[1]).host; } catch { /* not a URL: as it is */ }
+      const title = firstLine(m[2]).replace(/^#+\s*/, "");
+      return `${host}${title ? ` - ${oneLine(title, 90)}` : ""} (${size(m[2].length)})`;
+    }
+    case "web_search": {
+      const n = (r.match(/^\d+\. /gm) ?? []).length;
+      if (!n) return oneLine(first);
+      const top = r.match(/^1\. (.+)$/m)?.[1] ?? "";
+      return `${plural(n, "result")}${top ? ` - first: ${oneLine(top, 80)}` : ""}`;
+    }
+    case "search_files": {
+      const hits = r.split("\n").filter((x) => /:\d+:/.test(x)).length;
+      return hits ? `${plural(hits, "match")} for ${s("pattern")}` : oneLine(first);
+    }
+    case "list_files": return `${s("path") || "the folder"} - ${plural(r.split("\n").filter((x) => x.trim()).length, "entry")}`
+      .replace("entrys", "entries");
+    default: return oneLine(first);
+  }
+}
+
 /** A short line for a tool row: what it did, in its own terms. */
 export function toolSummary(t: ToolView): string {
   const a = t.args ?? {};

@@ -405,6 +405,10 @@ button.file-chip:disabled { cursor: default; }
 .tool-name { font-family: var(--font-plate); font-weight: 600; font-size: 14px; color: var(--ink); white-space: nowrap; }
 .tool-sum { font-size: 13.5px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tool-time { font-size: 12.5px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.tool-sum.bad { color: var(--fault); }
+.tool-text { display: flex; flex-direction: column; min-width: 0; gap: 1px; }
+.tool-text .tool-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool-head.two { padding-top: 7px; padding-bottom: 7px; }
 .tool-body { padding: 4px 12px 12px 32px; display: flex; flex-direction: column; gap: 8px; }
 .tool-body pre { margin: 0; max-height: 320px; overflow: auto; background: var(--code-bg); border-radius: 6px; padding: 8px 10px; font-family: var(--font-mono); font-size: 12.5px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
 .tool-body .label { font-size: 13px; }
