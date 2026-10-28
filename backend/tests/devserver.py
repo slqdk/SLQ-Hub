@@ -300,6 +300,30 @@ def responder(body: dict) -> dict:
         if tools_done == 1:
             return {"tool_calls": [{"name": "mcp__calc__build", "arguments": {"files": ["src/Main.st"], "target": "plc"}}]}
         return {"content": "The build server got **src/Main.st**."}
+    if "work steps" in low:          # 0.46.0: thoughts and calls as a working turn has them - one edit misses
+        md = ("---\nname: picture-animals\ndescription: A picture with animals.\n---\n\n# Questions\n\n"
+              "- Which animal should be in the picture?\n- How many animals should be in the picture?\n")
+        plan = [
+            ("The user wants a question about the season. First I write the skill file to work on.",
+             "write_file", {"path": "skills/picture-animals/SKILL.md", "content": md}),
+            ("Let me read the file to see the exact questions block.",
+             "read_file", {"path": "skills/picture-animals/SKILL.md"}),
+            ("Now I add the season question after the question about how many animals.",
+             "edit_file", {"path": "skills/picture-animals/SKILL.md", "old_string": "- How many animals?",
+                           "new_string": "- How many animals?\n- Which season?"}),
+            ("The text was not what I remembered. I copy it exactly from the lines the error showed.",
+             "edit_file", {"path": "skills/picture-animals/SKILL.md",
+                           "old_string": "- How many animals should be in the picture?",
+                           "new_string": "- How many animals should be in the picture?\n- Which season should it be?"}),
+            ("Let me check that the questions block still has three questions.",
+             "bash", {"about": "Count the questions", "command": "grep -c '^- ' skills/picture-animals/SKILL.md"}),
+        ]
+        if tools_done < len(plan):
+            thought, name, args = plan[tools_done]
+            more = " The file has a front matter block and a list of questions under it. Each question is one line."
+            return {"reasoning": thought + more * 3, "pace": 0.05, "delay": 1.5,
+                    "tool_calls": [{"name": name, "arguments": args}]}
+        return {"content": "Done: **picture-animals** now asks which season the picture should show."}
     if "files" in low:
         if tools_done == 0:
             return {"content": "I will write the script first.", "tool_calls": [{"name": "write_file", "arguments": {

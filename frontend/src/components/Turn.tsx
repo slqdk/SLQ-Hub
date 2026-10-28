@@ -1,11 +1,11 @@
 // An assistant turn: thinking, text, the strip of tool calls, artifacts.
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { AppWindow, Brain, Check, ChevronDown, ChevronRight, Code2, Download, FileText, GitBranch, Image as ImageIcon, Shapes,
   Sparkles } from "lucide-react";
 import { api, mediaUrl, type ArtifactRef, type Skill, type SkillCardData, type SkillDraft } from "../lib/api";
 import { bytes, seconds } from "../lib/format";
-import { toolAbout, toolLabel, toolOutcome, toolSummary, type Decision, type Item, type ReviewItem,
-  type ToolView } from "../lib/turns";
+import { thoughtGist, toolAbout, toolLabel, toolOutcome, toolSummary, workSummary, type Decision, type Item,
+  type ReviewItem, type ToolView } from "../lib/turns";
 import { allAnswered, QuestionList } from "./QuestionCard";
 import { useApp } from "../state";
 import { Markdown } from "./Markdown";
@@ -26,12 +26,56 @@ export interface TurnActions {
   stopThinking?: () => Promise<unknown>;
 }
 
-export function Items({ items, actions }: { items: Item[]; actions: TurnActions }) {
+/** A turn's steps between its words (0.46.0): runs of thinking and tool calls are one block, closed, that says what
+ *  the steps did - the rows themselves one click away. While the turn works, the step under way stays open below it:
+ *  the thinking (with Stop thinking), or the call that runs, headed by what the thought before it said it would do.
+ *  A call that waits for the user is always shown. */
+type Unit = { kind: "item"; it: Item; i: number } | { kind: "work"; items: Item[]; at: number };
+
+const shownTools = (it: Item) => (it.kind === "tools"
+  ? it.tools.filter((t) => t.name !== "todo_write" && !(t.name === "artifact" && t.display?.artifact)) : []);
+const underWay = (it: Item) => it.kind === "tools" && it.tools.some((t) =>
+  ["running", "streaming", "approval", "question"].includes(t.state));
+
+function units(items: Item[], live: boolean): Unit[] {
+  const out: Unit[] = [];
+  let run: number[] = [];
+  const flush = () => {
+    if (!run.length) return;
+    let done = run;
+    const tail: number[] = [];
+    while (live && done.length && done[done.length - 1] === items.length - 1
+      && (items[done[done.length - 1]].kind === "thinking" || underWay(items[done[done.length - 1]]))) {
+      tail.unshift(done[done.length - 1]);              // the step under way, shown as it is
+      done = done.slice(0, -1);
+      if (items[tail[0]].kind === "thinking") break;    // (a thought and the call it leads to stay together)
+    }
+    const calls = done.reduce((n, i) => n + shownTools(items[i]).length, 0);
+    if (calls >= 1 && done.length >= 2) out.push({ kind: "work", items: done.map((i) => items[i]), at: done[0] });
+    else done.forEach((i) => out.push({ kind: "item", it: items[i], i }));
+    tail.forEach((i) => out.push({ kind: "item", it: items[i], i }));
+    run = [];
+  };
+  items.forEach((it, i) => {
+    if (it.kind === "thinking" || it.kind === "tools") run.push(i);
+    else {
+      flush();
+      out.push({ kind: "item", it, i });
+    }
+  });
+  flush();
+  return out;
+}
+
+export function Items({ items, actions, flat = false }: { items: Item[]; actions: TurnActions; flat?: boolean }) {
   const { auth } = useApp();
   const lastText = [...items].reverse().find((i) => i.kind === "text");
+  const plan: Unit[] = flat ? items.map((it, i) => ({ kind: "item" as const, it, i })) : units(items, !!actions.live);
   return (
     <>
-      {items.map((it, i) => {
+      {plan.map((u) => {
+        if (u.kind === "work") return <WorkBlock key={`w${u.at}`} items={u.items} actions={actions} />;
+        const { it, i } = u;
         switch (it.kind) {
           case "thinking": {
             const live = actions.live && i === items.length - 1;
@@ -42,9 +86,12 @@ export function Items({ items, actions }: { items: Item[]; actions: TurnActions 
               remoteImages={!auth?.internetAsks} />;
           case "tools": {
             // The task list and finished artifacts show as their own blocks.
-            const shown = it.tools.filter((t) => t.name !== "todo_write" && !(t.name === "artifact" && t.display?.artifact));
+            const shown = shownTools(it);
             if (!shown.length) return null;
-            return <div className="strip" key={i}>{shown.map((t) => <ToolRow key={t.id} tool={t} actions={actions} />)}</div>;
+            const before = items[i - 1];
+            const hint = !flat && before?.kind === "thinking" ? thoughtGist(before.text) : "";
+            return <div className="strip" key={i}>{shown.map((t) => <ToolRow key={t.id} tool={t} actions={actions}
+              hint={t.state === "done" || t.state === "error" ? "" : hint} />)}</div>;
           }
           case "artifact":
             return <ArtifactCard key={i} refx={it.ref} onOpen={() => actions.openArtifact(it.ref)} />;
@@ -79,6 +126,7 @@ function Thinking({ text, live, onStop }: { text: string; live?: boolean; onStop
   const [open, setOpen] = useState(false);
   const [stopping, setStopping] = useState<"" | "asked" | "missed">("");
   const words = text.trim().split(/\s+/).length;
+  const gist = useMemo(() => (live ? "" : thoughtGist(text)), [text, live]);   // what it decided (0.46.0)
   const ended = /\(That is enough thinking for this step[^)]*\)\s*$/.test(text);   // its budget, or Stop thinking
   // The model server says yes even when the stop came too late to change anything; if it still thinks a while
   // later, the button can be pressed again.
@@ -100,7 +148,10 @@ function Thinking({ text, live, onStop }: { text: string; live?: boolean; onStop
     <div className="thinking">
       <div className="thinking-head">
         <button onClick={() => setOpen((o) => !o)} aria-expanded={open || !!live}>
-          <Brain size={15} /> {live ? "Thinking" : `Thought for ${words} words${ended ? ", then stopped" : ""}`}
+          <Brain size={15} />
+          <span className={`thinking-gist${!live && gist ? " said" : ""}`}>{live ? "Thinking"
+            : gist ? `${gist}${ended ? " (stopped)" : ""}`
+            : `Thought for ${words} words${ended ? ", then stopped" : ""}`}</span>
           {open || live ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
         </button>
         {live && onStop && (
@@ -174,7 +225,31 @@ function ReviewRow({ item, actions }: { item: ReviewItem; actions: TurnActions }
 const STATE_LAMP: Record<string, LampState> = { streaming: "wait", running: "run", approval: "act", question: "act",
   done: "off", error: "fault" };
 
-function ToolRow({ tool, actions }: { tool: ToolView; actions: TurnActions }) {
+/** Finished steps as one closed row that says what they did; open, the steps themselves. */
+function WorkBlock({ items, actions }: { items: Item[]; actions: TurnActions }) {
+  const [open, setOpen] = useState(false);
+  const tools = items.flatMap(shownTools);
+  const sum = workSummary(tools);
+  const images = tools.flatMap((t) => t.images ?? []);
+  const bad = sum.lastFailed && !actions.live;
+  const note = sum.failed && !bad ? ` (${sum.failed} failed on the way)` : bad ? " - the last step failed" : "";
+  return (
+    <div className="strip work">
+      <button className="tool-head" onClick={() => setOpen((o) => !o)} aria-expanded={open}
+        title={open ? "Close the steps" : "Show the steps"}>
+        {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+        <Lamp state={bad ? "fault" : "run"} size="sm" pulse={false} />
+        <span className={`tool-sum work-sum${bad ? " bad" : ""}`}>{sum.text}{note}</span>
+        <span className="tool-time">{tools.length} step{tools.length === 1 ? "" : "s"}</span>
+      </button>
+      {open && <div className="work-body"><Items items={items} actions={{ ...actions, live: false }} flat /></div>}
+      {!open && images.length > 0 && <div className="tool-body"><ToolImages images={images} /></div>}
+    </div>
+  );
+}
+
+function ToolRow({ tool, actions, hint = "" }: { tool: ToolView; actions: TurnActions;
+  hint?: string }) {   // hint (0.46.0): what the thought before a running call said it would do
   const [open, setOpen] = useState(false);
   const busy = tool.state === "running" || tool.state === "streaming";
   const lamp = tool.state === "done" ? "off" : STATE_LAMP[tool.state];
@@ -183,7 +258,7 @@ function ToolRow({ tool, actions }: { tool: ToolView; actions: TurnActions }) {
   // the call is for ("about") heads the row, with that line under it.
   const finished = (tool.state === "done" || tool.state === "error") && tool.result != null;
   const summary = finished ? toolOutcome(tool) : given || (tool.state === "streaming" ? "..." : "");
-  const about = tool.subagent ? "" : toolAbout(tool);
+  const about = tool.subagent ? "" : toolAbout(tool) || hint;
   const sum = <span className={`tool-sum${tool.state === "error" ? " bad" : ""}`}>{tool.subagent ? "" : summary}</span>;
   return (
     <div className="tool">
@@ -196,7 +271,7 @@ function ToolRow({ tool, actions }: { tool: ToolView; actions: TurnActions }) {
         </span>
         {about ? <span className="tool-text"><span className="tool-name">{about}</span>{sum}</span> : sum}
         <span className="tool-time">{tool.state === "approval" || tool.state === "question" ? "waiting for you"
-          : tool.seconds != null ? seconds(tool.seconds)
+          : tool.seconds != null ? (tool.seconds >= 1 ? seconds(tool.seconds) : "")    // not "0 ms" (0.46.0)
           : busy ? (tool.progress ? `${tool.progress.value}/${tool.progress.max}` : "running") : ""}</span>
       </button>
       {tool.state === "approval" && (actions.approve || actions.runId) && <Approval tool={tool}

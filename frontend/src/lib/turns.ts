@@ -443,12 +443,21 @@ function bashOutcome(r: string, failed: boolean): string {
 /** A finished call in a line (0.42.0): what came of it - shown in its row instead of what it was given; red when it
  *  failed. The full input and result stay one click away. */
 export function toolOutcome(t: ToolView): string {
+  return shortPath(outcomeLine(t));
+}
+
+function outcomeLine(t: ToolView): string {
   const r = (t.result ?? "").trim();
   const failed = t.state === "error";
   if (!r) return failed ? "Failed" : "Done";
   const a = t.args ?? {};
   const s = (k: string) => (typeof a[k] === "string" ? (a[k] as string) : "");
   const first = firstLine(r);
+  if (failed && t.name === "edit_file") {             // the model's copy of the text was not in the file
+    if (first.startsWith("old_string was not found")) return `The text to change was not found in ${fileName(s("path"))}`;
+    const many = first.match(/^old_string occurs (\d+) times/);
+    if (many) return `The text to change is in ${fileName(s("path"))} ${many[1]} times`;
+  }
   if (failed && t.name !== "bash") return oneLine(httpStatus(first) ? `Failed: ${httpStatus(first)}` : first);
   switch (t.name) {
     case "bash": return bashOutcome(r, failed);
@@ -478,14 +487,28 @@ export function toolOutcome(t: ToolView): string {
       const answers = t.display?.answers;
       return Array.isArray(answers) && answers.length ? answers.map((x) => x.join(", ") || "-").join(" · ") : oneLine(first);
     }
+    case "edit_file": {
+      const m = first.match(/^Edited .+?: replaced (\d+) occurrence\(s\), starting at line (\d+)/);
+      return m ? `${fileName(s("path"))}, line ${m[2]}${m[1] !== "1" ? ` (${m[1]} places)` : ""}` : oneLine(first);
+    }
     case "list_files": return `${s("path") || "the folder"} - ${plural(r.split("\n").filter((x) => x.trim()).length, "entry")}`
       .replace("entrys", "entries");
     default: return oneLine(first);
   }
 }
 
+/** A path as the user knows it (0.46.0): without the sandbox's /workspace/chats/<id>/ or /workspace/projects/<id>/. */
+export const shortPath = (p: string): string => p.replace(/\/?workspace\/(?:chats|projects)\/\d+\/?/g, "");
+
+/** A file's name and the folder it is in: "picture-animals/SKILL.md". */
+const fileName = (p: string): string => shortPath(p).split("/").filter(Boolean).slice(-2).join("/");
+
 /** A short line for a tool row: what it did, in its own terms. */
 export function toolSummary(t: ToolView): string {
+  return shortPath(givenLine(t));
+}
+
+function givenLine(t: ToolView): string {
   const a = t.args ?? {};
   const s = (k: string) => (typeof a[k] === "string" ? (a[k] as string) : "");
   switch (t.name) {
@@ -526,4 +549,57 @@ export function toolLabel(name: string): string {
   const m = name.match(/^mcp__(.+?)__(.+)$/);
   if (m) return `${m[1]}: ${m[2]}`;
   return name.replace(/_/g, " ");
+}
+
+/** The point of a thought, for the step after it (0.46.0): the last sentence that says what the model does next
+ *  ("Let me read the file again to get the exact text."), else its first sentence. */
+const INTENT = /^(let me|let's|i'll|i will|i need to|i should|i must|i have to|i'm going to|i am going to|i want to|(?:now|next|first|then),? (?:i|let)|time to)\b/i;
+
+export function thoughtGist(text: string): string {
+  const clean = text.replace(/\(That is enough thinking[^)]*\)\s*$/, "").replace(/```[\s\S]*?```/g, " ")
+    .replace(/[#*`>_]+/g, " ").replace(/\s+/g, " ").trim();
+  const sentences = (clean.match(/[^.!?]+[.!?]+(?=\s|$)/g) ?? []).map((x) => x.trim()
+    .replace(/^(so|okay|ok|alright|well|hmm|right|good|great)[,.!]?\s+/i, "")).filter((x) => x.length > 12);
+  const pick = [...sentences].reverse().find((x) => INTENT.test(x)) ?? sentences[0] ?? clean;
+  return pick.length > 140 ? `${pick.slice(0, 139)}...` : pick;
+}
+
+const VERBS: Record<string, [string, string]> = {          // tool: [verb, what it counts when it has no file]
+  read_file: ["read", ""], edit_file: ["edited", ""], write_file: ["wrote", ""], delete_file: ["deleted", ""],
+  view_image: ["looked at", ""], list_files: ["looked through", "the folder"], search_files: ["searched", "the files"],
+  bash: ["ran", "command"], web_search: ["searched", "the web"], web_fetch: ["read", "page"],
+  image_generate: ["made", "picture"], image_edit: ["edited", "picture"], ask_user: ["asked", "you"],
+};
+
+/** Finished steps in a line (0.46.0): what was done to what - "edited picture-animals/SKILL.md 2x, read it 2x,
+ *  ran 3 commands" - and the failures the steps after did not set right. */
+export function workSummary(tools: ToolView[]): { text: string; failed: number; lastFailed: boolean } {
+  const parts: string[] = [];
+  const seen = new Map<string, number>();
+  const order: string[] = [];
+  // a file by its name ("SKILL.md"), or with its folder when two files here have that name
+  const paths = [...new Set(tools.map((t) => (typeof t.args?.path === "string" ? shortPath(t.args.path as string) : ""))
+    .filter(Boolean))];
+  const base = (p: string) => p.split("/").filter(Boolean).pop() ?? p;
+  const named = (p: string) => (paths.filter((q) => base(q) === base(p)).length > 1 ? fileName(p) : base(p));
+  for (const t of tools) {
+    const [verb, thing] = VERBS[t.name] ?? [toolLabel(t.name), ""];
+    const target = typeof t.args?.path === "string" ? named(shortPath(t.args.path as string)) : thing;
+    const key = `${verb}\u0000${target}`;
+    if (!seen.has(key)) order.push(key);
+    seen.set(key, (seen.get(key) ?? 0) + 1);
+  }
+  let lastTarget = "";
+  for (const key of order) {
+    const [verb, target] = key.split("\u0000");
+    const n = seen.get(key) ?? 1;
+    const counted = target === "command" || target === "page" || target === "picture";
+    const what = counted ? `${n} ${target}${n === 1 ? "" : "s"}` : target === lastTarget && target ? "it" : target;
+    parts.push(`${verb}${what ? ` ${what}` : ""}${!counted && n > 1 ? ` ${n}x` : ""}`);
+    if (!counted) lastTarget = target;
+  }
+  const failed = tools.filter((t) => t.state === "error").length;
+  const lastFailed = tools.length > 0 && tools[tools.length - 1].state === "error";
+  const text = parts.join(", ");
+  return { text: text ? text[0].toUpperCase() + text.slice(1) : "", failed, lastFailed };
 }

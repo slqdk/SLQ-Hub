@@ -377,7 +377,10 @@ button.file-chip:disabled { cursor: default; }
 
 .thinking { border-left: 2px solid var(--rule); padding: 0 0 0 12px; }
 .thinking-head { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; }
-.thinking-head > button:first-child { display: inline-flex; align-items: center; gap: 6px; border: 0; background: none; padding: 2px 0; color: var(--ink-2); font-family: var(--font-plate); font-weight: 600; font-size: 14px; }
+.thinking-head > button:first-child { display: inline-flex; align-items: center; gap: 6px; border: 0; background: none; padding: 2px 0; color: var(--ink-2); font-family: var(--font-plate); font-weight: 600; font-size: 14px; max-width: 100%; min-width: 0; text-align: left; }
+.thinking-head svg { flex: none; }
+.thinking-gist { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.thinking-gist.said { font-family: inherit; font-weight: 400; font-size: 14px; }
 .thinking-stop { height: 26px; padding: 0 10px; font-size: 13px; }
 .review-report { padding: 4px 14px 10px 36px; font-size: 14.5px; }
 .thinking-body { color: var(--ink-2); font-size: 14.5px; white-space: pre-wrap; margin-top: 4px; max-height: 340px; overflow: auto; }
@@ -406,6 +409,9 @@ button.file-chip:disabled { cursor: default; }
 .tool-sum { font-size: 13.5px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tool-time { font-size: 12.5px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
 .tool-sum.bad { color: var(--fault); }
+.strip.work .work-sum { color: var(--ink); white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.35; }
+.strip.work .work-sum.bad { color: var(--fault); }
+.work-body { border-top: 1px solid var(--rule); padding: 6px 8px; display: flex; flex-direction: column; gap: 6px; }
 .tool-text { display: flex; flex-direction: column; min-width: 0; gap: 1px; }
 .tool-text .tool-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tool-head.two { padding-top: 7px; padding-bottom: 7px; }

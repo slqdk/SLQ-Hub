@@ -158,6 +158,8 @@ export const SECTIONS: HelpSection[] = [
         what: "You stay in charge while it works.",
         how: [
           "Write while it works: it reads your message after the step it is on.",
+          "Its finished steps fold into one line that says what they did; click the line for each step, and a "
+            + "thought for all of it.",
           "The square button stops it.",
           "An answer that was stopped, or reached the most steps one turn may take, says Not finished: Continue goes "
             + "on from where it stopped, with what it has made so far.",

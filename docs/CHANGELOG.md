@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.46.0 - 2026-10-28
+
+- **Working steps say what they did.** While the assistant works, the steps
+  it has finished fold into one line that says what they did - "Wrote
+  SKILL.md, read it, edited it 2x, ran 1 command (1 failed on the way)" -
+  with the steps themselves one click away. The step under way stays open
+  below it: the thinking as it comes, or the call that runs, headed by what
+  the thought before it said it would do. The line turns red only when the
+  last step failed.
+- **A thought is headed by what it decided** - "Let me read the file to see
+  the exact questions block." instead of "Thought for 74 words". Click it for
+  the whole thought.
+- **No more "0 ms".** Reading and editing a file takes no time worth showing;
+  a step's time shows from one second.
+- **Fewer red "old_string was not found".** An edit now finds its text when
+  the model's copy has read_file's line numbers in it, tabs that came out as
+  spaces, a lost indentation or a stray space - in one place only - and the
+  new text gets the file's indentation. When the text really is not there,
+  the model is shown the most similar lines exactly, to copy from on its next
+  try. The row says "The text to change was not found in SKILL.md".
+- **Windows line ends are kept.** Editing a file with CRLF line ends (as
+  TwinCAT's files have) no longer turns every line end into LF.
+
 ## 0.45.1 - 2026-10-28
 
 - **The Skills menu closes when you pick a skill.** Choosing (or taking off)

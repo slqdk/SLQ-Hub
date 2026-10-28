@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import io
 import re
+from difflib import SequenceMatcher
+from fractions import Fraction
 from pathlib import Path
 
 from ...chats import store as chats
@@ -223,6 +225,139 @@ async def write_file(ctx: ToolContext, args: dict) -> ToolResult:
                       f"{content.count(chr(10)) + 1} lines).")
 
 
+NUMBERED = re.compile(r"^ *\d+\t")          # the line number read_file puts before each line ("  12\t")
+
+
+def _unnumbered(s: str, every: bool = True) -> str | None:
+    """s without read_file's line numbers, when every line with text in it has one: a copy of what read_file showed,
+    numbers and all. None when s is not numbered. every=False: the numbers left out where there are any."""
+    lines = s.split("\n")
+    if every and (not any(l.strip() for l in lines) or not all(NUMBERED.match(l) for l in lines if l.strip())):
+        return None
+    return "\n".join(NUMBERED.sub("", l, count=1) for l in lines)
+
+
+def _squeeze(line: str) -> str:
+    return " ".join(line.split())
+
+
+def _indent(line: str) -> str:
+    return line[: len(line) - len(line.lstrip(" \t"))]
+
+
+def _step(table: dict[str, str]):
+    """How one step of old's indentation is written in the file, as the table of old's indentations and the file's
+    shows it (four spaces for a tab, two spaces for four): a function for the part of an indentation past one the
+    table has. It leaves that part as it is when the table does not show a single, regular step."""
+    steps = {(a2[len(a1):], b2[len(b1):]) for a1, b1 in table.items() for a2, b2 in table.items()
+             if len(a2) > len(a1) and len(b2) > len(b1) and a2.startswith(a1) and b2.startswith(b1)}
+    steps = steps or {(a, b) for a, b in table.items() if a and b}
+    kinds = {(a[0], b[0], Fraction(len(b), len(a))) for a, b in steps}
+    if not steps or len(kinds) != 1 or any(len(set(a)) > 1 or len(set(b)) > 1 for a, b in steps):
+        return lambda rest: rest
+    (was, now, ratio), = kinds
+
+    def convert(rest: str) -> str:
+        if rest and set(rest) == {was} and (len(rest) * ratio).denominator == 1:
+            return now * int(len(rest) * ratio)
+        return rest
+    return convert
+
+
+def _fit_indent(new: list[str], old: list[str], there: list[str]) -> list[str] | None:
+    """new indented the way the file is, from what old's lines show of the difference: each indentation in old stands
+    for the file's on the same line (four spaces for a tab, a first line copied without its indentation). None when
+    that is not one-to-one, or new has an indentation it cannot place."""
+    pairs = [(_indent(a), _indent(b)) for a, b in zip(old, there) if a.strip()]
+    if all(a == b for a, b in pairs):
+        return new
+    table: dict[str, str] = {}
+    for a, b in pairs[1:]:
+        if table.setdefault(a, b) != b:
+            return None
+    first_a, first_b = pairs[0]
+    alone = table.get(first_a, first_b) != first_b       # the first line alone is off: copied from after its indent
+    if not alone:
+        table[first_a] = first_b
+    step, out = _step(table), []
+    for j, line in enumerate(new):
+        if not line.strip():
+            out.append("")
+            continue
+        ind = _indent(line)
+        if j == 0 and alone and ind == first_a:
+            out.append(first_b + line[len(ind):])
+            continue
+        keys = [k for k in table if ind.startswith(k)]
+        if not keys:
+            return None
+        k = max(keys, key=len)                          # a deeper line: the known part, then the rest converted
+        out.append(table[k] + step(ind[len(k):]) + line[len(ind):])
+    return out
+
+
+def _loose_edit(text: str, old: str, new: str) -> tuple[str, int, bool] | str | None:
+    """old in the file when whitespace does not count - line by line, the spaces and tabs at the ends of a line left
+    out and a run of them inside counted as one - for a copy that came out with tabs as spaces, an indentation lost or
+    a trailing space. In exactly one place: (the text with new there, its first line, whether new was re-indented);
+    in several, or where new's indentation cannot be fitted: why not; nowhere: None."""
+    lines = text.split("\n")
+    o, n = old.split("\n"), new.split("\n")
+    while o and not o[0].strip():                       # blank lines around old do not count (nor new's own)
+        o.pop(0)
+        if n and not n[0].strip():
+            n.pop(0)
+    while o and not o[-1].strip():
+        o.pop()
+        if n and not n[-1].strip():
+            n.pop()
+    if not o:
+        return None
+    want = [_squeeze(l) for l in o]
+    have = [_squeeze(l) for l in lines]
+    size = len(want)
+    at = [i for i in range(len(have) - size + 1) if have[i] == want[0] and have[i:i + size] == want]
+    if not at:
+        return None
+    if len(at) > 1:
+        return (f"it matches {len(at)} places when whitespace is ignored (lines "
+                f"{', '.join(str(i + 1) for i in at[:6])}). Add surrounding lines, copied exactly.")
+    i = at[0]
+    there = lines[i:i + size]
+    fitted = _fit_indent(n, o, there)
+    if fitted is None:
+        exact, _ = clip("\n".join(there), 2000)
+        return (f"it matches lines {i + 1}-{i + size} only when whitespace is ignored, and new_string's indentation "
+                f"could not be fitted to the file's. Those lines exactly:\n{exact}")
+    return "\n".join(lines[:i] + fitted + lines[i + size:]), i + 1, fitted != n
+
+
+def _closest(text: str, old: str) -> str:
+    """Where the file has the text most like old, as a hint: those lines exactly, to copy from. "" when nothing is
+    close (or the file is too long to look through)."""
+    lines = text.split("\n")
+    o = old.strip("\n").split("\n")
+    size = len(o)
+    if len(lines) > 20000 or size > 300:
+        return ""
+    have = [_squeeze(l) for l in lines]
+    sm = SequenceMatcher(autojunk=False)
+    sm.set_seq2("\n".join(_squeeze(l) for l in o))
+    best, at = 0.6, -1                                   # less alike than this is no help
+    for i in range(max(1, len(lines) - size + 1)):
+        sm.set_seq1("\n".join(have[i:i + size]))
+        if sm.real_quick_ratio() <= best or sm.quick_ratio() <= best:
+            continue
+        r = sm.ratio()
+        if r > best:
+            best, at = r, i
+    if at < 0:
+        return ""
+    last = min(len(lines), at + size)
+    exact, _ = clip("\n".join(lines[at:last]), 2000)
+    return f" The most similar text is at lines {at + 1}-{last}, exactly:\n{exact}\n"
+
+
 async def edit_file(ctx: ToolContext, args: dict) -> ToolResult:
     rel = args.get("path") or ""
     old, new = args.get("old_string"), args.get("new_string")
@@ -231,25 +366,38 @@ async def edit_file(ctx: ToolContext, args: dict) -> ToolResult:
     p = ctx.workdir.resolve(rel)
     if not p.is_file():
         return ToolResult(f"No such file: {rel}", is_error=True)
-    text = p.read_text(encoding="utf-8", errors="replace")
-    count = text.count(old)
+    raw = p.read_bytes().decode("utf-8", "replace")
+    crlf = raw.count("\r\n") > raw.count("\n") - raw.count("\r\n")     # written back with the line ends it had
+    text = raw.replace("\r\n", "\n").replace("\r", "\n")
+    old, new = old.replace("\r\n", "\n"), new.replace("\r\n", "\n")
+    count, how, line = text.count(old), "", 0
+    plain = _unnumbered(old) if count == 0 else None
+    if plain is not None:
+        # a copy of read_file's lines with their numbers (local models do this): the text without them
+        old, new, count = plain, _unnumbered(new, every=False) or "", text.count(plain)
+        how = " (old_string had read_file's line numbers in it - they were left out)"
     if count == 0:
-        hint = ""
-        if old.strip() and text.count(old.strip()) == 1:
-            hint = " (it matches once if leading/trailing whitespace is ignored - copy the exact text)"
-        return ToolResult(f"old_string was not found in {rel}{hint}. Read the file and copy the text exactly.",
-                          is_error=True)
-    if count > 1 and not args.get("replace_all"):
-        return ToolResult(f"old_string occurs {count} times in {rel}. Add surrounding lines to make it unique, "
-                          "or set replace_all.", is_error=True)
+        loose = _loose_edit(text, old, new)
+        if isinstance(loose, str):
+            return ToolResult(f"old_string was not found in {rel} exactly: {loose}", is_error=True)
+        if loose is None:
+            hint = _closest(text, old) or " "
+            return ToolResult(f"old_string was not found in {rel}.{hint}Copy the text exactly (read the file again "
+                              "if it may have changed).", is_error=True)
+        updated, line, fitted = loose
+        how += " (found with whitespace ignored" + (", new_string indented the file's way" if fitted else "") + ")"
+    else:
+        if count > 1 and not args.get("replace_all"):
+            return ToolResult(f"old_string occurs {count} times in {rel}. Add surrounding lines to make it unique, "
+                              "or set replace_all.", is_error=True)
+        updated = text.replace(old, new) if args.get("replace_all") else text.replace(old, new, 1)
+        line = text[: text.index(old)].count("\n") + 1
     mark = copied_mark(new, text)
     if mark:
         return marked(mark, rel)
-    updated = text.replace(old, new) if args.get("replace_all") else text.replace(old, new, 1)
-    ctx.workdir.write(rel, updated, "agent", "hub", f"agent edited {rel}")
-    line = text[: text.index(old)].count("\n") + 1
-    return ToolResult(f"Edited {rel}: replaced {count if args.get('replace_all') else 1} occurrence(s), "
-                      f"starting at line {line}.")
+    ctx.workdir.write(rel, updated.replace("\n", "\r\n") if crlf else updated, "agent", "hub", f"agent edited {rel}")
+    n = count if count and args.get("replace_all") else 1
+    return ToolResult(f"Edited {rel}: replaced {n} occurrence(s), starting at line {line}.{how}")
 
 
 async def search_files(ctx: ToolContext, args: dict) -> ToolResult:

@@ -628,7 +628,7 @@ message's time with the conversation.
 | Tool | What it does |
 |---|---|
 | `web_search`, `web_fetch` | SearXNG; fetch with an SSRF guard (no private addresses, the connection made to the checked address, every redirect checked), readable text extraction, truncation. |
-| `list_files`, `read_file`, `write_file`, `edit_file`, `search_files`, `move_file`, `delete_file` | The project's folder (or the chat's scratch folder). Every write is checked in as a sync revision, so everything can be restored. `read_file` on an image puts the image in front of the model. `write_file` with `append: true` adds to a file's end (0.16.2): a long file goes in parts. |
+| `list_files`, `read_file`, `write_file`, `edit_file`, `search_files`, `move_file`, `delete_file` | The project's folder (or the chat's scratch folder). Every write is checked in as a sync revision, so everything can be restored. `read_file` on an image puts the image in front of the model. `write_file` with `append: true` adds to a file's end (0.16.2): a long file goes in parts. `edit_file` takes read_file's line numbers out of a copy and, in one place only, finds it with whitespace ignored, giving the new text the file's indentation; it keeps a file's CRLF line ends (0.46.0). |
 | `bash` | Runs in the sandbox in the project folder, with a timeout and output limits. Long output goes to a file, and the model gets the head, the tail and the path. C# with the .NET 10 SDK (0.15.1, below). |
 | `windows_app` | A Windows desktop program (Windows Forms or WPF on .NET 10) run under Wine on a virtual screen in the sandbox, built first if it is a project: screenshots when its first window is up, at each `shot` step and at the end; steps click (by position or by the text on the screen), type, press keys, drag, scroll and wait (0.16.0, "Windows programs on a virtual screen" below). The owner's chats, where the sandbox has Wine. |
 | `web_app` | A web page, browser app or game from the working folder - or an HTML, React, SVG or Mermaid artifact, as the side panel runs it - opened in Chromium in the sandbox: screenshots, the console, uncaught errors with file and line, failed requests, alert texts; steps click (by position, CSS selector or text), type, press and hold keys, move, scroll, wait and evaluate JavaScript (0.29.0, "Web pages in a browser" below); the last screenshot compared with a picture of the original, whole or a part of it (0.35.0). The owner's chats, where the sandbox has the browser. |
@@ -2308,7 +2308,10 @@ running, amber waiting, blue your action is needed (a tool asks), red fault.
 - **Chat.** Streaming markdown with code, tables and KaTeX maths, collapsible
   thinking, tool calls as a terminal strip (one row per call, expandable to
   input and output), approvals inline, artifact cards, task lists, a summary
-  line per answer, retry and edit-and-resend.
+  line per answer, retry and edit-and-resend. Finished steps fold into one
+  row that says what they did ("Wrote SKILL.md, read it, edited it 2x");
+  the step under way stays open below it, and a thought is headed by what it
+  decided (0.46.0).
 - **Not finished** (0.22.0). An answer stopped at the step limit or by the
   user says so in an amber bar - in its files card, or alone - with Continue
   under the last answer; a pressed Continue shows as a "Continued" mark

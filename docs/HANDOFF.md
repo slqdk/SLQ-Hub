@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.45.1, 2026-10-28)
+## State (0.46.0, 2026-10-28)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -398,6 +398,18 @@ image_edit with qwen-image-2.1 on an attached picture, else image_generate with 
 settings; `useFolders` in `lib/skills.ts`, remembered per browser), skills in none first; his category "internal" is
 listed last and opens on three clicks within 1.5 s of each other, never remembered. Seen on the dev server.
 0.45.1, Søren: the Skills menu closes as soon as a skill is picked.
+0.46.0, Søren on a working chat ("Det giver ikke super meget mening.. og den røde kommer jævnligt. Og der står
+altid 0ms"): runs of thinking and calls fold into one closed block (Turn.tsx `units()`/`WorkBlock`, `workSummary` in
+turns.ts) that names what the steps did, red only when the last step failed; while the turn works, the step under
+way stays outside it - the thinking (with Stop thinking), or the running call headed by `thoughtGist` of the thought
+before it (its last sentence of intent, "Let me ...", else its first). A finished thought is headed by its gist.
+Times under 1 s are hidden: file tools take ~1 ms and `round(..., 2)` made it 0.0 - the "0 ms". edit_file
+(tools/files.py): read_file's line numbers are taken out of old_string (and new_string); else a line-wise match
+with whitespace ignored, used only where it is the one place, with new_string re-indented through the table of
+old's indentations to the file's (`_fit_indent`; `_step` converts deeper levels, e.g. four spaces to a tab); else
+the error shows the most similar lines (`_closest`, difflib, 0.6 at least). A CRLF file stays CRLF (`read_text`
+had translated it, and every edit wrote it back with LF). Seen on the dev server (scenario "work steps", phone
+width). NOT seen: why Søren's edits failed - the screenshot did not show the calls (item 82).
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
 host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU
@@ -1077,6 +1089,13 @@ the host if the VM ever stops by itself.
     to a POU in `twincat/` (and on the PC after a sync), attachments in
     `hub/attachments/`. Not seen anywhere: the New project dialog with its
     synced-folder field in a browser (built and type-checked only).
+82. **edit_file's tolerance on the VM** (0.46.0): which case made Søren's red
+    "old_string was not found" - line numbers copied, tabs as spaces, a lost
+    indentation, or text that is not in the file (an older version, a guess,
+    a shortened read). An export of a chat with a failed edit shows the call
+    and the file. Also whether a re-indented new_string is what the model
+    meant (in ST the result is only cosmetic; in Python it would matter), and
+    the work block and thought gists on a real turn with Qwen3.8's thinking.
 80. **Not pursued (Søren, 2026-10-28)** - kept here in case it is taken up again; if it stays unused, remove
     the `windows` service, `.30` from `SANDBOX_IPS`, `windows/*` from `FOLDERS` and INSTALL.md section 12.
     **0.39.0's Windows container on VM 222**: `COMPOSE_PROFILES=windows` in
