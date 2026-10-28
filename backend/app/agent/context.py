@@ -26,9 +26,10 @@ def renamed(b: dict) -> str:
     """An attachment saved under another name because an older, different file has its name (0.35.2): chat 138 was
     told "unpack .hub/attachments/cm98-reference.zip" and unpacked the older kit of that name, not the one attached."""
     name, path = b.get("name"), b.get("path") or ""
-    if not name or b.get("ref") or path in ("", f".hub/attachments/{name}"):
+    folder = path.rsplit("/", 1)[0] if "/" in path else ""          # .hub/attachments, or hub/attachments (0.40.0)
+    if not name or b.get("ref") or not path or path == f"{folder}/{name}":
         return ""
-    return (f" - an older, different file is .hub/attachments/{name}; this attachment is {path}, and a request "
+    return (f" - an older, different file is {folder}/{name}; this attachment is {path}, and a request "
             f"that names {name} means this one")
 
 
@@ -271,7 +272,8 @@ NOTES_HEADINGS = """## Goal
 ## Open questions
 ## Next"""
 NOTES_RULES = """Keep what the user asked for and decided, facts and numbers that matter, the files - those that \
-exist, with their paths relative to the working folder (attachments are in .hub/attachments/) - and what they hold, \
+exist, with their paths relative to the working folder (attachments are in .hub/attachments/ or hub/attachments/) - \
+and what they hold, \
 what was tried and did not \
 work, and the next step. Say which findings were checked and which are still guesses. Leave out pleasantries and what is settled and \
 will not matter again. Write in the conversation's language, as short bullet points under these headings \

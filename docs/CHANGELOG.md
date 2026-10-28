@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.40.0 - 2026-10-28
+
+- **The PC gets one folder of a project, not all of it.** Before, the
+  assistant's own files sat beside your TwinCAT files and SLQ Sync copied them
+  to your PC (in chat 157: `src/`, `NOTES.md`, `FB_MC2_AxisControl/`). A new
+  project now has two folders. The **synced folder** is yours: you name it
+  when you make the project (the field is filled with the project's name, so
+  you can just type e.g. `twincat`), and SLQ Sync keeps your PC's folder the
+  same as it. The PC client is unchanged. **hub/** is the assistant's: its
+  notes (`hub/NOTES.md`), working files and drafts, the pictures, sound and
+  video it makes, your chat attachments (`hub/attachments/`) and what you
+  upload in Files without picking a folder. None of it reaches the PC, and its
+  history is kept like the rest. The assistant is told which folder is yours
+  and where its own files go. Neither folder can be deleted or renamed in
+  Files, and the synced folder keeps its name. Projects made before 0.40.0
+  still sync as a whole. A chat moved into a project that has the two folders
+  brings its files to `hub/`.
+
 ## 0.39.0 - 2026-10-27
 
 - **Windows in a container on the Hub's VM (optional).** For Windows-only

@@ -168,7 +168,8 @@ export interface ChatData { chat: Chat; messages: Message[]; artifacts: Artifact
   allowed?: { tool: string; created_at: string }[] }      // "Allow in this chat" answers
 
 export interface ProjectSettings { model: string | null; cloud_escalation: boolean; skills: string[]; libraries: number[];
-  thinking: boolean | null; image_model: string | null; level?: string | null }
+  thinking: boolean | null; image_model: string | null; level?: string | null;
+  sync_folder?: string | null }   // 0.40.0: the folder synced to the PC, hub/ beside it; "." or none = all of it
 export interface Project { id: number; name: string; instructions: string; settings: ProjectSettings; created_at: string;
   updated_at: string; archived?: number; chats?: number; head?: number; usage?: UsageTotals }
 /** What was used of the card (0.24.0): answers, other jobs, tokens read / written / from the cache, energy (Wh), cost
@@ -278,3 +279,14 @@ export interface Revision { rev: number; author: string; origin: string; message
   fileCount: number; files: { path: string; deleted: boolean }[] }
 
 export type Settings = Record<string, Record<string, any>>;
+
+/** A project's synced folder (0.40.0), or "" when the whole project is synced (one from before). */
+export const syncFolderOf = (p: Project): string => {
+  const f = p.settings?.sync_folder;
+  return f && f !== "." ? f : "";
+};
+
+/** The synced folder's name the Hub makes from a project's name: letters, digits, _ - and . (a space becomes -). */
+export const folderFromName = (s: string): string =>
+  s.trim().replace(/\s+/g, "-").replace(/[^\p{L}\p{N}_.-]/gu, "").replace(/^[.-]+|[.-]+$/g, "").slice(0, 60)
+    .replace(/[.-]+$/g, "");

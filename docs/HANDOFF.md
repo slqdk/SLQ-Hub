@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.39.0, 2026-10-27)
+## State (0.40.0, 2026-10-28)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -350,6 +350,17 @@ server on the Hub's own VM - Søren wants everything on the Ubuntu VM. VM 222
 got +100 GB (617 GB, `ubuntu-lv` grown) and has `/dev/kvm` (CPU type host, 12
 `svm`). Item 80. On 2026-10-28 Søren decided not to go on with the Windows VM:
 the container stays behind its profile, off, and nothing on VM 222 uses it.
+0.40.0, from Søren's look at project 4's Files (the assistant's `src/`,
+`NOTES.md` and `FB_MC2_AxisControl/` beside his TwinCAT solution, and all of it
+synced to his PC): a new project has a **synced folder** - named when it is
+made, the name filled from the project's - that is the PC's folder, and
+**hub/** beside it for the assistant's notes, working files, made media, the
+attachments (`hub/attachments/`) and uploads to no folder; it never reaches the
+PC. The mapping is Hub-side (`sync_routes.py`), so SLQSync.exe is unchanged;
+older projects (no `sync_folder`, or ".") sync as a whole as before. Søren's
+answers: uploads and attachments both to hub/, the name chosen at creation,
+always on for new projects; no migration of project 4 - he makes a new
+project. DESIGN §7 "The synced folder". Item 81.
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
 host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU
@@ -1019,6 +1030,16 @@ the host if the VM ever stops by itself.
     is broken") would show it: the export's `web_app` calls and their reports.
     Also: Download all on Søren's phone (Chrome on Android saves the ZIP), a
     whole-folder ZIP of chat 79's folder (some 30 MB of DB1 files and JSON).
+81. **0.40.0's synced folder with the real SLQSync.exe**: tested here with
+    `slq_sync.py` (the Python client) in a round trip against both layouts,
+    and the API by hand - not with the Windows tray app. Check on the PC: a
+    new project (say `TwinCAT HUB Project 2`, synced folder `twincat`), link an
+    empty PC folder, copy the TwinCAT solution in, sync - the files land in
+    `twincat/` on the Hub, nothing in `hub/` reaches the PC. Then a chat in
+    the project: the assistant's notes and work files in `hub/`, its change
+    to a POU in `twincat/` (and on the PC after a sync), attachments in
+    `hub/attachments/`. Not seen anywhere: the New project dialog with its
+    synced-folder field in a browser (built and type-checked only).
 80. **Not pursued (Søren, 2026-10-28)** - kept here in case it is taken up again; if it stays unused, remove
     the `windows` service, `.30` from `SANDBOX_IPS`, `windows/*` from `FOLDERS` and INSTALL.md section 12.
     **0.39.0's Windows container on VM 222**: `COMPOSE_PROFILES=windows` in

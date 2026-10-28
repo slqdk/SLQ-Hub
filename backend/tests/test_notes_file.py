@@ -8,6 +8,8 @@ import json
 
 from pathlib import Path
 
+import pytest
+
 from app.agent import notes_file as N
 from app.chats import store as chats
 from app.projects import store as projects
@@ -201,30 +203,36 @@ async def test_moving_a_chat_into_a_new_project(signed_in, app, fakes):
     p = body["project"]
     assert p["name"] == "CM98" and body["chat"]["project_id"] == p["id"] and body["copied"] == 6
     assert body["chat"]["settings"]["moved_from"] == old.sandbox_path and body["left"] == ["pipe"]
-    dst = projects.project_dir(hub.env.workspace_dir, p["id"])
+    top = projects.project_dir(hub.env.workspace_dir, p["id"])
+    dst = top / "hub"              # a new project syncs its folder CM98/ (0.40.0): the chat's files go to hub/ beside it
+    assert p["settings"]["sync_folder"] == "CM98" and (top / "CM98").is_dir() and not any((top / "CM98").iterdir())
     assert (dst / "index.html").read_text() == "<h1>CM98</h1>" and (dst / "data/players.json").exists()
-    assert (dst / ".hub/attachments/skud.png").exists() and (dst / ".hub/outputs/c1.txt").exists()
-    assert not (dst / ".hub/skills").exists() and not (dst / "pipe").exists()
+    assert (dst / "attachments/skud.png").exists() and (top / ".hub/outputs/c1.txt").exists()
+    assert not (top / ".hub/skills").exists() and not (dst / "pipe").exists() and not (dst / ".hub").exists()
     assert (dst / "latest.json").is_symlink() and os.readlink(dst / "latest.json") == "data/players.json"
     assert (dst / "run.sh").stat().st_mode & 0o777 == 0o755 and (dst / "output").is_dir()
     assert not old.root.exists()                                              # moved, not copied
     trashed = Path(body["old_folder"])                                        # the old folder is kept in the trash
     assert trashed.parent == hub.env.data_dir / "trash" and (trashed / "index.html").exists()
-    assert {"index.html", "data/players.json", "NOTES.md"} <= set(syncstore.manifest(p["id"]))     # in the history
+    assert {"hub/index.html", "hub/data/players.json", "hub/NOTES.md"} <= set(syncstore.manifest(p["id"]))
+    assert chats.messages(c["id"])[0]["content"][0]["path"] == "hub/attachments/skud.png"     # the chat points there
     # the next turn works in the project, and is told where the old paths went
     fakes.llama["replies"] = [{"content": "Here."}]
     await finish(app, await say(signed_in, c["id"], "Hvor er filerne?"))
     system = fakes.llama["requests"][-1]["messages"][0]["content"]
-    assert f'You work in the files of the project "CM98" ({hub.env.sandbox_workspace}/projects/{p["id"]})' in system
-    assert f"This chat was moved into the project from its own folder ({old.sandbox_path})" in system
-    assert "- NOTES.md in the working folder holds the notes of this work" in system
+    assert (f'You work in the files of the project "CM98" ({hub.env.sandbox_workspace}/projects/{p["id"]}), in two '
+            "folders:\n- CM98/ is the user's.") in system
+    assert (f"This chat was moved into the project from its own folder ({old.sandbox_path}): the files the "
+            "conversation above shows there are in hub/ now, its attachments in hub/attachments/.") in system
+    assert "- hub/NOTES.md in the working folder holds the notes of this work" in system
+    assert "Attachments the user sends are copied to hub/attachments/ in the working folder." in system
     # once in a project: not again
     assert (await signed_in.post(f"/hub/api/chats/{c['id']}/move", json={"new_project": "Again"})).status_code == 409
 
 
 async def test_moving_into_a_project_overwrites_nothing(signed_in, app, fakes):
     hub = app.state.hub
-    p = (await signed_in.post("/hub/api/projects", json={"name": "CM98"})).json()
+    p = (await signed_in.post("/hub/api/projects", json={"name": "CM98", "sync_folder": "."})).json()
     dst = projects.project_dir(hub.env.workspace_dir, p["id"])
     (dst / "index.html").write_text("the project's own")
     (dst / "same.txt").write_text("same")
@@ -244,12 +252,13 @@ async def test_moving_into_a_project_overwrites_nothing(signed_in, app, fakes):
     assert (dst / "new.txt").read_text() == "new"
 
 
-async def test_an_attachment_by_the_same_name_is_renamed_and_the_chat_points_at_it(signed_in, app, fakes):
+@pytest.mark.parametrize("folder, att", [(".", ".hub/attachments"), (None, "hub/attachments")])
+async def test_an_attachment_by_the_same_name_is_renamed_and_the_chat_points_at_it(signed_in, app, fakes, folder, att):
     hub = app.state.hub
-    p = (await signed_in.post("/hub/api/projects", json={"name": "Garage"})).json()
+    p = (await signed_in.post("/hub/api/projects", json={"name": "Garage", "sync_folder": folder})).json()
     dst = projects.project_dir(hub.env.workspace_dir, p["id"])
-    (dst / ".hub/attachments").mkdir(parents=True)
-    (dst / ".hub/attachments/image.png").write_text("the project's picture")
+    (dst / att).mkdir(parents=True)
+    (dst / att / "image.png").write_text("the project's picture")
     c = await new_chat(signed_in)
     block = {"type": "image", "sha": "cd" * 32, "name": "image.png", "path": ".hub/attachments/image.png"}
     chats.add_message(c["id"], "user", [{"type": "text", "text": "Se her"}, block])
@@ -259,9 +268,9 @@ async def test_an_attachment_by_the_same_name_is_renamed_and_the_chat_points_at_
     r = await signed_in.post(f"/hub/api/chats/{c['id']}/move", json={"project_id": p["id"]})
     assert r.status_code == 200, r.text
     import hashlib
-    alt = f".hub/attachments/{hashlib.sha256(b'the chat' + chr(39).encode() + b's picture').hexdigest()[:8]}-image.png"
+    alt = f"{att}/{hashlib.sha256(b'the chat' + chr(39).encode() + b's picture').hexdigest()[:8]}-image.png"
     assert (dst / alt).read_text() == "the chat's picture"
-    assert (dst / ".hub/attachments/image.png").read_text() == "the project's picture"
+    assert (dst / att / "image.png").read_text() == "the project's picture"
     moved = chats.messages(c["id"])[0]["content"][1]
     assert moved["path"] == alt and moved["sha"] == "cd" * 32
 
@@ -271,11 +280,11 @@ async def test_what_cannot_be_moved(signed_in, app, fakes):
     c = await new_chat(signed_in)
     assert (await signed_in.post(f"/hub/api/chats/{c['id']}/move", json={})).status_code == 400
     assert (await signed_in.post(f"/hub/api/chats/{c['id']}/move", json={"project_id": 9999})).status_code == 404
-    p = (await signed_in.post("/hub/api/projects", json={"name": "Old"})).json()
+    p = (await signed_in.post("/hub/api/projects", json={"name": "Old", "sync_folder": "."})).json()
     assert (await signed_in.patch(f"/hub/api/projects/{p['id']}", json={"archived": True})).status_code == 200
     assert (await signed_in.post(f"/hub/api/chats/{c['id']}/move", json={"project_id": p["id"]})).status_code == 409
     # a link where a folder belongs in the project: in the way, not followed
-    q = (await signed_in.post("/hub/api/projects", json={"name": "Links"})).json()
+    q = (await signed_in.post("/hub/api/projects", json={"name": "Links", "sync_folder": "."})).json()
     dst = projects.project_dir(hub.env.workspace_dir, q["id"])
     (dst / "game").symlink_to("/tmp")
     (workdir(app, c["id"]).root / "game").mkdir()
@@ -332,7 +341,7 @@ async def test_a_failed_copy_puts_everything_back(signed_in, app, fakes, monkeyp
 async def test_names_the_history_cannot_hold_and_names_alike_but_for_case(signed_in, app, fakes):
     import os
     hub = app.state.hub
-    p = (await signed_in.post("/hub/api/projects", json={"name": "Case"})).json()
+    p = (await signed_in.post("/hub/api/projects", json={"name": "Case", "sync_folder": "."})).json()
     (projects.project_dir(hub.env.workspace_dir, p["id"]) / "Readme.md").write_text("theirs")
     c = await new_chat(signed_in)
     root = workdir(app, c["id"]).root
@@ -388,3 +397,24 @@ async def test_condensing_at_the_start_is_not_the_model_keeping_notes(signed_in,
     assert run.status == "done", run.events[-1]
     assert "(the chat was condensed)" in (workdir(app, c["id"]).root / "NOTES.md").read_text()
     assert [e["data"]["step"] for e in run.events if e["type"] == "notes_reminder"] == [15]
+
+
+async def test_in_a_project_that_syncs_one_folder_the_assistant_keeps_to_hub(signed_in, app, fakes):
+    """0.40.0: the prompt names both folders, the attachments and the notes go to hub/, not to the PC's folder."""
+    from .mocks import _png
+    p = (await signed_in.post("/hub/api/projects", json={"name": "Garage"})).json()
+    top = projects.project_dir(app.state.hub.env.workspace_dir, p["id"])
+    up = (await signed_in.post("/hub/api/uploads", files={"file": ("photo.png", _png((20, 10)), "image/png")})).json()
+    fakes.llama["replies"] = [{"content": "A red rectangle."}, {"content": "Photo"}]
+    c = await new_chat(signed_in, project_id=p["id"])
+    await finish(app, await say(signed_in, c["id"], "What is this?", attachments=[up["sha"]]))
+    assert (top / "hub" / "attachments" / "photo.png").read_bytes() == _png((20, 10))
+    assert not (top / ".hub" / "attachments").exists() and not any((top / "Garage").iterdir())
+    req = fakes.llama["requests"][0]["messages"]
+    assert "hub/attachments/photo.png" in req[-1]["content"][2]["text"]
+    system = req[0]["content"]
+    assert "in two folders:\n- Garage/ is the user's. SLQ Sync keeps it the same as a folder on their PC" in system
+    assert "- hub/ is yours and never leaves the Hub: your notes (hub/NOTES.md)" in system
+    r = await signed_in.put(f"/hub/api/chats/{c['id']}/notes", json={"text": "## Goal\n- tidy the garage"})
+    assert r.status_code == 200 and "tidy the garage" in (top / "hub" / "NOTES.md").read_text()
+    assert not (top / "NOTES.md").exists() and N.find(top / "hub") == top / "hub" / "NOTES.md"

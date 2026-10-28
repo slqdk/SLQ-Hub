@@ -26,7 +26,7 @@ def _target(ctx: ToolContext, save_as: str | None, stem: str) -> str:
     prompt); otherwise a free name from the prompt - in a project under video/, in a chat's own folder at the top."""
     raw = (save_as or "").strip()
     if not raw:
-        return _free(ctx, f"video/{stem}" if ctx.project else stem)
+        return _free(ctx, f"{ctx.workdir.own}video/{stem}" if ctx.project else stem)
     p = ctx.workdir.resolve(raw)                     # a path in the folder or a sandbox path; outside: ValueError
     rel = ctx.workdir.rel(p)
     if raw.endswith("/") or p.is_dir():

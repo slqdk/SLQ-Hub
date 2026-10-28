@@ -1,7 +1,7 @@
 // The cabinet-grey rail: new chat, search, projects, recent chats, and the GPU plate.
 import { useEffect, useMemo, useState } from "react";
 import { BookOpen, CircleHelp, FolderClosed, MessageSquarePlus, Plus, Search, Settings, Sparkles, X } from "lucide-react";
-import { api, type ChatListItem } from "../lib/api";
+import { api, folderFromName, type ChatListItem } from "../lib/api";
 import { dateGroup } from "../lib/format";
 import { linkProps, navigate, type Route } from "../lib/router";
 import { useApp } from "../state";
@@ -143,12 +143,15 @@ function NewProject({ onClose, onCreated, onError }: { onClose: () => void; onCr
   onError: (m: string) => void }) {
   const [name, setName] = useState("");
   const [instructions, setInstructions] = useState("");
+  const [folder, setFolder] = useState<string | null>(null);     // null: from the name, as it is typed
   const [busy, setBusy] = useState(false);
+  const shownFolder = folder ?? folderFromName(name);
   const create = async () => {
     if (!name.trim()) return;
     setBusy(true);
     try {
-      const p = await api<{ id: number }>("/hub/api/projects", { body: { name: name.trim(), instructions } });
+      const p = await api<{ id: number }>("/hub/api/projects",
+        { body: { name: name.trim(), instructions, sync_folder: shownFolder.trim() || null } });
       onCreated(p.id);
     } catch (e) {
       onError((e as Error).message);
@@ -164,6 +167,11 @@ function NewProject({ onClose, onCreated, onError }: { onClose: () => void; onCr
       <label className="field"><span>Name</span>
         <input className="input" autoFocus value={name} onChange={(e) => setName(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && create()} /></label>
+      <label className="field"><span>Synced folder</span>
+        <input className="input" value={shownFolder} placeholder={folderFromName(name) || "files"}
+          onChange={(e) => setFolder(e.target.value)} />
+        <small>Your files, synced with your PC by SLQ Sync. Beside it, hub/ holds the assistant's notes, working files
+          and your attachments - those stay on the Hub. The name is set now and cannot be changed later.</small></label>
       <label className="field"><span>Instructions for the assistant</span>
         <textarea className="textarea" rows={4} value={instructions} onChange={(e) => setInstructions(e.target.value)}
           placeholder="What this project is about, how answers should look, what to keep in mind." />

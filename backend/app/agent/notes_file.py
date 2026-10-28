@@ -33,7 +33,11 @@ def wanted(settings) -> bool:
 
 
 def find(root: Path) -> Path | None:
-    """The notes file at the top of the working folder, in any case (notes.md) - a regular file, not a link."""
+    """The notes file at the top of the folder for the notes, in any case (notes.md) - a regular file, not a link.
+    That folder is the working folder's top, or hub/ in a project that syncs one folder (Workdir.own_root, 0.40.0) -
+    and not a link either."""
+    if Path(root).is_symlink():
+        return None
     try:
         for p in sorted(Path(root).iterdir()):
             if p.name.lower() == NAME.lower() and not p.is_symlink() and p.is_file():
@@ -99,9 +103,10 @@ def write(wd, chat_id: int, title: str, notes: str, why: str, owners: tuple = ()
     goes. -> the file's name, or None when nothing was written. A link named NOTES.md is replaced, never written
     through (safe_write); a working folder that is a link is left alone; in a project it is checked in."""
     root = Path(wd.root)
-    if root.is_symlink() or not root.is_dir():
+    folder = Path(getattr(wd, "own_root", root))          # hub/ in a project that syncs one folder (0.40.0)
+    if root.is_symlink() or not root.is_dir() or folder.is_symlink():
         return None
-    p = find(root)
+    p = find(folder)
     if p is not None and owner(p) not in {chat_id, *owners}:
         return None
     if not (notes or "").strip():
@@ -109,7 +114,7 @@ def write(wd, chat_id: int, title: str, notes: str, why: str, owners: tuple = ()
             p.unlink()
             wd.checkin("hub", "hub", "notes cleared")
         return None
-    target = p if p is not None else root / NAME
+    target = p if p is not None else folder / NAME
     projects.safe_write(root, target, text_for(title, notes, why, chat_id).encode("utf-8"))
     wd.checkin("hub", "hub", f"notes ({why})")
-    return target.name
+    return target.relative_to(root).as_posix()

@@ -1626,7 +1626,8 @@ memory and settings (default model, cloud escalation). Its files live in
 `data/workspace/projects/<id>/`, which the sandbox sees as
 `/workspace/projects/<id>`. A chat outside a project has its own scratch folder,
 `data/workspace/chats/<id>/` (deleted with the chat). Attachments and long tool
-outputs go to `.hub/` inside the folder, which sync ignores.
+outputs go to `.hub/` inside the folder, which sync ignores (attachments to
+`hub/attachments/` in a project with a synced folder, below).
 
 **Files in a message.** In a chat, files of its folder can be put in the next
 message (the + in the Files panel, or + -> Project files in the composer).
@@ -1659,6 +1660,24 @@ The routes are identical: `/api/sync/whoami`, `/api/sync/projects`, and
 `slq_sync.py` therefore work against the Hub. The server-side ignore list is
 generic (`.git`, `node_modules`, `__pycache__`, `.venv`, `*.tmp`, `*.bak`,
 `~$*`, `thumbs.db`, …). The TwinCAT patterns are not included.
+
+**The synced folder (0.40.0).** A project made since 0.40.0 has two folders:
+its synced folder (`settings.sync_folder`, named when the project is made -
+from the project's name unless the user types one - and never changed after)
+and `hub/`. The PC's folder is the synced folder: `sync_routes.py` takes the
+prefix off the paths it sends (`head`, `changes`, `revisions`, check-in
+results) and puts it on the paths it gets (check-in), and leaves out what lies
+outside. The history and the blob store keep the whole project, so `hub/` has
+history too, and SLQSync.exe needs no change. `hub/` is the assistant's: the
+system prompt names both folders, attachments go to `hub/attachments/` (shown
+in Files, unlike `.hub/attachments/`), the notes file is `hub/NOTES.md`,
+pictures, sound and video default to `hub/images|audio|video/`, an upload to
+no folder lands in `hub/`, and a chat moved into such a project brings its
+files to `hub/` (`move.to_path`) with its messages pointed there. Files will
+not delete or rename the two folders - an emptied synced folder would empty
+the PC's. A project from before (no `sync_folder`, or ".") syncs as a whole,
+as it did. Søren, 2026-10-28: "chat relatede filer bliver blandet med twincat
+project filer".
 
 The UI gets a file tree with preview and editor, the revision list with
 restore, and the sync devices. Each row of the tree says when the file last

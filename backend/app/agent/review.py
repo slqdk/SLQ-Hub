@@ -111,9 +111,10 @@ def reviewer_text(steps: int, seconds: float, mcp: bool = False) -> str:
 
 def work_files(files: list[dict]) -> list[dict]:
     """The files worth a review: not the pictures, sound and video the turn made, nor NOTES.md at the top of the
-    folder - the work's notes, not its work."""
+    folder (or of hub/ in a project that syncs one folder) - the work's notes, not its work."""
+    notes = {NOTES_NAME.lower(), f"hub/{NOTES_NAME}".lower()}
     return [f for f in files if not str(f.get("mime") or "").startswith(MEDIA)
-            and str(f.get("path") or "").lower() != NOTES_NAME.lower()]
+            and str(f.get("path") or "").lower() not in notes]
 
 
 def made_something(steps: list[dict]) -> bool:

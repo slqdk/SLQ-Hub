@@ -40,8 +40,9 @@ export function MoveToProject({ chatId, title, onMoved, onClose }: { chatId: num
       <button className="btn primary" disabled={!ready || busy} onClick={move}>
         <FolderInput size={15} /> {busy ? "Moving..." : "Move"}</button>
     </>}>
-      <p className="muted small" style={{ marginTop: 0 }}>The chat's files go into the project's folder, and from its next
-        answer on it works there - with the project's instructions, files, skills and sync. Nothing in the project is
+      <p className="muted small" style={{ marginTop: 0 }}>The chat's files go into the project's folder - into its
+        hub/ folder when the project syncs one folder to your PC, so nothing reaches the PC unasked - and from its next
+        answer on it works there, with the project's instructions, files, skills and sync. Nothing in the project is
         overwritten.</p>
       <div className="list" role="radiogroup" aria-label="Project" style={{ maxHeight: 320, overflow: "auto" }}>
         <label className="list-row choice-row">

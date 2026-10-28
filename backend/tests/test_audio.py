@@ -419,14 +419,14 @@ async def test_in_a_project_a_song_goes_to_audio_and_settings_choose_the_model(s
     assert nodes["DualCLIPLoader"]["clip_name2"] == "qwen_1.7b_ace15.safetensors"
     assert nodes["TextEncodeAceStepAudio1.5"]["lyrics"] == "[Instrumental]"        # no lyrics: an instrumental
     res = tool_result(run)
-    assert res["ok"] and "Saved audio/calm-piano.mp3: 60 s" in res["text"] and "instrumental" in res["text"], res
+    assert res["ok"] and "Saved hub/audio/calm-piano.mp3: 60 s" in res["text"] and "instrumental" in res["text"], res
     folder = app.state.hub.env.workspace_dir / "projects" / str(p["id"])
-    assert (folder / "audio" / "calm-piano.mp3").is_file()
+    assert (folder / "hub" / "audio" / "calm-piano.mp3").is_file()     # hub/: the assistant's (0.40.0)
     desc = tools_offered(fakes, 0)["music_generate"]["description"]
     assert "ace-step-1.5-turbo: ACE-Step 1.5 Turbo (used without model)" in desc
     # save_as as a sandbox path lands where it says, and a folder gets a name from the prompt
     for save_as, saved in ((f"/workspace/projects/{p['id']}/audio/intro.mp3", "audio/intro.mp3"),
-                           ("jingles/", "jingles/calm-piano.mp3"), ("audio", "audio/calm-piano-2.mp3")):
+                           ("jingles/", "jingles/calm-piano.mp3"), ("hub/audio", "hub/audio/calm-piano-2.mp3")):
         fakes.llama["requests"].clear()
         fakes.llama["replies"] = [{"tool_calls": [{"name": "music_generate", "arguments": {
             "prompt": "calm piano", "save_as": save_as}}]}, {"content": "Done."}]

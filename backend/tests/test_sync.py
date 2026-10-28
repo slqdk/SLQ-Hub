@@ -29,7 +29,7 @@ def _sha(b: bytes) -> str:
 @pytest.fixture
 def project(app):
     s.reset_cache()
-    p = store.create_project("Demo")
+    p = store.create_project("Demo", sync_folder=".")           # synced as a whole, the way before 0.40.0
     wd = store.project_dir(app.state.hub.env.workspace_dir, p["id"])
     (wd / "src").mkdir(parents=True)
     (wd / "src" / "main.py").write_text("print(1)\n", encoding="utf-8")
@@ -173,11 +173,19 @@ def live(hub_env, fakes, monkeypatch):
 
 
 @pytest.mark.skipif(not CLIENT.is_file(), reason="the SLQ sync client source is not next to this repo")
-def test_the_real_client_round_trip(live, tmp_path):
+@pytest.mark.parametrize("folder", [".", "plc"])
+def test_the_real_client_round_trip(live, tmp_path, folder):
+    """The same client, a project synced as a whole (".") and one that syncs its folder plc/ (0.40.0) - where
+    hub/ beside it never reaches the PC."""
     url, application = live
     s.reset_cache()
-    p = store.create_project("Conveyor")
-    srv = store.project_dir(application.state.hub.env.workspace_dir, p["id"])
+    p = store.create_project("Conveyor", sync_folder=folder)
+    top = store.make_folders(application.state.hub.env.workspace_dir, p)
+    srv = top if folder == "." else top / folder                 # what the PC's folder is the same as
+    if folder != ".":
+        (top / "hub" / "attachments").mkdir(parents=True)
+        (top / "hub" / "NOTES.md").write_text("the assistant's notes", encoding="utf-8")
+        (top / "hub" / "attachments" / "photo.png").write_bytes(b"png")
     (srv / "src").mkdir(parents=True)
     (srv / "src" / "main.py").write_text("v1", encoding="utf-8")
     (srv / "plan.md").write_text("plan", encoding="utf-8")
@@ -191,6 +199,8 @@ def test_the_real_client_round_trip(live, tmp_path):
     assert m.main(["--config", cfg, "setup", "--server", url, "--token", token]) == 0
     assert m.main(["--config", cfg, "link", str(p["id"]), str(pc)]) == 0
     assert (pc / "src" / "main.py").read_text() == "v1" and (pc / "plan.md").exists()
+    if folder != ".":
+        assert sorted(x.name for x in pc.iterdir() if not x.name.startswith(".")) == ["plan.md", "src"]
 
     (pc / "src" / "main.py").write_text("from the PC", encoding="utf-8")
     (pc / "src" / "extra.py").write_text("extra", encoding="utf-8")
@@ -213,6 +223,11 @@ def test_the_real_client_round_trip(live, tmp_path):
     assert m.main(["--config", cfg, "sync"]) == 0
     assert (srv / "src" / "main.py").read_text() == "merged"
     assert len(s.revisions(p["id"])) >= 5
+    if folder != ".":                                           # the assistant's work stays on the Hub
+        (top / "hub" / "draft.st").write_text("PROGRAM Draft", encoding="utf-8")
+        assert m.main(["--config", cfg, "sync"]) == 0
+        assert not (pc / "hub").exists() and not (pc / "draft.st").exists() and not (pc / "NOTES.md").exists()
+        assert (top / "hub" / "NOTES.md").exists() and not (top / "src").exists()
 
 
 def test_writes_do_not_follow_symlinks_planted_by_the_sandbox(app, tmp_path):
@@ -231,3 +246,75 @@ def test_writes_do_not_follow_symlinks_planted_by_the_sandbox(app, tmp_path):
     with pytest.raises(ValueError):
         wd.write("outside/settings.json", "pwned")
     assert secret.read_text() == "original"
+
+
+async def test_a_project_syncs_only_its_synced_folder(signed_in, app):
+    """0.40.0: a new project's PC folder is its synced folder - named from the project when not given, set for
+    good - and hub/ beside it (the assistant's files, the attachments, uploads to no folder) never reaches the PC."""
+    s.reset_cache()
+    ws = app.state.hub.env.workspace_dir
+    r = await signed_in.post("/hub/api/projects", json={"name": "TwinCAT HUB Project"})
+    p = r.json()
+    assert r.status_code == 200 and p["settings"]["sync_folder"] == "TwinCAT-HUB-Project"
+    top = store.project_dir(ws, p["id"])
+    sf = top / "TwinCAT-HUB-Project"
+    assert sf.is_dir() and (top / "hub").is_dir()
+    for bad in ("hub", "HUB", "node_modules", "///"):
+        r = await signed_in.post("/hub/api/projects", json={"name": "X", "sync_folder": bad})
+        assert r.status_code == 400, (bad, r.text)
+    assert (await signed_in.post("/hub/api/projects", json={"name": "X", "sync_folder": " My PLC "})).json()[
+        "settings"]["sync_folder"] == "My-PLC"
+    whole = (await signed_in.post("/hub/api/projects", json={"name": "Y", "sync_folder": "."})).json()
+    assert store.sync_folder(whole) == "" and not (store.project_dir(ws, whole["id"]) / "hub").exists()
+    # set for good: a settings change leaves it
+    r = await signed_in.patch(f"/hub/api/projects/{p['id']}", json={"settings": {"sync_folder": "other", "level": "think"}})
+    assert r.json()["settings"]["sync_folder"] == "TwinCAT-HUB-Project" and r.json()["settings"]["level"] == "think"
+
+    (sf / "PLC").mkdir()
+    (sf / "PLC" / "MAIN.TcPOU").write_text("main v1", encoding="utf-8")
+    (top / "hub" / "attachments").mkdir()
+    (top / "hub" / "NOTES.md").write_text("notes", encoding="utf-8")
+    (top / "hub" / "attachments" / "screen.png").write_bytes(b"png")
+    (top / "loose.txt").write_text("at the top", encoding="utf-8")
+    tok = (await signed_in.post("/hub/api/sync-tokens", json={"name": "Work PC"})).json()["token"]
+    h = {"Authorization": f"Bearer {tok}"}
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://hub") as dev:
+        head = (await dev.get(f"/api/sync/projects/{p['id']}/head", headers=h)).json()
+        assert head["files"] == {"PLC/MAIN.TcPOU": _sha(b"main v1")}
+        assert set(s.manifest(p["id"])) == {"TwinCAT-HUB-Project/PLC/MAIN.TcPOU", "hub/NOTES.md",
+                                            "hub/attachments/screen.png", "loose.txt"}     # the history has it all
+        base = head["head"]
+        body = {"origin": "PC", "files": [
+            {"path": "PLC\\POUs\\FB_Axis.TcPOU", "baseSha": None, "sha": _sha(b"fb"), "content": base64.b64encode(b"fb").decode()},
+            {"path": "PLC/MAIN.TcPOU", "baseSha": _sha(b"stale"), "sha": _sha(b"pc"), "content": base64.b64encode(b"pc").decode()}]}
+        r = (await dev.post(f"/api/sync/projects/{p['id']}/checkin", json=body, headers=h)).json()
+        assert r["accepted"] == ["PLC/POUs/FB_Axis.TcPOU"] and (sf / "PLC" / "POUs" / "FB_Axis.TcPOU").read_text() == "fb"
+        assert r["conflicts"] == [{"path": "PLC/MAIN.TcPOU", "serverSha": _sha(b"main v1")}]
+        bad = {"origin": "PC", "files": [{"path": "../hub/NOTES.md", "baseSha": _sha(b"notes"), "sha": None}]}
+        assert (await dev.post(f"/api/sync/projects/{p['id']}/checkin", json=bad, headers=h)).status_code == 400
+        assert (top / "hub" / "NOTES.md").read_text() == "notes"
+        # the assistant's change in hub/ is a revision the PC is not shown; one in the synced folder is
+        (top / "hub" / "NOTES.md").write_text("more notes", encoding="utf-8")
+        ch = (await dev.get(f"/api/sync/projects/{p['id']}/changes", params={"since": base}, headers=h)).json()
+        assert ch["head"] > base and ch["changes"] == {"PLC/POUs/FB_Axis.TcPOU": _sha(b"fb")}
+        (sf / "PLC" / "MAIN.TcPOU").unlink()
+        ch = (await dev.get(f"/api/sync/projects/{p['id']}/changes", params={"since": ch["head"]}, headers=h)).json()
+        assert ch["changes"] == {"PLC/MAIN.TcPOU": None}
+        revs = (await dev.get(f"/api/sync/projects/{p['id']}/revisions", headers=h)).json()["revisions"]
+        assert [f["path"] for f in revs[0]["files"]] == ["PLC/MAIN.TcPOU"] and revs[0]["fileCount"] == 1
+        assert all(not f["path"].startswith(("hub/", "TwinCAT-HUB-Project/")) for r in revs for f in r["files"])
+        assert all(r["fileCount"] == len(r["files"]) for r in revs)
+        assert [r["rev"] for r in revs] == [4, 2, 1]                            # 3 changed only hub/NOTES.md
+    # the Files panel: an upload to no folder goes to hub/; the two folders stay
+    r = await signed_in.post(f"/hub/api/folders/project/{p['id']}/upload", files={"files": ("plan.pdf", b"%PDF")},
+                             data={"dir": ""})
+    assert r.json()["saved"] == ["hub/plan.pdf"]
+    r = await signed_in.post(f"/hub/api/folders/project/{p['id']}/upload", files={"files": ("io.xml", b"<x/>")},
+                             data={"dir": "TwinCAT-HUB-Project/PLC"})
+    assert r.json()["saved"] == ["TwinCAT-HUB-Project/PLC/io.xml"]
+    for path in ("TwinCAT-HUB-Project", "hub"):
+        r = await signed_in.delete(f"/hub/api/folders/project/{p['id']}/file", params={"path": path})
+        assert r.status_code == 400 and "two folders" in r.json()["detail"]
+        r = await signed_in.post(f"/hub/api/folders/project/{p['id']}/move", json={"src": path, "dst": "elsewhere"})
+        assert r.status_code == 400
+    assert sf.is_dir() and (top / "hub" / "plan.pdf").exists()

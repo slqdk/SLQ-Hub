@@ -258,9 +258,9 @@ async def test_wan_14b_from_a_description_and_the_settings_choose_the_model(sign
     assert (empty["width"], empty["height"], empty["length"]) == (480, 832, 81)
     high, low = nodes(g, "KSamplerAdvanced")
     assert (high["positive"], high["negative"], high["latent_image"]) == (["9", 0], ["10", 0], ["13", 0])
-    assert res["text"].startswith("Saved video/fireworks-over-copenhagen-harbour.mp4: 5.06 s")
+    assert res["text"].startswith("Saved hub/video/fireworks-over-copenhagen-harbour.mp4: 5.06 s")
     folder = app.state.hub.env.workspace_dir / "projects" / str(p["id"])
-    assert (folder / "video" / "fireworks-over-copenhagen-harbour.mp4").is_file()
+    assert (folder / "hub" / "video" / "fireworks-over-copenhagen-harbour.mp4").is_file()
     # hd, a named model, save_as
     res = await call(app, signed_in, c["id"], fakes, {"prompt": "fireworks", "hd": True, "model": "wan2.2-5b",
                                                       "save_as": "clips/finale"})

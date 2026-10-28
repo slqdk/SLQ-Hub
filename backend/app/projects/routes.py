@@ -28,6 +28,7 @@ class ProjectIn(BaseModel):
     name: str
     instructions: str = ""
     settings: dict | None = None
+    sync_folder: str | None = None          # 0.40.0: the folder synced to the PC; None = from the name, "." = all
 
 
 class ProjectPatch(BaseModel):
@@ -44,8 +45,11 @@ async def list_projects(archived: bool = False):
 
 @router.post("/hub/api/projects")
 async def create_project(body: ProjectIn, request: Request):
-    p = store.create_project(body.name, body.instructions, body.settings)
-    store.project_dir(get_hub(request).env.workspace_dir, p["id"])
+    try:
+        p = store.create_project(body.name, body.instructions, body.settings, body.sync_folder)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    store.make_folders(get_hub(request).env.workspace_dir, p)
     return p
 
 
@@ -79,9 +83,10 @@ async def delete_project(pid: int, request: Request):
 def workdir(hub: Hub, kind: str, fid: int) -> store.Workdir:
     ws = hub.env.workspace_dir
     if kind == "project":
-        if not store.get_project(fid):
+        project = store.get_project(fid)
+        if not project:
             raise HTTPException(404, "No such project.")
-        return store.Workdir(store.project_dir(ws, fid), fid, ws, hub.env.sandbox_workspace)
+        return store.project_workdir(ws, fid, hub.env.sandbox_workspace, project)
     if kind == "chat":
         with db.connect() as con:
             r = con.execute("SELECT project_id FROM chats WHERE id=?", (fid,)).fetchone()
@@ -258,13 +263,14 @@ async def mkdir(kind: str, fid: int, body: MkdirIn, request: Request):
 @router.post("/hub/api/folders/{kind}/{fid}/upload")
 async def upload(kind: str, fid: int, request: Request, files: list[UploadFile] = File(...), dir: str = Form("")):
     wd = workdir(get_hub(request), kind, fid)
+    folder = dir.strip("/") or wd.own.rstrip("/")     # no folder chosen: hub/ in a project that syncs one (0.40.0)
     saved = []
     for f in files:
         data = await f.read()
         if len(data) > MAX_UPLOAD:
             raise HTTPException(413, f"{f.filename} is larger than {MAX_UPLOAD // (1024 * 1024)} MB.")
         name = Path(f.filename or "upload").name
-        rel = f"{dir.strip('/')}/{name}" if dir.strip("/") else name
+        rel = f"{folder}/{name}" if folder else name
         p = _safe(wd.resolve, rel)
         _safe(store.safe_write, wd.root, p, data)
         saved.append(wd.rel(p))

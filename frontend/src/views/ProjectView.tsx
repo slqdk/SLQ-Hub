@@ -2,7 +2,7 @@
 import { LEVEL_OPTIONS } from "../lib/effort";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Download, Menu, MessageSquarePlus, Plus } from "lucide-react";
-import { api, type ChatListItem, type Library, type Project, type Revision, type Skill } from "../lib/api";
+import { api, syncFolderOf, type ChatListItem, type Library, type Project, type Revision, type Skill } from "../lib/api";
 import { ago, bytes, energy, money, tokens, worked } from "../lib/format";
 import { linkProps, navigate } from "../lib/router";
 import { useApp } from "../state";
@@ -299,8 +299,11 @@ function SyncDevices({ project }: { project: Project }) {
   const server = location.origin;
   return (
     <div className="stack" style={{ maxWidth: "48rem" }}>
-      <p className="lead">SLQ Sync keeps a folder on a Windows PC in step with this project, both ways, with every
+      <p className="lead">SLQ Sync keeps a folder on a Windows PC in step with {syncFolderOf(project)
+        ? <>this project's <code>{syncFolderOf(project)}/</code> folder</> : "this project"}, both ways, with every
         revision kept here. It is the same client as before: point it at this Hub with a device token.</p>
+      {syncFolderOf(project) && <p className="faint" style={{ margin: 0 }}>
+        <code>hub/</code> beside it - the assistant's notes, working files and your attachments - stays on the Hub.</p>}
       <div className="callout">
         <div className="label">Set up a PC</div>
         <ol style={{ margin: "6px 0 0", paddingLeft: 20 }}>

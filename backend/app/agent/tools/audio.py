@@ -49,7 +49,7 @@ def _target(ctx: ToolContext, save_as: str | None, stem: str, allowed: tuple[str
     text); otherwise a free name from the text - in a project under audio/, in a chat's own folder at the top."""
     raw = (save_as or "").strip()
     if not raw:
-        return _free(ctx, f"audio/{stem}" if ctx.project else stem), "mp3"
+        return _free(ctx, f"{ctx.workdir.own}audio/{stem}" if ctx.project else stem), "mp3"
     p = ctx.workdir.resolve(raw)                     # a path in the folder or a sandbox path; outside: ValueError
     rel = ctx.workdir.rel(p)
     if raw.endswith("/") or p.is_dir():
@@ -163,7 +163,7 @@ async def _sound_input(ctx: ToolContext, path: str, max_seconds: int, what: str)
     wd = ctx.workdir
     p = wd.resolve(v)
     if not p.is_file():                       # an attachment by its name (chat 76 copied it out and back each turn)
-        attached = wd.resolve(f".hub/attachments/{Path(v).name}")
+        attached = wd.resolve(f"{wd.attach_dir}/{Path(v).name}")
         if not attached.is_file():
             raise FileNotFoundError(v)
         p = attached
@@ -220,7 +220,7 @@ def _paths(ctx: ToolContext, save_as: str | None, stem: str, parts: tuple[str, .
         folder = ctx.workdir.rel(ctx.workdir.resolve(raw))
         base = stem if folder == "." else f"{folder}/{stem}"
     else:
-        base = f"audio/{stem}" if ctx.project else stem
+        base = f"{ctx.workdir.own}audio/{stem}" if ctx.project else stem
     n = 1
     while True:
         out = {p: f"{base}-{p}{'' if n == 1 else f'-{n}'}.mp3" for p in parts}

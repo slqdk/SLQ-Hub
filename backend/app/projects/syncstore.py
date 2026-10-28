@@ -139,11 +139,23 @@ def changes_since(pid: int, since: int) -> dict:
     return {"head": h, "since": since, "changes": {p: now.get(p) for p in paths}}
 
 
-def revisions(pid: int, limit: int = 50, before: int | None = None) -> list[dict]:
+def in_view(changes: dict, prefix: str) -> dict:
+    """path -> value of what lies under prefix (a synced folder and "/", 0.40.0), named as the PC names it - without
+    the prefix. prefix "": all of it, as it is."""
+    if not prefix:
+        return changes
+    return {k[len(prefix):]: v for k, v in changes.items() if k.startswith(prefix) and len(k) > len(prefix)}
+
+
+def revisions(pid: int, limit: int = 50, before: int | None = None, prefix: str = "") -> list[dict]:
+    """The newest revisions first. prefix (a synced folder and "/", 0.40.0): only those that changed something
+    under it, their files named without it - what the PC sees."""
+    cut = len(prefix)
     q = ("SELECT r.rev, r.author, r.origin, r.message, r.created_at,"
-         " COUNT(c.path) n FROM sync_revs r LEFT JOIN sync_changes c"
-         " ON c.project_id=r.project_id AND c.rev=r.rev WHERE r.project_id=?")
-    params: list = [pid]
+         " COUNT(c.path) n FROM sync_revs r " + ("JOIN" if prefix else "LEFT JOIN") + " sync_changes c"
+         " ON c.project_id=r.project_id AND c.rev=r.rev"
+         + (" AND substr(c.path, 1, ?) = ? AND length(c.path) > ?" if prefix else "") + " WHERE r.project_id=?")
+    params: list = [cut, prefix, cut, pid] if prefix else [pid]
     if before:
         q += " AND r.rev < ?"
         params.append(before)
@@ -153,9 +165,10 @@ def revisions(pid: int, limit: int = 50, before: int | None = None) -> list[dict
         rows = con.execute(q, params).fetchall()
         out = []
         for r in rows:
-            files = [{"path": c["path"], "deleted": c["sha"] is None} for c in con.execute(
-                "SELECT path, sha FROM sync_changes WHERE project_id=? AND rev=? ORDER BY path LIMIT 30",
-                (pid, r["rev"]))]
+            files = [{"path": c["path"][cut:], "deleted": c["sha"] is None} for c in con.execute(
+                "SELECT path, sha FROM sync_changes WHERE project_id=? AND rev=?"
+                + (" AND substr(path, 1, ?) = ? AND length(path) > ?" if prefix else "") + " ORDER BY path LIMIT 30",
+                (pid, r["rev"], cut, prefix, cut) if prefix else (pid, r["rev"]))]
             out.append({"rev": r["rev"], "author": r["author"], "origin": r["origin"], "message": r["message"],
                         "createdAt": r["created_at"], "fileCount": r["n"], "files": files})
     return out

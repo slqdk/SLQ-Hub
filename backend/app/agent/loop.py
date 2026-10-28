@@ -792,11 +792,11 @@ class Engine:
         if step < due or not made_something(self.steps):
             return
         self.notes_reminded = step
-        now = notes_file.stamp(self.workdir.root)
+        now = notes_file.stamp(self.workdir.own_root)
         if now is not None and now != self.notes_at:      # written since the last look: the next one counts from here
             self.notes_at = now
             return
-        name = now[0] if now else notes_file.NAME
+        name = self.workdir.own + (now[0] if now else notes_file.NAME)      # hub/NOTES.md in a split project
         messages.append({"role": "user", "content": notes_file.REMINDER.format(steps=step, name=name)})
         note = f"It was reminded to write what it found in {name} (step {step})."
         self.pending_notice = f"{self.pending_notice} {note}".strip()
@@ -1092,8 +1092,7 @@ class Agent:
     def workdir(self, chat: dict) -> projects.Workdir:
         ws = self.hub.env.workspace_dir
         if chat.get("project_id"):
-            return projects.Workdir(projects.project_dir(ws, chat["project_id"]), chat["project_id"], ws,
-                                    self.hub.env.sandbox_workspace)
+            return projects.project_workdir(ws, chat["project_id"], self.hub.env.sandbox_workspace)
         return projects.Workdir(projects.chat_dir(ws, chat["id"]), None, ws, self.hub.env.sandbox_workspace)
 
     def start(self, chat_id: int, options: dict | None = None) -> Run:
@@ -1170,12 +1169,13 @@ class Agent:
         mem = self.hub.extras["memory"].index(project["id"] if project else None)
         user = self.hub.settings.get("agent", "user_name") or (self.hub.env.admin_user or "the user").title()
         from . import notes_file
-        notes = notes_file.find(wd.root) if notes_file.wanted(self.hub.settings) and not subagent else None
+        notes = notes_file.find(wd.own_root) if notes_file.wanted(self.hub.settings) and not subagent else None
         moved = str((chat.get("settings") or {}).get("moved_from") or "") if project else ""
         renamed = (chat.get("settings") or {}).get("moved_renamed") if moved else None
         return system_prompt(user=user, model_name=Catalog.label(entry),
-                             folder_text=folder_text(project, wd.sandbox_path, notes.name if notes else "", moved,
-                                                     renamed if isinstance(renamed, dict) else None),
+                             folder_text=folder_text(project, wd.sandbox_path, wd.own + notes.name if notes else "",
+                                                     moved, renamed if isinstance(renamed, dict) else None,
+                                                     sync_folder=wd.sync_folder),
                              sandbox_path=wd.sandbox_path, memory_index=mem, skills=skills, project=project,
                              summary="" if subagent else chat.get("summary") or "",
                              images_available=bool(images and images.available()),
@@ -1237,7 +1237,7 @@ class Agent:
             chats.update_chat(chat_id, summary=summary, summary_upto=split)
             if await self.notes_to_file(chat, engine.workdir, summary, "the chat was condensed", engine.device):
                 from . import notes_file                   # the Hub's write is not the model keeping its notes
-                engine.notes_at = await asyncio.to_thread(notes_file.stamp, engine.workdir.root)
+                engine.notes_at = await asyncio.to_thread(notes_file.stamp, engine.workdir.own_root)
         chat = chats.get_chat(chat_id)
         engine.chat = chat
         return self.build_messages(chat, engine.project, engine.workdir, engine.model, run, engine.handover_label(),
@@ -1393,7 +1393,7 @@ class Agent:
             from . import notes_file                      # NOTES.md as it was when the turn started (0.31.0)
             engine.remind_notes = notes_file.wanted(self.hub.settings) and not test
             engine.keeps_model = not test                 # a test run measures its model, and keeps the chat's
-            engine.notes_at = await asyncio.to_thread(notes_file.stamp, wd.root)
+            engine.notes_at = await asyncio.to_thread(notes_file.stamp, wd.own_root)
             engine.turn_options = {k: options[k] for k in ("thinking", "effort") if options.get(k) is not None}
             engine.steps.append({"type": "queue", "seconds": waited})
 
@@ -1467,15 +1467,15 @@ class Agent:
 
 
 def attachment_block(wd: projects.Workdir, up: dict) -> dict:
-    """Copy an upload into the working folder's .hub/attachments and make the
-    message block that points at it."""
+    """Copy an upload into the working folder's attachments (.hub/attachments, or hub/attachments in a project that
+    syncs one folder - 0.40.0) and make the message block that points at it."""
     from ..projects import blobs
     name = Path(up.get("name") or up["sha"][:12]).name or up["sha"][:12]
-    rel = f".hub/attachments/{name}"
+    rel = f"{wd.attach_dir}/{name}"
     p = wd.resolve(rel)
     data = blobs.read(up["sha"])
     if p.exists() and p.read_bytes() != data:
-        rel = f".hub/attachments/{up['sha'][:8]}-{name}"
+        rel = f"{wd.attach_dir}/{up['sha'][:8]}-{name}"
         p = wd.resolve(rel)
     if not p.exists():
         projects.safe_write(wd.root, p, data)

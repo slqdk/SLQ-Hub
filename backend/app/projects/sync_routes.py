@@ -2,7 +2,13 @@
 
 Identical to SLQ Companion's protocol (2.64.0): the Windows client signs in
 with a device token (Authorization: Bearer slqsync_...) and syncs a local
-folder with a project's revision history."""
+folder with a project's revision history.
+
+A project made since 0.40.0 syncs one folder of it (its synced folder; hub/
+beside it is the assistant's): the PC's folder is that folder. The history
+keeps the whole project, paths from its top; here they are turned into the
+PC's - the prefix taken off on the way out, put on on the way in - and what
+lies outside is left out. The PC client is the same."""
 from __future__ import annotations
 
 import base64
@@ -33,6 +39,12 @@ def _call(fn, *args, **kwargs):
         raise HTTPException(400, str(exc))
 
 
+def _prefix(pid: int) -> str:
+    """The synced folder and "/" (0.40.0), or "" for a project that syncs as a whole."""
+    folder = store.sync_folder(store.get_project(pid))
+    return f"{folder}/" if folder else ""
+
+
 @router.get("/api/sync/whoami")
 async def whoami(request: Request):
     return {"user": request.state.user["username"], "role": "admin", "server": socket.gethostname()}
@@ -50,14 +62,15 @@ async def head(pid: int, request: Request):
     wd = _workdir(request, pid)
     syncstore.snapshot(pid, wd, author="hub", origin="hub", message="Changes on the server")
     h = syncstore.head(pid)
-    return {"head": h, "files": syncstore.manifest(pid, h)}
+    return {"head": h, "files": syncstore.in_view(syncstore.manifest(pid, h), _prefix(pid))}
 
 
 @router.get("/api/sync/projects/{pid}/changes")
 async def changes(pid: int, since: int, request: Request):
     wd = _workdir(request, pid)
     syncstore.snapshot(pid, wd, author="hub", origin="hub", message="Changes on the server")
-    return _call(syncstore.changes_since, pid, max(0, since))
+    out = _call(syncstore.changes_since, pid, max(0, since))
+    return {**out, "changes": syncstore.in_view(out["changes"], _prefix(pid))}
 
 
 @router.get("/api/sync/projects/{pid}/blob/{sha}")
@@ -85,6 +98,7 @@ async def checkin(pid: int, body: CheckinBody, request: Request):
     if len(body.files) > MAX_CHECKIN_FILES:
         raise HTTPException(400, f"At most {MAX_CHECKIN_FILES} files per check-in.")
     wd = _workdir(request, pid)
+    pre = _prefix(pid)
     files = []
     for f in body.files:
         content = None
@@ -93,15 +107,20 @@ async def checkin(pid: int, body: CheckinBody, request: Request):
                 content = base64.b64decode(f.content or "", validate=True)
             except ValueError:
                 raise HTTPException(400, f"{f.path}: content is not base64.")
-        files.append({"path": f.path, "baseSha": f.baseSha, "sha": f.sha, "content": content})
+        path = pre + _call(syncstore.clean_path, f.path) if pre else f.path       # the PC's path, in the project
+        files.append({"path": path, "baseSha": f.baseSha, "sha": f.sha, "content": content})
     origin = " ".join((body.origin or "").split())[:60] or "client"
     result = _call(syncstore.checkin, pid, wd, files, author=request.state.user["username"], origin=origin,
                    message=body.message)
     if result.get("rev"):
         store.touch_project(pid)
+    if pre:
+        result = {**result, "accepted": [p[len(pre):] for p in result["accepted"]],
+                  "conflicts": [{**c, "path": c["path"][len(pre):]} for c in result["conflicts"]]}
     return result
 
 
 @router.get("/api/sync/projects/{pid}/revisions")
 async def revisions(pid: int, limit: int = 50, before: int = 0):
-    return {"head": syncstore.head(pid), "revisions": syncstore.revisions(pid, limit=limit, before=before or None)}
+    return {"head": syncstore.head(pid), "revisions": syncstore.revisions(pid, limit=limit, before=before or None,
+                                                                          prefix=_prefix(pid))}

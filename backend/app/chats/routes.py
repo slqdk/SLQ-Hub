@@ -462,16 +462,25 @@ async def _move(hub, chat: dict, project: dict | None, name: str, moved_from: st
     try:
         if private is not None:
             dst = projects.project_dir(ws, project["id"]) if project else None
-            move.refuse(await asyncio.to_thread(move.plan, private, dst))      # a quick answer before anything
+            into = projects.HUB_FOLDER if projects.sync_folder(project) else ""
+            move.refuse(await asyncio.to_thread(move.plan, private, dst, into))   # a quick answer before anything
         if project is None:
             project = made = projects.create_project(name)
-        dst = projects.project_dir(ws, project["id"])
+        dst = projects.make_folders(ws, project)
+        into = projects.HUB_FOLDER if projects.sync_folder(project) else ""     # its files to hub/ (0.40.0)
         result = move.Plan()
         if private is not None:
             result = await asyncio.to_thread(move.merge_locked, private, dst, project["id"],
-                                             f"moved in from the chat \"{chat['title']}\""[:200])
-        if result.renamed:                                   # attachments the project had by the same names
-            store.repoint_paths(chat_id, result.renamed)
+                                             f"moved in from the chat \"{chat['title']}\""[:200], into)
+        repoint = dict(result.renamed)                       # attachments the project had by the same names
+        if into:                                             # and every file the messages name, now under hub/
+            for m in store.messages(chat_id):
+                for b in m["content"] if isinstance(m["content"], list) else []:
+                    path = b.get("path") if isinstance(b, dict) else None
+                    if isinstance(path, str) and path and not path.startswith("/") and path not in repoint:
+                        repoint[path] = move.to_path(path, into)
+        if repoint:
+            store.repoint_paths(chat_id, repoint)
         moved = store.move_to_project(chat_id, project["id"], moved_from, result.renamed)
     except BaseException as exc:
         back = await asyncio.to_thread(move.put_back, ws, chat_id, private)

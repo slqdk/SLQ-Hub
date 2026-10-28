@@ -149,7 +149,8 @@ def _save_outputs(ctx: ToolContext, items: list[dict], save_as: str | None, prom
             stem = Path(save_as)
             rel = str(stem) if len(items) == 1 else f"{stem.with_suffix('')}-{i + 1}{stem.suffix or '.png'}"
         else:
-            rel = f"images/{time.strftime('%Y%m%d-%H%M%S')}-{_slug(prompt)}{'-' + str(i + 1) if len(items) > 1 else ''}.png"
+            rel = (f"{ctx.workdir.own}images/{time.strftime('%Y%m%d-%H%M%S')}-{_slug(prompt)}"
+                   f"{'-' + str(i + 1) if len(items) > 1 else ''}.png")
         ctx.workdir.write(rel, blobs.read(it["sha"]), "agent", "hub", f"generated {rel}")
         paths.append(rel)
     return paths

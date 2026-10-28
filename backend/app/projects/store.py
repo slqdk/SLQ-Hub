@@ -14,6 +14,7 @@ import errno
 import json
 import mimetypes
 import os
+import re
 import shutil
 import stat
 import tempfile
@@ -38,14 +39,63 @@ def _row(r) -> dict:
     return d
 
 
-def create_project(name: str, instructions: str = "", settings: dict | None = None) -> dict:
+HUB_FOLDER = "hub"     # 0.40.0: the assistant's own files and the attachments, in a project that syncs one folder
+WHOLE = "."            # sync_folder of a project that syncs as a whole (every project from before 0.40.0)
+
+
+def sync_folder(project: dict | None) -> str:
+    """The folder of a project that SLQ Sync keeps the same as the folder on the user's PC (0.40.0) - beside it,
+    hub/ holds the assistant's own files and never leaves the Hub. '' for a project that syncs as a whole: one from
+    before (no sync_folder) or made so on purpose (".")."""
+    v = ((project or {}).get("settings") or {}).get("sync_folder")
+    return v if isinstance(v, str) and v not in ("", WHOLE) else ""
+
+
+def clean_sync_folder(value: str | None, project_name: str) -> str:
+    """A new project's synced folder: the name the user gave, or else the project's name - one folder whose name
+    holds letters, digits, _ - and . (a space becomes -). "." keeps the project in one piece (the older way).
+    Raises ValueError for a name that cannot be used."""
+    typed = (value or "").strip()
+    if typed == WHOLE:
+        return WHOLE
+    name = re.sub(r"[^\w.-]", "", re.sub(r"\s+", "-", typed or project_name or ""))
+    name = name.strip(".-")[:60].strip(".-")
+    if not name:
+        if typed:
+            raise ValueError("The synced folder needs a name of letters or digits.")
+        name = "files"
+    if name.lower() == HUB_FOLDER or name.lower() in syncstore.IGNORE_DIRS:
+        if typed:
+            raise ValueError(f"\"{name}\" cannot be the synced folder: "
+                             + ("hub/ is the assistant's folder." if name.lower() == HUB_FOLDER
+                                else "sync leaves a folder of that name out."))
+        name = f"{name}-files"
+    return name
+
+
+def create_project(name: str, instructions: str = "", settings: dict | None = None,
+                   sync_folder: str | None = None) -> dict:
+    """A new project. It syncs only its synced folder (0.40.0), named from sync_folder or else from the project's
+    name - unless sync_folder is "." (the whole project, as before); make_folders makes its folders."""
     name = " ".join((name or "").split())[:120] or "Untitled project"
+    folder = clean_sync_folder(sync_folder, name)
     now = db.utcnow()
     with db.connect() as con:
         cur = con.execute("INSERT INTO projects (name, instructions, settings, created_at, updated_at)"
                           " VALUES (?,?,?,?,?)",
-                          (name, instructions or "", json.dumps({**PROJECT_DEFAULTS, **(settings or {})}), now, now))
+                          (name, instructions or "",
+                           json.dumps({**PROJECT_DEFAULTS, **(settings or {}), "sync_folder": folder}), now, now))
         return get_project(cur.lastrowid)
+
+
+def make_folders(workspace: Path, project: dict) -> Path:
+    """The project's folder, and in it the synced folder and hub/ when it has them."""
+    root = project_dir(workspace, project["id"])
+    folder = sync_folder(project)
+    if folder:
+        real_dir(root, folder)
+        real_dir(root, HUB_FOLDER)
+    return root
 
 
 def get_project(pid: int) -> dict | None:
@@ -71,7 +121,7 @@ def update_project(pid: int, name: str | None = None, instructions: str | None =
         fields["name"] = " ".join(name.split())[:120] or p["name"]
     if instructions is not None:
         fields["instructions"] = instructions
-    if settings is not None:
+    if settings is not None:                     # sync_folder is not among them: set when the project is made
         merged = {**p["settings"], **{k: v for k, v in settings.items() if k in PROJECT_DEFAULTS}}
         fields["settings"] = json.dumps(merged)
     if archived is not None:
@@ -124,6 +174,13 @@ def chat_dir(workspace: Path, chat_id: int) -> Path:
     return real_dir(workspace, "chats", str(chat_id))
 
 
+def project_workdir(workspace: Path, pid: int, sandbox_root: str = "/workspace",
+                    project: dict | None = None) -> "Workdir":
+    """A project's folder as a Workdir that knows its synced folder (0.40.0)."""
+    project = project if project is not None else get_project(pid)
+    return Workdir(project_dir(workspace, pid), pid, workspace, sandbox_root, sync_folder(project))
+
+
 @dataclass
 class Workdir:
     """A folder the UI or the agent works in, with every path kept inside it.
@@ -132,10 +189,31 @@ class Workdir:
     project_id: int | None
     workspace: Path
     sandbox_root: str = "/workspace"
+    sync_folder: str = ""          # 0.40.0: the project's folder that is synced to the PC; "" = all of it
 
     @property
     def sandbox_path(self) -> str:
         return f"{self.sandbox_root}/{self.root.relative_to(self.workspace).as_posix()}"
+
+    @property
+    def own(self) -> str:
+        """Where the assistant's own files go, as a prefix: "hub/" in a project that syncs one folder, else ""."""
+        return f"{HUB_FOLDER}/" if self.sync_folder else ""
+
+    @property
+    def own_root(self) -> Path:
+        return self.root / HUB_FOLDER if self.sync_folder else self.root
+
+    @property
+    def attach_dir(self) -> str:
+        """Where the user's attachments are copied: hub/attachments in a project that syncs one folder (shown in
+        Files, never synced), else .hub/attachments."""
+        return f"{HUB_FOLDER}/attachments" if self.sync_folder else ".hub/attachments"
+
+    def _keep_folders(self, p: Path, what: str) -> None:
+        """The synced folder and hub/ stay: one deleted or renamed would empty the PC's folder (0.40.0)."""
+        if self.sync_folder and p.parent == self.root.resolve() and p.name in (self.sync_folder, HUB_FOLDER):
+            raise ValueError(f"{p.name}/ is one of the project's two folders - {what} what is in it instead")
 
     def resolve(self, rel: str | None) -> Path:
         rel = (rel or ".").replace("\\", "/").strip()
@@ -249,6 +327,7 @@ class Workdir:
         p = self.resolve(rel)
         if p == self.root.resolve():
             raise ValueError("refusing to delete the whole folder")
+        self._keep_folders(p, "delete")
         if p.is_dir():
             shutil.rmtree(p)
         elif p.exists():
@@ -261,6 +340,7 @@ class Workdir:
         a, b = self.resolve(src), self.resolve(dst)
         if not a.exists():
             raise FileNotFoundError(src)
+        self._keep_folders(a, "move")
         b.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(a), str(b))
         self.checkin(author, origin, f"moved {src} -> {dst}")

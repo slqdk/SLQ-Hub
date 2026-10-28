@@ -158,7 +158,9 @@ export function Files({ folder, projectId, select, selectAt, picked, onPick }: {
     fd.append("dir", currentDir);
     try {
       const r = await api<{ saved: string[] }>(`${base(folder)}/upload`, { form: fd });
-      toast(`Uploaded ${r.saved.length} file${r.saved.length === 1 ? "" : "s"}`, "run");
+      const into = r.saved[0]?.includes("/") ? r.saved[0].slice(0, r.saved[0].lastIndexOf("/")) : "";
+      toast(`Uploaded ${r.saved.length} file${r.saved.length === 1 ? "" : "s"}${into && into !== currentDir
+        ? ` to ${into}/` : ""}`, "run");
       refresh();
     } catch (e) {
       toast((e as Error).message, "fault");

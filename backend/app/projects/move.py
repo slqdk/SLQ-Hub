@@ -167,9 +167,23 @@ def to_trash(private: Path | None, trash: Path, chat_id: int) -> Path | None:
     return dest
 
 
-def plan(private: Path, dst: Path | None) -> Plan:
-    """What the move does. dst None: a new project's empty folder. Raises OSError when the chat's folder is not a
-    folder any more (swapped for a link)."""
+def to_path(rel: str, into: str = "") -> str:
+    """Where a path of the chat's folder goes in the project's. into "": the same path. into "hub" (a project that
+    syncs one folder, 0.40.0): under hub/ - the chat's attachments in hub/attachments/ - and the Hub's own things
+    under .hub/ where they were; never into the synced folder, so nothing reaches the PC unasked."""
+    if not into:
+        return rel
+    att = ".hub/attachments"
+    if rel == att or rel.startswith(att + "/"):
+        return f"{into}/attachments{rel[len(att):]}"
+    if rel == ".hub" or rel.startswith(".hub/"):
+        return rel
+    return f"{into}/{rel}"
+
+
+def plan(private: Path, dst: Path | None, into: str = "") -> Plan:
+    """What the move does. dst None: a new project's empty folder. into: see to_path. Raises OSError when the
+    chat's folder is not a folder any more (swapped for a link)."""
     out = Plan()
     src_fd = os.open(private, DIR_FLAGS)
     dst_fd = os.open(dst, DIR_FLAGS) if dst is not None else None
@@ -187,10 +201,10 @@ def plan(private: Path, dst: Path | None) -> Plan:
                     out.bad_names.append(rel)
                     continue
                 if (here / d).is_symlink():
-                    _plan_entry(out, src_fd, dst_fd, listings, Entry("link", rel, rel, os.readlink(here / d)))
+                    _plan_entry(out, src_fd, dst_fd, listings, Entry("link", rel, to_path(rel, into), os.readlink(here / d)))
                     continue
                 keep.append(d)
-                _plan_entry(out, src_fd, dst_fd, listings, Entry("dir", rel, rel))
+                _plan_entry(out, src_fd, dst_fd, listings, Entry("dir", rel, to_path(rel, into)))
             dirs[:] = keep
             for name in sorted(files):
                 rel = (rel_dir / name).as_posix()
@@ -199,9 +213,9 @@ def plan(private: Path, dst: Path | None) -> Plan:
                     continue
                 p = here / name
                 if p.is_symlink():
-                    _plan_entry(out, src_fd, dst_fd, listings, Entry("link", rel, rel, os.readlink(p)))
+                    _plan_entry(out, src_fd, dst_fd, listings, Entry("link", rel, to_path(rel, into), os.readlink(p)))
                 elif p.is_file():
-                    _plan_entry(out, src_fd, dst_fd, listings, Entry("file", rel, rel))
+                    _plan_entry(out, src_fd, dst_fd, listings, Entry("file", rel, to_path(rel, into)))
                 else:
                     out.left.append(rel)
     finally:
@@ -233,7 +247,7 @@ def _plan_entry(out: Plan, src_fd: int, dst_fd: int | None, cache: dict, e: Entr
         # an attachment the project has by that name: the name a second upload of it would get there
         f = _open_file(src_fd, tuple(e.rel.split("/")))
         try:
-            alt = f".hub/attachments/{_sha(f)[:8]}-{e.rel.rsplit('/', 1)[1]}"
+            alt = f"{e.to.rsplit('/', 1)[0]}/{_sha(f)[:8]}-{e.rel.rsplit('/', 1)[1]}"
         finally:
             os.close(f)
         state = _state(src_fd, dst_fd, cache, e, alt)
@@ -374,11 +388,11 @@ def _undo(dst_fd: int, made: list, made_dirs: list) -> None:
             os.close(pfd)
 
 
-def merge_locked(private: Path, dst: Path, pid: int, message: str) -> Plan:
+def merge_locked(private: Path, dst: Path, pid: int, message: str, into: str = "") -> Plan:
     """Under the project's sync lock: plan again against the project as it is now, refuse a clash, make it, check it
     in. -> the plan that was made."""
     with syncstore.lock(pid):
-        p = plan(private, dst)
+        p = plan(private, dst, into)
         refuse(p)
         apply(private, dst, p.make)
         try:

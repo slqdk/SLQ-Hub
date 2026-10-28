@@ -43,7 +43,7 @@ not check, and anything the user must know.
 # The working folder
 {folder}
 {tools_line}
-- Attachments the user sends are copied to .hub/attachments/ in the working folder.
+- Attachments the user sends are copied to {attach} in the working folder.
 - One answer of yours has room for only so much, tool calls included: write a long file (more than a few hundred \
 lines) in parts - the first with write_file, each next one with write_file and append: true.
 - The files you create or change in the working folder are shown to the user under your answer, ready to open, \
@@ -240,9 +240,11 @@ def system_prompt(*, user: str, model_name: str, folder_text: str, sandbox_path:
     seen = [what for what, ok in (("web_app for web pages and browser games", web),
                                   ("windows_app for Windows programs", windows)) if ok and code]
     look = f" ({', '.join(seen)})" if seen else ""
+    from ..projects.store import sync_folder
     text = BASE.format(user=user, model=model_name, date=now.strftime("%A %d %B %Y"), folder=folder_text,
                        tools_line=tools_line, image_gen=IMAGE_GEN if images_available else "",
-                       big_reads="" if subagent else BIG_READS, look=look)
+                       big_reads="" if subagent else BIG_READS, look=look,
+                       attach="hub/attachments/" if sync_folder(project) else ".hub/attachments/")
     text += sound_text(sound or [])
     if video:
         text += VIDEO
@@ -303,11 +305,28 @@ def device_folder_text(sandbox_path: str, code: bool = False, left: list | None 
 
 
 def folder_text(project: dict | None, sandbox_path: str, notes: str = "", moved_from: str = "",
-                renamed: dict | None = None) -> str:
-    """The working folder's first lines. notes: the notes file's name when the folder has one (0.31.0) - one short
+                renamed: dict | None = None, sync_folder: str = "") -> str:
+    """The working folder's first lines. notes: the notes file's path when the folder has one (0.31.0) - one short
     line that changes only when the file appears, so the model server's prompt cache holds. moved_from: the chat's
-    own folder before it was moved into the project (0.31.0) - the conversation shows paths there."""
-    if project:
+    own folder before it was moved into the project (0.31.0) - the conversation shows paths there. sync_folder: the
+    project's folder that is synced to the PC (0.40.0) - hub/ beside it is the assistant's."""
+    if project and sync_folder:
+        text = (f"You work in the files of the project \"{project['name']}\" ({sandbox_path}), in two folders:\n"
+                f"- {sync_folder}/ is the user's. SLQ Sync keeps it the same as a folder on their PC: their project's "
+                "own files, as they use them there. Change in it what the user asks for and put nothing else there - "
+                "everything you write there appears on their PC.\n"
+                "- hub/ is yours and never leaves the Hub: your notes (hub/NOTES.md), working copies, drafts, scripts, "
+                "and what you make for the chat (pictures, sound, video, files to download). The user's attachments "
+                "are in hub/attachments/.\n"
+                "Keep the top of the folder to these two; the order below holds inside each. Every change is kept "
+                "in the project's history.")
+        if moved_from:
+            text += (f" This chat was moved into the project from its own folder ({moved_from}): the files the "
+                     "conversation above shows there are in hub/ now, its attachments in hub/attachments/.")
+            if renamed:
+                text += (" Attachments the project had by the same names were renamed on the way: "
+                         + ", ".join(f"{a} is now {b}" for a, b in renamed.items()) + ".")
+    elif project:
         text = (f"You work in the files of the project \"{project['name']}\" ({sandbox_path}). Every change is kept "
                 "in the project's history and synced to the user's PC.")
         if moved_from:
