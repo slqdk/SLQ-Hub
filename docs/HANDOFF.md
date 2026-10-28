@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.44.0, 2026-10-28)
+## State (0.45.0, 2026-10-28)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -394,6 +394,9 @@ placed it), and the composer's question card scrolls past 46% of the screen. Mad
 picture skills for Søren, in English as the app is (picture-animals/-christmas/-halloween/-easter, category
 Pictures; the Danish billede-med-* drafts replaced): seven questions each,
 image_edit with qwen-image-2.1 on an attached picture, else image_generate with the chat's model (not Chroma1-HD).
+0.45.0, Søren: categories are folders, closed until their name is clicked (composer menu, Skills page, project
+settings; `useFolders` in `lib/skills.ts`, remembered per browser), skills in none first; his category "internal" is
+listed last and opens on three clicks within 1.5 s of each other, never remembered. Seen on the dev server.
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
 host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU

@@ -3,10 +3,10 @@
 // skills for this chat (0.23.0: picked by hand - the Skills button, or / and a
 // skill's name in the message box).
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUp, BookOpen, Brain, Check, Cloud, Cpu, FileText, FolderOpen, Image as ImageIcon, Paperclip, Plus, Settings2,
-  Sparkles, Square, Wand2, X } from "lucide-react";
+import { ArrowUp, BookOpen, Brain, Check, ChevronDown, ChevronRight, Cloud, Cpu, FileText, FolderOpen, Image as ImageIcon,
+  Paperclip, Plus, Settings2, Sparkles, Square, Wand2, X } from "lucide-react";
 import { upload, type AnswerItem, type AnswersBlock, type ModelEntry, type Skill, type Upload } from "../lib/api";
-import { byCategory } from "../lib/skills";
+import { byCategory, NO_CATEGORY, useFolders } from "../lib/skills";
 import { LEVEL_LABEL, LEVELS, levelText, type Level } from "../lib/effort";
 import { clearDraft, NEW_SKILL_TEXT, peekDraft, SKILL_MAKER } from "../lib/draft";
 import { bytes } from "../lib/format";
@@ -333,21 +333,7 @@ export function Composer({ running, onSend, onStop, settings, onSettings, models
             <>
               <div className="menu-head">Skills for this chat</div>
               {skills.length === 0 && <div className="menu-item faint" style={{ cursor: "default" }}>No skills yet</div>}
-              {groups.filter(([, list]) => list.length > 0).map(([label, list]) => (
-                <div key={label}>
-                  <div className="menu-sub">{label}</div>
-                  {list.map((k) => {
-                    const on = settings.skills.includes(k.ref);
-                    return (
-                      <button key={k.ref} className="menu-item" role="menuitemcheckbox" aria-checked={on}
-                        onClick={() => toggleSkill(k.ref)}>
-                        {on ? <Check size={15} /> : <Sparkles size={15} />}
-                        <span>{k.title}<small className="clamp-2">{k.mine || k.builtin ? "" : `${k.by} · `}{k.description}</small></span>
-                      </button>
-                    );
-                  })}
-                </div>
-              ))}
+              <SkillFolders groups={groups} chosen={settings.skills} onToggle={toggleSkill} />
               {(canMake || onManageSkills) && <div className="menu-sep" />}
               {canMake && <button className="menu-item" onClick={() => { close(); makeSkill(); }}><Wand2 size={15} />
                 <span>Make a skill<small>Attach your files and say what it is for; the assistant writes it</small></span></button>}
@@ -430,5 +416,39 @@ export function Composer({ running, onSend, onStop, settings, onSettings, models
         )}
       </div>
     </div>
+  );
+}
+
+/** The Skills menu's list (0.45.0): skills in no category first, then each category as a folder that opens when its
+ *  name is clicked ("internal" on three quick clicks, closed again when the menu closes). */
+function SkillFolders({ groups, chosen, onToggle }: { groups: [string, Skill[]][]; chosen: string[];
+  onToggle: (ref: string) => void }) {
+  const folders = useFolders("hub:skill-menu-open");
+  const item = (k: Skill) => {
+    const on = chosen.includes(k.ref);
+    return (
+      <button key={k.ref} className="menu-item" role="menuitemcheckbox" aria-checked={on} onClick={() => onToggle(k.ref)}>
+        {on ? <Check size={15} /> : <Sparkles size={15} />}
+        <span>{k.title}<small className="clamp-2">{k.mine || k.builtin ? "" : `${k.by} · `}{k.description}</small></span>
+      </button>
+    );
+  };
+  return (
+    <>
+      {groups.map(([cat, list]) => {
+        if (cat === NO_CATEGORY) return <div key={cat}>{list.map(item)}</div>;
+        const open = folders.isOpen(cat);
+        const on = list.filter((k) => chosen.includes(k.ref)).length;
+        return (
+          <div key={cat}>
+            <button type="button" className="menu-sub menu-folder" aria-expanded={open} onClick={() => folders.click(cat)}>
+              {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}<span className="grow">{cat}</span>
+              <span className="faint">{on ? `${on} on · ` : ""}{list.length}</span>
+            </button>
+            {open && list.map(item)}
+          </div>
+        );
+      })}
+    </>
   );
 }

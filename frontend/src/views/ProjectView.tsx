@@ -1,9 +1,9 @@
 // A project: its chats, files, settings, history and sync devices.
 import { LEVEL_OPTIONS } from "../lib/effort";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Download, Menu, MessageSquarePlus, Plus } from "lucide-react";
+import { ChevronDown, ChevronRight, Download, Menu, MessageSquarePlus, Plus } from "lucide-react";
 import { api, syncFolderOf, type ChatListItem, type Library, type Project, type Revision, type Skill } from "../lib/api";
-import { byCategory } from "../lib/skills";
+import { byCategory, NO_CATEGORY, useFolders } from "../lib/skills";
 import { ago, bytes, energy, money, tokens, worked } from "../lib/format";
 import { linkProps, navigate } from "../lib/router";
 import { useApp } from "../state";
@@ -141,6 +141,7 @@ function ProjectSettings({ project, onSaved }: { project: Project; onSaved: (p: 
   const [s, setS] = useState(project.settings);
   const [libraries, setLibraries] = useState<Library[]>([]);
   const [skills, setSkills] = useState<Skill[]>([]);
+  const folders = useFolders("hub:skill-project-open");     // the skills' categories, closed until clicked (0.45.0)
   const [cloudReady, setCloudReady] = useState<boolean | null>(null);
   useEffect(() => {
     api<{ libraries: Library[] }>("/hub/api/libraries").then((r) => setLibraries(r.libraries), () => undefined);
@@ -211,14 +212,22 @@ function ProjectSettings({ project, onSaved }: { project: Project; onSaved: (p: 
       <div className="field"><span>Skills in every chat of this project</span>
         {skills.length === 0 ? <small>No skills yet (Skills in the sidebar).</small> : <>
           <small>Chats here use these as well as the ones chosen in the chat itself.</small>
-          {byCategory(skills).map(([cat, list]) => (
-            <div key={cat} className="skill-pick-group">
-              {skills.some((k) => k.category) && <div className="small muted">{cat}</div>}
-              <div className="row wrap">{list.map((k) => (
-                <label key={k.ref} className="check" title={k.description}><input type="checkbox"
-                  checked={s.skills.includes(k.ref)} onChange={() => setS({ ...s, skills: toggle(s.skills, k.ref) })} />
-                  {" "}{k.title}{!k.mine && !k.builtin && <span className="faint"> ({k.by})</span>}</label>))}</div>
-            </div>))}</>}</div>
+          {byCategory(skills).map(([cat, list]) => {
+            const folder = cat !== NO_CATEGORY;
+            const open = !folder || folders.isOpen(cat);
+            const on = list.filter((k) => s.skills.includes(k.ref)).length;
+            return (
+              <div key={cat} className="skill-pick-group">
+                {folder && <button type="button" className="menu-folder" aria-expanded={open} onClick={() => folders.click(cat)}>
+                  {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}<span className="grow">{cat}</span>
+                  <span className="faint">{on ? `${on} chosen · ` : ""}{list.length}</span></button>}
+                {open && <div className="row wrap">{list.map((k) => (
+                  <label key={k.ref} className="check" title={k.description}><input type="checkbox"
+                    checked={s.skills.includes(k.ref)} onChange={() => setS({ ...s, skills: toggle(s.skills, k.ref) })} />
+                    {" "}{k.title}{!k.mine && !k.builtin && <span className="faint"> ({k.by})</span>}</label>))}</div>}
+              </div>
+            );
+          })}</>}</div>
       <div className="row"><button className="btn primary" onClick={save}>Save changes</button><span className="grow" />
         <ConfirmButton onConfirm={remove} confirmText="Delete the project and its chats?">Delete project</ConfirmButton></div>
     </div>

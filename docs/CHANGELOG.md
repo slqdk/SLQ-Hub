@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.45.0 - 2026-10-28
+
+- **Categories are folders.** In the Skills menu by the message box, on the
+  Skills page and in a project's settings, a category is closed until you
+  click its name; skills in no category are listed straight away, first.
+  The folders you open are remembered in the browser. With a search on the
+  Skills page they open by themselves.
+- **"internal" comes last and opens on three quick clicks.** A category named
+  internal is listed at the very bottom and opens only when its name is
+  clicked three times in a row; it is closed again the next time.
+
 ## 0.44.0 - 2026-10-28
 
 - **A skill can bring its own category.** A skill whose SKILL.md says

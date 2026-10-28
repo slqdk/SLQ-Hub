@@ -6,13 +6,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, Download, Menu, MessageSquarePlus, MoreHorizontal, Pencil, Search, Sparkles, Tag,
   Trash2, Upload as UploadIcon, Wand2 } from "lucide-react";
 import { api, type Skill } from "../lib/api";
-import { byCategory, categoryNames, HUB_CATEGORY, NO_CATEGORY, skillMatches } from "../lib/skills";
+import { byCategory, categoryNames, HUB_CATEGORY, isInternal, NO_CATEGORY, skillMatches, useFolders } from "../lib/skills";
 import { ago, bytes } from "../lib/format";
 import { NEW_SKILL_TEXT, SKILL_MAKER } from "../lib/draft";
 import { useApp } from "../state";
 import { Empty, MenuButton, Modal, Switch } from "../components/ui";
-
-const CLOSED_KEY = "hub:skill-categories-closed";      // the categories folded away, in this browser
 
 /** The owner's Skills page (a person's app shows SkillsContent in its own frame). */
 export function SkillsView({ onNewChat }: { onNewChat: (text: string, skills: string[]) => void }) {
@@ -33,13 +31,7 @@ export function SkillsContent({ onNewChat }: { onNewChat: (text: string, skills:
   const [skills, setSkills] = useState<Skill[] | null>(null);
   const [view, setView] = useState<{ skill: Skill; text: string; edit: boolean } | null>(null);
   const [query, setQuery] = useState("");
-  const [closed, setClosed] = useState<string[]>(() => {
-    try {
-      return JSON.parse(localStorage.getItem(CLOSED_KEY) ?? "[]");
-    } catch {
-      return [];
-    }
-  });
+  const folders = useFolders("hub:skill-page-open");    // closed until clicked (0.45.0); "internal" on three clicks
   const [placing, setPlacing] = useState<{ skill: Skill; text: string } | null>(null);   // its category
   const [renaming, setRenaming] = useState<{ old: string; text: string } | null>(null);
   const input = useRef<HTMLInputElement>(null);
@@ -98,13 +90,6 @@ export function SkillsContent({ onNewChat }: { onNewChat: (text: string, skills:
     } catch (e) {
       toast((e as Error).message, "fault");
     }
-  };
-  const toggle = (cat: string) => {
-    const next = closed.includes(cat) ? closed.filter((c) => c !== cat) : [...closed, cat];
-    setClosed(next);
-    try {
-      localStorage.setItem(CLOSED_KEY, JSON.stringify(next));
-    } catch { /* private window: it is forgotten, that is all */ }
   };
   const place = async () => {
     if (!placing) return;
@@ -184,7 +169,8 @@ export function SkillsContent({ onNewChat }: { onNewChat: (text: string, skills:
       <p className="lead">A skill is a set of instructions, with the knowledge that goes with them, for one kind of task.
         A chat uses a skill only when you choose it there: the <b>Skills</b> button by the message box, or type <b>/</b> and
         its name. Skills are in the format Claude uses, so they move between the two. Put yours into categories from
-        their <b>⋯</b> menu - the family sees your shared ones under the same.</p>
+        their <b>⋯</b> menu - the family sees your shared ones under the same. A category opens when you click its
+        name.</p>
       <div className="row wrap" style={{ marginBottom: 16, gap: 8 }}>
         <button className="btn primary" onClick={() => onNewChat(NEW_SKILL_TEXT, [SKILL_MAKER])}><Wand2 size={15} /> New skill</button>
         <button className="btn" onClick={() => input.current?.click()}><UploadIcon size={15} /> Import</button>
@@ -202,12 +188,13 @@ export function SkillsContent({ onNewChat }: { onNewChat: (text: string, skills:
         ? <Empty>No skills of your own yet. Make one with the assistant from your own files, or import one.</Empty> : null}
       {skills !== null && query && groups.length === 0 && <Empty>No skill matches "{query}".</Empty>}
       {groups.map(([cat, list]) => {
-        const open = !!query || !closed.includes(cat);
-        const own = cat !== NO_CATEGORY && cat !== HUB_CATEGORY && list.some((k) => k.mine);
+        if (cat === NO_CATEGORY) return <div key={cat} className="list" style={{ marginTop: 12 }}>{list.map(row)}</div>;
+        const open = (!!query && !isInternal(cat)) || folders.isOpen(cat);   // a search opens all but "internal"
+        const own = cat !== HUB_CATEGORY && list.some((k) => k.mine);
         return (
           <section key={cat} className="skill-cat">
             <h2 className="section-title">
-              <button className="skill-cat-toggle" onClick={() => toggle(cat)} aria-expanded={open}>
+              <button className="skill-cat-toggle" onClick={() => folders.click(cat)} aria-expanded={open}>
                 {open ? <ChevronDown size={16} /> : <ChevronRight size={16} />} {cat}
                 <span className="muted small">{list.length}</span></button>
               {own && <button className="icon-btn small" title={`Rename the category ${cat}`}

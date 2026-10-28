@@ -1590,7 +1590,9 @@ own are listed under "SLQ Hub", the rest under "No category". Renaming a
 category moves all the caller's skills in it; replacing a skill keeps its
 category, deleting it forgets it. A skill with `metadata:` `category:` in
 its front matter is placed there when it arrives (0.44.0), unless its owner
-has placed it already. The lists (Skills page, composer, project
+has placed it already. In the lists a category is a folder, closed until
+its name is clicked (0.45.0); skills in none come first, and a category
+named "internal" comes last and opens on three quick clicks. The lists (Skills page, composer, project
 settings) group by category in the browser (`lib/skills.ts`).
 
 **Choosing.** A chat's `settings.skills` and its project's hold refs (a
