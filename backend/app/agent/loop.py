@@ -139,7 +139,7 @@ class WrapUp:
 
 
 def _ensure_tools_loaded() -> None:
-    from .tools import audio, files, history, images, knowledge, shell, video, web, webapp, windows  # noqa: F401
+    from .tools import ask, audio, files, history, images, knowledge, shell, video, web, webapp, windows  # noqa: F401
     from . import meta_tools  # noqa: F401
 
 

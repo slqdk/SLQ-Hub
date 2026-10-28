@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.43.0 - 2026-10-28
+
+- **Question cards.** When a choice is yours and there are real options, the
+  assistant now asks on a card with buttons - one choice or several - and
+  waits for your answer (the new `ask_user` tool, like Claude's own cards).
+  You can also write your own answer on the card, or just write a message
+  instead. The row then shows what you chose. It works in people's chats too.
+- **Skills with fixed questions.** A skill can carry questions with their
+  options - "How many elves? 0, 1, 2, 3" - in a `questions` block in its
+  SKILL.md. When you choose the skill, they show as a card above the message
+  box; pick the answers, add a picture, and send - no text needed. The
+  answers go with the message (and show in it), stay for the next messages,
+  and Change gives the card back. The format, one question a line:
+  `How many elves? | 0 | 1 | *2 | 3` (`*` picks an option from the start,
+  `+` in front of the question allows several). The skill maker knows it, so
+  "Make a skill" can make such skills.
+
 ## 0.42.0 - 2026-10-28
 
 - **A step says what came of it.** A finished step in an answer no longer

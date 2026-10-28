@@ -643,6 +643,7 @@ message's time with the conversation.
 | `todo_write` | A visible checklist for long tasks. It helps a 27B model keep track of them. |
 | `task` | A subagent with a fresh context and the tools except artifact, todo_write, image and sound generation, task and escalate, inside the same lease. Its steps show nested under the call; only its report goes back. |
 | MCP tools | From configured servers: streamable HTTP, or stdio servers that run inside the sandbox through a pipe in the sandbox daemon. These ask first, with "Always allow" per tool. Since 0.36.0 a server can ask for files from the working folder, and the review can use its tools that only look (below, "MCP tools and the working folder"). |
+| `ask_user` | (0.43.0) Questions with 2-6 options each, up to 4, shown as a card with buttons; the turn waits for the answer (30 minutes), and a message written meanwhile answers it. Only for real choices. Not in subagents or the review. |
 | `escalate` | Present when someone can take over: the stronger local model (Settings → Assistant), or the cloud where escalation is on. Its description names who. |
 
 **Approval.** Everything inside the sandbox runs without asking: files,
@@ -1570,6 +1571,16 @@ skills are private; replacing one keeps its sharing. Everyone sees their own
 skills, the others' shared ones (with who made them) and the Hub's; only the
 maker changes, shares or deletes a skill. A removed person's skills go with
 them.
+
+**Questions (0.43.0).** A skill may carry fixed questions: the first
+```questions block of its SKILL.md that is not inside another fence, one
+question a line - `question | option | *option`, `*` chosen from the start,
+`+` in front for several answers. The composer shows them as a card when the
+skill is chosen; the answers go with the message as an `answers` block, which
+the model reads as "[The user's answers to the questions of the skill ...]"
+and the chat shows in the message. They are not sent again until changed
+(the latest answers in the chat close the card). The system prompt says that
+the chat asks them, so the model uses ask_user only for what is left open.
 
 **Categories (0.41.0).** The maker puts a skill into a category:
 `.categories.json` beside the sharing files maps its folder name to the

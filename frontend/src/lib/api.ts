@@ -110,7 +110,14 @@ export type Block =
    * wrapped/limit (0.32.0): it was told to finish near its limit of steps or time ("24 steps", "15 minutes"). */
   | { type: "review"; id: string; model: string; verdict: "ok" | "problems" | "failed"; report: string; files: string[];
       artifacts?: string[]; seconds?: number; changed?: string[]; error?: string; wrapped?: "steps" | "time";
-      limit?: string };
+      limit?: string }
+  /** The user's answers to a chosen skill's questions (0.43.0), sent with the message. */
+  | AnswersBlock;
+
+export interface AnswerItem { q: string; a: string[] }
+export interface AnswersBlock { type: "answers"; skill: string; title: string; items: AnswerItem[] }
+/** One of a skill's fixed questions (its ```questions block): chosen = picked from the start. */
+export interface SkillQuestion { text: string; options: string[]; chosen: string[]; multi: boolean }
 
 export interface ImageRef { sha: string; mime?: string; caption?: string }
 export interface ArtifactRef { id: string; version: number; title: string; type: string; language?: string | null }
@@ -123,6 +130,7 @@ export interface Display {
   sources?: { title: string; url: string }[];
   mcp?: { server: string; tool: string };
   audio?: { path: string; seconds: number; model: string }[];
+  answers?: string[][];          // ask_user (0.43.0): what the user chose, per question
   video?: { path: string; seconds: number; model: string }[];
   skill?: SkillCardData;
   [k: string]: unknown;
@@ -253,7 +261,8 @@ export interface ApiKey { id: number; name: string; prefix: string; priority: st
 export interface Skill { ref: string; name: string; title: string; description: string; files: string[]; size: number;
   kind: "owner" | "person" | "hub"; owner_id: number | null; mine: boolean; shared: boolean; builtin: boolean;
   updated: string; by: string;
-  category?: string }    // 0.41.0: as its owner set it; "" or none = no category
+  category?: string;     // 0.41.0: as its owner set it; "" or none = no category
+  questions?: SkillQuestion[] }   // 0.43.0: asked on a card in the message box when the skill is chosen
 /** What skill_propose shows in the chat: a skill the assistant made, to add with Add skill. */
 export interface SkillCardData { draft: string; name: string; title: string; description: string; files: string[];
   size: number; replaces: boolean; ref: string }
@@ -291,3 +300,13 @@ export const syncFolderOf = (p: Project): string => {
 export const folderFromName = (s: string): string =>
   s.trim().replace(/\s+/g, "-").replace(/[^\p{L}\p{N}_.-]/gu, "").replace(/^[.-]+|[.-]+$/g, "").slice(0, 60)
     .replace(/[.-]+$/g, "");
+
+/** The latest answers to each skill's questions in a chat's messages (0.43.0): skill ref -> its answers. */
+export function answeredIn(messages: { role: string; content: Block[] }[]): Record<string, AnswerItem[]> {
+  const out: Record<string, AnswerItem[]> = {};
+  for (const m of messages) {
+    if (m.role !== "user") continue;
+    for (const b of m.content) if (b.type === "answers" && b.skill) out[b.skill] = b.items;
+  }
+  return out;
+}

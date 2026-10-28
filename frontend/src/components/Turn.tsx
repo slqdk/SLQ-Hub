@@ -6,6 +6,7 @@ import { api, mediaUrl, type ArtifactRef, type Skill, type SkillCardData, type S
 import { bytes, seconds } from "../lib/format";
 import { toolAbout, toolLabel, toolOutcome, toolSummary, type Decision, type Item, type ReviewItem,
   type ToolView } from "../lib/turns";
+import { allAnswered, QuestionList } from "./QuestionCard";
 import { useApp } from "../state";
 import { Markdown } from "./Markdown";
 import { ThinkingText } from "./ThinkingText";
@@ -17,6 +18,8 @@ export interface TurnActions {
   live?: boolean;
   /** Answer a call that waits for the user (a person's chat: its device turn); default: the run's approve. */
   approve?: (callId: string, decision: Decision) => Promise<unknown>;
+  /** Answer ask_user's card (0.43.0; a person's chat: its device turn); default: the run's answer. */
+  answer?: (callId: string, answers: string[][]) => Promise<unknown>;
   /** A new chat with this skill chosen (the skill card, once the skill is added). */
   chatWithSkill?: (ref: string) => void;
   /** End the thinking of the step that thinks now (0.30.0); resolves to whether it ended. */
@@ -168,7 +171,8 @@ function ReviewRow({ item, actions }: { item: ReviewItem; actions: TurnActions }
   );
 }
 
-const STATE_LAMP: Record<string, LampState> = { streaming: "wait", running: "run", approval: "act", done: "off", error: "fault" };
+const STATE_LAMP: Record<string, LampState> = { streaming: "wait", running: "run", approval: "act", question: "act",
+  done: "off", error: "fault" };
 
 function ToolRow({ tool, actions }: { tool: ToolView; actions: TurnActions }) {
   const [open, setOpen] = useState(false);
@@ -191,12 +195,16 @@ function ToolRow({ tool, actions }: { tool: ToolView; actions: TurnActions }) {
           {!about && <span className="tool-name">{tool.subagent ? `Subagent: ${tool.subagent.description}` : toolLabel(tool.name)}</span>}
         </span>
         {about ? <span className="tool-text"><span className="tool-name">{about}</span>{sum}</span> : sum}
-        <span className="tool-time">{tool.state === "approval" ? "waiting for you" : tool.seconds != null ? seconds(tool.seconds)
+        <span className="tool-time">{tool.state === "approval" || tool.state === "question" ? "waiting for you"
+          : tool.seconds != null ? seconds(tool.seconds)
           : busy ? (tool.progress ? `${tool.progress.value}/${tool.progress.max}` : "running") : ""}</span>
       </button>
       {tool.state === "approval" && (actions.approve || actions.runId) && <Approval tool={tool}
         answer={actions.approve ?? ((callId, decision) => api(`/hub/api/runs/${actions.runId}/approve`,
           { body: { call_id: callId, decision } }))} />}
+      {tool.state === "question" && tool.questions && (actions.answer || actions.runId) && <AskCard tool={tool}
+        answer={actions.answer ?? ((callId, answers) => api(`/hub/api/runs/${actions.runId}/answer`,
+          { body: { call_id: callId, answers } }))} />}
       {tool.children && tool.children.length > 0 && (open || busy) && (
         <div className="tool-body"><div className="sub-run"><Items items={tool.children} actions={{ ...actions }} /></div></div>
       )}
@@ -232,6 +240,35 @@ function ToolDetail({ tool }: { tool: ToolView }) {
         {hits.map((h, i) => <div key={i}>[{i + 1}] {h.filename}{h.page ? `, page ${h.page}` : ""} <span className="faint">({h.via.join(" + ")})</span></div>)}
       </div>}
       {tool.images && tool.images.length > 0 && <ToolImages images={tool.images} />}
+    </div>
+  );
+}
+
+/** ask_user's card (0.43.0): the questions with their options as buttons, the user's own words allowed. */
+function AskCard({ tool, answer }: { tool: ToolView; answer: (callId: string, answers: string[][]) => Promise<unknown> }) {
+  const { toast } = useApp();
+  const questions = (tool.questions ?? []).map((q) => ({ text: q.question, options: q.options, multi: q.multi }));
+  const [answers, setAnswers] = useState<string[][]>(questions.map(() => []));
+  const [busy, setBusy] = useState(false);
+  const send = async () => {
+    setBusy(true);
+    try {
+      await answer(tool.id, answers);
+    } catch (e) {
+      toast((e as Error).message, "fault");
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="tool-body">
+      <div className="qcard ask" role="group" aria-label="The assistant asks">
+        <QuestionList questions={questions} answers={answers} onChange={setAnswers} own disabled={busy} />
+        <div className="q-foot">
+          <button className="btn primary small" disabled={busy || !allAnswered(questions, answers)} onClick={send}>
+            Send the answer</button>
+          <span className="faint small">or write it in a message</span>
+        </div>
+      </div>
     </div>
   );
 }

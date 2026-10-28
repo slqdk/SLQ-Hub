@@ -22,6 +22,33 @@ SHORTENED = re.compile(r"\n?\[(?:\.\.\. )?(\d+) (?:more )?characters - [^;\]]*; 
 LOOK_IT_UP = "look it up whole with chat_history, or call the tool again"
 
 
+def answers_block(raw) -> dict | None:
+    """The user's answers to a skill's questions (0.43.0) as a message block, cleaned: {"type": "answers", "skill",
+    "title", "items": [{"q", "a": [...]}]} - None when there is nothing usable."""
+    if not isinstance(raw, dict):
+        return None
+    items = []
+    for it in (raw.get("items") or [])[:10]:
+        if not isinstance(it, dict) or not isinstance(it.get("q"), str):
+            continue
+        a = it.get("a")
+        a = [a] if isinstance(a, str) else a if isinstance(a, list) else []
+        a = [str(x).strip()[:200] for x in a if isinstance(x, (str, int, float)) and str(x).strip()][:12]
+        if it["q"].strip() and a:
+            items.append({"q": it["q"].strip()[:300], "a": a})
+    if not items:
+        return None
+    return {"type": "answers", "skill": str(raw.get("skill") or "")[:200], "title": str(raw.get("title") or "")[:200],
+            "items": items}
+
+
+def answers_text(b: dict) -> str:
+    """How the model reads the user's answers to a skill's questions."""
+    lines = "\n".join(f"- {it['q']} {', '.join(it['a'])}" for it in b.get("items") or [])
+    title = b.get("title") or b.get("skill") or "the skill"
+    return (f"[The user's answers to the questions of the skill \"{title}\" - use them for its task:\n{lines}]")
+
+
 def renamed(b: dict) -> str:
     """An attachment saved under another name because an older, different file has its name (0.35.2): chat 138 was
     told "unpack .hub/attachments/cm98-reference.zip" and unpacked the older kit of that name, not the one attached."""
@@ -192,6 +219,8 @@ def to_model_messages(rows: list[dict], current_run: str | None = None, keep_ima
                                                           f"{renamed(b)}]"})
                 elif t == "file_ref":
                     docs.append({"type": "text", "text": _file_ref(b, fresh)})
+                elif t == "answers":
+                    parts.append({"type": "text", "text": answers_text(b)})
                 elif t == "continue":
                     parts.append({"type": "text", "text": continue_text(b)})
                 elif t == "handover":

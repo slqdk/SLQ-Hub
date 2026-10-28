@@ -2,7 +2,7 @@
 // (history) or from a run's live events - so both render the same way.
 import type { ArtifactRef, Block, Display, ImageRef, Message, RunEvent, RunRecord, SkillCardData, Todo } from "./api";
 
-export type ToolState = "streaming" | "running" | "approval" | "done" | "error";
+export type ToolState = "streaming" | "running" | "approval" | "question" | "done" | "error";
 
 export interface ToolView {
   id: string;
@@ -20,6 +20,7 @@ export interface ToolView {
   ask?: AskInfo;                               // what the turn asks before this call (internet set to ask first)
   canChat?: boolean;                           // "Allow in this chat" is offered (the owner's chats)
   sends?: string[];                            // files from the chat's folder whose content goes with the call (MCP)
+  questions?: { question: string; options: string[]; multi?: boolean }[];   // ask_user's card, waiting (0.43.0)
 }
 
 /** Internet for the assistant, asking first: what a call wants and what "always" would allow. */
@@ -269,6 +270,19 @@ function applyStream(items: Item[], ev: RunEvent): void {
       }
       break;
     }
+    case "questions_needed": {             // ask_user's card (0.43.0): the turn waits for the answer
+      const t = findTool(items, d.id);
+      if (t) {
+        t.state = "question";
+        t.questions = Array.isArray(d.questions) ? d.questions : [];
+      }
+      break;
+    }
+    case "questions_answered": {
+      const t = findTool(items, d.id);
+      if (t && t.state === "question") t.state = "running";
+      break;
+    }
     case "approval_answered": {            // the buttons go; a reload replays this too
       const t = findTool(items, d.id);
       if (t && t.state === "approval") t.state = "running";
@@ -460,6 +474,10 @@ export function toolOutcome(t: ToolView): string {
       const hits = r.split("\n").filter((x) => /:\d+:/.test(x)).length;
       return hits ? `${plural(hits, "match")} for ${s("pattern")}` : oneLine(first);
     }
+    case "ask_user": {
+      const answers = t.display?.answers;
+      return Array.isArray(answers) && answers.length ? answers.map((x) => x.join(", ") || "-").join(" · ") : oneLine(first);
+    }
     case "list_files": return `${s("path") || "the folder"} - ${plural(r.split("\n").filter((x) => x.trim()).length, "entry")}`
       .replace("entrys", "entries");
     default: return oneLine(first);
@@ -491,6 +509,10 @@ export function toolSummary(t: ToolView): string {
     case "skill": return s("name");
     case "artifact": return s("title") || s("id");
     case "task": return s("description");
+    case "ask_user": {
+      const qs = Array.isArray(a.questions) ? a.questions as { question?: string }[] : [];
+      return (qs[0]?.question ?? "") + (qs.length > 1 ? ` (+${qs.length - 1})` : "");
+    }
     case "escalate": return s("reason");
     default: {
       const first = Object.values(a).find((v) => typeof v === "string");
@@ -500,6 +522,7 @@ export function toolSummary(t: ToolView): string {
 }
 
 export function toolLabel(name: string): string {
+  if (name === "ask_user") return "Question";
   const m = name.match(/^mcp__(.+?)__(.+)$/);
   if (m) return `${m[1]}: ${m[2]}`;
   return name.replace(/_/g, " ");

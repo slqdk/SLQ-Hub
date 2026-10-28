@@ -3,7 +3,7 @@
     cd backend && python -m tests.devserver [--port 8080] [--data /tmp/hub-dev]
 
 Signs in as soren / "correct horse battery". The fake model answers by
-keyword: "files" (writes and runs a script), "install" (code that needs the
+keyword: "files" (writes and runs a script), "ask me" (a question card it waits for), "install" (code that needs the
 internet), "read dr.dk" (web_fetch), "jingle" (a command makes a
 sound, a PDF and notes: the card under the answer), "announce" (speech),
 "song" (music), "horn" (a sound effect), "video" (Wan 2.2 5B: ffmpeg's test
@@ -286,6 +286,12 @@ def responder(body: dict) -> dict:
         return {"content": "The form opens, the greeting shows the name, and the list has the three pumps."}
     if "web picture" in low:                            # a picture from the web in the answer (a link while asking)
         return {"content": "Here is one from the web:\n\n![a red fox](https://example.com/fox.jpg)\n\nThat is all."}
+    if "ask me" in low:                                 # 0.43.0: a question card; the turn waits for the answer
+        if tools_done == 0:
+            return {"content": "A few choices first.", "tool_calls": [{"name": "ask_user", "arguments": {"questions": [
+                {"question": "Which style should the card have?", "options": ["Classic", "Modern", "Cartoon"]},
+                {"question": "Which colours?", "options": ["Red", "Green", "Gold", "Silver"], "multi": True}]}}]}
+        return {"content": "Thanks - I will make it like that."}
     if "plc build" in low:                              # 0.36.0: an MCP tool that takes files; its question lists them
         if tools_done == 0:
             return {"tool_calls": [{"name": "write_file", "arguments": {

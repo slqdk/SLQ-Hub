@@ -5,12 +5,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUp, BookOpen, Brain, Check, Cloud, Cpu, FileText, FolderOpen, Image as ImageIcon, Paperclip, Plus, Settings2,
   Sparkles, Square, Wand2, X } from "lucide-react";
-import { upload, type ModelEntry, type Skill, type Upload } from "../lib/api";
+import { upload, type AnswerItem, type AnswersBlock, type ModelEntry, type Skill, type Upload } from "../lib/api";
 import { byCategory } from "../lib/skills";
 import { LEVEL_LABEL, LEVELS, levelText, type Level } from "../lib/effort";
 import { clearDraft, NEW_SKILL_TEXT, peekDraft, SKILL_MAKER } from "../lib/draft";
 import { bytes } from "../lib/format";
 import { Lamp, MenuButton } from "./ui";
+import { allAnswered, QuestionList } from "./QuestionCard";
 
 export interface ComposerSettings {
   model: string;
@@ -32,9 +33,11 @@ const shortPath = (p: string) => p.split("/").slice(-2).join("/");
 
 export function Composer({ running, onSend, onStop, settings, onSettings, models, pictureModels = [], pictureDefault,
   libraries, skills, placeholder, autoFocus, refs = [], onRemoveRef, onOpenRef, onBrowseFiles, browseLabel,
-  uploader = upload, showLibraries = true, onManageSkills, reviewOnExtra = true }: {
+  uploader = upload, showLibraries = true, onManageSkills, reviewOnExtra = true, answered = {} }: {
   running: boolean;
-  onSend: (text: string, uploads: Upload[]) => Promise<boolean>;
+  /** answers: a chosen skill's questions answered on its card (0.43.0), to go with the message. */
+  onSend: (text: string, uploads: Upload[], answers: AnswersBlock[]) => Promise<boolean>;
+  answered?: Record<string, AnswerItem[]>;   // the latest answers to each skill's questions in this chat
   onStop: () => void;
   settings: ComposerSettings;
   onSettings: (patch: Partial<ComposerSettings>) => void;
@@ -68,6 +71,21 @@ export function Composer({ running, onSend, onStop, settings, onSettings, models
   const chosen = useMemo(() => settings.skills.map((ref) => skills.find((k) => k.ref === ref)
     ?? { ref, title: ref.split("/").pop() ?? ref, description: "", mine: false, builtin: false } as Skill),
   [settings.skills, skills]);
+  // A chosen skill's fixed questions (0.43.0): a card above the message box until they are answered and sent;
+  // then a line with the answers, to change for the next message. Answers already in this chat start closed.
+  const [qa, setQa] = useState<Record<string, { answers: string[][]; open: boolean }>>({});
+  const asking = chosen.filter((k) => (k.questions ?? []).length > 0);
+  const cardOf = (k: Skill) => {
+    if (qa[k.ref]) return qa[k.ref];
+    const qs = k.questions ?? [];
+    const before = answered[k.ref];
+    return before ? { answers: qs.map((q) => before.find((it) => it.q === q.text)?.a ?? q.chosen), open: false }
+      : { answers: qs.map((q) => q.chosen), open: true };
+  };
+  const setCard = (k: Skill, patch: Partial<{ answers: string[][]; open: boolean }>) =>
+    setQa((all) => ({ ...all, [k.ref]: { ...cardOf(k), ...patch } }));
+  const openCards = asking.filter((k) => cardOf(k).open);
+  const unanswered = openCards.filter((k) => !allAnswered(k.questions ?? [], cardOf(k).answers));
   const matches = useMemo(() => {
     if (!slash) return [];
     const q = slash.query;
@@ -144,16 +162,20 @@ export function Composer({ running, onSend, onStop, settings, onSettings, models
 
   const ready = pending.filter((p) => p.state === "done" && p.upload).map((p) => p.upload!);
   const uploading = pending.some((p) => p.state === "uploading");
-  const hasContent = text.trim().length > 0 || ready.length > 0 || refs.length > 0;
+  const hasContent = text.trim().length > 0 || ready.length > 0 || refs.length > 0 || openCards.length > 0;
   // While a turn works, a message waits for it: the model reads it after the step it is on.
-  const canSend = !sending && !uploading && hasContent;
+  const canSend = !sending && !uploading && hasContent && unanswered.length === 0;
 
   const send = async () => {
     if (!canSend) return;
     setSending(true);
-    const ok = await onSend(text, ready);
+    const answers: AnswersBlock[] = openCards.map((k) => ({ type: "answers", skill: k.ref, title: k.title,
+      items: (k.questions ?? []).map((q, i) => ({ q: q.text, a: cardOf(k).answers[i] ?? [] })) }));
+    const ok = await onSend(text, ready, answers);
     setSending(false);
     if (ok) {
+      if (openCards.length) setQa((all) => ({ ...all, ...Object.fromEntries(openCards.map((k) =>
+        [k.ref, { ...cardOf(k), open: false }])) }));
       setText("");
       pending.forEach((p) => p.preview && URL.revokeObjectURL(p.preview));
       setPending([]);
@@ -186,6 +208,27 @@ export function Composer({ running, onSend, onStop, settings, onSettings, models
           ))}
         </div>
       )}
+      {asking.map((k) => {
+        const card = cardOf(k);
+        const qs = k.questions ?? [];
+        const done = qs.filter((_, i) => (card.answers[i] ?? []).length > 0).length;
+        if (!card.open) return (
+          <div className="qcard compact" key={`q:${k.ref}`}>
+            <Sparkles size={14} /><b>{k.title}</b>
+            <span className="ellipsis">{done ? card.answers.map((a) => a.join(", ") || "-").join(" · ") : "Questions not answered"}</span>
+            <button className="btn small" onClick={() => setCard(k, { open: true })}>{done ? "Change" : "Answer"}</button>
+          </div>
+        );
+        return (
+          <div className="qcard" key={`q:${k.ref}`} role="group" aria-label={`Questions of ${k.title}`}>
+            <div className="qcard-head"><Sparkles size={14} /><b className="grow ellipsis">{k.title}</b>
+              <span className="faint small">{done} of {qs.length} answered</span>
+              <button className="icon-btn small" title="Not now - send without the answers" aria-label="Not now"
+                onClick={() => setCard(k, { open: false })}><X size={13} /></button></div>
+            <QuestionList questions={qs} answers={card.answers} onChange={(answers) => setCard(k, { answers })} />
+          </div>
+        );
+      })}
       {(pending.length > 0 || refs.length > 0 || chosen.length > 0) && (
         <div className="pending">
           {chosen.map((k) => (
@@ -216,7 +259,7 @@ export function Composer({ running, onSend, onStop, settings, onSettings, models
           ))}
         </div>
       )}
-      <textarea ref={ta} value={text} rows={1} placeholder={placeholder ?? "Write to the assistant"}
+      <textarea ref={ta} value={text} rows={1} placeholder={openCards.length ? "Anything to add? (optional)" : placeholder ?? "Write to the assistant"}
         onChange={(e) => {
           setText(e.target.value);
           // (the list shows once there are skills that match: also when the list of skills arrives after the "/")
@@ -382,7 +425,8 @@ export function Composer({ running, onSend, onStop, settings, onSettings, models
         {running && <button className="send stop" onClick={onStop} aria-label="Stop" title="Stop"><Square size={14} fill="currentColor" /></button>}
         {(!running || hasContent) && (
           <button className="send" onClick={send} disabled={!canSend} aria-label={running ? "Send while it works" : "Send"}
-            title={running ? "It reads this after the step it is on" : undefined}><ArrowUp size={18} /></button>
+            title={unanswered.length ? `Answer the questions of ${unanswered[0].title} first`
+              : running ? "It reads this after the step it is on" : undefined}><ArrowUp size={18} /></button>
         )}
       </div>
     </div>

@@ -54,7 +54,7 @@ MAX_OUT_TOTAL = 250 * 1024 * 1024
 MAX_OUT_FILES = 50
 MAX_ACTIVE = 2                         # turns one person may have running at once (a phone and a PC)
 MAX_WAITING = 4                        # finished turns of one person still waiting for their device; older go
-BLOCK_TYPES = {"text", "image", "file", "thinking", "tool_call", "tool_result", "continue"}
+BLOCK_TYPES = {"text", "image", "file", "thinking", "tool_call", "tool_result", "continue", "answers"}
 SETTING_KEYS = {"model", "thinking", "effort", "image_model", "level"}
 LEDGERS = "device-turns"               # data/device-turns/<turn>: the stored files a turn will delete, for a sweep
                                        # after a restart (not in the turn's folder: the person's code may write there)
@@ -347,6 +347,11 @@ def prepare(turn: DeviceTurn, body: dict, wd: projects.Workdir) -> list[dict]:
                 b["images"] = [i for i in b["images"] if i.get("sha")]
             elif b["type"] == "file":
                 b = {k: v for k, v in b.items() if k != "data"}
+            elif b["type"] == "answers":                        # a skill's questions, answered on its card
+                from .context import answers_block
+                b = answers_block(b)
+                if b is None:
+                    continue
             elif b["type"] == "continue":                       # Continue under an unfinished turn: only why
                 steps = b.get("steps")
                 b = {"type": "continue", "reason": "limit" if b.get("reason") == "limit" else "stopped",
@@ -641,6 +646,24 @@ async def approve(turn_id: str, request: Request):
         raise HTTPException(400, "call_id and a decision of allow or deny")
     if not turn.run.answer_approval(str(body["call_id"]), body["decision"]):
         raise HTTPException(404, "that tool call is not waiting for an answer")
+    return {"ok": True}
+
+
+@router.post("/hub/api/device/turns/{turn_id}/answer")
+async def answer(turn_id: str, request: Request):
+    """The person's answers to an ask_user card (0.43.0)."""
+    turn = _turns(request).get(turn_id, _person(request))
+    if turn is None:
+        raise HTTPException(404, "no such answer being written")
+    try:
+        body = json.loads(await request.body())
+    except ValueError:
+        raise HTTPException(400, "the body must be JSON")
+    from ..chats.routes import clean_answers
+    if not isinstance(body, dict) or not body.get("call_id") or not isinstance(body.get("answers"), list):
+        raise HTTPException(400, "call_id and answers")
+    if not turn.run.answer_questions(str(body["call_id"]), clean_answers(body["answers"])):
+        raise HTTPException(404, "that card is not waiting for an answer")
     return {"ok": True}
 
 

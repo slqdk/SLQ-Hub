@@ -923,3 +923,26 @@ div.tests-result-head { cursor: default; }
   .skill-row { gap: 8px; padding: 10px; }
 }
 @media (min-width: 861px) { .scrim { display: none; } }
+
+/* Question cards (0.43.0): a skill's questions in the message box, ask_user in an answer */
+.qcard { border: 1px solid var(--rule); border-radius: 10px; background: var(--paper); padding: 10px 12px; margin: 0 6px 8px; }
+.qcard-head { display: flex; align-items: center; gap: 8px; font-size: 13.5px; margin-bottom: 6px; }
+.qcard-head .grow { flex: 1; min-width: 0; }
+.qcard.compact { display: flex; align-items: center; gap: 8px; padding: 6px 10px; font-size: 13px; }
+.qcard.compact .ellipsis { flex: 1; min-width: 0; color: var(--ink-2); }
+.qlist { display: flex; flex-direction: column; gap: 10px; }
+.q-text { font-size: 14px; font-weight: 600; margin-bottom: 5px; }
+.q-options { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.q-option { display: inline-flex; align-items: center; gap: 4px; min-height: 32px; padding: 4px 12px; border-radius: 16px;
+  border: 1px solid var(--rule); background: var(--canvas, transparent); color: var(--ink); font: inherit; font-size: 13.5px;
+  cursor: pointer; }
+.q-option:hover { border-color: var(--act); }
+.q-option.on { background: var(--act-wash); border-color: var(--act); color: var(--act); font-weight: 600; }
+.q-own { flex: 1 1 160px; min-width: 140px; height: 32px; font-size: 13.5px; }
+.qcard.ask { margin: 0; }
+.qcard .q-foot { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+.msg-answers { border: 1px solid var(--rule); border-radius: 10px; padding: 8px 12px; background: var(--paper);
+  font-size: 13.5px; max-width: min(560px, 80vw); }
+.msg-answers .label { display: flex; align-items: center; gap: 6px; font-weight: 600; margin-bottom: 4px; }
+.msg-answers .item { color: var(--ink-2); }
+.msg-answers .item b { color: var(--ink); font-weight: 600; }

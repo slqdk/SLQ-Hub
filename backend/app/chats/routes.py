@@ -187,6 +187,7 @@ class MessageIn(BaseModel):
     attachments: list[str] = []          # upload sha256s
     refs: list[str] = []                 # files of the chat's working folder (the project's files)
     options: dict = {}                   # model, thinking, effort for this turn
+    answers: list[dict] = []             # 0.43.0: the user's answers to chosen skills' questions
 
 
 def _start(request: Request, chat_id: int, options: dict) -> str:
@@ -218,14 +219,16 @@ async def post_message(chat_id: int, body: MessageIn, request: Request):
     active = agent.runs.active_for_chat(chat_id)
     if active and len(active.inbox) >= 10:
         raise HTTPException(409, "Ten messages are already waiting for this turn")
-    if not body.text.strip() and not body.attachments and not body.refs:
+    from ..agent.context import CHARS_PER_TOKEN, answers_block
+    answers = [a for a in (answers_block(x) for x in body.answers[:5]) if a]
+    if not body.text.strip() and not body.attachments and not body.refs and not answers:
         raise HTTPException(400, "the message is empty")
-    from ..agent.context import CHARS_PER_TOKEN
     from ..agent.loop import REF_SHARE, attachment_block, ref_blocks
     wd = agent.workdir(chat)
     blocks: list[dict] = []
     if body.text.strip():
         blocks.append({"type": "text", "text": body.text})
+    blocks.extend(answers)                               # a skill's fixed questions, answered on its card
     for sha in body.attachments[:50]:
         up = store.get_upload(sha)
         if not up:
@@ -249,7 +252,7 @@ async def post_message(chat_id: int, body: MessageIn, request: Request):
     active = agent.runs.active_for_chat(chat_id)
     if active is not None:
         item = {"id": "note_" + secrets.token_hex(4), "blocks": blocks}
-        active.inbox.append(item)
+        active.queue(item)                               # (a question card waiting takes it as the answer)
         active.emit("user_queued", id=item["id"], content=blocks)
         return {"message": None, "run_id": active.id, "queued": item["id"]}
     msg = store.add_message(chat_id, "user", blocks)     # attachments are copied to .hub/ (not synced)
@@ -586,6 +589,29 @@ async def approve(run_id: str, body: Approval, request: Request):
         raise HTTPException(400, "no such run, or decision is not allow/chat/always/deny")
     if not run.answer_approval(body.call_id, body.decision):
         raise HTTPException(404, "that tool call is not waiting for an answer")
+    return {"ok": True}
+
+
+class Answers(BaseModel):
+    call_id: str
+    answers: list                        # one list of chosen (or written) options per question
+
+
+def clean_answers(raw: list, questions: int = 4) -> list[list[str]]:
+    """ask_user's answers as the card sends them: one list of texts per question, cut to size."""
+    out = []
+    for a in (raw or [])[:questions]:
+        a = [a] if isinstance(a, str) else a if isinstance(a, list) else []
+        out.append([str(x).strip()[:300] for x in a if isinstance(x, (str, int, float)) and str(x).strip()][:12])
+    return out
+
+
+@router.post("/runs/{run_id}/answer")
+async def answer(run_id: str, body: Answers, request: Request):
+    """The user's answers to an ask_user card (0.43.0)."""
+    run = _agent(request).runs.get(run_id)
+    if run is None or not run.answer_questions(body.call_id, clean_answers(body.answers)):
+        raise HTTPException(404, "that card is not waiting for an answer")
     return {"ok": True}
 
 

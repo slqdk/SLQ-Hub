@@ -5,8 +5,7 @@ import { levelOf } from "../lib/effort";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CircleHelp, Download, FileText, FolderOpen, KeyRound, LogOut, Menu, MessageSquarePlus, MoreHorizontal, Pencil,
   Search, Sparkles, Trash2, Upload as UploadIcon, User as UserIcon, X } from "lucide-react";
-import { api, setLocalMedia, type Artifact, type ArtifactRef, type Block, type ChatSettings, type Message, type ModelEntry,
-  type ProducedFile, type Settings, type Skill, type Upload } from "../lib/api";
+import { api, setLocalMedia, type Artifact, type ArtifactRef, type Block, type ChatSettings, type Message, type ModelEntry, type ProducedFile, type Settings, type Skill, type Upload, type AnswersBlock, answeredIn } from "../lib/api";
 import { bytes, dateGroup } from "../lib/format";
 import { saveText } from "../lib/download";
 import { buildTurns, liveSegments, newLive, reduceLive, unfinished, type AssistantTurn, type LiveRun,
@@ -326,7 +325,7 @@ export function PersonApp() {
     return { sha: key, name: fname, mime, size: blob.size, width: null, height: null, url };
   };
 
-  const send = async (text: string, uploads: Upload[]): Promise<boolean> => {
+  const send = async (text: string, uploads: Upload[], answers: AnswersBlock[] = []): Promise<boolean> => {
     if (busy) {
       toast("Wait for the answer, or stop it, before you write again.", "info");
       return false;
@@ -338,6 +337,7 @@ export function PersonApp() {
       const taken = new Set((await S.listFiles(meta.id)).map((f) => f.path));
       const blocks: Block[] = [];
       if (text.trim()) blocks.push({ type: "text", text });
+      blocks.push(...answers);                              // a skill's questions, answered on its card (0.43.0)
       for (const u of uploads) {
         const b = await S.getBlob(u.sha);
         if (!b) continue;
@@ -716,6 +716,8 @@ export function PersonApp() {
                         // when the turn asks first (internet), she answers once: "always" is the owner's
                         approve: (callId, decision) => api(`/hub/api/device/turns/${liveHere.runId}/approve`,
                           { body: { call_id: callId, decision: decision === "deny" ? "deny" : "allow" } }),
+                        answer: (callId, answers) => api(`/hub/api/device/turns/${liveHere.runId}/answer`,
+                          { body: { call_id: callId, answers } }),
                         stopThinking: () => api(`/hub/api/device/turns/${liveHere.runId}/stop-thinking`,
                           { method: "POST" }) }} />
                       {i === segs.length - 1 && state}
@@ -731,8 +733,8 @@ export function PersonApp() {
 
         <div className="composer-wrap">
           <div className="column">
-            <Composer running={running} onSend={send} onStop={stop} settings={effective} onSettings={changeSettings}
-              reviewOnExtra={false}
+            <Composer key={chat?.meta.id ?? "new"} running={running} onSend={send} onStop={stop} settings={effective}
+              onSettings={changeSettings} reviewOnExtra={false} answered={answeredIn(chat?.data.messages ?? [])}
               models={llms} pictureModels={pictureModels} pictureDefault={pictureDefault} libraries={[]} skills={skills}
               autoFocus showLibraries={false} uploader={uploader}
               onManageSkills={() => { setPanel(null); setHelp(null); setSkillsPage(true); }}

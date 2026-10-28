@@ -1,9 +1,7 @@
 // A chat: history, the live turn, and the composer.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
-import { Cloud, Copy, Download, FileText, FolderInput, FolderOpen, Menu, MessageSquarePlus, MoreHorizontal, NotebookPen, Pencil,
-  RotateCcw, ShieldCheck, Trash2 } from "lucide-react";
-import { api, mediaUrl, type ArtifactRef, type Block, type ChatData, type ChatSettings, type Library, type Message,
-  type ModelEntry, type ProducedFile, type RunEvent, type RunRecord, type Settings, type Skill, type Upload } from "../lib/api";
+import { Cloud, Copy, Download, FileText, FolderInput, FolderOpen, Menu, MessageSquarePlus, MoreHorizontal, NotebookPen, Pencil, RotateCcw, ShieldCheck, Sparkles, Trash2 } from "lucide-react";
+import { api, mediaUrl, type ArtifactRef, type Block, type ChatData, type ChatSettings, type Library, type Message, type ModelEntry, type ProducedFile, type RunEvent, type RunRecord, type Settings, type Skill, type Upload, type AnswersBlock, answeredIn } from "../lib/api";
 import { clearDraftSkills, peekDraftSkills, setDraft as setMessageDraft } from "../lib/draft";
 import { levelOf } from "../lib/effort";
 import { energy, money, seconds, tokens } from "../lib/format";
@@ -259,7 +257,7 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
     }
   };
 
-  const send = async (text: string, uploads: Upload[]): Promise<boolean> => {
+  const send = async (text: string, uploads: Upload[], answers: AnswersBlock[] = []): Promise<boolean> => {
     try {
       let id = chatId;
       if (!id) {
@@ -268,7 +266,7 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
         id = created.id;
       }
       const r = await api<{ message: Message | null; run_id: string; queued?: string }>(`/hub/api/chats/${id}/messages`, {
-        body: { text, attachments: uploads.map((u) => u.sha), refs } });
+        body: { text, attachments: uploads.map((u) => u.sha), refs, answers } });
       onRefs([]);
       if (r.queued || !r.message) {                    // the turn at work reads it after the step it is on
         stick.current = true;
@@ -532,6 +530,7 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
       <div className="composer-wrap">
         <div className="column">
           <Composer running={running} onSend={send} onStop={stop} settings={effective} onSettings={changeSettings}
+            answered={answeredIn(data?.messages ?? [])}
             models={chatModels} pictureModels={pictureModels} pictureDefault={pictureDefault} libraries={libraries} skills={skills} autoFocus
             placeholder={running ? "Add something while it works" : project ? `Ask about ${project.name}, or give it a task` : undefined}
             refs={folder ? refs : []} onRemoveRef={(p) => onRefs((r) => r.filter((x) => x !== p))} onOpenRef={(p) => showFiles(p)}
@@ -598,6 +597,7 @@ export function UserMessage({ message, editing, canEdit, onEdit, onCancel, onSav
   onOpenFile?: (path: string) => void }) {
   const text = message.content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join("\n\n");
   const files = message.content.filter((b) => b.type === "image" || b.type === "file" || b.type === "file_ref");
+  const answers = message.content.filter((b): b is AnswersBlock => b.type === "answers");
   const whileWorking = message.content.some((b) => b.type === "text" && b.while_working);
   const [value, setValue] = useState(text);
   if (isContinue(message)) return <div className="msg-continued" role="note">
@@ -626,6 +626,12 @@ export function UserMessage({ message, editing, canEdit, onEdit, onCancel, onSav
           ) : null)}
         </div>
       )}
+      {answers.map((b, i) => (
+        <div key={`a${i}`} className="msg-answers">
+          <div className="label"><Sparkles size={13} /> {b.title || b.skill}</div>
+          {b.items.map((it, j) => <div key={j} className="item">{it.q} <b>{it.a.join(", ")}</b></div>)}
+        </div>
+      ))}
       {editing ? (
         <div className="stack" style={{ width: "min(640px, 80vw)" }}>
           <textarea className="textarea" value={value} autoFocus onChange={(e) => setValue(e.target.value)} rows={4} />

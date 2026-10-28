@@ -179,6 +179,15 @@ export const SECTIONS: HelpSection[] = [
         ],
       },
       {
+        id: "questions",
+        tools: ["ask_user"],
+        title: "Questions with buttons",
+        what: "When a choice is yours and there are real options - a style, a size, which of three - the assistant "
+          + "asks on a card with buttons and waits for your answer. You can also write your own answer on the card, "
+          + "or simply write a message instead.",
+        examples: [{ text: "Make a birthday invitation - ask me about the style and the colours first" }],
+      },
+      {
         id: "long",
         tools: ["chat_history"],
         title: "Long chats",
@@ -773,6 +782,9 @@ export const SECTIONS: HelpSection[] = [
         what: "A skill is used only in the chats you choose it for - nothing is picked on its own. The assistant then "
           + "follows it, and reads its files when it needs them.",
         how: ["Type / in the message box and the skill's name, or press the Skills button by the message box.",
+          "A skill with fixed questions shows them on a card above the message box when you choose it: pick the "
+            + "answers, add a picture if it needs one, and send - no text needed. The answers stay for the next "
+            + "messages; Change gives the card back.",
           "A project's skills (its page, Settings) are used in all the project's chats."],
         tips: ["Two or three skills at a time are plenty: each one takes room in what the assistant reads."],
       },

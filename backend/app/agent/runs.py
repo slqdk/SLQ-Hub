@@ -21,6 +21,7 @@ class Run:
         self.ended: float | None = None
         self.task: asyncio.Task | None = None
         self.approvals: dict[str, asyncio.Future] = {}
+        self.questions: dict[str, asyncio.Future] = {}       # ask_user's cards waiting for the user (0.43.0)
         # What the user sent while the turn works ({"id", "blocks"}): the loop hands it to the model after the
         # step it is on; whatever is left when the turn ends starts the next turn.
         self.inbox: list[dict] = []
@@ -34,6 +35,35 @@ class Run:
     def take_inbox(self) -> list[dict]:
         items, self.inbox = self.inbox, []
         return items
+
+    def queue(self, item: dict) -> None:
+        """A message the user sent while the turn works. A question card waiting for them takes it as their
+        answer in their own words: the card is left, and the model reads the message after this step."""
+        self.inbox.append(item)
+        for fut in list(self.questions.values()):
+            if not fut.done():
+                fut.set_result({"typed": True})
+
+    async def ask_questions(self, call_id: str, questions: list[dict], timeout: float = 1800) -> dict | None:
+        """Wait for the user's answers to ask_user's card: {"answers": [[...], ...]} (one list per question), or
+        {"typed": True} when they wrote a message instead; None when no answer came in `timeout`."""
+        fut = asyncio.get_running_loop().create_future()
+        self.questions[call_id] = fut
+        self.emit("questions_needed", id=call_id, questions=questions)
+        try:
+            return await asyncio.wait_for(fut, timeout)
+        except asyncio.TimeoutError:
+            return None
+        finally:
+            self.questions.pop(call_id, None)
+            self.emit("questions_answered", id=call_id)
+
+    def answer_questions(self, call_id: str, answers: list) -> bool:
+        fut = self.questions.get(call_id)
+        if fut and not fut.done():
+            fut.set_result({"answers": answers})
+            return True
+        return False
 
     def emit(self, kind: str, **data) -> dict:
         self._seq += 1

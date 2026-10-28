@@ -35,6 +35,56 @@ MAX_FILES = 500
 DRAFT_DAYS = 14
 REF_RE = re.compile(r"^(?:(?P<hub>hub)/|@(?P<user>\d+)/)?(?P<name>[a-z0-9][a-z0-9._-]{0,63})$")
 CATEGORY_MAX = 40          # characters of a category's name (0.41.0)
+FENCE_RE = re.compile(r"^(`{3,}|~{3,})\s*([\w-]*)")
+MAX_QUESTIONS, MAX_OPTIONS = 10, 12
+
+
+def _questions_lines(body: str) -> list[str] | None:
+    """The lines of the first ```questions block that is not inside another fence (an example of one in a
+    ```` fence - the skill maker's own instructions show one - is not the skill's)."""
+    fence, lines = "", None
+    for line in (body or "").splitlines():
+        m = FENCE_RE.match(line)
+        if lines is not None:                       # in the block: to its closing ```
+            if line.strip() == "```":
+                return lines
+            lines.append(line)
+        elif fence:                                 # in another fence: to its own closing
+            if m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence) and not m.group(2):
+                fence = ""
+        elif m:
+            if m.group(1) == "```" and m.group(2) == "questions":
+                lines = []
+            else:
+                fence = m.group(1)
+    return None
+
+
+def parse_questions(body: str) -> list[dict]:
+    """A skill's questions for the user (0.43.0): the first ```questions block of its SKILL.md, one question a line -
+    the question, then its options, all split by | ; * before an option chooses it from the start, + before the
+    question lets the user choose several; # starts a comment. The chat shows them as a card when the skill is
+    chosen, and the answers go with the message. [{"text", "options", "chosen", "multi"}]; lines that are not a
+    question with 2 options or more are left out."""
+    block = _questions_lines(body)
+    if not block:
+        return []
+    out: list[dict] = []
+    for line in block:
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        multi = line.startswith("+")
+        parts = [x.strip() for x in line.lstrip("+").split("|")]
+        text, raw = parts[0][:200], [x for x in parts[1:] if x.lstrip("*").strip()]
+        options = [x.lstrip("*").strip()[:80] for x in raw][:MAX_OPTIONS]
+        chosen = [x.lstrip("*").strip()[:80] for x in raw[:MAX_OPTIONS] if x.startswith("*")]
+        if not text or len(options) < 2 or len(set(options)) != len(options):
+            continue
+        out.append({"text": text, "options": options, "chosen": chosen if multi else chosen[:1], "multi": multi})
+        if len(out) >= MAX_QUESTIONS:
+            break
+    return out
 
 
 def parse_front_matter(text: str) -> tuple[dict, str]:
@@ -233,7 +283,7 @@ class Skills:
 
     def _entry(self, d: Path, kind: str, person: int | None, shared: bool, mine: bool,
                category: str = "") -> dict:
-        meta, _ = parse_front_matter((d / "SKILL.md").read_text(encoding="utf-8", errors="replace"))
+        meta, body = parse_front_matter((d / "SKILL.md").read_text(encoding="utf-8", errors="replace"))
         files = sorted(p.relative_to(d).as_posix() for p in d.rglob("*")
                        if p.is_file() and p.name != "SKILL.md" and not p.name.startswith("."))
         size = sum(p.stat().st_size for p in d.rglob("*") if p.is_file())
@@ -242,6 +292,7 @@ class Skills:
         return {"ref": ref_of(person, d.name, kind == "hub"), "name": d.name, "title": title,
                 "description": desc[:1024], "files": files[:200], "size": size, "kind": kind,
                 "owner_id": person, "mine": mine, "shared": shared, "builtin": kind == "hub", "category": category,
+                "questions": parse_questions(body),
                 "updated": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime((d / "SKILL.md").stat().st_mtime)),
                 # older name for the same: shared with the family (the composer once listed "switched off" ones)
                 "enabled": shared}

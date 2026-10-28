@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.42.0, 2026-10-28)
+## State (0.43.0, 2026-10-28)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -378,6 +378,17 @@ an `about` the chat shows at the head of the row (`tools/base.py` ABOUT; bash
 requires it, so llama-server's grammar should make Qwen write it - not seen on
 the card yet). Old chats get the outcome line too; the about only where the
 model gave one.
+0.43.0, Søren: question cards "ligesom du har, men kun hvis der er
+deciderede valgmuligheder", and fixed skills ("Billede med Juletema": a fixed
+instruction plus questions with options, the user uploads a picture without
+text). `ask_user` (tools/ask.py) waits on `Run.ask_questions` (30 minutes; a
+message written meanwhile answers it: `Run.queue`); `/runs/{id}/answer` and
+the device turn's `/answer`. A skill's ```questions block (skills.py
+`parse_questions`, not inside another fence) is shown by the composer as a
+card; answers travel as an `answers` block (context.py renders it for the
+model; people's devices may send it). Seen in a browser on the dev server;
+not on the VM - whether Qwen uses ask_user only for real options is the thing
+to watch (export a chat where it asks too much or not at all).
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
 host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU

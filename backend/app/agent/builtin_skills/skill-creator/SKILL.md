@@ -78,6 +78,23 @@ Write in the language the user writes in, unless they ask for another. The name 
 To keep a file as it is (an Excel template, a logo), do not rewrite it: name it in `include` when you call
 `skill_propose` (step 6); it goes into `assets/`.
 
+**Fixed questions.** When the skill always needs the same few choices from the user (how many, which style, which
+colour), put them in a `questions` block in `SKILL.md`. When the skill is chosen, the chat shows them as a card
+with buttons, and the answers come with the user's message - the user need not write anything else. One question
+a line: the question, then its options, all split by `|`; `*` before an option picks it from the start; `+` before
+the question lets the user choose several:
+
+````
+```questions
+How many elves should be in the picture? | 0 | 1 | *2 | 3
+Should there be snow? | Yes | No
++ Which colours? | *Red | Green | Gold
+```
+````
+
+Only real options (2-12 each, at most 10 questions); what is open stays a question for the conversation. Say in
+the instructions how each answer is used ("put that many elves in the picture").
+
 ## 5. Try it
 
 Follow your own `SKILL.md` once on a realistic request (one the user gave, or one you make up) and show the user

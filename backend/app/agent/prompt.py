@@ -216,6 +216,9 @@ def skills_text(skills: list[dict]) -> str:
             where = (f"\nIts other files: {shown}. Read one with skill(name=\"{s['ref']}\", file=\"...\"); its "
                      f"folder, for code or to improve it: .hub/skills/{s['dir']}/ in the working folder.")
         body = s.get("body") or ""
+        if s.get("questions"):                    # 0.43.0: the chat asks them on a card when the skill is chosen
+            where += ("\nIts questions (the ```questions block) are put to the user on a card in the chat: their "
+                      "answers come with their message. Use them; ask with ask_user only what they leave open.")
         if len(body) <= room:
             out.append(f"\n## Skill: {s['title']} ({s['ref']})\n{body}{where}")
             room -= len(body)
