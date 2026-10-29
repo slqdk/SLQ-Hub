@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.48.1 - 2026-10-29
+
+- **SLQ Sync says why it was refused.** Instead of "sign in with a sync device
+  token", the PC's sync app now shows which it is: no token arrived (a proxy
+  may drop the Authorization header), it is not a device token, or the token
+  is unknown to the Hub (removed - add the device again). The Hub's log notes
+  each refusal, without the token.
+
 ## 0.48.0 - 2026-10-29
 
 - **Import a whole set of skills at once.** A .zip with several skills side

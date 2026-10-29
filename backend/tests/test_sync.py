@@ -117,6 +117,14 @@ async def test_device_tokens_reach_sync_and_nothing_else(signed_in, app, project
         assert (await dev.get("/hub/api/projects", headers=h)).status_code == 401       # nothing else
         assert (await dev.get("/api/tags", headers=h)).status_code == 401               # not the model API
         assert (await dev.get("/api/sync/whoami", headers={"Authorization": "Bearer slqsync_nope"})).status_code == 401
+        # 0.48.1: the refusal says which it was, short enough for SLQ Sync's window (about 60 characters)
+        why = {k: (await dev.get("/api/sync/whoami", headers=hd)).json()["detail"] for k, hd in (
+            ("none", {}), ("other", {"Authorization": "Bearer slqhub_abc"}),
+            ("unknown", {"Authorization": "Bearer slqsync_nope"}))}
+        assert why == {"none": "no token arrived - a proxy may drop the Authorization header",
+                       "other": "not a device token - they start with slqsync_",
+                       "unknown": "unknown token - removed on the Hub? Add the device again"}
+        assert all(len(x) <= 64 for x in why.values())
         body = {"origin": "PC", "files": [{"path": "README.md", "baseSha": _sha(b"readme"), "sha": _sha(b"v2"),
                                            "content": base64.b64encode(b"v2").decode()}]}
         r = (await dev.post(f"/api/sync/projects/{pid}/checkin", json=body, headers=h)).json()

@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.48.0, 2026-10-29)
+## State (0.48.1, 2026-10-29)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -422,6 +422,13 @@ Skills page seen on the dev server.
 folder; `_skill_folders`) installs each of them; POST /hub/api/skills answers `refs`/`names` as well, and the Skills
 page's toast names them. Made for the set of 18 skills Søren asked for ("Lav alle"), delivered as one zip. Tested
 here (unit and API).
+0.48.1, Søren's screenshot: SLQ Sync 2.65.0 against https://hub.slq.dk answered "401 sign in with a sync device
+token" on whoami (Test and save) and on projects (Link) - while the Link dialog's project list (loaded with the saved
+token when the settings window opened) showed project #7. The Hub refuses only when no bearer arrives or its token
+is not in `sync_tokens` (removed from a project's Sync page; nothing else deletes one), so the cause was NOT seen.
+`gate._sync_refusal` now names which (no token / not slqsync_ / unknown token, each under 64 characters for the
+tray's window) and logs it with the address. Asked Søren to add the device again, and if that fails, to read the new
+message after the update.
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
 host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU

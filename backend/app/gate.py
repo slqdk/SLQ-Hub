@@ -20,12 +20,15 @@ home network is not signed in at all when the request comes from elsewhere.
 from __future__ import annotations
 
 import json
+import logging
 import re
 
 from starlette.datastructures import Headers
 
 from . import auth, netguard
 from .api.common import Caller
+
+log = logging.getLogger("hub.gate")
 
 PATH_KEY = re.compile(r"^/k/(slqhub_[A-Za-z0-9_\-]{10,})(/.*)?$")
 # What a person (role member) may use of the UI API; everything else is the owner's.
@@ -178,7 +181,9 @@ class Gate:
             user = auth.user_for_sync_token(raw) if raw else None
             user = _signed_in(user or auth.session_user(_cookie(headers, auth.SESSION_COOKIE)), lan)
             if user is None or auth.is_member(user):            # people have no projects to sync
-                return await _json(send, 401, {"detail": "sign in with a sync device token"})
+                why = _sync_refusal(raw, user)
+                log.warning("sync request %s %s from %s refused: %s", method, path, ip, why)
+                return await _json(send, 401, {"detail": why})
             state["user"] = user
             return await self.app(scope, receive, send)
 
@@ -209,6 +214,19 @@ def _with_version(send, version: str):
             message = {**message, "headers": [*(message.get("headers") or []), extra]}
         await send(message)
     return wrapped
+
+
+def _sync_refusal(raw: str | None, user: dict | None) -> str:
+    """Why a sync request was refused, short enough for SLQ Sync's window (it shows about 60 characters after the
+    route) and never the token itself (0.48.1: Søren's PC got "sign in with a sync device token" and nothing said
+    which of these it was)."""
+    if user is not None:
+        return "sync is for the Hub's owner, not a person's account"
+    if not raw:
+        return "no token arrived - a proxy may drop the Authorization header"
+    if not raw.startswith(auth.SYNC_TOKEN_PREFIX):
+        return "not a device token - they start with slqsync_"
+    return "unknown token - removed on the Hub? Add the device again"
 
 
 def _signed_in(user: dict | None, lan: bool) -> dict | None:
