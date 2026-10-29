@@ -2,7 +2,7 @@
 // A run: pictures in, captions (written by the chat model, or typed), then the whole card for a few hours, then a
 // checkpoint - chosen by its sample pictures - becomes a LoRA.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { GraduationCap, ImagePlus, Sparkles, X } from "lucide-react";
+import { Copy, GraduationCap, ImagePlus, Sparkles, X } from "lucide-react";
 import { api, type TrainingDetail, type TrainingOverview, type TrainingRun } from "../lib/api";
 import { bytes, seconds } from "../lib/format";
 import { useApp } from "../state";
@@ -69,6 +69,7 @@ export function TrainingSection({ onAdded }: { onAdded: () => void }) {
   const [failed, setFailed] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [copying, setCopying] = useState<TrainingRun | null>(null);
   const load = useCallback(() => api<TrainingOverview>("/hub/api/training")
     .then((d) => { setData(d); setFailed(false); }, () => setFailed(true)), []);
   useEffect(() => { load(); }, [load]);
@@ -111,8 +112,10 @@ export function TrainingSection({ onAdded }: { onAdded: () => void }) {
       )}
       {creating && <NewTraining data={data} onClose={() => setCreating(false)}
         onMade={(id) => { setCreating(false); load(); setOpen(id); }} />}
-      {open && <TrainingEditor rid={open} data={data} onClose={() => { setOpen(null); load(); }}
-        onAdded={onAdded} />}
+      {open && <TrainingEditor key={open} rid={open} data={data} onClose={() => { setOpen(null); load(); }}
+        onAdded={onAdded} onDuplicate={(run) => { setOpen(null); setCopying(run); }} />}
+      {copying && <DuplicateTraining run={copying} onClose={() => { setOpen(copying.id); setCopying(null); }}
+        onMade={(id) => { setCopying(null); load(); setOpen(id); }} />}
     </div>
   );
 }
@@ -170,8 +173,53 @@ function NewTraining({ data, onClose, onMade }: { data: TrainingOverview; onClos
   );
 }
 
-function TrainingEditor({ rid, data, onClose, onAdded }: { rid: string; data: TrainingOverview; onClose: () => void;
-  onAdded: () => void }) {
+/** "Rikke" -> "Rikke v2", "Rikke v2" -> "Rikke v3" (as the Hub names a copy). */
+function nextName(name: string): string {
+  const m = /^(.*?)\s+v(\d+)$/.exec(name.trim());
+  return m ? `${m[1]} v${Number(m[2]) + 1}` : `${name.trim().slice(0, 76)} v2`;
+}
+
+function DuplicateTraining({ run, onClose, onMade }: { run: TrainingRun; onClose: () => void;
+  onMade: (id: string) => void }) {
+  const { toast } = useApp();
+  const [f, setF] = useState({ name: nextName(run.name), trigger: run.trigger, kind: run.kind as string });
+  const [busy, setBusy] = useState(false);
+  const make = async () => {
+    setBusy(true);
+    try {
+      const copy = await api<TrainingRun>(`/hub/api/training/runs/${run.id}/duplicate`, { body: f });
+      toast(`${copy.name}: ${run.images ?? "the"} pictures and their captions copied`, "run");
+      onMade(copy.id);
+    } catch (e) {
+      toast((e as Error).message, "fault");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal title={`Duplicate ${run.name}`} onClose={onClose}
+      footer={<><button className="btn" onClick={onClose}>Cancel</button>
+        <button className="btn primary" disabled={busy || !f.name.trim() || f.trigger.length < 3} onClick={make}>
+          Duplicate</button></>}>
+      <p className="muted small" style={{ margin: 0 }}>A new training with the same pictures, captions, steps and rank -
+        not the checkpoints or samples, which stay with {run.name}. Change what you want to try in the copy.</p>
+      <label className="field"><span>Name</span>
+        <input className="input" value={f.name} maxLength={80} autoFocus
+          onChange={(e) => setF({ ...f, name: e.target.value })} /></label>
+      <label className="field"><span>Trigger word</span>
+        <input className="input" value={f.trigger} maxLength={40}
+          onChange={(e) => setF({ ...f, trigger: e.target.value.replace(/[^A-Za-z0-9_]/g, "") })} />
+        <small>A new one replaces {run.trigger} in every caption.</small></label>
+      <label className="field"><span>What it learns</span>
+        <select className="input" value={f.kind} onChange={(e) => setF({ ...f, kind: e.target.value })}>
+          {Object.entries(KINDS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+        </select></label>
+    </Modal>
+  );
+}
+
+function TrainingEditor({ rid, data, onClose, onAdded, onDuplicate }: { rid: string; data: TrainingOverview;
+  onClose: () => void; onAdded: () => void; onDuplicate: (run: TrainingRun) => void }) {
   const { toast } = useApp();
   const [run, setRun] = useState<TrainingDetail | null>(null);
   const [error, setError] = useState("");
@@ -248,6 +296,8 @@ function TrainingEditor({ rid, data, onClose, onAdded }: { rid: string; data: Tr
           disabled={working} onConfirm={() => act("delete", () => api(`/hub/api/training/runs/${rid}`,
             { method: "DELETE" }), "Deleted").then(onClose)}>Delete training</ConfirmButton>
         <span className="grow" />
+        <button className="btn" disabled={!pics.length}
+          onClick={() => onDuplicate({ ...run, images: pics.length })}><Copy size={14} /> Duplicate</button>
         <button className="btn" onClick={onClose}>Close</button>
       </>}>
       <div className="train-settings">
@@ -383,7 +433,7 @@ function TrainingEditor({ rid, data, onClose, onAdded }: { rid: string; data: Tr
                 : !data.service ? "The trainer is not running (see above)."
                   : `${run.steps} steps. The first time, about 16 GB of model files are downloaded first.`}</span>
           <ConfirmButton className="btn primary" disabled={!ready || !data.service || !!busy}
-            confirmText={run.checkpoints.length ? "Busy for hours, and these checkpoints go - start?"
+            confirmText={run.checkpoints.length ? "Busy for hours, and these checkpoints go (Duplicate keeps them) - start?"
               : "The card is busy for hours - start?"}
             onConfirm={() => act("start", () => api(`/hub/api/training/runs/${rid}/start`, { method: "POST" }))}>
             {run.state === "draft" ? "Start training" : "Train again"}</ConfirmButton>

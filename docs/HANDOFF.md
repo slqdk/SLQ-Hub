@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.50.1, 2026-10-29)
+## State (0.51.0, 2026-10-29)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -459,7 +459,16 @@ profile, run update.sh" - but with nothing new to fetch the updater stopped at "
 container in `compose ps -a --services` (made folders first). Whether Compose takes COMPOSE_PROFILES from
 `--env-file` for `config`/`build`/`up` without the service named is NOT verified on the VM (naming it -
 `update.sh compose up -d --build trainer` - starts it either way). The updater's busy check names a training and
-counts a base-model download. The config keys were checked against the same commit (`diffusion_trainer`,
+counts a base-model download.
+0.51.0, Søren ("ja gør det" to a Duplicate button, after his first real run started: "Rikke", 35 pictures, the base
+download showing 7.2 GiB - the klein-base single file is the same size as the distilled one's): `Training.duplicate`
+copies a run's JPEGs and captions (not output/, not ai-toolkit's caches) into a new run with the same steps and rank,
+named "<name> v2/v3...", with a new trigger word replacing the old one in the captions as a word (`loras.has_word`,
+now also used by `set_captions` and `with_triggers`: the substring test found "lora" in "explorative"). Read in
+ai-toolkit's dataloader_mixins.py: `images/_latent_cache/<stem>_<md5>.safetensors` is keyed by file name and crop,
+not content (`_t_e_cache` hashes the caption), so `remove_image` and `add_images` drop a name's cache files - before,
+a new picture under a removed one's name trained on the old latents. The editor closes while the Duplicate dialog
+is open (one modal at a time; Escape closed both). Tested here and on the dev server. The config keys were checked against the same commit (`diffusion_trainer`,
 arch `flux2_klein_4b`, `cache_text_embeddings` so the 8 GB text encoder leaves the card, `timestep_type`
 "weighted" as ai-toolkit's UI default for klein; no quantisation, AdamW - quanto and bitsandbytes are the least
 sure on AMD). The image follows ai-toolkit's own AMD install (`manager/spec.py`: torch 2.13.0 / torchvision 0.28.0

@@ -69,6 +69,20 @@ async def change_run(rid: str, body: RunPatch, request: Request):
         _fail(exc)
 
 
+class DuplicateIn(BaseModel):
+    name: str | None = None
+    trigger: str | None = None
+    kind: str | None = None
+
+
+@router.post("/runs/{rid}/duplicate")
+async def duplicate_run(rid: str, body: DuplicateIn, request: Request):
+    try:
+        return _t(request).duplicate(rid, body.name or None, body.trigger or None, body.kind or None)
+    except TrainingError as exc:
+        _fail(exc)
+
+
 @router.delete("/runs/{rid}")
 async def delete_run(rid: str, request: Request):
     try:

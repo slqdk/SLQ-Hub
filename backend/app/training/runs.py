@@ -37,6 +37,8 @@ from pathlib import Path
 import httpx
 from PIL import Image, ImageOps
 
+from ..images.loras import has_word
+
 log = logging.getLogger("hub.training")
 
 BASE = {"model": "flux2-klein-4b", "family": "flux2-klein", "label": "FLUX.2 klein 4B",
@@ -85,6 +87,23 @@ class TrainingError(Exception):
 
 def _slug(text: str, n: int = 40) -> str:
     return re.sub(r"[^a-z0-9]+", "-", str(text).lower()).strip("-")[:n] or "lora"
+
+
+def _drop_caches(folder: Path, stem: str) -> None:
+    """ai-toolkit's caches of one picture (images/_latent_cache, images/_t_e_cache: <stem>_<22-character hash>
+    .safetensors). The latents are keyed by the file's name and crop, not its content."""
+    pattern = re.compile(rf"^{re.escape(stem)}_[A-Za-z0-9_-]{{22}}\.safetensors$")
+    for cache in folder.glob("_*"):
+        if cache.is_dir():
+            for f in cache.iterdir():
+                if pattern.match(f.name):
+                    f.unlink(missing_ok=True)
+
+
+def _next_name(name: str) -> str:
+    """"Rikke" -> "Rikke v2", "Rikke v2" -> "Rikke v3"."""
+    m = re.fullmatch(r"(.*?)\s+v(\d+)", name.strip())
+    return f"{m.group(1)} v{int(m.group(2)) + 1}" if m else f"{name.strip()[:76]} v2"
 
 
 class Training:
@@ -196,6 +215,25 @@ class Training:
             fields["rank"] = rank
         return self._set(rid, **fields)
 
+    def duplicate(self, rid: str, name: str | None = None, trigger: str | None = None,
+                  kind: str | None = None) -> dict:
+        """A new training with this one's pictures, captions, steps and rank - not its checkpoints or samples, so a
+        v2 can be tried while v1's results stay. A new trigger word replaces the old one in the captions."""
+        src = self._load(rid)
+        folder = self._dir(rid) / "images"
+        run = self.create(name or _next_name(src["name"]), trigger or src["trigger"], kind or src["kind"],
+                          src["steps"], src["rank"])
+        old, new = src["trigger"], run["trigger"]
+        word = re.compile(rf"(?<![A-Za-z0-9_]){re.escape(old)}(?![A-Za-z0-9_])", re.I)
+        dest = self.root / run["id"] / "images"
+        for p in sorted(folder.glob("*.jpg")):                     # not ai-toolkit's caches: they are rebuilt
+            shutil.copyfile(p, dest / p.name)
+            cap = p.with_suffix(".txt")
+            if cap.is_file():
+                text = cap.read_text(encoding="utf-8")
+                (dest / cap.name).write_text(word.sub(new, text) if new != old else text, encoding="utf-8")
+        return run
+
     def captioner(self) -> dict | None:
         """The chat model when it is downloaded and can see pictures - it writes the captions."""
         from ..agent.loop import vision
@@ -253,6 +291,7 @@ class Training:
                     name = f"{stem}.jpg"
                     while (folder / name).exists():
                         name, n = f"{stem}-{n}.jpg", n + 1
+                    _drop_caches(folder, Path(name).stem)    # left by a picture of that name before
                     img.save(folder / name, "JPEG", quality=95)
             except TrainingError:
                 raise
@@ -269,6 +308,7 @@ class Training:
         folder = self._dir(rid) / "images"
         (folder / name).unlink(missing_ok=True)
         (folder / name).with_suffix(".txt").unlink(missing_ok=True)
+        _drop_caches(folder, Path(name).stem)
 
     def set_captions(self, rid: str, captions: dict) -> None:
         run = self._editable(rid)
@@ -277,7 +317,7 @@ class Training:
             if not NAME_RE.match(str(name)) or not str(name).endswith(".jpg") or not (folder / name).is_file():
                 continue
             text = " ".join(str(text).split())[:600]
-            if text and run["trigger"].lower() not in text.lower():
+            if text and not has_word(text, run["trigger"]):
                 text = f"{run['trigger']}, {text}"            # the trigger word is what the LoRA learns to answer
             (folder / name).with_suffix(".txt").write_text(text, encoding="utf-8")
 

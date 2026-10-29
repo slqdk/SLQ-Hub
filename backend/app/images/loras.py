@@ -249,7 +249,12 @@ class Loras:
         return nodes, triggers, names, notes
 
 
+def has_word(text: str, word: str) -> bool:
+    """`word` in `text` as a word of its own, any case ("lora" is not in "explorative")."""
+    return bool(word) and re.search(rf"(?<![A-Za-z0-9_]){re.escape(word)}(?![A-Za-z0-9_])", text, re.I) is not None
+
+
 def with_triggers(prompt: str, triggers: list[str]) -> str:
     """The prompt with each LoRA's trigger word in it (put first when the prompt does not have it)."""
-    missing = [t for t in triggers if t and t.lower() not in prompt.lower()]
+    missing = [t for t in triggers if t and not has_word(prompt, t)]
     return (", ".join(missing) + ", " + prompt) if missing else prompt

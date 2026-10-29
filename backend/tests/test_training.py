@@ -189,6 +189,52 @@ async def test_a_training_left_from_before_a_restart_is_stopped_first(app, fakes
     assert hub.scheduler.current == "train" and not hub.scheduler.running      # it had the card, and gave it back
 
 
+async def test_a_training_is_duplicated_with_a_new_trigger_word(signed_in, app):
+    """Duplicate (0.51.0): the pictures, captions and settings into a new training - not its results or ai-toolkit's
+    caches - with a new trigger word put in the captions; the name counts up."""
+    t = app.state.hub.extras["training"]
+    run = (await signed_in.post("/hub/api/training/runs", json={"name": "Rikke", "trigger": "lora", "kind": "person",
+                                                                "steps": 2000, "rank": 32}, headers=ORIGIN)).json()
+    rid = run["id"]
+    await signed_in.post(f"/hub/api/training/runs/{rid}/images",
+                         files=[("files", (f"p{i}.jpg", photo(), "image/jpeg")) for i in range(3)], headers=ORIGIN)
+    t.set_captions(rid, {"p0.jpg": "on a bench in the park, Lora's bike behind", "p1.jpg": "explorative light"})
+    src = t.root / rid
+    (src / "output" / rid).mkdir(parents=True)
+    (src / "output" / rid / f"{rid}.safetensors").write_bytes(b"x")
+    (src / "images" / "_latent_cache").mkdir()
+    (src / "images" / "_latent_cache" / f"p0_{'A' * 22}.safetensors").write_bytes(b"x")
+    r = await signed_in.post(f"/hub/api/training/runs/{rid}/duplicate", json={"trigger": "waterx55"}, headers=ORIGIN)
+    assert r.status_code == 200, r.text
+    copy = r.json()
+    assert (copy["name"], copy["trigger"], copy["kind"], copy["steps"], copy["rank"]) == \
+        ("Rikke v2", "waterx55", "person", 2000, 32)
+    d = t.detail(copy["id"])
+    assert [im["name"] for im in d["images_list"]] == ["p0.jpg", "p1.jpg", "p2.jpg"]
+    assert d["images_list"][0]["caption"] == "on a bench in the park, waterx55's bike behind"   # had it as a word
+    assert d["images_list"][1]["caption"] == "waterx55, explorative light"          # "lora" inside a word is not it
+    assert d["checkpoints"] == [] and not (t.root / copy["id"] / "images" / "_latent_cache").exists()
+    assert t.detail(rid)["images_list"][1]["caption"] == "lora, explorative light"   # the original is untouched
+    again = (await signed_in.post(f"/hub/api/training/runs/{copy['id']}/duplicate", json={}, headers=ORIGIN)).json()
+    assert again["name"] == "Rikke v3" and again["trigger"] == "waterx55"
+    bad = await signed_in.post(f"/hub/api/training/runs/{rid}/duplicate", json={"trigger": "two words"}, headers=ORIGIN)
+    assert bad.status_code == 400
+
+
+def test_a_removed_picture_takes_its_caches_along(app):
+    """ai-toolkit keys its latent cache by the picture's file name, not its content: a picture removed, and another
+    added under the same name, must not train on the old one's latents."""
+    t = app.state.hub.extras["training"]
+    rid = t.create("Cache", "cachx", "thing", 500)["id"]
+    t.add_images(rid, [("img-1.jpg", photo()), ("img-10.jpg", photo())])
+    cache = t.root / rid / "images" / "_latent_cache"
+    cache.mkdir()
+    for name in (f"img-1_{'b' * 22}.safetensors", f"img-10_{'c' * 22}.safetensors"):
+        (cache / name).write_bytes(b"x")
+    t.remove_image(rid, "img-1.jpg")
+    assert sorted(f.name for f in cache.iterdir()) == [f"img-10_{'c' * 22}.safetensors"]
+
+
 # ---------------------------------------------------------------- the trainer service
 
 FAKE_TOOLKIT = r'''

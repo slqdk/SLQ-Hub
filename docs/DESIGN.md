@@ -1854,7 +1854,10 @@ files afterwards.
     FLUX.2 klein 4B (Apache 2.0): trained on klein-base-4B in bf16 without
     quantising, used on the 4-step model. Every 250 steps a checkpoint and
     three sample pictures are saved; the admin chooses one by its pictures
-    and it becomes a LoRA (source "trained").
+    and it becomes a LoRA (source "trained"). Duplicate copies a run's
+    pictures and captions into a v2 (a new trigger word replaces the old one
+    in the captions), so v1 keeps its checkpoints; Train again starts the
+    same run over.
   - **Families and abilities.** Each picture model in the catalog has a
     `family` (which graph) and `abilities` (generate, edit, cutout). Models
     that only generate hand edits to one that edits. `image_generate`'s

@@ -42,6 +42,7 @@ def test_the_family_is_read_from_the_file():
     assert guess_base({"x.lora_A.weight": T}) == ""
     assert with_triggers("a man on a bike", ["sorenx"]) == "sorenx, a man on a bike"
     assert with_triggers("sorenx on a bike", ["sorenx"]) == "sorenx on a bike"
+    assert with_triggers("an explorative walk", ["lora"]) == "lora, an explorative walk"     # a word, not a part
 
 
 def test_adding_changing_and_removing(tmp_path):

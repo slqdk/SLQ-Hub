@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.51.0 - 2026-10-29
+
+- **Duplicate a LoRA training** to try a v2: the copy gets the pictures,
+  captions, steps and rank (the name counts up - "Rikke v2"), with a new
+  trigger word or kind if you like - a new trigger word replaces the old one
+  in every caption. The original keeps its checkpoints and sample pictures.
+- Fixed: a picture removed and another added under the same name was trained
+  from the old picture's cached data (ai-toolkit keys its cache by the file
+  name). A removed picture's cache now goes with it.
+- Fixed: a trigger word is matched as a word of its own - "lora" was found
+  inside "explorative", so a caption or a picture prompt could be left
+  without it.
+
 ## 0.50.1 - 2026-10-29
 
 - **Turning the trainer on works with update.sh alone.** With

@@ -414,6 +414,8 @@ export const SECTIONS: HelpSection[] = [
           + "for a few hours - chats and pictures wait.",
           "Every 250 steps it saves a checkpoint with sample pictures. Choose the step that looks right and Add as "
           + "LoRA.",
+          "To try a v2 - other pictures, captions, steps or a new trigger word - Duplicate the training: the copy "
+          + "gets the pictures and captions, and v1 keeps its checkpoints.",
           "The first training downloads about 16 GB of model files. Only you can train or use LoRAs."],
         owner: true,
       },
