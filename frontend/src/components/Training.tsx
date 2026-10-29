@@ -2,7 +2,7 @@
 // A run: pictures in, captions (written by the chat model, or typed), then the whole card for a few hours, then a
 // checkpoint - chosen by its sample pictures - becomes a LoRA.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Copy, GraduationCap, ImagePlus, Sparkles, X } from "lucide-react";
+import { CircleHelp, Copy, GraduationCap, ImagePlus, Sparkles, X } from "lucide-react";
 import { api, type TrainingDetail, type TrainingOverview, type TrainingRun } from "../lib/api";
 import { bytes, seconds } from "../lib/format";
 import { useApp } from "../state";
@@ -173,6 +173,58 @@ function NewTraining({ data, onClose, onMade }: { data: TrainingOverview; onClos
   );
 }
 
+type Guide = "" | "steps" | "rank" | "choose" | "better";
+
+/** A small "?" that opens a guide below (a click, so it works on a phone). Inside a label it does not focus the
+ *  field. */
+function HelpDot({ on, onClick, label }: { on: boolean; onClick: () => void; label: string }) {
+  return <button type="button" className={`help-dot ${on ? "on" : ""}`} aria-label={label} aria-expanded={on}
+    title={label} onClick={(e) => { e.preventDefault(); onClick(); }}><CircleHelp size={14} /></button>;
+}
+
+/** The advice for a training (Søren: "write it into the interface, or I cannot remember it"). */
+function GuideText({ guide, kind }: { guide: Guide; kind: string }) {
+  const likeness = kind === "style" ? "has the style" : kind === "person" ? "looks like the person" : "looks like the thing";
+  if (guide === "steps") return <>
+    <b>Steps</b> are how long it trains. 1500 is a good start for 15-40 pictures; more pictures want more steps.
+    A checkpoint with sample pictures is saved every 250 steps, so too many steps only cost time - you can choose an
+    earlier one. While it trains, the page shows the time left.</>;
+  if (guide === "rank") return <>
+    <b>Rank</b> is how much the LoRA can hold. 16 suits a face or a thing. 32 for fine detail or a detailed style:
+    it learns more, but copies your pictures sooner, and the file is twice the size.</>;
+  if (guide === "choose") return <>
+    <b>Which step to keep</b>
+    <ul>
+      <li>Every 250 steps a checkpoint is saved, with the same three sample pictures made with the trigger word.
+        "Before training" is the model without the LoRA.</li>
+      <li>Choose the step where it {likeness} <i>and</i> still does what the prompt says - the watercolour is still a
+        watercolour, the café still a café.</li>
+      <li><b>Too early:</b> it does not look like it yet.</li>
+      <li><b>Too late:</b> stiff or plastic faces, the same pose, clothes or background as in your pictures, burnt
+        colours, the watercolour turning into a photo.</li>
+      <li>Add as LoRA on that step and try it in a chat. Weaker there than in the samples? Raise its strength to
+        1.1-1.2 in the LoRA's settings: the samples use the base model, chats the fast 4-step one.</li>
+    </ul></>;
+  return <>
+    <b>How to make it better</b>
+    <ul>
+      <li><b>Keep the best first:</b> Add as LoRA on the best step - Train again deletes this training's checkpoints.
+        Or Duplicate it into a v2, which keeps them here.</li>
+      <li><b>One change a round,</b> so you know what helped, and name the versions (v1, v2).</li>
+      <li><b>Steps:</b> best step was the last one - give it 500-1000 more. Best step was early - give it fewer, or
+        just keep that one.</li>
+      <li><b>Pictures matter most:</b> sharp, from different angles and distances, in different light, places and
+        clothes. Take out blurry and heavily filtered ones, and those with other people. 20-30 good pictures beat 35
+        mixed ones.</li>
+      <li><b>Captions:</b> describe what should change from picture to picture - clothes, place, pose, light - but not
+        what the trigger word should learn. What a caption leaves out becomes part of the trigger word. Correct
+        wrong details in written captions.</li>
+      <li><b>Rank:</b> 16 suits most; 32 when fine details are missing.</li>
+      <li><b>Using it:</b> strength 1 is as trained, 0.7-0.9 a lighter touch. Set its default in the LoRA's
+        settings.</li>
+    </ul></>;
+}
+
 /** "Rikke" -> "Rikke v2", "Rikke v2" -> "Rikke v3" (as the Hub names a copy). */
 function nextName(name: string): string {
   const m = /^(.*?)\s+v(\d+)$/.exec(name.trim());
@@ -226,6 +278,8 @@ function TrainingEditor({ rid, data, onClose, onAdded, onDuplicate }: { rid: str
   const [busy, setBusy] = useState("");
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [settings, setSettings] = useState<{ name: string; steps: string } | null>(null);
+  const [guide, setGuide] = useState<Guide>("");
+  const toggle = (g: Guide) => setGuide(guide === g ? "" : g);
   const input = useRef<HTMLInputElement>(null);
   const load = useCallback(() => api<TrainingDetail>(`/hub/api/training/runs/${rid}`)
     .then((r) => { setRun(r); setError(""); }, (e) => setError((e as Error).message)), [rid]);
@@ -305,18 +359,27 @@ function TrainingEditor({ rid, data, onClose, onAdded, onDuplicate }: { rid: str
           <input className="input" value={s.name} maxLength={80} disabled={!editable}
             onChange={(e) => setSettings({ ...s, name: e.target.value })}
             onBlur={() => s.name.trim() && s.name !== run.name && saveSettings({ name: s.name })} /></label>
-        <label className="field"><span>Steps</span>
+        <label className="field"><span>Steps <HelpDot on={guide === "steps"} onClick={() => toggle("steps")}
+          label="About steps" /></span>
           <input className="input" type="number" min={250} max={6000} step={250} value={s.steps} disabled={!editable}
             onChange={(e) => setSettings({ ...s, steps: e.target.value })}
             onBlur={() => Number(s.steps) !== run.steps && saveSettings({ steps: Number(s.steps) })} /></label>
-        <label className="field"><span>Rank</span>
+        <label className="field"><span>Rank <HelpDot on={guide === "rank"} onClick={() => toggle("rank")}
+          label="About rank" /></span>
           <select className="input" value={run.rank} disabled={!editable}
             onChange={(e) => saveSettings({ rank: Number(e.target.value) })}>
             {[8, 16, 32, 64].map((r) => <option key={r} value={r}>{r}</option>)}
           </select></label>
       </div>
-      <div className="muted small" style={{ marginTop: -6 }}>
-        {KINDS[run.kind]?.label ?? run.kind} · trigger word <b>{run.trigger}</b> · {data.base.label}</div>
+      <div className="row train-info">
+        <span className="grow muted small">
+          {KINDS[run.kind]?.label ?? run.kind} · trigger word <b>{run.trigger}</b> · {data.base.label}</span>
+        <button type="button" className={`btn quiet small ${guide === "choose" ? "on" : ""}`}
+          aria-expanded={guide === "choose"} onClick={() => toggle("choose")}><CircleHelp size={14} /> Which step?</button>
+        <button type="button" className={`btn quiet small ${guide === "better" ? "on" : ""}`}
+          aria-expanded={guide === "better"} onClick={() => toggle("better")}><CircleHelp size={14} /> Make it better</button>
+      </div>
+      {guide && <div className="callout train-guide"><GuideText guide={guide} kind={run.kind} /></div>}
 
       {/* Where it is */}
       {working && (
@@ -348,7 +411,7 @@ function TrainingEditor({ rid, data, onClose, onAdded, onDuplicate }: { rid: str
           <h4 style={{ margin: "0 0 4px" }}>Sample pictures</h4>
           <p className="muted small" style={{ marginTop: 0 }}>Made with the trigger word every 250 steps. Choose the
             step where it looks right before it starts to look stiff or copy the pictures - that is the one to
-            keep.</p>
+            keep. <button type="button" className="link-btn" onClick={() => setGuide("choose")}>How to tell</button></p>
           <div className="train-steps">
             {steps.map((st) => {
               const cp = checkpoint(st);

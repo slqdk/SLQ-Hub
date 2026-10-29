@@ -84,12 +84,17 @@ def _follow(job: dict) -> None:
             m = BAR.search(line)
             with lock:
                 if m:
+                    # Only the training's own bar (ai-toolkit gives it the job's name, "<id>: 3%|...| 45/1500 [...]"):
+                    # the caching bars (35/35 pictures) and the sample pictures' (1/25) are not steps. Seen on the
+                    # card 2026-10-29: "Step 35 of 35" while it cached the pictures. No bar goes into the log.
+                    if f"{job['id']}:" not in line:
+                        continue
                     job["step"], job["total"] = int(m.group(1)), int(m.group(2))
                     job["elapsed_s"], job["eta_s"] = _secs(m.group(3)), _secs(m.group(4))
                     loss = LOSS.search(line)
                     if loss:
                         job["loss"] = float(loss.group(1))
-                    continue                                 # bars are not kept in the log
+                    continue
                 job["log"].append(line[:400])
                 del job["log"][:-60]
     code = proc.wait()

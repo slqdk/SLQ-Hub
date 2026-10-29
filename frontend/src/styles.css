@@ -978,3 +978,11 @@ div.tests-result-head { cursor: default; }
 }
 .train-step-pics { display: flex; gap: 8px; flex-wrap: wrap; }
 .train-step-pics img { width: 120px; height: 120px; object-fit: cover; border-radius: 6px; background: var(--cabinet); display: block; }
+.help-dot { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; margin-left: 4px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--ink-3); cursor: pointer; vertical-align: -4px; }
+.help-dot:hover, .help-dot.on { color: var(--run); background: color-mix(in srgb, var(--run) 12%, transparent); }
+.train-info { gap: 6px; flex-wrap: wrap; margin-top: -6px; }
+.train-guide { font-size: 14px; line-height: 1.45; }
+.train-guide ul { margin: 6px 0 0; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; }
+.btn.on { color: var(--run); }
+.link-btn { padding: 0; border: 0; background: none; color: var(--run); font: inherit; text-decoration: underline; cursor: pointer; }
+@media (max-width: 560px) { .train-info > .grow { flex-basis: 100%; } }

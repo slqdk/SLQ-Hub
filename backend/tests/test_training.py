@@ -238,12 +238,17 @@ def test_a_removed_picture_takes_its_caches_along(app):
 # ---------------------------------------------------------------- the trainer service
 
 FAKE_TOOLKIT = r'''
-import sys, time
-total = int(open(sys.argv[1]).read().count("x") or 0) or 4
+import os, sys, time
+name = os.path.basename(os.path.dirname(sys.argv[1]))      # ai-toolkit's bar has the job's name; the run's folder
+for i in range(1, 36, 17):                                  # a caching bar first: not training steps
+    sys.stdout.write(f"\rCaching latents to disk: {i * 2}%|#| {i}/35 [00:0{i % 9}<00:01, 9.0it/s]")
+print("")
 for i in range(1, 5):
-    sys.stdout.write(f"\rrun:  {i * 25}%|##| {i}/4 [00:0{i}<00:0{4 - i},  1.00s/it, lr: 1.0e-04 loss: 0.{50 - i}e+00]")
+    sys.stdout.write(f"\r{name}:  {i * 25}%|##| {i}/4 [00:0{i}<00:0{4 - i},  1.00s/it, lr: 1.0e-04 loss: 0.{50 - i}e+00]")
     sys.stdout.flush()
     time.sleep(0.05)
+sys.stdout.write("\r 40%|####| 10/25 [00:02<00:03,  4.0it/s]")      # a sample picture's bar: not a step either
+print("")
 print("\nSaving at step 4")
 if "slow" in open(sys.argv[1]).read():
     time.sleep(30)

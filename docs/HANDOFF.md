@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.51.1, 2026-10-29)
+## State (0.52.0, 2026-10-29)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -481,7 +481,16 @@ logged nothing: the card was empty at the start); memory freed inside ai-toolkit
 maps and unmaps physical memory (HIP's VMM) - the likeliest place for it to stay mapped. `traind.toolkit_env` now
 leaves it out (the Dockerfile line stays, so the built layers are reused; `TRAINER_ALLOC_CONF` sets one). NOT yet
 known whether that was it: the next run with the same loop tells (the card should fall with run.py). If not: keep
-the text encoder on the card (no `cache_text_embeddings`), or sample at 768 px. The config keys were checked against the same commit (`diffusion_trainer`,
+the text encoder on the card (no `cache_text_embeddings`), or sample at 768 px.
+0.52.0, measured on the card with 0.51.1 (the same loop): the card now follows run.py - 19.0 → 11.5 → 9.5 GB for
+run.py with the card at 19.2 → 11.8 → 9.8 (ComfyUI 0.2) - so expandable segments WERE the cause. The baseline samples
+were made and training started: "Step 1 of 1500 · 1 h 49 min left" (about 4.4 s a step; tqdm's first estimate),
+loss 0.776, the card at about 12 GB while it trains. Also seen: the page showed "Step 35 of 35" while ai-toolkit
+cached 35 pictures - traind took every tqdm bar for the training's. Now only the bar with the job's name counts
+(ai-toolkit: `ToolkitProgressBar(desc=self.job.name)` in BaseSDTrainProcess); the caching and sampling bars are
+dropped. Søren asked for the advice I had given in the chat to be in the interface ("ellers ka jeg ikke huske det"):
+the training editor has "Which step?" and "Make it better" (a guide panel under the info line, `GuideText` in
+`Training.tsx`) and a "?" at Steps and Rank - click, not hover, so they work on a phone. The config keys were checked against the same commit (`diffusion_trainer`,
 arch `flux2_klein_4b`, `cache_text_embeddings` so the 8 GB text encoder leaves the card, `timestep_type`
 "weighted" as ai-toolkit's UI default for klein; no quantisation, AdamW - quanto and bitsandbytes are the least
 sure on AMD). The image follows ai-toolkit's own AMD install (`manager/spec.py`: torch 2.13.0 / torchvision 0.28.0
@@ -1191,8 +1200,9 @@ the host if the VM ever stops by itself.
       torch fails the build - read which), and does `import torch` see the card in the container
       (`sudo bash update.sh compose exec trainer python -c "import torch; print(torch.cuda.is_available())"`)?
       ai-toolkit calls its AMD support "experimental and largely untested".
-    - **Memory (0.51.1)**: the first two runs ran out at the first sample (memory freed after the text encoder
-      stayed on the card, see the 0.51.1 paragraph). Next run: watch the card against run.py with the 5-second loop.
+    - **Memory (0.51.1, solved in 0.51.2)**: the first two runs ran out at the first sample (expandable
+      segments kept freed memory on the card); without them it trains at about 12 GB. Still to see: the whole
+      1500 steps, the time it really takes, and the samples at 250, 500, ... looking like the person.
     - **The first run**: a thing with 15-25 pictures, 1000 steps. The download (about 16 GB - an estimate: 7.75
       GB is the distilled klein-4B's single file on Hugging Face, the base repo's was not looked at, and Qwen3-4B's
       bf16 weights are about 8 GB) lands in `models/hf/hub`; ai-toolkit then

@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.52.0 - 2026-10-29
+
+- **The advice is on the training page.** "Which step?" explains how to
+  choose a checkpoint by its sample pictures (too early, too late, what to do
+  when it looks weaker in a chat); "Make it better" what to change for the
+  next round - steps up or down, pictures, captions, rank, strength - and to
+  keep the best step before training again. A "?" at Steps and Rank says
+  what they do.
+- **The first LoRA training runs on the card.** Without expandable
+  segments (0.51.1) the memory ai-toolkit frees goes back to the card: it
+  made its sample pictures and trains (about 4.4 s a step for FLUX.2 klein
+  4B, a first estimate).
+- The training page counted ai-toolkit's other progress bars as steps -
+  "Step 35 of 35" while it cached 35 pictures, and the sample pictures'
+  bars. Only the training's own steps count now.
+
 ## 0.51.1 - 2026-10-29
 
 - **LoRA training ran out of memory at its first sample pictures** on the
