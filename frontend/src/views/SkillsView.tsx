@@ -58,8 +58,10 @@ export function SkillsContent({ onNewChat }: { onNewChat: (text: string, skills:
     const fd = new FormData();
     fd.append("file", f, f.name);
     try {
-      const r = await api<{ ref: string; name: string }>("/hub/api/skills", { form: fd });
-      toast(`${r.name} is among your skills now`, "run");
+      const r = await api<{ ref: string; name: string; names?: string[] }>("/hub/api/skills", { form: fd });
+      const n = r.names?.length ?? 1;
+      toast(n > 1 ? `${n} skills are among your skills now: ${r.names!.join(", ")}` : `${r.name} is among your skills now`,
+        "run");
       changed();
     } catch (e) {
       toast((e as Error).message, "fault");
@@ -178,7 +180,7 @@ export function SkillsContent({ onNewChat }: { onNewChat: (text: string, skills:
         <button className="btn primary" onClick={() => onNewChat(NEW_SKILL_TEXT, [SKILL_MAKER])}><Wand2 size={15} /> New skill</button>
         <button className="btn" onClick={() => input.current?.click()}><UploadIcon size={15} /> Import</button>
         <span className="muted small">New skill: give the assistant your files and say what the skill should do. Import: a
-          .zip or .skill (e.g. from Claude), or a SKILL.md.</span>
+          .zip or .skill (e.g. from Claude) - one skill or a set of them - or a SKILL.md.</span>
         <input ref={input} type="file" hidden accept=".zip,.skill,.md"
           onChange={(e) => { const f = e.target.files?.[0]; if (f) importFile(f); e.target.value = ""; }} />
       </div>

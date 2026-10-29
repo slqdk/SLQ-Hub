@@ -437,3 +437,21 @@ async def test_internal_is_not_seen_from_a_persons_phone(signed_in, app, fakes):
         await turn(app, phone, {"title": "S", "settings": {"skills": ["admin-tools"]},
                                 "messages": [user_msg("Hello")]})
         assert "admin-tools" not in fakes.llama["requests"][0]["messages"][0]["content"]
+
+
+async def test_a_zip_with_a_set_of_skills_brings_them_all(signed_in, app, fakes, tmp_path):
+    """0.48.0: a set of skills in one .zip - folders side by side, each with its SKILL.md - imports every one; a
+    skill with another SKILL.md somewhere inside it (an example) is still one skill."""
+    s = Skills(tmp_path / "skills")
+    data = bundle("", {"picture-style/SKILL.md": md("picture-style"), "picture-style/references/styles.md": b"x",
+                       "video-slideshow/SKILL.md": md("video-slideshow"), "video-slideshow/scripts/run.py": b"y",
+                       "__MACOSX/video-slideshow/._SKILL.md": b"junk"})
+    assert s.install_all(OWNER, data, "set.zip") == ["picture-style", "video-slideshow"]
+    assert s.entry(OWNER, "video-slideshow")["files"] == ["scripts/run.py"]
+    nested = bundle("maker", {"SKILL.md": md("maker"), "examples/demo/SKILL.md": md("demo")})
+    assert s.install_all(OWNER, nested, "maker.zip") == ["maker"]
+    one = bundle("solo", {"SKILL.md": md("solo")})
+    assert s.install(OWNER, one, "solo.zip") == "solo"
+    r = await signed_in.post("/hub/api/skills", files={"file": ("set.zip", data, "application/zip")}, headers=ORIGIN)
+    assert r.status_code == 200 and r.json()["refs"] == ["picture-style", "video-slideshow"]
+    assert r.json()["ref"] == "picture-style" and r.json()["names"] == ["picture-style", "video-slideshow"]

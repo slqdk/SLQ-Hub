@@ -409,9 +409,21 @@ class Skills:
     def install(self, who: dict | None, data: bytes, filename: str) -> str:
         """A .zip/.skill bundle (SKILL.md at its root or in one folder) or a bare SKILL.md, into `who`'s skills -
         replacing one of the same name. Not shared until they share it. Returns its ref."""
+        return self.install_all(who, data, filename)[0]
+
+    def install_all(self, who: dict | None, data: bytes, filename: str) -> list[str]:
+        """As install - and a .zip of a set of skills (0.48.0: folders side by side, each with its SKILL.md, none
+        inside another) installs every one of them. Their refs, in the bundle's order."""
         person = self._person(who)
         if filename.lower().endswith((".zip", ".skill")) or data[:2] == b"PK":
-            src, name = self._unzip(data)
+            refs = []
+            for prefix in self._skill_folders(data):
+                src, name = self._unzip(data, prefix)
+                try:
+                    refs.append(self._place(src, slug(name), person))
+                finally:
+                    shutil.rmtree(src, ignore_errors=True)
+            return refs
         else:
             meta, _ = parse_front_matter(data.decode("utf-8", "replace"))
             name = meta.get("name") if isinstance(meta.get("name"), str) and meta.get("name") else Path(filename).stem
@@ -419,11 +431,12 @@ class Skills:
             src.mkdir(parents=True)
             (src / "SKILL.md").write_bytes(data)
         try:
-            return self._place(src, slug(name), person)
+            return [self._place(src, slug(name), person)]
         finally:
             shutil.rmtree(src, ignore_errors=True)
 
-    def _unzip(self, data: bytes) -> tuple[Path, str]:
+    @staticmethod
+    def _open_zip(data: bytes) -> tuple[zipfile.ZipFile, list[str]]:
         if len(data) > MAX_SKILL_BYTES:
             raise ValueError("the bundle is larger than 50 MB")
         try:
@@ -435,13 +448,27 @@ class Skills:
             raise ValueError("the bundle unpacks to more than 200 MB")
         if len(names) > MAX_FILES:
             raise ValueError(f"the bundle has more than {MAX_FILES} files")
-        skill_md = sorted((n for n in names if PurePosixPath(n).name == "SKILL.md" and "__MACOSX" not in n),
-                          key=lambda n: n.count("/"))
-        if not skill_md:
+        return z, names
+
+    def _skill_folders(self, data: bytes) -> list[str]:
+        """The folders of a bundle that are skills ("" for its root): the one SKILL.md nearest the top, with
+        everything under it - or, when there are several and none lies inside another's folder, each of them."""
+        _, names = self._open_zip(data)
+        found = sorted((n for n in names if PurePosixPath(n).name == "SKILL.md" and "__MACOSX" not in n),
+                       key=lambda n: (n.count("/"), n))
+        if not found:
             raise ValueError("no SKILL.md in the bundle")
-        prefix = str(PurePosixPath(skill_md[0]).parent)
-        prefix = "" if prefix == "." else prefix + "/"
-        meta, _ = parse_front_matter(z.read(skill_md[0]).decode("utf-8", "replace"))
+        folders = [str(PurePosixPath(n).parent) for n in found]
+        folders = ["" if f == "." else f + "/" for f in folders]
+        if len(folders) == 1 or any(b.startswith(a) for a in folders for b in folders if a != b):
+            return folders[:1]
+        return sorted(folders)
+
+    def _unzip(self, data: bytes, prefix: str | None = None) -> tuple[Path, str]:
+        z, names = self._open_zip(data)
+        if prefix is None:
+            prefix = self._skill_folders(data)[0]
+        meta, _ = parse_front_matter(z.read(prefix + "SKILL.md").decode("utf-8", "replace"))
         name = meta.get("name") if isinstance(meta.get("name"), str) and meta.get("name") else \
             (prefix.strip("/").split("/")[-1] if prefix else "skill")
         tmp = self.root / f".import-{secrets.token_hex(6)}"

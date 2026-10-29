@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.47.0, 2026-10-29)
+## State (0.48.0, 2026-10-29)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -418,6 +418,10 @@ shared before or not. Into internal unshares (`set_category`, `rename_category`,
 "Only you - internal is never shared" without the switch. A person cannot name a category internal (400), and one
 named so before 0.47.0 reads as no category. Tested here (unit and API, the phone side included); the admin's
 Skills page seen on the dev server.
+0.48.0: `Skills.install_all` - a .zip whose SKILL.md files lie in folders side by side (none inside another's
+folder; `_skill_folders`) installs each of them; POST /hub/api/skills answers `refs`/`names` as well, and the Skills
+page's toast names them. Made for the set of 18 skills Søren asked for ("Lav alle"), delivered as one zip. Tested
+here (unit and API).
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
 host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU

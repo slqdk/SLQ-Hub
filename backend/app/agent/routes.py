@@ -58,13 +58,14 @@ async def list_skills(request: Request):
 
 @router.post("/skills")
 async def install_skill(request: Request, file: UploadFile = File(...)):
-    """A skill from Claude or elsewhere: a .zip or .skill bundle, or a SKILL.md - into your skills, not shared."""
+    """A skill from Claude or elsewhere: a .zip or .skill bundle, or a SKILL.md - into your skills, not shared. A
+    .zip with a set of skills side by side brings them all (0.48.0)."""
     data = await file.read()
     try:
-        ref = _store(request).install(_who(request), data, file.filename or "SKILL.md")
+        refs = _store(request).install_all(_who(request), data, file.filename or "SKILL.md")
     except (ValueError, OSError) as exc:
         raise HTTPException(400, str(exc))
-    return {"ref": ref, "name": ref.split("/")[-1]}
+    return {"ref": refs[0], "name": refs[0].split("/")[-1], "refs": refs, "names": [r.split("/")[-1] for r in refs]}
 
 
 @router.get("/skills/one")

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.48.0 - 2026-10-29
+
+- **Import a whole set of skills at once.** A .zip with several skills side
+  by side - one folder each, with its SKILL.md - brings them all in one go
+  from Skills -> Import; the message names them. A single skill imports as
+  before, also one with an example SKILL.md somewhere inside it.
+
 ## 0.47.0 - 2026-10-29
 
 - **"internal" is the admin's alone.** Skills the admin puts in the category

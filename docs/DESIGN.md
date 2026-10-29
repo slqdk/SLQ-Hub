@@ -1598,6 +1598,10 @@ settings) group by category in the browser (`lib/skills.ts`). The owner's intern
 (`may_see`), so no person's chat can use one, shared or not; putting a skill there unshares it, and a
 person cannot name a category internal.
 
+**A set in one zip (0.48.0).** Import takes a .zip with several skills side by side - one folder each
+with its SKILL.md, none inside another's folder - and installs every one; otherwise the SKILL.md nearest the
+top is the skill and everything under its folder comes with it.
+
 **Choosing.** A chat's `settings.skills` and its project's hold refs (a
 person's device chat sends hers with each turn). `turn_skills` resolves them
 for whoever runs the turn, drops refs that are gone or not theirs to see,
