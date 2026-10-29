@@ -9,6 +9,8 @@
 # the build instead of quietly swapping in PyPI's CUDA build. The config the Hub writes needs no quantisation and no
 # 8-bit optimiser - the least sure parts on AMD. The first real run is the test.
 FROM ubuntu:24.04
+# (PYTORCH_HIP_ALLOC_CONF below is NOT passed on to ai-toolkit - traind.py's toolkit_env says why. It stays here so
+# the layers built already are reused; it only affects the image's own torch check.)
 
 ARG TORCH_INDEX=https://download.pytorch.org/whl/rocm7.1
 ARG TORCH_VERSION=2.13.0

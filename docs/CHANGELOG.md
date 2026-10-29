@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.51.1 - 2026-10-29
+
+- **LoRA training ran out of memory at its first sample pictures** on the
+  RX 7900 XTX. Measured: memory ai-toolkit gave back after its text encoder
+  stayed in use on the card until the training ended. ai-toolkit now runs
+  without PyTorch's "expandable segments" (set in the trainer's image), the
+  likeliest cause - the next run shows whether that was it.
+  `TRAINER_ALLOC_CONF` in `.env` can set PyTorch's allocator for the trainer.
+
 ## 0.51.0 - 2026-10-29
 
 - **Duplicate a LoRA training** to try a v2: the copy gets the pictures,

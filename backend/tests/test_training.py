@@ -286,6 +286,16 @@ def test_the_trainer_follows_ai_toolkit(traind):
     assert job["log"] == ["Saving at step 4"] and (root / "r1" / "config.json").is_file()
 
 
+def test_ai_toolkit_runs_without_expandable_segments(traind, monkeypatch):
+    mod, _ = traind
+    monkeypatch.setenv("PYTORCH_HIP_ALLOC_CONF", "expandable_segments:True")
+    monkeypatch.delenv("TRAINER_ALLOC_CONF", raising=False)
+    env = mod.toolkit_env()
+    assert "PYTORCH_HIP_ALLOC_CONF" not in env and env["PYTHONUNBUFFERED"] == "1"
+    monkeypatch.setenv("TRAINER_ALLOC_CONF", "garbage_collection_threshold:0.8")
+    assert mod.toolkit_env()["PYTORCH_HIP_ALLOC_CONF"] == "garbage_collection_threshold:0.8"
+
+
 def test_the_trainer_stops_a_job(traind):
     mod, root = traind
     assert mod.start_job({"id": "r1", "config": {"slow": True}, "dir": str(root / "r1")})[0] == 200

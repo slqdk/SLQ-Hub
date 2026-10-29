@@ -50,6 +50,19 @@ def _secs(t: str) -> int | None:
     return sum(v * 60 ** i for i, v in enumerate(reversed(parts)))
 
 
+def toolkit_env() -> dict:
+    """ai-toolkit's environment: without PyTorch's expandable segments, which the image sets. Measured on the RX
+    7900 XTX (2026-10-29, the card's VRAM in sysfs against each process's in /sys/class/kfd): with them, about 12 GB
+    ai-toolkit freed after its text encoder stayed in use on the card until the process ended, and the first sample
+    ran out of memory with PyTorch holding 8.8 of the card's 24 GB. TRAINER_ALLOC_CONF sets the allocator instead."""
+    env = {**os.environ, "PYTHONUNBUFFERED": "1"}
+    for key in ("PYTORCH_HIP_ALLOC_CONF", "PYTORCH_CUDA_ALLOC_CONF", "PYTORCH_ALLOC_CONF"):
+        env.pop(key, None)
+    if os.environ.get("TRAINER_ALLOC_CONF"):
+        env["PYTORCH_HIP_ALLOC_CONF"] = os.environ["TRAINER_ALLOC_CONF"]
+    return env
+
+
 def busy() -> bool:
     return any(j["state"] in ("running", "stopping") for j in jobs.values())
 
@@ -103,8 +116,7 @@ def start_job(body: dict) -> tuple[int, dict]:
             return 409, {"error": "the trainer is busy"}
         conf = folder / "config.json"
         conf.write_text(json.dumps(cfg, indent=1))
-        env = {**os.environ, "PYTHONUNBUFFERED": "1"}
-        proc = subprocess.Popen(["python", "run.py", str(conf)], cwd=TOOLKIT, env=env, stdout=subprocess.PIPE,
+        proc = subprocess.Popen(["python", "run.py", str(conf)], cwd=TOOLKIT, env=toolkit_env(), stdout=subprocess.PIPE,
                                 stderr=subprocess.STDOUT, start_new_session=True)
         job = {"id": jid, "state": "running", "step": 0, "total": 0, "loss": None, "elapsed_s": 0, "eta_s": None,
                "log": [], "error": "", "proc": proc, "started": time.time()}

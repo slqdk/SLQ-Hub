@@ -132,6 +132,7 @@ services:
     shm_size: 8gb
     environment:
       TZ: ${TZ:-Europe/Copenhagen}
+      TRAINER_ALLOC_CONF: ${TRAINER_ALLOC_CONF:-}   # PyTorch's allocator for ai-toolkit (empty: its defaults)
     volumes:
       - ${HUB_ROOT:-/srv/slq-hub}/data/training:/training
       - ${HUB_ROOT:-/srv/slq-hub}/models/hf:/models/hf

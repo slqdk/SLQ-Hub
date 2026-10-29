@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.51.0, 2026-10-29)
+## State (0.51.1, 2026-10-29)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -468,7 +468,20 @@ now also used by `set_captions` and `with_triggers`: the substring test found "l
 ai-toolkit's dataloader_mixins.py: `images/_latent_cache/<stem>_<md5>.safetensors` is keyed by file name and crop,
 not content (`_t_e_cache` hashes the caption), so `remove_image` and `add_images` drop a name's cache files - before,
 a new picture under a removed one's name trained on the old latents. The editor closes while the Duplicate dialog
-is open (one modal at a time; Escape closed both). Tested here and on the dev server. The config keys were checked against the same commit (`diffusion_trainer`,
+is open (one modal at a time; Escape closed both). Tested here and on the dev server.
+0.51.1, the first real training ("Rikke", 35 pictures, rank 16) failed twice at the first sample: torch OOM in the
+FLUX.2 VAE decoder (`toolkit/models/v2/vae/flux2_kl.py`), "Tried to allocate 4.50 GiB ... 23.98 GiB of which 4.01 GiB
+is free ... 8.82 GiB allocated by PyTorch" - after "Free the GPU". Measured with a loop every 5 s on the VM (sysfs
+`mem_info_vram_used` against each process's `/sys/class/kfd/kfd/proc/<pid>/vram_*`): only ComfyUI (0.1 GB) and
+`run.py` on the card; while the text encoder loaded the card matched run.py (15.4 / 15.2 GB); then run.py fell to
+3.4 GB but the card stayed at 15.5, and with the transformer back (8.8 GB) the card held 15.6 - about 6.7 GB in use
+that no process accounted for, until run.py died (card 0.2 GB). So nothing else held the card (the Hub's clearing
+logged nothing: the card was empty at the start); memory freed inside ai-toolkit was not given back. The image sets
+`PYTORCH_HIP_ALLOC_CONF=expandable_segments:True` (my addition, not ai-toolkit's); with expandable segments PyTorch
+maps and unmaps physical memory (HIP's VMM) - the likeliest place for it to stay mapped. `traind.toolkit_env` now
+leaves it out (the Dockerfile line stays, so the built layers are reused; `TRAINER_ALLOC_CONF` sets one). NOT yet
+known whether that was it: the next run with the same loop tells (the card should fall with run.py). If not: keep
+the text encoder on the card (no `cache_text_embeddings`), or sample at 768 px. The config keys were checked against the same commit (`diffusion_trainer`,
 arch `flux2_klein_4b`, `cache_text_embeddings` so the 8 GB text encoder leaves the card, `timestep_type`
 "weighted" as ai-toolkit's UI default for klein; no quantisation, AdamW - quanto and bitsandbytes are the least
 sure on AMD). The image follows ai-toolkit's own AMD install (`manager/spec.py`: torch 2.13.0 / torchvision 0.28.0
@@ -1178,6 +1191,8 @@ the host if the VM ever stops by itself.
       torch fails the build - read which), and does `import torch` see the card in the container
       (`sudo bash update.sh compose exec trainer python -c "import torch; print(torch.cuda.is_available())"`)?
       ai-toolkit calls its AMD support "experimental and largely untested".
+    - **Memory (0.51.1)**: the first two runs ran out at the first sample (memory freed after the text encoder
+      stayed on the card, see the 0.51.1 paragraph). Next run: watch the card against run.py with the 5-second loop.
     - **The first run**: a thing with 15-25 pictures, 1000 steps. The download (about 16 GB - an estimate: 7.75
       GB is the distilled klein-4B's single file on Hugging Face, the base repo's was not looked at, and Qwen3-4B's
       bf16 weights are about 8 GB) lands in `models/hf/hub`; ai-toolkit then
