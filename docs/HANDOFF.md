@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.52.0, 2026-10-29)
+## State (0.52.1, 2026-10-29)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -490,7 +490,9 @@ cached 35 pictures - traind took every tqdm bar for the training's. Now only the
 (ai-toolkit: `ToolkitProgressBar(desc=self.job.name)` in BaseSDTrainProcess); the caching and sampling bars are
 dropped. Søren asked for the advice I had given in the chat to be in the interface ("ellers ka jeg ikke huske det"):
 the training editor has "Which step?" and "Make it better" (a guide panel under the info line, `GuideText` in
-`Training.tsx`) and a "?" at Steps and Rank - click, not hover, so they work on a phone. The config keys were checked against the same commit (`diffusion_trainer`,
+`Training.tsx`) and a "?" at Steps and Rank - click, not hover, so they work on a phone. 0.52.1 (asked for after
+"is it only the face?"): the picture mix and caption advice per kind (`PICTURES`, `CAPTIONS`, `PICTURE_HINT`), for a
+person with a check against the café sample; the links further down scroll to the guide. The config keys were checked against the same commit (`diffusion_trainer`,
 arch `flux2_klein_4b`, `cache_text_embeddings` so the 8 GB text encoder leaves the card, `timestep_type`
 "weighted" as ai-toolkit's UI default for klein; no quantisation, AdamW - quanto and bitsandbytes are the least
 sure on AMD). The image follows ai-toolkit's own AMD install (`manager/spec.py`: torch 2.13.0 / torchvision 0.28.0

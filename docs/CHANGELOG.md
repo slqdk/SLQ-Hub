@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.52.1 - 2026-10-29
+
+- **Which pictures, by what it learns.** For a person, the training page
+  now says the mix that works - about half close-ups of the face, a third
+  head and shoulders, the rest full body - and what to leave out (other
+  people, beauty filters, the same outfit again and again). A thing and a
+  style get their own advice, and the captions advice follows the kind.
+  "More tips" under the pictures opens the guide.
+
 ## 0.52.0 - 2026-10-29
 
 - **The advice is on the training page.** "Which step?" explains how to

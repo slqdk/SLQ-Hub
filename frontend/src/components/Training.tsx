@@ -1,7 +1,7 @@
 // LoRA training (0.50.0): Settings -> Models -> LoRAs -> Train a LoRA. The admin's alone - people never see it.
 // A run: pictures in, captions (written by the chat model, or typed), then the whole card for a few hours, then a
 // checkpoint - chosen by its sample pictures - becomes a LoRA.
-import { useCallback, useEffect, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { CircleHelp, Copy, GraduationCap, ImagePlus, Sparkles, X } from "lucide-react";
 import { api, type TrainingDetail, type TrainingOverview, type TrainingRun } from "../lib/api";
 import { bytes, seconds } from "../lib/format";
@@ -182,6 +182,32 @@ function HelpDot({ on, onClick, label }: { on: boolean; onClick: () => void; lab
     title={label} onClick={(e) => { e.preventDefault(); onClick(); }}><CircleHelp size={14} /></button>;
 }
 
+/** Which pictures, by what it learns. A person LoRA learns everything the pictures share that the captions leave
+ *  out - face, hair, build, and also an outfit or background seen again and again. */
+const PICTURES: Record<string, ReactNode> = {
+  person: <>For a person, a mix: about <b>half close-ups of the face</b> (front, three-quarter, profile, different
+    expressions), <b>a third head and shoulders</b>, <b>the rest full body</b>. Without full-body pictures it can get
+    the face right and give the body of a stranger, and a face further away looks less like them. Leave out other
+    people (crop them away), beauty filters, the same outfit or background again and again, and sunglasses, hats or
+    hands over the face.</>,
+  thing: <>For a thing: from all sides and angles, close-ups of the details and the whole of it, on different
+    backgrounds and in different light. It should be the main subject - crop away what is always around it.</>,
+  style: <>For a style: many different subjects in that style - people, animals, places, things - so it learns the
+    style and not a subject. Leave out pictures that are only a little like it.</>,
+};
+const CAPTIONS: Record<string, string> = {
+  person: "describe clothes, place, pose, light, expression and framing (close-up, full body) - not the face or the " +
+    "build, and the hair only when it changes (then it can be asked for).",
+  thing: "describe where it is, the background, the light and the angle - not the thing itself, its colour or brand.",
+  style: "describe what each picture shows - not the style, the colours or the technique.",
+};
+const PICTURE_HINT: Record<string, string> = {
+  person: "15-40 sharp pictures, 1024 px or more: about half close-ups of the face, a third head and shoulders, the " +
+    "rest full body - in different places, light and clothes. No other people, no beauty filters.",
+  thing: "15-40 sharp pictures, 1024 px or more, from all sides, close and further away, on different backgrounds.",
+  style: "15-40 pictures in the style, 1024 px or more, of many different subjects.",
+};
+
 /** The advice for a training (Søren: "write it into the interface, or I cannot remember it"). */
 function GuideText({ guide, kind }: { guide: Guide; kind: string }) {
   const likeness = kind === "style" ? "has the style" : kind === "person" ? "looks like the person" : "looks like the thing";
@@ -213,12 +239,13 @@ function GuideText({ guide, kind }: { guide: Guide; kind: string }) {
       <li><b>One change a round,</b> so you know what helped, and name the versions (v1, v2).</li>
       <li><b>Steps:</b> best step was the last one - give it 500-1000 more. Best step was early - give it fewer, or
         just keep that one.</li>
-      <li><b>Pictures matter most:</b> sharp, from different angles and distances, in different light, places and
-        clothes. Take out blurry and heavily filtered ones, and those with other people. 20-30 good pictures beat 35
-        mixed ones.</li>
-      <li><b>Captions:</b> describe what should change from picture to picture - clothes, place, pose, light - but not
-        what the trigger word should learn. What a caption leaves out becomes part of the trigger word. Correct
-        wrong details in written captions.</li>
+      <li><b>Pictures matter most:</b> sharp and large (1024 px or more); 20-30 good pictures beat 35 mixed ones.
+        {" "}{PICTURES[kind] ?? PICTURES.thing}</li>
+      <li><b>Captions:</b> {CAPTIONS[kind] ?? CAPTIONS.thing} What a caption leaves out becomes part of the trigger
+        word. Correct wrong details in written captions.</li>
+      {kind === "person" && <li><b>Check the mix:</b> in the café sample the person is further away than in the
+        portrait. Looks like them there too - the mix is right. Only the portrait does - add more half and full-body
+        pictures in a v2.</li>}
       <li><b>Rank:</b> 16 suits most; 32 when fine details are missing.</li>
       <li><b>Using it:</b> strength 1 is as trained, 0.7-0.9 a lighter touch. Set its default in the LoRA's
         settings.</li>
@@ -279,7 +306,12 @@ function TrainingEditor({ rid, data, onClose, onAdded, onDuplicate }: { rid: str
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [settings, setSettings] = useState<{ name: string; steps: string } | null>(null);
   const [guide, setGuide] = useState<Guide>("");
+  const guideBox = useRef<HTMLDivElement>(null);
   const toggle = (g: Guide) => setGuide(guide === g ? "" : g);
+  const openGuide = (g: Guide) => {           // from a link further down: the guide is at the top
+    setGuide(g);
+    window.requestAnimationFrame(() => guideBox.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  };
   const input = useRef<HTMLInputElement>(null);
   const load = useCallback(() => api<TrainingDetail>(`/hub/api/training/runs/${rid}`)
     .then((r) => { setRun(r); setError(""); }, (e) => setError((e as Error).message)), [rid]);
@@ -379,7 +411,7 @@ function TrainingEditor({ rid, data, onClose, onAdded, onDuplicate }: { rid: str
         <button type="button" className={`btn quiet small ${guide === "better" ? "on" : ""}`}
           aria-expanded={guide === "better"} onClick={() => toggle("better")}><CircleHelp size={14} /> Make it better</button>
       </div>
-      {guide && <div className="callout train-guide"><GuideText guide={guide} kind={run.kind} /></div>}
+      {guide && <div className="callout train-guide" ref={guideBox}><GuideText guide={guide} kind={run.kind} /></div>}
 
       {/* Where it is */}
       {working && (
@@ -411,7 +443,7 @@ function TrainingEditor({ rid, data, onClose, onAdded, onDuplicate }: { rid: str
           <h4 style={{ margin: "0 0 4px" }}>Sample pictures</h4>
           <p className="muted small" style={{ marginTop: 0 }}>Made with the trigger word every 250 steps. Choose the
             step where it looks right before it starts to look stiff or copy the pictures - that is the one to
-            keep. <button type="button" className="link-btn" onClick={() => setGuide("choose")}>How to tell</button></p>
+            keep. <button type="button" className="link-btn" onClick={() => openGuide("choose")}>How to tell</button></p>
           <div className="train-steps">
             {steps.map((st) => {
               const cp = checkpoint(st);
@@ -449,8 +481,9 @@ function TrainingEditor({ rid, data, onClose, onAdded, onDuplicate }: { rid: str
           <input ref={input} type="file" multiple hidden accept="image/*,.heic,.heif"
             onChange={(e) => { const f = [...(e.target.files ?? [])]; if (f.length) upload(f); e.target.value = ""; }} />
         </div>
-        <p className="muted small" style={{ marginTop: 0 }}>15-40 sharp pictures from different angles, places and
-          light, 1024 px or more. They are turned upright and scaled to at most 2048 px.</p>
+        <p className="muted small" style={{ marginTop: 0 }}>{PICTURE_HINT[run.kind] ?? PICTURE_HINT.thing} They are
+          turned upright and scaled to at most 2048 px. <button type="button" className="link-btn"
+            onClick={() => openGuide("better")}>More tips</button></p>
         {pics.length > 0 && (
           <>
             <p className="muted small" style={{ margin: "0 0 6px" }}>Captions describe what changes from picture to
