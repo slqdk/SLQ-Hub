@@ -402,6 +402,22 @@ export const SECTIONS: HelpSection[] = [
         owner: true,
       },
       {
+        id: "lora-training",
+        title: "Train a LoRA on your own pictures",
+        what: "Settings, Models, LoRAs, Train a LoRA teaches FLUX.2 klein 4B a thing, a person or a style from 15-40 of "
+          + "your pictures, here on the card. It needs the trainer turned on (COMPOSE_PROFILES=training on the VM).",
+        examples: [
+          { text: "New training: CX9020 controller, trigger word cx9020x, 25 photos of it" },
+          { text: "Then: Draw cx9020x in a control cabinet, with my CX9020 LoRA" },
+        ],
+        how: ["Add the pictures, let the chat model write the captions (or type them), then Start. The card is busy "
+          + "for a few hours - chats and pictures wait.",
+          "Every 250 steps it saves a checkpoint with sample pictures. Choose the step that looks right and Add as "
+          + "LoRA.",
+          "The first training downloads about 16 GB of model files. Only you can train or use LoRAs."],
+        owner: true,
+      },
+      {
         id: "cutout",
         tools: ["image_remove_background"],
         title: "Cut out the subject",

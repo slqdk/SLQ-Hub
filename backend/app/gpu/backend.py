@@ -57,6 +57,8 @@ class GpuBackend:
             port = AUX_PORTS["embed-gpu"]
             await self.runner.start("embed-gpu", port, args)
             await self.runner.wait_ready("embed-gpu", port, timeout=300)
+        elif kind == "train":                    # 0.50.0: the LoRA trainer takes the whole card - nothing of ours
+            await self._clear_card()             # may stay on it (the scheduler has unloaded what it knows of)
         else:
             raise ValueError(f"unknown residency {need!r}")
 

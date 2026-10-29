@@ -218,6 +218,21 @@ export interface Lora { id: string; name: string; base: string; base_label: stri
   fits: { id: string; name: string }[] }
 export interface LoraList { loras: Lora[]; families: Record<string, string> }
 
+/** LoRA training (0.50.0): a run, as the list and the editor see it. */
+export type TrainingState = "draft" | "captioning" | "preparing" | "queued" | "training" | "done" | "failed" | "cancelled";
+export interface TrainingProgress { what: "captions" | "download" | "queue" | "training" | "stopping"; done?: number;
+  total?: number; repo?: string; step?: number; loss?: number | null; eta_s?: number | null; log?: string[] }
+export interface TrainingRun { id: string; name: string; trigger: string; kind: "person" | "thing" | "style";
+  steps: number; rank: number; base: string; state: TrainingState; error: string; created: number; started?: number;
+  ended?: number; lora: string | null; images?: number; log?: string[]; progress?: TrainingProgress | null }
+export interface TrainingDetail extends TrainingRun {
+  images_list: { name: string; caption: string; v: number }[];
+  checkpoints: { step: number; file: string; size: number }[];
+  samples: { step: number; n: number; path: string }[] }
+export interface TrainingOverview { service: { ok: boolean; busy: boolean; toolkit: boolean; ref: string } | null;
+  runs: TrainingRun[]; base: { model: string; family: string; label: string; repo: string }; kinds: string[];
+  min_images: number; max_images: number; can_caption: boolean }
+
 export interface ModelEntry { id: string; name: string; name_card?: string; description?: string; default?: boolean; installed: boolean;
   loaded?: boolean; downloads: DownloadState[]; capabilities?: string[]; kind?: string;
   files: { repo?: string; path?: string; url?: string; dest: string; size?: number; role?: string }[];

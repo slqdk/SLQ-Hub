@@ -110,6 +110,35 @@ services:
       inner:
         ipv4_address: 172.31.251.12
 
+  # LoRA training (0.50.0): Ostris' ai-toolkit on the card, given jobs by the Hub when its GPU queue hands it the
+  # whole card. Optional - on with COMPOSE_PROFILES=training in .env (a large image: PyTorch for ROCm and
+  # ai-toolkit's libraries). Offline like the other model containers: the Hub fetches the base models into
+  # models/hf (Hugging Face's cache), and the run's pictures and results live in data/training.
+  trainer:
+    <<: *gpu
+    profiles: ["training"]
+    build:
+      context: ../services/trainer
+      args:                     # its own PyTorch - ai-toolkit's AMD pins, not ComfyUI's (services/trainer/Dockerfile)
+        TORCH_INDEX: ${TRAINER_TORCH_INDEX:-https://download.pytorch.org/whl/rocm7.1}
+        TORCH_VERSION: ${TRAINER_TORCH_VERSION:-2.13.0}
+        TORCHVISION_VERSION: ${TRAINER_TORCHVISION_VERSION:-0.28.0}
+        TORCHAUDIO_VERSION: ${TRAINER_TORCHAUDIO_VERSION:-2.11.0}
+        AI_TOOLKIT_REF: ${AI_TOOLKIT_REF:-b69b98314557f7c8b08e11bbb14e48d959e6ab26}
+    image: slq-hub-trainer:latest
+    container_name: slq-hub-trainer
+    restart: unless-stopped
+    init: true
+    shm_size: 8gb
+    environment:
+      TZ: ${TZ:-Europe/Copenhagen}
+    volumes:
+      - ${HUB_ROOT:-/srv/slq-hub}/data/training:/training
+      - ${HUB_ROOT:-/srv/slq-hub}/models/hf:/models/hf
+    networks:
+      inner:
+        ipv4_address: 172.31.251.14
+
   # Text to speech on the CPU (Chatterbox, Røst): no GPU, so the chat model stays on the card while it speaks.
   speech:
     build:

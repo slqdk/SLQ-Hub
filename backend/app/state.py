@@ -30,6 +30,7 @@ class Transports:
     sandbox: httpx.AsyncBaseTransport | None = None
     web: httpx.AsyncBaseTransport | None = None
     speech: httpx.AsyncBaseTransport | None = None
+    trainer: httpx.AsyncBaseTransport | None = None
 
 
 @dataclass

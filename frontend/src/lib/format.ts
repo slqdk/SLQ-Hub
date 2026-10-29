@@ -80,6 +80,7 @@ export function residencyName(need: string | null | undefined, names: Record<str
   if (kind === "llm") return names[id] ?? id;
   if (kind === "comfy") return "ComfyUI (pictures, sound)";
   if (kind === "embedgpu") return "Indexing pages";
+  if (kind === "train") return "LoRA training";
   if (kind === "idle") return "Nothing loaded";
   return need;
 }

@@ -146,7 +146,8 @@ for statistics.
 ### Concepts
 
 - **Residency**: what is loaded on the card. Examples: `llm:qwen3.8-27b`,
-  `llm:qwen3.6-35b-a3b`, `comfy`, `embed-gpu`. One at a time.
+  `llm:qwen3.6-35b-a3b`, `comfy`, `embed-gpu`, and `train` - the LoRA
+  trainer, which takes the whole card (0.50.0). One at a time.
 - **Slots**: how many jobs a residency serves at once. LLMs have 2
   (`llama-server -np 2`), ComfyUI and GPU indexing have 1. The Hub never sends
   llama-server more requests than it has slots, so the queue the UI shows
@@ -1839,6 +1840,21 @@ files afterwards.
     People's chats, devices and apps never see or use a LoRA: the routes are
     the owner's, the setting is not a device setting, and the parameter is
     only offered in the owner's turns.
+  - **Training a LoRA (0.50.0, the admin's alone).** Settings -> Models ->
+    LoRAs -> Train a LoRA (`backend/app/training/`). A run is a folder in
+    `data/training`: pictures with a caption beside each (the chat model
+    writes them when it can see, through the queue; or typed), a trigger
+    word, a kind (thing, person, style), steps and rank. Start fetches the
+    base model's files into Hugging Face's cache in `models/hf` (the Hub
+    does it: the trainer is offline like the other model containers), then
+    takes the residency `train` as a background job until the training is
+    done, stopped or failed. The trainer (`services/trainer`, compose profile
+    `training`, optional) is Ostris' ai-toolkit with a small HTTP service
+    that runs one job and reports its step, time left and loss. The base is
+    FLUX.2 klein 4B (Apache 2.0): trained on klein-base-4B in bf16 without
+    quantising, used on the 4-step model. Every 250 steps a checkpoint and
+    three sample pictures are saved; the admin chooses one by its pictures
+    and it becomes a LoRA (source "trained").
   - **Families and abilities.** Each picture model in the catalog has a
     `family` (which graph) and `abilities` (generate, edit, cutout). Models
     that only generate hand edits to one that edits. `image_generate`'s

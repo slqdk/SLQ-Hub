@@ -50,7 +50,7 @@ from app.state import Transports
 from . import dev_evals
 from .conftest import _install_fake_models
 from .mocks import (HostRouter, float_wav, make_civitai, make_civitai_delivery, make_comfy, make_hf, make_llama,
-                    make_mcp_http, make_sandbox, make_searxng, make_speech, make_supervisor, silent_mp3)
+                    make_mcp_http, make_sandbox, make_searxng, make_speech, make_supervisor, make_trainer, silent_mp3)
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -201,6 +201,8 @@ def responder(body: dict) -> dict:
     start = max((i for i, m in enumerate(msgs) if own(m)), default=-1)
     tools_done = sum(1 for m in msgs[start + 1:] if m["role"] == "tool")
     low = text.lower()
+    if "for training a picture model" in low:        # LoRA training (0.50.0): a caption for one picture
+        return {"content": "a small grey device on a table, seen from the front, soft daylight"}
     if "short title" in low:
         return {"content": text.split("starts with:")[-1].strip()[:40].title() or "Chat"}
     if "condense the conversation" in low:
@@ -498,6 +500,13 @@ HF_DEMO = {"tiny_downloads": True, "repos": {"unsloth/Qwen3-Coder-30B-A3B-Instru
 
 
 # Search ("Ornith 1.5 9B" in the dialog): the records the search API returns, and Ornith's own repository.
+# LoRA training (0.50.0): what the Hub fetches for the trainer (tiny downloads here)
+HF_DEMO["repos"]["black-forest-labs/FLUX.2-klein-base-4B"] = {"sha": "0a1b2c", "tree": [
+    _hf_file("flux-2-klein-base-4b.safetensors", 7.75), _hf_file("transformer/diffusion_pytorch_model.safetensors", 7.75)]}
+HF_DEMO["repos"]["ai-toolkit/flux2_vae"] = {"sha": "3d4e5f", "tree": [_hf_file("ae.safetensors", 0.34)]}
+HF_DEMO["repos"]["Qwen/Qwen3-4B"] = {"sha": "6a7b8c", "tree": [
+    _hf_file("model-00001-of-00003.safetensors", 3.96), _hf_file("model-00002-of-00003.safetensors", 3.99),
+    _hf_file("model-00003-of-00003.safetensors", 0.1), _hf_file("config.json", 0.000001)]}
 HF_DEMO["repos"]["ornith-ai/Ornith-1.5-9B-GGUF"] = {
     "tree": [_hf_file(f"Ornith-1.5-9B-{q}.gguf", gb) for q, gb in
              (("Q4_K_M", 5.38), ("Q5_K_M", 6.18), ("Q6_K", 7.04), ("Q8_0", 9.12), ("BF16", 17.14))]
@@ -601,6 +610,69 @@ def _test_clip(base: Path) -> bytes | None:
         return None
 
 
+def _controller(size: int, bg: tuple, x: int, y: int, label: str = "") -> bytes:
+    """A made-up photo of a small grey controller with lamps, for the training demo."""
+    from PIL import Image, ImageDraw
+    img = Image.new("RGB", (size, size), bg)
+    d = ImageDraw.Draw(img)
+    for i in range(0, size, 24):                                   # a little texture: a bench, a wall
+        d.line([(0, i), (size, i + 12)], fill=tuple(max(0, c - 14) for c in bg), width=3)
+    w, h = size * 2 // 5, size // 2
+    d.rectangle([x, y, x + w, y + h], fill=(58, 62, 68), outline=(30, 32, 36), width=4)
+    d.rectangle([x + 12, y + 14, x + w - 12, y + 52], fill=(40, 44, 50))
+    for j, colour in enumerate(((60, 200, 90), (60, 200, 90), (240, 160, 40), (60, 200, 90))):
+        d.rectangle([x + 18 + j * 26, y + 70, x + 34 + j * 26, y + 82], fill=colour)
+    for k in range(4):                                             # the terminals
+        d.rectangle([x + 16, y + 110 + k * 30, x + w - 16, y + 126 + k * 30], fill=(205, 205, 200))
+    if label:
+        d.text((16, size - 28), label, fill=(20, 20, 20))
+    buf = io.BytesIO()
+    img.save(buf, "JPEG", quality=88)
+    return buf.getvalue()
+
+
+def _seed_training(data: Path) -> None:
+    """Two LoRA trainings: one trained (samples by step, checkpoints), one being prepared (pictures, no captions)."""
+    import time as _t
+    places = [((176, 132, 92), "on a wooden workbench in daylight, seen from the front"),
+              ((236, 236, 232), "on a plain white table, studio light, seen from above"),
+              ((120, 124, 130), "mounted on a DIN rail in a grey control cabinet, close-up"),
+              ((196, 170, 130), "on a desk next to a laptop, warm evening light"),
+              ((90, 110, 140), "held in a hand in front of a blue wall, from the side"),
+              ((210, 200, 180), "on a shelf with other parts, soft window light"),
+              ((150, 160, 150), "on a test stand with cables plugged in, from a low angle"),
+              ((230, 220, 200), "in its open box on a counter, seen from the front")]
+    lora = json.dumps({"diffusion_model.single_blocks.0.linear1.lora_A.weight":
+                       {"dtype": "F16", "shape": [16, 3072], "data_offsets": [0, 0]}}).encode()
+    lora = struct.pack("<Q", len(lora)) + lora
+    for rid, name, trig, state, n, captioned, steps in (
+            ("cx9020-controller-20261027-201500", "CX9020 controller", "cx9020x", "done", 8, True, 1000),
+            ("workshop-style-20261028-091200", "Workshop sketches", "skchx", "draft", 5, False, 2000)):
+        root = data / "training" / rid
+        if root.exists():
+            continue
+        (root / "images").mkdir(parents=True)
+        out = root / "output" / rid
+        (out / "samples").mkdir(parents=True)
+        for i in range(n):
+            bg, cap = places[i % len(places)]
+            (root / "images" / f"img-{i + 1}.jpg").write_bytes(_controller(640, bg, 120 + 30 * (i % 3), 110 + 20 * (i % 4)))
+            if captioned:
+                (root / "images" / f"img-{i + 1}.txt").write_text(f"{trig}, {cap}")
+        if state == "done":
+            for step in (0, 250, 500, 750, 1000):
+                for k, (bg, _) in enumerate(places[:3]):
+                    # before training: no controller at all; then more and more like it
+                    pic = _controller(384, bg, 80, 70) if step else _controller(384, bg, 900, 900, "a box")
+                    (out / "samples" / f"17617{step:05d}{k}__{step:09d}_{k}.jpg").write_bytes(pic)
+                if step:
+                    (out / (f"{rid}_{step:09d}.safetensors" if step < 1000 else f"{rid}.safetensors")).write_bytes(lora)
+        (root / "run.json").write_text(json.dumps({
+            "id": rid, "name": name, "trigger": trig, "kind": "thing" if state == "done" else "style", "steps": steps,
+            "rank": 16, "base": "flux2-klein-4b", "state": state, "error": "", "created": _t.time() - 86400,
+            "lora": None, **({"started": _t.time() - 80000, "ended": _t.time() - 70000} if state == "done" else {})}))
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=8080)
@@ -638,9 +710,12 @@ def main() -> None:
               lan_networks=tuple(_networks(["127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"])),
               admin_user="soren", admin_password_hash=auth.hash_password("correct horse battery", n=2**10),
               static_dir=dist if (dist / "index.html").is_file() else None, speech_url="http://speech:7100")
+    _seed_training(data)
     fakes = {"sup": {}, "llama": {"responder": responder},
              "comfy": {"audio_seconds": 3.0, "video_bytes": _test_clip(base)},
              "sandbox": {"handler": sandbox_handler(data / "workspace")}, "mcp": {}, "speech": {},
+             # LoRA training: a job "trains" for a few minutes (60 looks, one per 5 s), then writes its results
+             "trainer": {"root": str(data / "training"), "looks_to_finish": 60},
              # Settings -> Cloud: OpenAI-compatible, base URL http://cloud.test/v1, any key (0.37.0)
              "cloud": {"responder": lambda body: {"content": "The cloud model took it over and finished the work "
                                                              "(a fake answer from cloud.test)."}}}
@@ -649,10 +724,11 @@ def main() -> None:
                          "searxng": make_searxng(), "mcp.test": make_mcp_http(fakes["mcp"]),
                          "huggingface.co": make_hf(HF_DEMO), "civitai.com": make_civitai(CIVITAI_DEMO),
                          "delivery.civitai.test": make_civitai_delivery(CIVITAI_DEMO),
-                         "speech:7100": make_speech(fakes["speech"]), "cloud.test": make_llama(fakes["cloud"])},
+                         "speech:7100": make_speech(fakes["speech"]), "cloud.test": make_llama(fakes["cloud"]),
+                         "trainer:7300": make_trainer(fakes["trainer"])},
                         streaming=("llm",))
     t = Transports(llm=router, runner=router, comfy=router, sandbox=None if a.sandbox else router, web=router,
-                   speech=router)
+                   speech=router, trainer=router)
     app = create_app(env, t, startup=False)
     hub = app.state.hub
 

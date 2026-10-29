@@ -78,11 +78,11 @@ ENV_FILE = HUB_ROOT / ".env"
 COMPOSE = ROOT / "deploy" / "docker-compose.yml"
 OVERRIDE = HUB_ROOT / "docker-compose.override.yml"
 PROJECT = "slq-hub"
-BUILT = ("hub", "llm", "comfyui", "sandbox", "speech")  # services with their own image
+BUILT = ("hub", "llm", "comfyui", "sandbox", "speech", "trainer")  # services with their own image (trainer: optional)
 # Folders the services mount, made (owned by uid 1000, the containers' user) before they start: Docker would
 # create a missing one as root, and the Hub could not download into it.
 FOLDERS = ("data", "models/llm", "models/comfy", "models/speech", "comfy/input", "comfy/output", "comfy/user",
-           "windows/storage", "windows/oem", "windows/shared")
+           "windows/storage", "windows/oem", "windows/shared", "data/training", "models/hf")
 KEEP = 3
 TIMEOUT = 300
 POLL = float(os.environ.get("HUB_UPDATE_POLL", "3"))

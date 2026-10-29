@@ -32,6 +32,7 @@ export function ownerName(owner: string): string {
   if (owner === "system") return "the Hub";
   if (owner === "library") return "library indexing";
   if (owner === "tests") return "a test run";
+  if (owner === "training") return "LoRA training";
   return owner;
 }
 

@@ -4,6 +4,7 @@ import { Plus } from "lucide-react";
 import { api, type Lora, type LoraList } from "../lib/api";
 import { bytes } from "../lib/format";
 import { useApp } from "../state";
+import { TrainingSection } from "./Training";
 import { ConfirmButton, Lamp, Modal } from "./ui";
 
 export function LorasSection() {
@@ -57,7 +58,8 @@ export function LorasSection() {
         menu, or ask for it by name. A LoRA works only with models of its family.</p>
       <div className="list">
         {data === null ? <div className="faint">Loading</div> : data.loras.length === 0
-          ? <div className="list-row"><span className="muted">No LoRAs yet. Add a .safetensors LoRA from your computer.</span></div>
+          ? <div className="list-row"><span className="muted">No LoRAs yet. Add a .safetensors LoRA from your computer,
+            or train one below.</span></div>
           : data.loras.map((l) => (
             <div className="list-row" key={l.id} style={{ alignItems: "flex-start", flexWrap: "wrap" }}>
               <Lamp state={l.fits.length ? "off" : "act"} />
@@ -79,6 +81,7 @@ export function LorasSection() {
             </div>
           ))}
       </div>
+      <TrainingSection onAdded={load} />
       {editing && data && <LoraSettings lora={editing} families={data.families} onClose={() => setEditing(null)}
         onSaved={() => { setEditing(null); load(); }} />}
     </section>

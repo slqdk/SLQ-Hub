@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.49.0, 2026-10-29)
+## State (0.50.0, 2026-10-29)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -438,6 +438,29 @@ checkpoints, text encoders too) after the model's loader and rewires its users. 
 not in MEMBER_ROUTES). The chat setting `image_loras` (not a device setting) and the tools' `loras` parameter exist
 only in the owner's turns. Tested here against the fake ComfyUI and on the dev server (Settings, the picture menu).
 NOT seen on the card (item 83).
+0.50.0, Søren: "Og så skal træningen også bygges ind" - LoRA training, admin only like the LoRAs. `app/training/`:
+a run is `data/training/<id>/` (run.json, images/ with a caption .txt beside each JPEG - ai-toolkit's layout -
+output/). Pictures are turned upright, at most 2048 px, refused under 256 px. Captions: the chat model when it can see
+(through the queue, owner "training", one picture per call, thinking off; empty answers are counted and named) or
+typed; the trigger word is put first. Training: the Hub fetches the base into Hugging Face's cache layout in
+`models/hf` (the trainer is on `inner`, offline like the other model containers) - only what ai-toolkit reads,
+checked in its source at b69b983 (2026-10-27): `flux-2-klein-base-4b.safetensors` from black-forest-labs/
+FLUX.2-klein-base-4B (not its diffusers folders, which would double it), `ae.safetensors` from ai-toolkit/flux2_vae,
+all of Qwen/Qwen3-4B (the text encoder, a class attribute in `flux2_klein_model.py`, not a config key). Then the
+residency "train" (GpuBackend clears the card; nothing of ours loads) as a background job with `meta.cancel`, so
+the queue's Stop works too. `services/trainer/traind.py` (stdlib HTTP on 7300) runs `python run.py
+<dir>/config.json` and parses tqdm's bar for step, ETA and loss; a cancel is SIGINT, SIGTERM, SIGKILL, and the job
+says "stopping" until ai-toolkit has exited - the Hub keeps the card until then. A job the trainer no longer knows
+(it restarted) or a minute without an answer fails the run with the reason. After a Hub restart a leftover job is
+told to stop first, then the Hub holds the card until the trainer is idle. The config keys were checked against the same commit (`diffusion_trainer`,
+arch `flux2_klein_4b`, `cache_text_embeddings` so the 8 GB text encoder leaves the card, `timestep_type`
+"weighted" as ai-toolkit's UI default for klein; no quantisation, AdamW - quanto and bitsandbytes are the least
+sure on AMD). The image follows ai-toolkit's own AMD install (`manager/spec.py`: torch 2.13.0 / torchvision 0.28.0
+/ torchaudio 2.11.0 from the rocm7.1 index, held by a constraint while its requirements go in) - not ComfyUI's
+torch 2.14.1+rocm7.14. Checkpoints `<id>_000000250.safetensors` (the last `<id>.safetensors`) and samples
+`samples/<time>__<step>_<n>.jpg`, as in BaseSDTrainProcess. Tested here against a fake trainer, traind against a
+fake run.py, and the UI on the dev server (captions, start, progress, stop, Add as LoRA). NOT built or run on the
+card (item 84).
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
 host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU
@@ -1130,6 +1153,24 @@ the host if the VM ever stops by itself.
     log says "lora key not loaded" when a LoRA does not fit; the Hub does not read that yet, so a wrong family shows
     only as a picture without the LoRA's effect. Also: an upload of a few hundred MB through hub.slq.dk (Nginx Proxy
     Manager's body size limit).
+84. **LoRA training on the card** (0.50.0) - none of it has run on the real hardware:
+    - **The image**: `COMPOSE_PROFILES=training` in `.env`, `sudo bash update.sh`. Does ai-toolkit's
+      requirements install go through with the rocm7.1 torch held by the constraint (a package wanting another
+      torch fails the build - read which), and does `import torch` see the card in the container
+      (`sudo bash update.sh compose exec trainer python -c "import torch; print(torch.cuda.is_available())"`)?
+      ai-toolkit calls its AMD support "experimental and largely untested".
+    - **The first run**: a thing with 15-25 pictures, 1000 steps. The download (about 16 GB - an estimate: 7.75
+      GB is the distilled klein-4B's single file on Hugging Face, the base repo's was not looked at, and Qwen3-4B's
+      bf16 weights are about 8 GB) lands in `models/hf/hub`; ai-toolkit then
+      loads offline (HF_HUB_OFFLINE) - if it asks for a file the Hub did not fetch, the run fails with ai-toolkit's
+      own message in the trainer's last lines. Watch: the memory (bf16 + cached text embeddings is meant to fit
+      in 24 GB; `rocm-smi` while it trains), the speed (the time left after the first steps), and whether the
+      progress bar is parsed (step and time left on the page).
+    - **The result**: does a checkpoint load in ComfyUI on the 4-step klein (item 83: "lora key not loaded" in
+      ComfyUI's log means the keys do not fit), and does the trigger word bring the thing?
+    - **Stop and restart**: Stop during training (the card is free within about 90 s, after ai-toolkit has
+      exited); a Hub restart while it trains (the leftover job is stopped before anything loads).
+    - Not offered: klein 9B (gated, under BFL's own licence; ai-toolkit quantises it by default).
 80. **Not pursued (Søren, 2026-10-28)** - kept here in case it is taken up again; if it stays unused, remove
     the `windows` service, `.30` from `SANDBOX_IPS`, `windows/*` from `FOLDERS` and INSTALL.md section 12.
     **0.39.0's Windows container on VM 222**: `COMPOSE_PROFILES=windows` in

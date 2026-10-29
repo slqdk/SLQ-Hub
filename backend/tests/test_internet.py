@@ -325,8 +325,9 @@ async def test_the_owner_sets_it_in_settings(signed_in, app, client):
 
 
 def test_the_model_containers_have_no_way_out():
-    """llm, comfyui and speech sit on their own network with fixed addresses, which the VM's firewall keeps from
-    opening connections to anything outside it; the Hub reaches them there, and the internet through core."""
+    """llm, comfyui, speech and the LoRA trainer sit on their own network with fixed addresses, which the VM's
+    firewall keeps from opening connections to anything outside it; the Hub reaches them there, and the internet
+    through core."""
     from pathlib import Path
     root = Path(__file__).resolve().parents[2]
     compose = (root / "deploy" / "docker-compose.yml").read_text()
@@ -334,7 +335,7 @@ def test_the_model_containers_have_no_way_out():
     def service(name: str) -> str:
         return compose.split(f"\n  {name}:\n", 1)[1].split("\n\n  ", 1)[0]
     ips = {}
-    for name in ("llm", "comfyui", "speech"):
+    for name in ("llm", "comfyui", "speech", "trainer"):
         block = service(name)
         assert "\n    networks:\n      inner:\n        ipv4_address: 172.31.251." in block, name
         assert "core" not in block.split("\n    networks:", 1)[1], name
@@ -344,7 +345,7 @@ def test_the_model_containers_have_no_way_out():
     assert "searxng" in compose and "networks: [core]" in service("searxng")
     assert "inner:\n    driver: bridge" in compose and "subnet: 172.31.251.0/24" in compose
     fw = (root / "deploy" / "firewall" / "slq-hub-firewall.sh").read_text()
-    assert f'MODEL_IPS="${{MODEL_IPS:-{ips["llm"]} {ips["comfyui"]} {ips["speech"]}}}"' in fw
+    assert f'MODEL_IPS="${{MODEL_IPS:-{ips["llm"]} {ips["comfyui"]} {ips["speech"]} {ips["trainer"]}}}"' in fw
     assert 'INNER_NET="${INNER_NET:-172.31.251.0/24}"' in fw
     assert 'add DOCKER-USER -s "$ip" ! -d "$INNER_NET" -m conntrack --ctstate NEW -j DROP' in fw
 

@@ -10,7 +10,7 @@ from app.main import create_app
 from app.state import Transports
 
 from .mocks import (HostRouter, make_civitai, make_civitai_delivery, make_comfy, make_hf, make_llama, make_mcp_http,
-                    make_sandbox, make_searxng, make_speech, make_supervisor)
+                    make_sandbox, make_searxng, make_speech, make_supervisor, make_trainer)
 
 CATALOG = Path(__file__).resolve().parents[1] / "app" / "catalog" / "models.json"
 
@@ -37,6 +37,7 @@ class Fakes:
         self.hf = {}
         self.civitai = {}
         self.speech = {}
+        self.trainer = {}
 
 
 @pytest.fixture
@@ -73,10 +74,13 @@ def app(hub_env, fakes):
         "civitai.com": make_civitai(fakes.civitai),
         "delivery.civitai.test": make_civitai_delivery(fakes.civitai),
         "speech:7100": make_speech(fakes.speech),
+        "trainer:7300": make_trainer(fakes.trainer),
     })
-    t = Transports(llm=router, runner=router, comfy=router, sandbox=router, web=router, speech=router)
+    t = Transports(llm=router, runner=router, comfy=router, sandbox=router, web=router, speech=router,
+                   trainer=router)
     application = create_app(hub_env, t, startup=False)
     application.state.router = router
+    fakes.trainer["root"] = str(hub_env.data_dir / "training")
     # The independent review (0.30.0) is on by default: it would take the scripted replies of every test whose turn
     # writes a file. tests/test_review.py turns it on.
     application.state.hub.settings.update("agent", {"level_chats": "quick", "level_projects": "think"})

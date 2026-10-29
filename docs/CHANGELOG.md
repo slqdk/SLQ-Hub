@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.50.0 - 2026-10-29
+
+- **Train your own LoRA - only for the admin.** Settings -> Models -> LoRAs
+  -> Train a LoRA teaches FLUX.2 klein 4B a thing, a person or a style from
+  your own pictures: add 15-40 pictures, let the chat model write the
+  captions (or type them), choose a trigger word and start. The picture page
+  shows how far it is, with the time left, and can stop it.
+- **Choose by the sample pictures.** Every 250 steps it saves a checkpoint
+  with three sample pictures made with the trigger word; Add as LoRA puts
+  the step that looks right among your LoRAs.
+- A training takes the whole card for a few hours, through the GPU queue:
+  chats and pictures wait, and the GPU plate says "LoRA training". The first
+  one downloads about 16 GB of model files.
+- The trainer is optional: `COMPOSE_PROFILES=training` in `/srv/slq-hub/.env`
+  and `update.sh` build and start it (Ostris' ai-toolkit on PyTorch for
+  ROCm). Not yet run on the real card.
+
 ## 0.49.0 - 2026-10-29
 
 - **LoRAs for the picture models - only for the admin.** Settings -> Models

@@ -12,8 +12,9 @@
 # Windows' own updates). Replies to connections the Hub opens TO them are not
 # new, so they pass - and so do replies to RDP from the LAN to Windows.
 #
-# The model containers - llm (172.31.251.11), comfyui (.12) and speech (.13)
-# on the "inner" network - need nothing from outside it: new connections from
+# The model containers - llm (172.31.251.11), comfyui (.12), speech (.13) and
+# the LoRA trainer (.14, compose profile "training"; the Hub fetches its base
+# models) on the "inner" network - need nothing from outside it: new connections from
 # them to anything else (the internet, the LAN, the VM) are dropped. The Hub
 # reaches them on that network; ComfyUI's maintenance port still answers.
 #
@@ -23,7 +24,7 @@ set -euo pipefail
 
 SANDBOX_IPS="${SANDBOX_IPS:-172.31.250.20 172.31.250.30}"
 INNER_NET="${INNER_NET:-172.31.251.0/24}"
-MODEL_IPS="${MODEL_IPS:-172.31.251.11 172.31.251.12 172.31.251.13}"
+MODEL_IPS="${MODEL_IPS:-172.31.251.11 172.31.251.12 172.31.251.13 172.31.251.14}"
 ENV_FILE="${HUB_ENV_FILE:-/srv/slq-hub/.env}"
 
 lan=""

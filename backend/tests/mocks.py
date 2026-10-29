@@ -841,7 +841,7 @@ def make_hf(state: dict) -> FastAPI:
         r = repo_of(owner, name)
         if r is None or r.get("status"):
             return JSONResponse({"error": "no"}, status_code=404)
-        return {"_id": "x", "id": f"{owner}/{name}", "gguf": r.get("gguf") or {}}
+        return {"_id": "x", "id": f"{owner}/{name}", "gguf": r.get("gguf") or {}, **({"sha": r["sha"]} if r.get("sha") else {})}
 
     @app.get("/{owner}/{name}/resolve/main/{path:path}")
     async def resolve(owner: str, name: str, path: str, request: Request):
@@ -906,5 +906,65 @@ def make_civitai_delivery(state: dict) -> FastAPI:
         state.setdefault("delivery_auth", []).append(request.headers.get("authorization"))
         state.setdefault("delivered", []).append(name)
         return _ranged(b"c" * 2048, request)
+
+    return app
+
+
+def make_trainer(state: dict) -> FastAPI:
+    """The LoRA trainer (services/trainer/traind.py, 0.50.0): a job writes two checkpoints
+    and a sample picture into the run's folder (state["root"] is data/training, which the trainer sees as
+    /training) and is done on the second look."""
+    import json as _json
+    import struct as _struct
+    from pathlib import Path as _Path
+
+    app = FastAPI()
+    state.setdefault("jobs", {})
+
+    def lora_bytes() -> bytes:
+        raw = _json.dumps({"diffusion_model.single_blocks.0.linear1.lora_A.weight":
+                           {"dtype": "F16", "shape": [16, 3072], "data_offsets": [0, 0]}}).encode()
+        return _struct.pack("<Q", len(raw)) + raw
+
+    @app.get("/health")
+    async def health():
+        if state.get("down"):
+            return JSONResponse({"error": "down"}, status_code=503)
+        if state.get("busy_looks"):               # a job from before a restart, stopping
+            state["busy_looks"] -= 1
+            return {"ok": True, "busy": True, "job": state.get("busy_job"), "toolkit": True, "ref": "test"}
+        return {"ok": True, "busy": False, "job": None, "toolkit": True, "ref": "test"}
+
+    @app.post("/jobs")
+    async def job(request: Request):
+        body = await request.json()
+        rid = body["id"]
+        state["jobs"][rid] = {"config": body["config"], "dir": body["dir"], "looks": 0, "cancelled": False}
+        out = _Path(state["root"]) / rid / "output" / rid
+        (out / "samples").mkdir(parents=True, exist_ok=True)
+        (out / f"{rid}_000000250.safetensors").write_bytes(lora_bytes())
+        (out / f"{rid}.safetensors").write_bytes(lora_bytes())
+        (out / "samples" / "1761700000000__000000250_0.jpg").write_bytes(_png((64, 64)))
+        return {"ok": True}
+
+    @app.get("/jobs/{rid}")
+    async def look(rid: str):
+        if state.get("forget"):                  # the trainer restarted: its jobs are gone
+            return JSONResponse({"error": "no such job"}, status_code=404)
+        j = state["jobs"][rid]
+        j["looks"] += 1
+        if j["cancelled"]:                    # like ai-toolkit: a while to stop and let go of the card
+            j["stopping"] = j.get("stopping", 0) + 1
+            return {"state": "stopping" if j["stopping"] < 3 else "cancelled", "step": 250, "total": 500, "log": []}
+        if j["looks"] < state.get("looks_to_finish", 2) or state.get("hold"):
+            return {"state": "running", "step": 250, "total": 500, "loss": 0.31, "eta_s": 600, "log": ["caching"]}
+        return {"state": "done", "step": 500, "total": 500, "loss": 0.29, "log": ["Done"]}
+
+    @app.post("/jobs/{rid}/cancel")
+    async def cancel(rid: str):
+        if rid in state["jobs"]:
+            state["jobs"][rid]["cancelled"] = True
+        state.setdefault("cancels", []).append(rid)
+        return {"ok": True}
 
     return app

@@ -54,6 +54,8 @@ class Env:
     comfy_files: Path | None = None    # ComfyUI's input/ and output/ (mounted), to delete people's pictures there
     speech_url: str = "http://127.0.0.1:7100"   # the speech service (text to speech on the CPU)
     speech_models: str = "/models"     # the models folder as the speech service sees it
+    trainer_url: str = "http://trainer:7300"    # the LoRA trainer (0.50.0; compose profile "training")
+    trainer_root: str = "/training"    # data/training as the trainer sees it
 
     @property
     def db_path(self) -> Path:
@@ -112,6 +114,8 @@ def load_env() -> Env:
         comfy_files=Path(e["HUB_COMFY_FILES"]) if e.get("HUB_COMFY_FILES") else None,
         speech_url=e.get("HUB_SPEECH_URL", "http://127.0.0.1:7100").rstrip("/"),
         speech_models=e.get("HUB_SPEECH_MODELS", "/models").rstrip("/") or "/models",
+        trainer_url=e.get("HUB_TRAINER_URL", "http://trainer:7300").rstrip("/"),
+        trainer_root=e.get("HUB_TRAINER_ROOT", "/training").rstrip("/") or "/training",
     )
 
 
