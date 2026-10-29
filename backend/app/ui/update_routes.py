@@ -31,8 +31,8 @@ def busy_reasons(hub) -> list[str]:
     why: list[str] = []
     snap = hub.scheduler.snapshot()
     for j in snap["running"]:
-        who = {"web": "a chat", "tests": "a test", "library": "library indexing", "system": "the Hub"}.get(
-            j["owner"], j["owner"])
+        who = {"web": "a chat", "tests": "a test", "library": "library indexing", "system": "the Hub",
+               "training": "a LoRA training"}.get(j["owner"], j["owner"])
         why.append(f"{who} is working on the card" + (f" ({j['label'][:60]})" if j.get("label") else ""))
     if snap["switching"]:
         why.append(f"the card is loading {snap['switching']}")
@@ -59,6 +59,11 @@ def busy_reasons(hub) -> list[str]:
                     why.append(f"{name}'s chat is answering")
             elif now - t.ended < DEVICE_FETCH_S:
                 why.append(f"{name}'s device is fetching an answer")
+    training = hub.extras.get("training")
+    if training is not None:                                       # the base model's download is not a GPU job
+        for run in training.list():
+            if run["state"] == "preparing":
+                why.append(f"the LoRA training {run['name']} is downloading its base model")
     tests = hub.extras.get("tests")
     if tests is not None and tests.running():
         why.append("a test run is going (Settings -> Tests)")

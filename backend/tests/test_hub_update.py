@@ -503,3 +503,21 @@ def test_windows_is_under_the_sandbox_rules():
     fw = (root / "deploy" / "firewall" / "slq-hub-firewall.sh").read_text()
     assert 'SANDBOX_IPS="${SANDBOX_IPS:-172.31.250.20 172.31.250.30}"' in fw
     assert 'add DOCKER-USER -s "$ip" -d "$net" -m conntrack --ctstate NEW -j DROP' in fw
+
+
+def test_a_profile_turned_on_since_the_last_update_is_built_and_started(hu, monkeypatch):
+    """COMPOSE_PROFILES=training added to .env with nothing new to fetch (0.50.1): the trainer, which never had a
+    container, is built and started; services that exist - running or stopped - are left alone."""
+    lists = {"config": "hub\nllm\ncomfyui\ntrainer\n", "ps": "hub\nllm\ncomfyui\n"}
+
+    def compose(*a, **k):
+        hu.calls.append(("compose", *a))
+        return subprocess.CompletedProcess(a, 0, lists.get(a[0], ""), "")
+    monkeypatch.setattr(hu, "compose", compose)
+    monkeypatch.setattr(hu, "say_windows_password", lambda: None)
+    assert hu.start_new_services() == ["trainer"]
+    assert ("compose", "up", "-d", "--build", "trainer") in hu.calls
+    assert (hu.HUB_ROOT / "data" / "training").is_dir() and (hu.HUB_ROOT / "models" / "hf").is_dir()
+    hu.calls.clear()
+    lists["ps"] = lists["config"]                      # all there: nothing is started
+    assert hu.start_new_services() == [] and not [c for c in hu.calls if c[1] == "up"]

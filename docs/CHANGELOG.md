@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.50.1 - 2026-10-29
+
+- **Turning the trainer on works with update.sh alone.** With
+  `COMPOSE_PROFILES=training` added to `.env` and no new version to fetch,
+  `update.sh` said "Already up to date" and did nothing; now it builds and
+  starts a service whose profile was turned on since the last update (the
+  trainer, Windows). Directly: `sudo bash update.sh compose up -d --build
+  trainer`.
+- An update waits for a LoRA training, also while it downloads its base
+  model.
+
 ## 0.50.0 - 2026-10-29
 
 - **Train your own LoRA - only for the admin.** Settings -> Models -> LoRAs

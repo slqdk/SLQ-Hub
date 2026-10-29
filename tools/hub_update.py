@@ -688,6 +688,27 @@ def ensure_windows_password(path: Path | None = None) -> str | None:
     return password
 
 
+def start_new_services() -> list[str]:
+    """Services of a compose profile turned on since the last update (COMPOSE_PROFILES in .env - the LoRA trainer,
+    Windows) that have never had a container: built and started, so "add the profile, run update.sh" works when
+    there is no new version to fetch (0.50.1). A service that exists, running or stopped, is left as it is."""
+    wanted = compose("config", "--services")
+    have = compose("ps", "-a", "--services")
+    if wanted.returncode != 0 or have.returncode != 0:
+        return []
+    new = sorted(set(wanted.stdout.split()) - set(have.stdout.split()))
+    if not new:
+        return []
+    ensure_folders(HUB_ROOT)
+    say_windows_password()
+    out.info(f"Turned on in .env since the last update: {', '.join(new)} - building and starting it (a first build "
+             "can take a long while)")
+    if compose("up", "-d", "--build", *new, capture=False).returncode != 0:
+        raise Stop(f"could not build or start {', '.join(new)} - see above. Try again: "
+                   f"sudo bash update.sh compose up -d --build {' '.join(new)}")
+    return new
+
+
 def say_windows_password() -> None:
     new = ensure_windows_password()
     if new:
@@ -821,7 +842,9 @@ def cmd_update(args) -> int:
         raise Stop(f"the clone is on '{branch}', which the remote does not have.")
     incoming = [l for l in git("log", "--oneline", f"HEAD..origin/{branch}").stdout.splitlines() if l.strip()]
     if not incoming and not args.force:
-        out.ok(f"Already up to date ({old_version}). Nothing to do.")
+        started = start_new_services()
+        out.ok(f"Already up to date ({old_version}). " + (f"Started {', '.join(started)}." if started
+                                                         else "Nothing to do."))
         return 0
     new_version = read_version_at(f"origin/{branch}")
     target = git("rev-parse", f"origin/{branch}").stdout.strip()

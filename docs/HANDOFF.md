@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.50.0, 2026-10-29)
+## State (0.50.1, 2026-10-29)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -452,7 +452,14 @@ the queue's Stop works too. `services/trainer/traind.py` (stdlib HTTP on 7300) r
 <dir>/config.json` and parses tqdm's bar for step, ETA and loss; a cancel is SIGINT, SIGTERM, SIGKILL, and the job
 says "stopping" until ai-toolkit has exited - the Hub keeps the card until then. A job the trainer no longer knows
 (it restarted) or a minute without an answer fails the run with the reason. After a Hub restart a leftover job is
-told to stop first, then the Hub holds the card until the trainer is idle. The config keys were checked against the same commit (`diffusion_trainer`,
+told to stop first, then the Hub holds the card until the trainer is idle.
+0.50.1, Søren's screenshot: 12 pictures with captions, "The trainer is not running". My 0.50.0 note said "add the
+profile, run update.sh" - but with nothing new to fetch the updater stopped at "Already up to date". Now
+`start_new_services` (in that branch) builds and starts services in `compose config --services` that have no
+container in `compose ps -a --services` (made folders first). Whether Compose takes COMPOSE_PROFILES from
+`--env-file` for `config`/`build`/`up` without the service named is NOT verified on the VM (naming it -
+`update.sh compose up -d --build trainer` - starts it either way). The updater's busy check names a training and
+counts a base-model download. The config keys were checked against the same commit (`diffusion_trainer`,
 arch `flux2_klein_4b`, `cache_text_embeddings` so the 8 GB text encoder leaves the card, `timestep_type`
 "weighted" as ai-toolkit's UI default for klein; no quantisation, AdamW - quanto and bitsandbytes are the least
 sure on AMD). The image follows ai-toolkit's own AMD install (`manager/spec.py`: torch 2.13.0 / torchvision 0.28.0
@@ -1154,7 +1161,10 @@ the host if the VM ever stops by itself.
     only as a picture without the LoRA's effect. Also: an upload of a few hundred MB through hub.slq.dk (Nginx Proxy
     Manager's body size limit).
 84. **LoRA training on the card** (0.50.0) - none of it has run on the real hardware:
-    - **The image**: `COMPOSE_PROFILES=training` in `.env`, `sudo bash update.sh`. Does ai-toolkit's
+    - **The image**: `COMPOSE_PROFILES=training` in `.env`, then `sudo bash update.sh compose up -d --build
+      trainer` (or plain `update.sh` from 0.50.1). With the profile on, a full update builds the trainer with the
+      rest, and a failed trainer build undoes the update like any failed build - turn the profile off to update
+      without it. Does ai-toolkit's
       requirements install go through with the rocm7.1 torch held by the constraint (a package wanting another
       torch fails the build - read which), and does `import torch` see the card in the container
       (`sudo bash update.sh compose exec trainer python -c "import torch; print(torch.cuda.is_available())"`)?
