@@ -1593,7 +1593,10 @@ its front matter is placed there when it arrives (0.44.0), unless its owner
 has placed it already. In the lists a category is a folder, closed until
 its name is clicked (0.45.0); skills in none come first, and a category
 named "internal" comes last and opens on three quick clicks. The lists (Skills page, composer, project
-settings) group by category in the browser (`lib/skills.ts`).
+settings) group by category in the browser (`lib/skills.ts`). The owner's internal is the admin's alone
+(0.47.0): the store leaves its skills out of everyone else's list and refuses them to everyone else
+(`may_see`), so no person's chat can use one, shared or not; putting a skill there unshares it, and a
+person cannot name a category internal.
 
 **Choosing.** A chat's `settings.skills` and its project's hold refs (a
 person's device chat sends hers with each turn). `turn_skills` resolves them

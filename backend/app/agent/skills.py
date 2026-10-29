@@ -7,7 +7,8 @@ Whose (0.23.0):
 - the Hub's own (skill-creator): app/agent/builtin_skills/<name>/ in the repo, ref "hub/<name>", read-only.
 A skill is its maker's until they share it with the family. The owner's not-shared skills are listed in
 <data>/skills/.disabled.json (its name is from when skills were "switched off" for every chat), a person's shared
-ones in @<id>/.shared.json. Everyone sees their own skills, the shared ones and the Hub's.
+ones in @<id>/.shared.json. Everyone sees their own skills, the shared ones and the Hub's - except the owner's
+category "internal" (0.47.0): the admin's alone, never listed, read or used for anyone else, shared or not.
 
 Picked by hand (0.23.0): a chat's skills are the ones chosen for it and for its project; nothing is offered on its
 own. Their SKILL.md goes into the system prompt, their other files are read with the skill tool and copied into
@@ -35,6 +36,7 @@ MAX_FILES = 500
 DRAFT_DAYS = 14
 REF_RE = re.compile(r"^(?:(?P<hub>hub)/|@(?P<user>\d+)/)?(?P<name>[a-z0-9][a-z0-9._-]{0,63})$")
 CATEGORY_MAX = 40          # characters of a category's name (0.41.0)
+INTERNAL = "internal"      # the owner's own category (0.47.0): no one else sees or uses a skill in it
 FENCE_RE = re.compile(r"^(`{3,}|~{3,})\s*([\w-]*)")
 MAX_QUESTIONS, MAX_OPTIONS = 10, 12
 
@@ -162,6 +164,11 @@ def check_skill_md(text: str) -> tuple[dict, list[str]]:
     return meta, problems
 
 
+def is_internal(category: str | None) -> bool:
+    """A category named internal (any case, spaces folded): the admin's alone."""
+    return " ".join(str(category or "").split()).casefold() == INTERNAL
+
+
 def slug(s: str) -> str:
     """A name the format accepts, from anything."""
     s = re.sub(r"[^a-z0-9]+", "-", (s or "").lower())
@@ -231,8 +238,17 @@ class Skills:
             data = json.loads((self._home(person) / ".categories.json").read_text())
         except (OSError, ValueError):
             return {}
-        return {k: v for k, v in data.items() if isinstance(k, str) and isinstance(v, str) and v} \
-            if isinstance(data, dict) else {}
+        # internal is the owner's: a person's skill named into it (before 0.47.0) is in no category
+        return {k: v for k, v in data.items() if isinstance(k, str) and isinstance(v, str) and v
+                and not (person is not None and is_internal(v))} if isinstance(data, dict) else {}
+
+    def _not_internal(self, person: int | None, name: str) -> None:
+        if person is not None and is_internal(name):
+            raise ValueError(f'"{INTERNAL}" is a category for the admin only - choose another name.')
+
+    def admin_only(self, name: str) -> bool:
+        """One of the owner's skills (by folder name) in their category internal (0.47.0)."""
+        return is_internal(self._categories(None).get(name))
 
     def _save_categories(self, person: int | None, cats: dict[str, str]) -> None:
         home = self._home(person)
@@ -254,12 +270,15 @@ class Skills:
         d = self._own(who, ref)
         name = self.clean_category(category)
         person = self._person(who)
+        self._not_internal(person, name)
         cats = self._categories(person)
         if name:
             cats[d.name] = name
         else:
             cats.pop(d.name, None)
         self._save_categories(person, cats)
+        if is_internal(name):
+            self._set_shared(None, d.name, False)       # into internal: not shared, also once out of it again
         return name
 
     def rename_category(self, who: dict | None, old: str, new: str | None) -> int:
@@ -269,6 +288,7 @@ class Skills:
         name = self.clean_category(new)
         if not old_key:
             raise ValueError("Which category?")
+        self._not_internal(person, name)
         cats = self._categories(person)
         mine = {d.name for d in self._dirs(self._home(person))}
         moved = [k for k, v in cats.items() if v.casefold() == old_key and k in mine]
@@ -279,6 +299,9 @@ class Skills:
                 cats.pop(k)
         if moved:
             self._save_categories(person, cats)
+            if is_internal(name):
+                for k in moved:
+                    self._set_shared(None, k, False)
         return len(moved)
 
     def _entry(self, d: Path, kind: str, person: int | None, shared: bool, mine: bool,
@@ -289,9 +312,12 @@ class Skills:
         size = sum(p.stat().st_size for p in d.rglob("*") if p.is_file())
         title = meta.get("name") if isinstance(meta.get("name"), str) and meta.get("name") else d.name
         desc = meta.get("description") if isinstance(meta.get("description"), str) else ""
+        admin_only = kind == "owner" and is_internal(category)
+        shared = shared and not admin_only
         return {"ref": ref_of(person, d.name, kind == "hub"), "name": d.name, "title": title,
                 "description": desc[:1024], "files": files[:200], "size": size, "kind": kind,
                 "owner_id": person, "mine": mine, "shared": shared, "builtin": kind == "hub", "category": category,
+                "admin_only": admin_only,
                 "questions": parse_questions(body),
                 "updated": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime((d / "SKILL.md").stat().st_mtime)),
                 # older name for the same: shared with the family (the composer once listed "switched off" ones)
@@ -312,6 +338,8 @@ class Skills:
             kind = "owner" if person is None else "person"
             for d in self._dirs(self._home(person)):
                 mine = person == me
+                if me is not None and person is None and is_internal(cats.get(d.name)):
+                    continue                            # the owner's internal: the admin's alone
                 if mine or d.name in shared:
                     out.append(self._entry(d, kind, person, d.name in shared, mine, cats.get(d.name, "")))
         out += [self._entry(d, "hub", None, True, False) for d in self._dirs(self.builtin)]
@@ -327,6 +355,8 @@ class Skills:
             return False
         if not (d / "SKILL.md").is_file():
             return False
+        if kind == "owner" and self._person(who) is not None and self.admin_only(name):
+            return False                                # internal: never anyone's but the admin's
         return kind == "hub" or person == self._person(who) or name in self._shared_names(person)
 
     def _own(self, who: dict | None, ref: str) -> Path:
@@ -456,9 +486,11 @@ class Skills:
                                        if isinstance(meta.get("metadata"), dict) else "")
         except (OSError, ValueError):
             return
-        if name:
+        if name and not (person is not None and is_internal(name)):
             cats[d.name] = name
             self._save_categories(person, cats)
+            if is_internal(name):
+                self._set_shared(None, d.name, False)
 
     def _set_shared(self, person: int | None, name: str, on: bool) -> None:
         if person is None:
@@ -481,6 +513,8 @@ class Skills:
 
     def set_shared(self, who: dict | None, ref: str, on: bool) -> None:
         d = self._own(who, ref)
+        if on and self._person(who) is None and self.admin_only(d.name):
+            raise ValueError(f"{d.name} is in {INTERNAL}, which is the admin's alone - move it out to share it.")
         self._set_shared(self._person(who), d.name, on)
 
     def put_text(self, who: dict | None, ref: str, text: str) -> None:

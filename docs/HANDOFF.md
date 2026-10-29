@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.46.0, 2026-10-28)
+## State (0.47.0, 2026-10-29)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -410,6 +410,14 @@ old's indentations to the file's (`_fit_indent`; `_step` converts deeper levels,
 the error shows the most similar lines (`_closest`, difflib, 0.6 at least). A CRLF file stays CRLF (`read_text`
 had translated it, and every edit wrote it back with LF). Seen on the dev server (scenario "work steps", phone
 width). NOT seen: why Søren's edits failed - the screenshot did not show the calls (item 82).
+0.47.0, Søren: "internal mappen skal ALTID kun være tilgænglig for admin". In skills.py: the owner's skills in a
+category named internal (`is_internal`, any case) are left out of a person's `visible()` and refused by `may_see()`
+- so the list, the skill's text, files and .zip, the skill tool and a device turn's chosen skills all lose them,
+shared before or not. Into internal unshares (`set_category`, `rename_category`, a skill's own metadata category);
+`set_shared` refuses while it is there; the entry says `admin_only` and `shared: false`, and the Skills page shows
+"Only you - internal is never shared" without the switch. A person cannot name a category internal (400), and one
+named so before 0.47.0 reads as no category. Tested here (unit and API, the phone side included); the admin's
+Skills page seen on the dev server.
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
 host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU

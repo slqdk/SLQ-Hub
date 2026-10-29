@@ -375,3 +375,65 @@ async def test_people_make_share_and_use_their_own_skills(signed_in, app, fakes)
         assert name == "kage-opskrifter/SKILL.md"
     await signed_in.delete(f"/hub/api/people/{maria['id']}", headers=ORIGIN)
     assert mine not in [s["ref"] for s in (await signed_in.get("/hub/api/skills")).json()]
+
+
+def test_internal_is_the_admins_alone(tmp_path):
+    """0.47.0, Søren: "internal mappen skal ALTID kun være tilgængelig for admin". The owner's skills in internal
+    are not listed, read or used for anyone else - shared before or not - and a person cannot make an internal of
+    their own (one named so before is no category)."""
+    s = Skills(tmp_path / "skills")
+    for name in ("secret-plc", "family-pics"):
+        s.install(OWNER, md(name), "SKILL.md")
+        s.set_shared(OWNER, name, True)
+    assert s.set_category(OWNER, "secret-plc", " Internal ") == "Internal"
+    refs = lambda who: [x["ref"] for x in s.visible(who)]                           # noqa: E731
+    assert "secret-plc" in refs(OWNER) and "secret-plc" not in refs(MARIA) and "family-pics" in refs(MARIA)
+    mine = s.entry(OWNER, "secret-plc")
+    assert mine["admin_only"] is True and mine["shared"] is False and mine["category"] == "Internal"
+    assert not s.may_see(MARIA, "secret-plc") and s.chosen(["secret-plc", "family-pics"], MARIA)[0]["ref"] == \
+        "family-pics" and len(s.chosen(["secret-plc"], MARIA)) == 0
+    for read in (lambda: s.get(MARIA, "secret-plc"), lambda: s.path(MARIA, "secret-plc"),
+                 lambda: s.entry(MARIA, "secret-plc"), lambda: s.zip(MARIA, "secret-plc")):
+        with pytest.raises(FileNotFoundError):
+            read()
+    with pytest.raises(ValueError):
+        s.set_shared(OWNER, "secret-plc", True)
+    s.set_category(OWNER, "secret-plc", "TwinCAT")                                  # out again: still private
+    assert s.entry(OWNER, "secret-plc")["shared"] is False and "secret-plc" not in refs(MARIA)
+    s.set_category(OWNER, "family-pics", "Pictures")
+    assert s.rename_category(OWNER, "pictures", "internal") == 1 and "family-pics" not in refs(MARIA)
+    # a person: no internal of their own - set, renamed into or brought along by an imported skill
+    s.install(MARIA, md("jule"), "SKILL.md")
+    s.set_category(MARIA, "@5/jule", "Food")
+    for change in (lambda: s.set_category(MARIA, "@5/jule", "INTERNAL"),
+                   lambda: s.rename_category(MARIA, "Food", "internal")):
+        with pytest.raises(ValueError):
+            change()
+    s.install(MARIA, b"---\nname: kage\ndescription: Kage.\nmetadata:\n  category: internal\n---\nBag.\n", "SKILL.md")
+    assert s.entry(MARIA, "@5/kage")["category"] == ""
+    (tmp_path / "skills" / "@5" / ".categories.json").write_text(json.dumps({"jule": "internal", "kage": "Food"}))
+    assert {x["ref"]: x["category"] for x in s.visible(MARIA) if x["mine"]} == {"@5/jule": "", "@5/kage": "Food"}
+
+
+async def test_internal_is_not_seen_from_a_persons_phone(signed_in, app, fakes):
+    await signed_in.post("/hub/api/skills", files={"file": ("SKILL.md", md("admin-tools"), "text/markdown")},
+                         headers=ORIGIN)
+    await signed_in.patch("/hub/api/skills/one", params={"ref": "admin-tools"}, json={"shared": True}, headers=ORIGIN)
+    r = await signed_in.patch("/hub/api/skills/one", params={"ref": "admin-tools"}, json={"category": "internal"},
+                              headers=ORIGIN)
+    assert r.status_code == 200
+    r = await signed_in.patch("/hub/api/skills/one", params={"ref": "admin-tools"}, json={"shared": True},
+                              headers=ORIGIN)
+    assert r.status_code == 400 and "internal" in r.json()["detail"]
+    own = {x["ref"]: x for x in (await signed_in.get("/hub/api/skills")).json()}
+    assert own["admin-tools"]["admin_only"] is True
+    await add_person(signed_in)
+    async with client_from(app) as phone:
+        await sign_in(phone)
+        assert "admin-tools" not in {x["ref"] for x in (await phone.get("/hub/api/skills")).json()}
+        assert (await phone.get("/hub/api/skills/one", params={"ref": "admin-tools"})).status_code == 404
+        assert (await phone.get("/hub/api/skills/zip", params={"ref": "admin-tools"})).status_code == 404
+        fakes.llama["replies"] = [{"content": "Done."}]
+        await turn(app, phone, {"title": "S", "settings": {"skills": ["admin-tools"]},
+                                "messages": [user_msg("Hello")]})
+        assert "admin-tools" not in fakes.llama["requests"][0]["messages"][0]["content"]

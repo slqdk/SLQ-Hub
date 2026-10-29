@@ -262,6 +262,7 @@ export interface Skill { ref: string; name: string; title: string; description: 
   kind: "owner" | "person" | "hub"; owner_id: number | null; mine: boolean; shared: boolean; builtin: boolean;
   updated: string; by: string;
   category?: string;     // 0.41.0: as its owner set it; "" or none = no category
+  admin_only?: boolean;  // 0.47.0: the owner's skill in "internal" - never shared, never seen by anyone else
   questions?: SkillQuestion[] }   // 0.43.0: asked on a card in the message box when the skill is chosen
 /** What skill_propose shows in the chat: a skill the assistant made, to add with Add skill. */
 export interface SkillCardData { draft: string; name: string; title: string; description: string; files: string[];

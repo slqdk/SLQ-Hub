@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.47.0 - 2026-10-29
+
+- **"internal" is the admin's alone.** Skills the admin puts in the category
+  internal are never shown to, read by or used for anyone else - not in the
+  family's skill lists, not in their chats, not even if they were shared
+  before. Moving a skill into internal stops sharing it, and it stays
+  private if it is moved out again. The family cannot make an internal
+  category of their own.
+
 ## 0.46.0 - 2026-10-28
 
 - **Working steps say what they did.** While the assistant works, the steps

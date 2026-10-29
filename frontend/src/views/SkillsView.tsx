@@ -27,7 +27,8 @@ export function SkillsView({ onNewChat }: { onNewChat: (text: string, skills: st
 }
 
 export function SkillsContent({ onNewChat }: { onNewChat: (text: string, skills: string[]) => void }) {
-  const { toast } = useApp();
+  const { toast, auth } = useApp();
+  const person = auth?.user?.role === "member";          // internal is the admin's (0.47.0)
   const [skills, setSkills] = useState<Skill[] | null>(null);
   const [view, setView] = useState<{ skill: Skill; text: string; edit: boolean } | null>(null);
   const [query, setQuery] = useState("");
@@ -132,11 +133,13 @@ export function SkillsContent({ onNewChat }: { onNewChat: (text: string, skills:
       <div className="grow">
         <b>{k.title}</b>
         <div className="meta skill-desc">{k.description || "No description"}</div>
-        <div className="meta">{k.mine ? (k.shared ? "Shared with the family" : "Only you") : `By ${k.by}`}
+        <div className="meta">{k.mine ? (k.admin_only ? "Only you - internal is never shared"
+          : k.shared ? "Shared with the family" : "Only you") : `By ${k.by}`}
           {` · ${k.files.length + 1} file${k.files.length ? "s" : ""}, ${bytes(k.size)}`}
           {!k.builtin && k.updated ? ` · changed ${ago(k.updated)}` : ""}</div>
       </div>
-      {k.mine && <span className="skill-share" title={k.shared ? "Shared with the family" : "Share it with the family"}>
+      {k.mine && !k.admin_only && <span className="skill-share"
+        title={k.shared ? "Shared with the family" : "Share it with the family"}>
         <Switch checked={k.shared} label={`Share ${k.title} with the family`} onChange={(v) => share(k, v)} />
         <span className="small muted hide-narrow">Shared</span></span>}
       <button className="btn small" onClick={() => onNewChat("", [k.ref])} title="A new chat with this skill">
@@ -215,7 +218,9 @@ export function SkillsContent({ onNewChat }: { onNewChat: (text: string, skills:
             placeholder="e.g. TwinCAT, Pictures, Documents" onChange={(e) => setPlacing({ ...placing, text: e.target.value })}
             onKeyDown={(e) => e.key === "Enter" && place()} />
           <small>Pick one you have, or type a new one. Empty: no category.
-            {placing.skill.shared ? " The family sees it under the same." : ""}</small></label>
+            {isInternal(placing.text) ? (person ? " internal is for the admin only."
+              : " Skills in internal are yours alone: never shared, never seen by the family.")
+              : placing.skill.shared ? " The family sees it under the same." : ""}</small></label>
       </Modal>}
       {renaming && <Modal title={`Rename ${renaming.old}`} onClose={() => setRenaming(null)}
         footer={<><button className="btn" onClick={() => setRenaming(null)}>Cancel</button>
