@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.49.0 - 2026-10-29
+
+- **LoRAs for the picture models - only for the admin.** Settings -> Models
+  -> LoRAs adds a LoRA (a .safetensors file): which picture models it fits
+  and its trigger word are read from the file when they can be, and can be
+  changed, with a default strength and a note on what it is for.
+- **Using one:** the picture chip under the message box turns LoRAs on for
+  every picture in the chat, or ask for one by name. Its trigger word goes
+  into the prompt by itself; a LoRA for another family of models is left out
+  with a note.
+- People's chats, their devices and apps on the model API never see or use
+  a LoRA.
+
 ## 0.48.1 - 2026-10-29
 
 - **SLQ Sync says why it was refused.** Instead of "sign in with a sync device

@@ -5,7 +5,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUp, BookOpen, Brain, Check, ChevronDown, ChevronRight, Cloud, Cpu, FileText, FolderOpen, Image as ImageIcon,
   Paperclip, Plus, Settings2, Sparkles, Square, Wand2, X } from "lucide-react";
-import { upload, type AnswerItem, type AnswersBlock, type ModelEntry, type Skill, type Upload } from "../lib/api";
+import { upload, type AnswerItem, type AnswersBlock, type Lora, type ModelEntry, type Skill, type Upload } from "../lib/api";
 import { byCategory, NO_CATEGORY, useFolders } from "../lib/skills";
 import { LEVEL_LABEL, LEVELS, levelText, type Level } from "../lib/effort";
 import { clearDraft, NEW_SKILL_TEXT, peekDraft, SKILL_MAKER } from "../lib/draft";
@@ -21,6 +21,7 @@ export interface ComposerSettings {
   skills: string[];
   libraries: number[];
   image_model: string | null;      // null: the project's or Settings' model for pictures
+  image_loras: string[];           // 0.49.0: the admin's LoRAs on every picture in this chat
 }
 
 interface Pending { key: number; name: string; size: number; preview: string | null; state: "uploading" | "done" | "failed";
@@ -33,7 +34,8 @@ const shortPath = (p: string) => p.split("/").slice(-2).join("/");
 
 export function Composer({ running, onSend, onStop, settings, onSettings, models, pictureModels = [], pictureDefault,
   libraries, skills, placeholder, autoFocus, refs = [], onRemoveRef, onOpenRef, onBrowseFiles, browseLabel,
-  uploader = upload, showLibraries = true, onManageSkills, reviewOnExtra = true, answered = {} }: {
+  uploader = upload, showLibraries = true, onManageSkills, reviewOnExtra = true, answered = {}, loras = [] }: {
+  loras?: Lora[];                  // 0.49.0: the admin's LoRAs (only the admin's chat passes them)
   running: boolean;
   /** answers: a chosen skill's questions answered on its card (0.43.0), to go with the message. */
   onSend: (text: string, uploads: Upload[], answers: AnswersBlock[]) => Promise<boolean>;
@@ -190,6 +192,10 @@ export function Composer({ running, onSend, onStop, settings, onSettings, models
   const pictureId = settings.image_model ?? pictureDefault;
   const picture = pictureModels.find((m) => m.id === pictureId) ?? pictureModels[0];
   const pictureDefaultName = pictureModels.find((m) => m.id === pictureDefault)?.name ?? pictureDefault;
+  const fitting = loras.filter((l) => l.fits.some((m) => m.id === picture?.id));       // for this chat's model
+  const lorasOn = fitting.filter((l) => settings.image_loras.includes(l.id));
+  const toggleLora = (id: string) => onSettings({ image_loras: settings.image_loras.includes(id)
+    ? settings.image_loras.filter((x) => x !== id) : [...settings.image_loras, id] });
 
   return (
     <div className={`composer ${drag ? "drag" : ""}`}
@@ -360,9 +366,10 @@ export function Composer({ running, onSend, onStop, settings, onSettings, models
             </>
           )}
         </MenuButton>
-        {pictureModels.length > 1 && (
-          <MenuButton up label={<><ImageIcon size={15} /> <span className="ellipsis chip-picture hide-narrow">{picture?.name ?? "Pictures"}</span></>}
-            title={`Model for pictures: ${picture?.name ?? "none"}`}>
+        {(pictureModels.length > 1 || fitting.length > 0) && (
+          <MenuButton up label={<><ImageIcon size={15} /> <span className="ellipsis chip-picture hide-narrow">{picture?.name ?? "Pictures"}
+            {lorasOn.length ? ` + ${lorasOn.length} LoRA${lorasOn.length > 1 ? "s" : ""}` : ""}</span></>}
+            title={`Model for pictures: ${picture?.name ?? "none"}${lorasOn.length ? `, with ${lorasOn.map((l) => l.name).join(", ")}` : ""}`}>
             {(close) => (
               <>
                 <div className="menu-head">Pictures in this chat</div>
@@ -377,6 +384,17 @@ export function Composer({ running, onSend, onStop, settings, onSettings, models
                     <span>{m.name}<small>{m.description?.split(". ")[0]}</small></span>
                   </button>
                 ))}
+                {fitting.length > 0 && <>
+                  <div className="menu-sep" />
+                  <div className="menu-head">LoRAs on every picture</div>
+                  {fitting.map((l) => (
+                    <button key={l.id} className="menu-item" role="menuitemcheckbox"
+                      aria-checked={settings.image_loras.includes(l.id)} onClick={() => toggleLora(l.id)}>
+                      {settings.image_loras.includes(l.id) ? <Check size={15} /> : <span style={{ width: 15 }} />}
+                      <span>{l.name}<small>{l.note || (l.trigger ? `Trigger word ${l.trigger}` : `Strength ${l.strength}`)}</small></span>
+                    </button>
+                  ))}
+                </>}
               </>
             )}
           </MenuButton>

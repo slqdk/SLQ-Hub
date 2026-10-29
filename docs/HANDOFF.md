@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.48.1, 2026-10-29)
+## State (0.49.0, 2026-10-29)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -429,6 +429,15 @@ is not in `sync_tokens` (removed from a project's Sync page; nothing else delete
 `gate._sync_refusal` now names which (no token / not slqsync_ / unknown token, each under 64 characters for the
 tray's window) and logs it with the address. Asked Søren to add the device again, and if that fails, to read the new
 message after the update.
+0.49.0, Søren: LoRAs for pictures, "LoRa is Admin only! also for using". `app/images/loras.py` keeps the list
+(`data/loras.json`; files in `models/comfy/loras/hub/<id>.safetensors`, ComfyUI's `hub/<id>.safetensors`), reads a
+file's header (must be a LoRA; `guess_base` from tensor names and metadata - img_mlp → Qwen-Image, lora_te1_ → SDXL,
+noise_refiner → Z-Image, double/single blocks → FLUX.2 klein, which FLUX.1 LoRAs also look like) and resolves a
+call's LoRAs for the model family actually used. `workflows.with_loras` puts LoraLoaderModelOnly (LoraLoader for SDXL
+checkpoints, text encoders too) after the model's loader and rewires its users. Routes `/hub/api/loras` (owner only;
+not in MEMBER_ROUTES). The chat setting `image_loras` (not a device setting) and the tools' `loras` parameter exist
+only in the owner's turns. Tested here against the fake ComfyUI and on the dev server (Settings, the picture menu).
+NOT seen on the card (item 83).
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
 host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU
@@ -1115,6 +1124,12 @@ the host if the VM ever stops by itself.
     and the file. Also whether a re-indented new_string is what the model
     meant (in ST the result is only cosmetic; in Python it would matter), and
     the work block and thought gists on a real turn with Qwen3.8's thinking.
+83. **LoRAs on the card** (0.49.0): a real LoRA per family through ComfyUI - FLUX.2 klein 4B (bf16 weights, the
+    likeliest to work; a LoRA trained on klein-base-4B used on the 4-step model), Qwen-Image 2.1 (its weights are
+    int8 "convrot": whether ComfyUI patches a LoRA into them at all is the open question), Z-Image, SDXL. ComfyUI's
+    log says "lora key not loaded" when a LoRA does not fit; the Hub does not read that yet, so a wrong family shows
+    only as a picture without the LoRA's effect. Also: an upload of a few hundred MB through hub.slq.dk (Nginx Proxy
+    Manager's body size limit).
 80. **Not pursued (Søren, 2026-10-28)** - kept here in case it is taken up again; if it stays unused, remove
     the `windows` service, `.30` from `SANDBOX_IPS`, `windows/*` from `FOLDERS` and INSTALL.md section 12.
     **0.39.0's Windows container on VM 222**: `COMPOSE_PROFILES=windows` in

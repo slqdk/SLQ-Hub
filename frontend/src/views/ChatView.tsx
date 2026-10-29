@@ -1,7 +1,7 @@
 // A chat: history, the live turn, and the composer.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import { Cloud, Copy, Download, FileText, FolderInput, FolderOpen, Menu, MessageSquarePlus, MoreHorizontal, NotebookPen, Pencil, RotateCcw, ShieldCheck, Sparkles, Trash2 } from "lucide-react";
-import { api, mediaUrl, type ArtifactRef, type Block, type ChatData, type ChatSettings, type Library, type Message, type ModelEntry, type ProducedFile, type RunEvent, type RunRecord, type Settings, type Skill, type Upload, type AnswersBlock, answeredIn } from "../lib/api";
+import { api, mediaUrl, type ArtifactRef, type Block, type ChatData, type ChatSettings, type Library, type Message, type ModelEntry, type ProducedFile, type RunEvent, type RunRecord, type Settings, type Lora, type LoraList, type Skill, type Upload, type AnswersBlock, answeredIn } from "../lib/api";
 import { clearDraftSkills, peekDraftSkills, setDraft as setMessageDraft } from "../lib/draft";
 import { levelOf } from "../lib/effort";
 import { energy, money, seconds, tokens } from "../lib/format";
@@ -42,6 +42,7 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
   const esRef = useRef<EventSource | null>(null);
   const [settings, setSettings] = useState<Settings | null>(settingsCache);
   const [libraries, setLibraries] = useState<Library[]>([]);
+  const [loras, setLoras] = useState<Lora[]>([]);
   const [skills, setSkills] = useState<Skill[]>([]);
   // A new chat's settings until it is saved; the Skills page's Use and New skill start it with skills chosen.
   const [draft, setDraft] = useState<Partial<ChatSettings>>(() => {
@@ -69,6 +70,7 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
     api<{ libraries: Library[] }>("/hub/api/libraries").then((r) => setLibraries(r.libraries), () => undefined);
     const loadSkills = () => api<Skill[]>("/hub/api/skills").then(setSkills, () => undefined);
     loadSkills();
+    api<LoraList>("/hub/api/loras").then((r) => setLoras(r.loras), () => undefined);     // 0.49.0: the admin's
     if (!chatId) clearDraftSkills();                   // taken by this new chat (above)
     window.addEventListener("hub:skills", loadSkills);   // one was added, shared or changed
     return () => window.removeEventListener("hub:skills", loadSkills);
@@ -240,7 +242,8 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
     const mode = entry?.thinking_mode;
     const thinking = !chosen && (mode === "on" || mode === "off") ? mode === "on" : level !== "quick";
     return { model, thinking, level, effort: cs.effort ?? entry?.thinking?.default_effort ?? agent.effort ?? "medium",
-      skills: cs.skills ?? [], libraries: cs.libraries ?? [], image_model: cs.image_model ?? null };
+      skills: cs.skills ?? [], libraries: cs.libraries ?? [], image_model: cs.image_model ?? null,
+      image_loras: cs.image_loras ?? [] };
   }, [data, draft, project, settings, models, llms]);
 
   const changeSettings = async (patch: Partial<ComposerSettings>) => {
@@ -532,6 +535,7 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
           <Composer running={running} onSend={send} onStop={stop} settings={effective} onSettings={changeSettings}
             answered={answeredIn(data?.messages ?? [])}
             models={chatModels} pictureModels={pictureModels} pictureDefault={pictureDefault} libraries={libraries} skills={skills} autoFocus
+            loras={loras}
             placeholder={running ? "Add something while it works" : project ? `Ask about ${project.name}, or give it a task` : undefined}
             refs={folder ? refs : []} onRemoveRef={(p) => onRefs((r) => r.filter((x) => x !== p))} onOpenRef={(p) => showFiles(p)}
             onBrowseFiles={folder ? () => showFiles() : undefined} browseLabel={project ? "Project files" : "This chat's files"}

@@ -353,3 +353,40 @@ def sdxl_t2i(ckpt: str, prompt: str, width: int, height: int, seed: int, steps: 
 
 def class_types(graph: dict) -> set[str]:
     return {n["class_type"] for n in graph.values()}
+
+
+def with_loras(graph: dict, loras: list[tuple[str, float]]) -> dict:
+    """The graph with LoRAs on its picture model (0.49.0): a chain of loaders after the model's loader, and every node
+    that used the model now uses the last of them. An SDXL checkpoint (CheckpointLoaderSimple) gets LoraLoader, which
+    also changes its text encoders; the models loaded with UNETLoader get LoraLoaderModelOnly. loras: (ComfyUI's name
+    for the file, strength)."""
+    if not loras:
+        return graph
+    g = json.loads(json.dumps(graph))
+    src = next((nid for nid, n in g.items() if n["class_type"] in ("UNETLoader", "CheckpointLoaderSimple")), None)
+    if src is None:
+        return g
+    ckpt = g[src]["class_type"] == "CheckpointLoaderSimple"
+    model, clip = [src, 0], [src, 1]
+    added = set()
+    for i, (name, strength) in enumerate(loras):
+        nid = f"lora{i + 1}"
+        if ckpt:
+            g[nid] = {"class_type": "LoraLoader", "inputs": {"model": model, "clip": clip, "lora_name": name,
+                                                             "strength_model": float(strength),
+                                                             "strength_clip": float(strength)}}
+            model, clip = [nid, 0], [nid, 1]
+        else:
+            g[nid] = {"class_type": "LoraLoaderModelOnly", "inputs": {"model": model, "lora_name": name,
+                                                                      "strength_model": float(strength)}}
+            model = [nid, 0]
+        added.add(nid)
+    for nid, node in g.items():
+        if nid in added:
+            continue
+        for key, value in node["inputs"].items():
+            if value == [src, 0]:
+                node["inputs"][key] = model
+            elif ckpt and value == [src, 1]:
+                node["inputs"][key] = clip
+    return g

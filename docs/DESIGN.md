@@ -1828,6 +1828,17 @@ files afterwards.
     (NoobAI V-pred) work: ComfyUI reads the `v_pred` key. The file goes to
     `models/comfy/checkpoints/hub/<id>.safetensors`; Civitai downloads follow
     its redirect to storage with `CIVITAI_TOKEN` (sent to Civitai only).
+  - **LoRAs (0.49.0, the admin's alone).** Settings -> Models -> LoRAs takes a
+    .safetensors LoRA (`backend/app/images/loras.py`): the file must be a
+    LoRA, its family (`base`) and trigger word are read from its header and
+    can be changed, with a default strength and a note the assistant reads.
+    A chat's `image_loras` (the picture chip) and the tools' `loras` add them;
+    one for another family than the model used is left out with a note, and
+    the trigger word is put first in the prompt when it is missing. The graph
+    gets LoraLoaderModelOnly after the model's loader (LoraLoader for SDXL).
+    People's chats, devices and apps never see or use a LoRA: the routes are
+    the owner's, the setting is not a device setting, and the parameter is
+    only offered in the owner's turns.
   - **Families and abilities.** Each picture model in the catalog has a
     `family` (which graph) and `abilities` (generate, edit, cutout). Models
     that only generate hand edits to one that edits. `image_generate`'s

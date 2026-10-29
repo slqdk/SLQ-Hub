@@ -11,6 +11,7 @@ import { useApp, type Theme } from "../state";
 import { QueueModal, plateState } from "../components/Queue";
 import { ConfirmButton, Empty, Lamp, Modal, Switch, SwitchRow, Tabs, copyText, useInterval, type LampState } from "../components/ui";
 import { TestsTab } from "../components/TestsTab";
+import { LorasSection } from "../components/Loras";
 import { forgetSettings } from "./ChatView";
 
 const TABS = [
@@ -221,6 +222,7 @@ function ModelsTab({ s }: { s: S }) {
             onConfirm={() => remove(m)}>Remove</ConfirmButton>}
           {deleteButton(m)}
         </>} />
+      <LorasSection />
       {!!models.audio?.length && <ModelGroup title="Sound, music and speech" items={models.audio} busy={busy}
         onDownload={download} onCancel={cancel}
         note="Speech runs on the CPU, so the chat model stays loaded; music, sound effects, stems and other voices run on the card through ComfyUI. Once one is downloaded, ask for it in any chat - with a sound file attached for a remake, stems or another voice."

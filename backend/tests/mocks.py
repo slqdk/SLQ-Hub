@@ -465,7 +465,7 @@ def make_comfy(state: dict) -> FastAPI:
                  "EmptyAceStep1.5LatentAudio", "VAEDecodeAudio", "SaveAudioAdvanced", "EmptyLatentAudio", "LoadAudio",
                  "VAEEncodeAudio", "AudioMerge", "SLQAceStepReference", "SLQAceStepEncode", "SLQSeparateVocals",
                  "SLQSeedVC", "SLQBeatCheck", "ModelSamplingSD3", "Wan22ImageToVideoLatent", "WanImageToVideo",
-                 "WanFirstLastFrameToVideo", "EmptyHunyuanLatentVideo", "KSamplerAdvanced", "LoraLoaderModelOnly",
+                 "WanFirstLastFrameToVideo", "EmptyHunyuanLatentVideo", "KSamplerAdvanced", "LoraLoaderModelOnly", "LoraLoader",
                  "CreateVideo", "SaveVideo", "TrimAudioDuration", "AudioConcat", "VAEDecodeTiled"]
         names = [n for n in names if n not in state.get("missing_nodes", ())]
         return {n: {"input": {}, "output": []} for n in names}

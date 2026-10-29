@@ -141,7 +141,8 @@ export interface Message { id: number; chat_id: number; role: "user" | "assistan
   run_id: string | null; created_at: string }
 
 export interface ChatSettings { model: string | null; thinking: boolean | null; effort: string | null; skills: string[];
-  libraries: number[]; image_model: string | null; level?: string | null }
+  libraries: number[]; image_model: string | null; level?: string | null;
+  image_loras?: string[] }       // 0.49.0: the admin's LoRAs on every picture in the chat
 export interface Chat { id: number; project_id: number | null; title: string; settings: ChatSettings; summary?: string;
   summary_upto?: number;
   created_at: string; updated_at: string; test_run?: string | null }
@@ -211,6 +212,12 @@ export interface SdxlChoices { presets: Record<string, SdxlSettings & { label: s
 
 /** name: what the Hub shows (the owner may rename chat and picture models); name_card: the model's own name, when
  * a bundled model was renamed. */
+/** A LoRA for the picture models (0.49.0) - the admin's alone. base: the family of the models it fits. */
+export interface Lora { id: string; name: string; base: string; base_label: string; trigger?: string; strength: number;
+  note?: string; size: number; added: string; source?: { kind: string; file?: string; run?: string };
+  fits: { id: string; name: string }[] }
+export interface LoraList { loras: Lora[]; families: Record<string, string> }
+
 export interface ModelEntry { id: string; name: string; name_card?: string; description?: string; default?: boolean; installed: boolean;
   loaded?: boolean; downloads: DownloadState[]; capabilities?: string[]; kind?: string;
   files: { repo?: string; path?: string; url?: string; dest: string; size?: number; role?: string }[];

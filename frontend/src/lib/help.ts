@@ -387,6 +387,21 @@ export const SECTIONS: HelpSection[] = [
         needs: ["images.edit"],
       },
       {
+        id: "loras",
+        title: "LoRAs: your own people, things and styles",
+        what: "A LoRA is a small add-on that teaches a picture model one thing - a person, a product or a style. Add "
+          + "one in Settings, Models, LoRAs (a .safetensors file); it works with the picture models of its family.",
+        examples: [
+          { text: "Draw our CX9020 controller on a workbench, with my cx9020 LoRA" },
+          { text: "Make a Christmas card of the family in my watercolour style" },
+        ],
+        how: ["The picture chip under the message box turns a LoRA on for every picture in the chat; or name it in "
+          + "the request.",
+          "Its trigger word is put in the prompt for you. Strength 1 is as trained, lower is a lighter touch.",
+          "Only you can use LoRAs - people's chats and apps never see them."],
+        owner: true,
+      },
+      {
         id: "cutout",
         tools: ["image_remove_background"],
         title: "Cut out the subject",

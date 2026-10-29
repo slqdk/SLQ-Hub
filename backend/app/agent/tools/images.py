@@ -180,6 +180,32 @@ def _picture_model(ctx: ToolContext, args: dict) -> str | None:
     return None
 
 
+def _admins_turn(ctx: ToolContext) -> bool:
+    """LoRAs are the admin's alone (0.49.0): never in a person's chat (their device's turn)."""
+    return getattr(ctx.engine, "device", None) is None
+
+
+def _loras(ctx: ToolContext, args: dict) -> list[dict]:
+    """The LoRAs for this call: the chat's own (its picture menu), then the ones the call names (their strength
+    wins). None in a person's chat."""
+    if not _admins_turn(ctx):
+        return []
+    out = [{"id": x} for x in (((ctx.chat or {}).get("settings") or {}).get("image_loras") or []) if isinstance(x, str)]
+    for item in args.get("loras") or []:
+        item = {"id": item} if isinstance(item, str) else item
+        lid = item.get("id") or item.get("name") if isinstance(item, dict) else None
+        if isinstance(lid, str):
+            out = [x for x in out if x["id"] != lid] + [{"id": lid, "strength": item.get("strength")}]
+    return out
+
+
+def _lora_text(item: dict) -> str:
+    used = f" with the LoRA{'s' if len(item.get('loras') or []) > 1 else ''} {', '.join(item['loras'])}" \
+        if item.get("loras") else ""
+    notes = f" ({'; '.join(item['lora_notes'])})" if item.get("lora_notes") else ""
+    return used + notes
+
+
 def _other_model_note(ctx: ToolContext, args: dict, used: str) -> str:
     """Said in the result when the call named another model than the chat's: the user sees it, and so does the
     model (and a troubleshooting export)."""
@@ -204,7 +230,7 @@ async def image_generate(ctx: ToolContext, args: dict) -> ToolResult:
                                     count=int(args.get("count") or 1), seed=args.get("seed"),
                                     fast=bool(args.get("fast")), model=_picture_model(ctx, args),
                                     negative=args.get("negative") or "", ticket=ctx.ticket,
-                                    on_progress=await _progress(ctx))
+                                    on_progress=await _progress(ctx), loras=_loras(ctx, args))
     except ImageError as exc:
         return gpu_failure("Image generation failed", exc)
     paths = _save_outputs(ctx, items, args.get("save_as"), prompt)
@@ -214,8 +240,8 @@ async def image_generate(ctx: ToolContext, args: dict) -> ToolResult:
     enhanced = f"\nERNIE-Image's prompt enhancer turned the prompt into: {used[:2000]}" if used else ""
     other = _other_model_note(ctx, args, items[0]["model"])
     used_by = (pipe.entry(items[0]["model"]) or {}).get("name") or items[0]["model"]      # the owner's name for it
-    return ToolResult(f"Generated {len(items)} image(s) with {used_by} ({desc}). They are shown to the "
-                      f"user and below.{other}{where}{enhanced}",
+    return ToolResult(f"Generated {len(items)} image(s) with {used_by}{_lora_text(items[0])} ({desc}). They are "
+                      f"shown to the user and below.{other}{where}{enhanced}",
                       images=[{"sha": it["sha"], "mime": "image/png"} for it in items],
                       display={"generated": [{"sha": it["sha"], "seed": it["seed"], "path": p}
                                              for it, p in zip(items, paths + [None] * len(items))]})
@@ -234,12 +260,12 @@ async def image_edit(ctx: ToolContext, args: dict) -> ToolResult:
     try:
         items = await pipe.edit(args.get("prompt") or "", datas, seed=args.get("seed"), fast=bool(args.get("fast")),
                                 model=_picture_model(ctx, args), ticket=ctx.ticket, on_progress=await _progress(ctx),
-                                count=int(args.get("count") or 1))
+                                count=int(args.get("count") or 1), loras=_loras(ctx, args))
     except ImageError as exc:
         return gpu_failure("Image editing failed", exc)
     paths = _save_outputs(ctx, items, args.get("save_as"), args.get("prompt") or "edit")
     where = _saved_text(paths)
-    return ToolResult(f"Edited image(s) ready ({len(items)}, {_size_note(items[0])}).{where}",
+    return ToolResult(f"Edited image(s) ready ({len(items)}, {_size_note(items[0])}){_lora_text(items[0])}.{where}",
                       images=[{"sha": it["sha"], "mime": "image/png"} for it in items],
                       display={"generated": [{"sha": it["sha"], "seed": it["seed"], "path": p}
                                              for it, p in zip(items, paths + [None] * len(items))]})
@@ -303,14 +329,46 @@ register(Tool("image_ocr", "Read the text in an image with Tesseract OCR (defaul
               "photos and screenshots your own vision is often better; use OCR for long printed text.",
               obj({"path": {"type": "string"}, "languages": {"type": "string"}}, ["path"]), image_ocr, group="images",
               read_only=True))
-def _generate_params(models: list[str]) -> dict:
+def _lora_param(ids: list[str]) -> dict:
+    return {"type": "array", "description": "The admin's LoRAs to use (listed above), with a strength 0-2 (1 as "
+                                            "trained, 0.6-0.9 for a lighter touch).",
+            "items": {"type": "object", "properties": {"id": {"type": "string", "enum": ids},
+                                                       "strength": {"type": "number"}}, "required": ["id"]}}
+
+
+def _generate_params(models: list[str], loras: list[str] | None = None) -> dict:
     model: dict = {"type": "string", "enum": models} if models else {"type": "string"}
-    return obj({"prompt": {"type": "string"}, "width": {"type": "integer"}, "height": {"type": "integer"},
-                "count": {"type": "integer", "description": "1-4, default 1. More only when the user asks for "
-                                                             "several pictures or for options."},
-                "seed": {"type": "integer"},
-                "fast": {"type": "boolean"}, "negative": {"type": "string"}, "model": model,
-                "save_as": {"type": "string", "description": "Path in the working folder"}}, ["prompt"])
+    params = {"prompt": {"type": "string"}, "width": {"type": "integer"}, "height": {"type": "integer"},
+              "count": {"type": "integer", "description": "1-4, default 1. More only when the user asks for "
+                                                           "several pictures or for options."},
+              "seed": {"type": "integer"},
+              "fast": {"type": "boolean"}, "negative": {"type": "string"}, "model": model,
+              "save_as": {"type": "string", "description": "Path in the working folder"}}
+    if loras:
+        params["loras"] = _lora_param(loras)
+    return obj(params, ["prompt"])
+
+
+def _lora_lines(ctx: ToolContext) -> tuple[str, list[str]]:
+    """The admin's LoRAs for the tool's description (0.49.0) - nothing in a person's chat."""
+    store = ctx.hub.extras.get("loras")
+    if store is None or not _admins_turn(ctx):
+        return "", []
+    items = store.list()
+    if not items:
+        return "", []
+    mine = set(((ctx.chat or {}).get("settings") or {}).get("image_loras") or [])
+    lines = []
+    for x in items:
+        bits = [f"for {x['base_label']} models"]
+        if x.get("trigger"):
+            bits.append(f'trigger "{x["trigger"]}" (put in the prompt for you)')
+        if x["id"] in mine:
+            bits.append("this chat uses it on every picture")
+        lines.append(f"- {x['id']}: {x['name']} ({'; '.join(bits)}).{(' ' + x['note']) if x.get('note') else ''}")
+    return ("\nThe admin's LoRAs - add-ons that teach a model a person, a thing or a style; one works only with "
+            "models of its family. Use one when the user asks for it or for what it was made for:\n"
+            + "\n".join(lines)), [x["id"] for x in items]
 
 
 def _generate_dynamic(ctx: ToolContext) -> tuple[str, dict]:
@@ -325,23 +383,29 @@ def _generate_dynamic(ctx: ToolContext) -> tuple[str, dict]:
         return GENERATE_TEXT, _generate_params([])
     lines = [f"- {e['id']}: {Catalog.label(e)}{' (this chat uses it)' if e is chosen else ''}. {prompt_hint(e)}"
              for e in gens]
+    lora_text, lora_ids = _lora_lines(ctx)
     return (f"Generate images from a text prompt. Without model, this chat uses {chosen['name']}; pick another "
             "only when the user asks for it. Write the prompt the way the model wants it:\n" + "\n".join(lines) +
-            "\nTakes 15-90 s per image (longer when the model has to load first).",
-            _generate_params([e["id"] for e in gens]))
+            "\nTakes 15-90 s per image (longer when the model has to load first)." + lora_text,
+            _generate_params([e["id"] for e in gens], lora_ids))
 
 
-def _edit_params(models: list[str]) -> dict:
+def _edit_params(models: list[str], loras: list[str] | None = None) -> dict:
     model: dict = {"type": "string", "enum": models} if models else {"type": "string"}
-    return obj({"prompt": {"type": "string"}, "images": {"type": "array", "items": {"type": "string"}},
-                "seed": {"type": "integer"}, "fast": {"type": "boolean"}, "count": {"type": "integer"},
-                "model": model, "save_as": {"type": "string"}}, ["prompt", "images"])
+    params = {"prompt": {"type": "string"}, "images": {"type": "array", "items": {"type": "string"}},
+              "seed": {"type": "integer"}, "fast": {"type": "boolean"}, "count": {"type": "integer"},
+              "model": model, "save_as": {"type": "string"}}
+    if loras:
+        params["loras"] = _lora_param(loras)
+    return obj(params, ["prompt", "images"])
 
 
 def _edit_dynamic(ctx: ToolContext) -> tuple[str, dict]:
     eds = _pipeline(ctx).installed("edit")
     names = " or ".join(Catalog.label(e) for e in eds) or "Qwen-Image 2.1"
-    return EDIT_TEXT.replace("(Qwen-Image 2.1)", f"({names})"), _edit_params([e["id"] for e in eds])
+    lora_text, lora_ids = _lora_lines(ctx)
+    return EDIT_TEXT.replace("(Qwen-Image 2.1)", f"({names})") + lora_text, _edit_params([e["id"] for e in eds],
+                                                                                          lora_ids)
 
 
 GENERATE_TEXT = ("Generate images from a text prompt with the model chosen for this chat (Settings -> Assistant -> "

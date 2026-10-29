@@ -197,10 +197,20 @@ class ImagePipeline:
             saved.append({**up, "width": w, "height": h})
         return saved
 
+    def _loras(self, wanted: list | None, fam: str, prompt: str) -> tuple[list, str, list[str], list[str]]:
+        """The LoRAs asked for that fit this model's family (0.49.0, the admin's own chats only - the caller decides)
+        -> (graph nodes, the prompt with their trigger words, their names, notes on any left out)."""
+        store = self.hub.extras.get("loras")
+        if not wanted or store is None:
+            return [], prompt, [], []
+        from .loras import with_triggers
+        nodes, triggers, names, notes = store.resolve(wanted, fam)
+        return nodes, with_triggers(prompt, triggers), names, notes
+
     async def generate(self, prompt: str, width: int = 1024, height: int = 1024, count: int = 1,
                        seed: int | None = None, fast: bool = False, model: str | None = None, negative: str = "",
                        steps: int | None = None, ticket: Ticket | None = None, owner: str = "web",
-                       priority: str = "interactive", on_progress=None) -> list[dict]:
+                       priority: str = "interactive", on_progress=None, loras: list | None = None) -> list[dict]:
         s = self.hub.settings.get("images")
         model = self.chosen(model)
         if family(self.entry(model)) == "ernie-image":
@@ -211,6 +221,8 @@ class ImagePipeline:
             raise ImageError(f"the image model {model} is not downloaded (Settings -> Models)")
         entry = self.entry(model) or {}
         fam = family(entry)
+        lora_nodes, prompt, lora_names, lora_notes = self._loras(loras, fam, prompt)
+        extra = {**({"loras": lora_names} if lora_names else {}), **({"lora_notes": lora_notes} if lora_notes else {})}
         results = []
         for i in range(max(1, min(int(count), 4))):
             sd = (int(seed) + i) if seed is not None else random.randint(1, 2**31 - 1)
@@ -220,10 +232,12 @@ class ImagePipeline:
                                     steps=steps or int(s.get("turbo_steps" if turbo else "steps", 8 if turbo else 25)),
                                     enhance=bool(s.get("enhance_prompts", True)))
                 texts: dict = {}
-                out = await self._run(graph, ticket, owner, priority, f"image: {prompt[:60]}", on_progress, texts)
+                out = await self._run(W.with_loras(graph, lora_nodes), ticket, owner, priority,
+                                      f"image: {prompt[:60]}", on_progress, texts)
                 used = (texts.get(W.ERNIE_PROMPT_NODE) or [""])[0].strip()
                 for item in self._save(out, "generated"):
-                    results.append({**item, "seed": sd, "model": model, **({"prompt_used": used} if used else {})})
+                    results.append({**item, "seed": sd, "model": model, **extra,
+                                    **({"prompt_used": used} if used else {})})
                 continue
             if fam == "flux2-klein":
                 graph = W.klein_t2i(prompt, width, height, sd, steps=steps or 4)
@@ -238,9 +252,10 @@ class ImagePipeline:
                 turbo = model.endswith("turbo")
                 graph = W.qwen_t2i(prompt, width, height, sd, steps=steps or int(s.get("steps", 25)),
                                    cfg=float(s.get("cfg", 1.0)), turbo=turbo, negative=negative)
-            out = await self._run(graph, ticket, owner, priority, f"image: {prompt[:60]}", on_progress)
+            out = await self._run(W.with_loras(graph, lora_nodes), ticket, owner, priority, f"image: {prompt[:60]}",
+                                  on_progress)
             for item in self._save(out, "generated"):
-                results.append({**item, "seed": sd, "model": model})
+                results.append({**item, "seed": sd, "model": model, **extra})
         return results
 
     @staticmethod
@@ -256,7 +271,8 @@ class ImagePipeline:
 
     async def edit(self, prompt: str, images: list[bytes], seed: int | None = None, fast: bool = False,
                    model: str | None = None, steps: int | None = None, ticket: Ticket | None = None,
-                   owner: str = "web", priority: str = "interactive", on_progress=None, count: int = 1) -> list[dict]:
+                   owner: str = "web", priority: str = "interactive", on_progress=None, count: int = 1,
+                   loras: list | None = None) -> list[dict]:
         s = self.hub.settings.get("images")
         model = self.chosen(model)
         if "edit" not in abilities(self.entry(model)):   # ERNIE, Z-Image, Chroma, SDXL only generate
@@ -265,6 +281,8 @@ class ImagePipeline:
             model = "qwen-image-2.1-turbo"
         if not self.available(model):
             raise ImageError(f"the image model {model} is not downloaded (Settings -> Models)")
+        lora_nodes, prompt, lora_names, lora_notes = self._loras(loras, family(self.entry(model)), prompt)
+        extra = {**({"loras": lora_names} if lora_names else {}), **({"lora_notes": lora_notes} if lora_notes else {})}
         results = []
         for i in range(max(1, min(int(count), 4))):
             names = await self._upload_inputs(images)
@@ -274,10 +292,11 @@ class ImagePipeline:
             else:
                 graph = W.qwen_edit(prompt, names, sd, steps=steps or int(s.get("steps", 25)),
                                     cfg=float(s.get("cfg", 1.0)), turbo=model.endswith("turbo"))
-            out = await self._run(graph, ticket, owner, priority, f"edit: {prompt[:60]}", on_progress)
+            out = await self._run(W.with_loras(graph, lora_nodes), ticket, owner, priority, f"edit: {prompt[:60]}",
+                                  on_progress)
             out, source = _fit(out, images[0])
             for item in self._save(out, "edited"):
-                results.append({**item, "seed": sd, "model": model, "source": source})
+                results.append({**item, "seed": sd, "model": model, "source": source, **extra})
         return results
 
     async def remove_background(self, image: bytes, ticket: Ticket | None = None, owner: str = "web",

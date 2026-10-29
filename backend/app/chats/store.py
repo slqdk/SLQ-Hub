@@ -28,7 +28,8 @@ from .. import db
 from ..projects import blobs
 
 CHAT_DEFAULTS = {"model": None, "thinking": None, "effort": None, "skills": [], "libraries": [], "image_model": None,
-                 "level": None}                 # effort (0.38.0): quick | think | extra; None = the project's or Settings'
+                 "level": None,                 # effort (0.38.0): quick | think | extra; None = the project's or Settings'
+                 "image_loras": []}             # 0.49.0: the admin's LoRAs on every picture in the chat (ids)
 
 
 def _chat(r) -> dict:
