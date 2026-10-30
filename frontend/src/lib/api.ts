@@ -224,11 +224,15 @@ export interface TrainingProgress { what: "captions" | "download" | "queue" | "t
   total?: number; repo?: string; step?: number; loss?: number | null; eta_s?: number | null; log?: string[] }
 export interface TrainingRun { id: string; name: string; trigger: string; kind: "person" | "thing" | "style";
   steps: number; rank: number; base: string; state: TrainingState; error: string; created: number; started?: number;
-  ended?: number; lora: string | null; images?: number; log?: string[]; progress?: TrainingProgress | null }
+  ended?: number; lora: string | null; images?: number; log?: string[]; progress?: TrainingProgress | null;
+  /** Bytes on disk (the list). */
+  size?: number }
 export interface TrainingDetail extends TrainingRun {
   images_list: { name: string; caption: string; v: number }[];
   checkpoints: { step: number; file: string; size: number }[];
-  samples: { step: number; n: number; path: string }[] }
+  samples: { step: number; n: number; path: string }[];
+  /** What Free space gives back: checkpoints, ai-toolkit's optimizer state and caches. */
+  freeable: number }
 export interface TrainingOverview { service: { ok: boolean; busy: boolean; toolkit: boolean; ref: string } | null;
   runs: TrainingRun[]; base: { model: string; family: string; label: string; repo: string }; kinds: string[];
   min_images: number; max_images: number; can_caption: boolean }

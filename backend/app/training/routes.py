@@ -175,6 +175,14 @@ async def use(rid: str, body: UseIn, request: Request):
         _fail(exc)
 
 
+@router.post("/runs/{rid}/free")
+async def free_space(rid: str, request: Request):
+    try:
+        return {"freed": _t(request).free_space(rid)}
+    except TrainingError as exc:
+        _fail(exc)
+
+
 @router.get("/runs/{rid}/file")
 async def file(rid: str, path: str, request: Request):
     try:

@@ -100,6 +100,16 @@ def _drop_caches(folder: Path, stem: str) -> None:
                     f.unlink(missing_ok=True)
 
 
+def _size(path: Path) -> int:
+    total = 0
+    for p in path.rglob("*") if path.is_dir() else []:
+        try:
+            total += p.stat().st_size if p.is_file() else 0
+        except OSError:
+            pass
+    return total
+
+
 def _next_name(name: str) -> str:
     """"Rikke" -> "Rikke v2", "Rikke v2" -> "Rikke v3"."""
     m = re.fullmatch(r"(.*?)\s+v(\d+)", name.strip())
@@ -163,7 +173,8 @@ class Training:
         for d in sorted(self.root.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
             if (d / "run.json").is_file():
                 run = json.loads((d / "run.json").read_text())
-                out.append({**run, "images": len(list((d / "images").glob("*.jpg"))), "progress": self.live.get(d.name)})
+                out.append({**run, "images": len(list((d / "images").glob("*.jpg"))), "progress": self.live.get(d.name),
+                            "size": _size(d)})
         return out
 
     def create(self, name: str, trigger: str, kind: str = "thing", steps: int = 1500, rank: int = 16) -> dict:
@@ -249,7 +260,31 @@ class Training:
             images.append({"name": p.name, "caption": cap.read_text(encoding="utf-8").strip() if cap.is_file() else "",
                            "v": int(p.stat().st_mtime)})
         return {**run, "images_list": images, "checkpoints": self.checkpoints(rid), "samples": self.samples(rid),
-                "progress": self.live.get(rid)}
+                "progress": self.live.get(rid), "freeable": self._freeable(rid)}
+
+    def _cache_dirs(self, rid: str) -> list[Path]:
+        return [p for p in (self._dir(rid) / "images").glob("_*") if p.is_dir()]
+
+    def _freeable(self, rid: str) -> int:
+        """The bytes Free space gives back: the checkpoints, ai-toolkit's optimizer state and its caches."""
+        out = self._dir(rid) / "output" / rid
+        files = [*out.glob("*.safetensors"), out / "optimizer.pt"] if out.is_dir() else []
+        return sum(p.stat().st_size for p in files if p.is_file()) + sum(_size(c) for c in self._cache_dirs(rid))
+
+    def free_space(self, rid: str) -> int:
+        """Free space (0.53.0): a training's checkpoints, optimizer state and caches go - its pictures, captions and
+        sample pictures stay, and so do the LoRAs added from it (copies in the LoRA folder). Three trainings held
+        10.5 GB on the VM (2026-10-30), all of it in every backup until then. Returns the bytes given back."""
+        run = self._load(rid)
+        if run["state"] in ACTIVE:
+            raise TrainingError("Not while it is working.", 409)
+        freed = self._freeable(rid)
+        out = self._dir(rid) / "output" / rid
+        for p in [*out.glob("*.safetensors"), out / "optimizer.pt"] if out.is_dir() else []:
+            p.unlink(missing_ok=True)
+        for c in self._cache_dirs(rid):
+            shutil.rmtree(c, ignore_errors=True)
+        return freed
 
     def delete(self, rid: str) -> None:
         d = self._dir(rid)
@@ -488,6 +523,8 @@ class Training:
             self._set(rid, state="failed", error=str(exc)[:500], ended=time.time())
         finally:
             self.live.pop(rid, None)
+            # ai-toolkit's optimizer state is for resuming a run, which the Hub does not do: hundreds of MB, gone
+            (self.root / rid / "output" / rid / "optimizer.pt").unlink(missing_ok=True)
             if ticket is not None:
                 await ticket.release()
 

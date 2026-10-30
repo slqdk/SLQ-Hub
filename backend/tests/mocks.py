@@ -944,6 +944,7 @@ def make_trainer(state: dict) -> FastAPI:
         (out / "samples").mkdir(parents=True, exist_ok=True)
         (out / f"{rid}_000000250.safetensors").write_bytes(lora_bytes())
         (out / f"{rid}.safetensors").write_bytes(lora_bytes())
+        (out / "optimizer.pt").write_bytes(b"o" * 1000)             # ai-toolkit's state for resuming
         (out / "samples" / "1761700000000__000000250_0.jpg").write_bytes(_png((64, 64)))
         return {"ok": True}
 

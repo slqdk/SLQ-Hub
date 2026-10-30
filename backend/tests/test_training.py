@@ -118,6 +118,7 @@ async def test_a_lora_is_trained_and_added(signed_in, app, fakes, monkeypatch):
     await wait_for(lambda: hub.scheduler.current != "train" or not hub.scheduler.running)
     detail = (await signed_in.get(f"/hub/api/training/runs/{rid}")).json()
     assert [c["step"] for c in detail["checkpoints"]] == [250, 500] and detail["samples"][0]["step"] == 250
+    assert not (t.root / rid / "output" / rid / "optimizer.pt").exists()         # resuming is not done: removed
     pic = await signed_in.get(f"/hub/api/training/runs/{rid}/file", params={"path": detail["samples"][0]["path"]})
     assert pic.status_code == 200 and pic.headers["content-type"] == "image/jpeg"
     assert (await signed_in.get(f"/hub/api/training/runs/{rid}/file",
@@ -154,6 +155,17 @@ async def test_a_lora_is_trained_and_added(signed_in, app, fakes, monkeypatch):
     assert "restart" in t._load(rid)["error"]
     await wait_for(lambda: not hub.scheduler.running)
     fakes.trainer.update(hold=False, forget=False)
+
+    # Free space: the checkpoints and caches go; pictures, captions, samples and the added LoRA stay.
+    (t.root / rid / "images" / "_latent_cache").mkdir(exist_ok=True)
+    (t.root / rid / "images" / "_latent_cache" / f"img-0_{'A' * 22}.safetensors").write_bytes(b"x" * 500)
+    before = (await signed_in.get(f"/hub/api/training/runs/{rid}")).json()
+    assert before["freeable"] > 500 and [r["size"] for r in t.list() if r["id"] == rid][0] > before["freeable"]
+    freed = (await signed_in.post(f"/hub/api/training/runs/{rid}/free", headers=ORIGIN)).json()["freed"]
+    assert freed == before["freeable"]
+    after = (await signed_in.get(f"/hub/api/training/runs/{rid}")).json()
+    assert after["checkpoints"] == [] and after["freeable"] == 0 and after["samples"] and len(after["images_list"]) == 5
+    assert not (t.root / rid / "images" / "_latent_cache").exists() and hub.extras["loras"].get(lora["id"]) is not None
 
     # A file ai-toolkit expects that Hugging Face does not have: said plainly, nothing half-written.
     with pytest.raises(R.TrainingError, match="no flux-2-klein-base-9b.safetensors"):

@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.52.1, 2026-10-29)
+## State (0.53.0, 2026-10-30)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -492,7 +492,17 @@ dropped. Søren asked for the advice I had given in the chat to be in the interf
 the training editor has "Which step?" and "Make it better" (a guide panel under the info line, `GuideText` in
 `Training.tsx`) and a "?" at Steps and Rank - click, not hover, so they work on a phone. 0.52.1 (asked for after
 "is it only the face?"): the picture mix and caption advice per kind (`PICTURES`, `CAPTIONS`, `PICTURE_HINT`), for a
-person with a check against the café sample; the links further down scroll to the guide. The config keys were checked against the same commit (`diffusion_trainer`,
+person with a check against the café sample; the links further down scroll to the guide.
+0.53.0, Søren's update on 2026-10-30 "hung" ten minutes at "Backing up the data..." - the backup was 10.3 GB
+(normally under a minute). Measured on the VM: disk 617 GB, 478 used, 109 free; `/srv/slq-hub`: models 281 GB,
+backups 23 GB, data 13 GB of which training 11 GB - three trainings overnight (rikke, rosanna, stine), output/
+4.9 + 2.8 + 2.8 GB, pictures 100-206 MB each; Docker: images 132 GB (36 reclaimable), build cache 35 GB (all
+reclaimable). Now `hub_update.BACKUP_EXCLUDE_RE` leaves out `training/<id>/output` and `training/<id>/images/_*`
+(ai-toolkit's caches), and `restore_data` keeps `training/` (RESTORE_KEEP), extracting the backed-up pictures,
+captions and run.json over it - a rollback never deletes checkpoints. `Training.free_space` (route `/free`, the
+"Free <size>" button) deletes a run's *.safetensors, optimizer.pt and caches; the samples stay (without Add as
+LoRA). optimizer.pt is deleted when a run ends. NOT measured: how much of each run's output was optimizer.pt and
+how much checkpoints - `ls -lh` of one output folder would say. The config keys were checked against the same commit (`diffusion_trainer`,
 arch `flux2_klein_4b`, `cache_text_embeddings` so the 8 GB text encoder leaves the card, `timestep_type`
 "weighted" as ai-toolkit's UI default for klein; no quantisation, AdamW - quanto and bitsandbytes are the least
 sure on AMD). The image follows ai-toolkit's own AMD install (`manager/spec.py`: torch 2.13.0 / torchvision 0.28.0

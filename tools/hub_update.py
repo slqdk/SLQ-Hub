@@ -60,6 +60,7 @@ import argparse
 import http.client
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -93,6 +94,12 @@ BUSY_PERCENT = 10         # a Hub older than 0.26.0 cannot say what it does: the
 # and caches, and .NET build output (.hub/dotnet) in any working folder (0.15.1).
 BACKUP_EXCLUDE = ("./logs", "./sandbox-home/.nuget", "./sandbox-home/.local/share/NuGet")
 BACKUP_EXCLUDE_ANYWHERE = ("/.hub/dotnet",)
+# LoRA trainings (0.53.0): a run's checkpoints and samples (output/) and ai-toolkit's caches beside its pictures
+# (images/_latent_cache, _t_e_cache) - gigabytes ai-toolkit makes again; with them a backup was 10.3 GB and took the
+# Hub away for ten minutes (2026-10-30). The pictures, captions and run.json are backed up; a restore leaves the
+# trainings' folders as they are and puts those back over them, so it never deletes checkpoints.
+BACKUP_EXCLUDE_RE = re.compile(r"^\./training/[^/]+/(output|images/_[^/]+)(/|$)")
+RESTORE_KEEP = {"logs", "training"}
 
 
 class Stop(Exception):
@@ -606,6 +613,8 @@ def show_from(log: Path, pos: int) -> int:
 def _exclude(info: tarfile.TarInfo) -> tarfile.TarInfo | None:
     if any(info.name == e or info.name.startswith(e + "/") for e in BACKUP_EXCLUDE):
         return None
+    if BACKUP_EXCLUDE_RE.match(info.name):
+        return None
     return None if any(e + "/" in info.name + "/" for e in BACKUP_EXCLUDE_ANYWHERE) else info
 
 
@@ -630,9 +639,8 @@ def restore_data(name: str) -> None:
     if not tar_path.is_file():
         raise Stop(f"no backup {name}.tar.gz in {where}")
     data = HUB_ROOT / "data"
-    keep = {"logs"}
     for child in data.iterdir() if data.is_dir() else []:
-        if child.name in keep:
+        if child.name in RESTORE_KEEP:
             continue
         if child.is_dir() and not child.is_symlink():
             shutil.rmtree(child)

@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.53.0 - 2026-10-30
+
+- **Backups without the trainings' checkpoints.** A training's checkpoints,
+  sample pictures and ai-toolkit's cache files are no longer in the update's
+  backup - with three trainings it was 10.3 GB and kept the Hub stopped for
+  ten minutes. Pictures, captions and the training settings are still backed
+  up, and a rollback no longer deletes checkpoints.
+- **Free space on a training.** Once you have added the LoRA you want,
+  "Free ..." at the bottom of the training deletes its checkpoints (a few GB
+  each); pictures, captions, sample pictures and the added LoRAs stay. The
+  list shows how much each training takes.
+- ai-toolkit's optimizer state (only for resuming a training, which the Hub
+  does not do) is deleted when a training ends.
+
 ## 0.52.1 - 2026-10-29
 
 - **Which pictures, by what it learns.** For a person, the training page

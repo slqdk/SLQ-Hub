@@ -521,3 +521,31 @@ def test_a_profile_turned_on_since_the_last_update_is_built_and_started(hu, monk
     hu.calls.clear()
     lists["ps"] = lists["config"]                      # all there: nothing is started
     assert hu.start_new_services() == [] and not [c for c in hu.calls if c[1] == "up"]
+
+
+def test_a_backup_leaves_out_what_ai_toolkit_makes_again(hu, tmp_path):
+    """0.53.0: a training's checkpoints and ai-toolkit's caches are not backed up (a 10.3 GB backup took the Hub away
+    for ten minutes); its pictures, captions and run.json are, and a restore puts them back without deleting the
+    checkpoints there."""
+    data = hu.HUB_ROOT / "data"
+    run = data / "training" / "rikke-20261029-143312"
+    for rel, body in (("run.json", b"{}"), ("images/img-1.jpg", b"jpg"), ("images/img-1.txt", b"waterx55, a park"),
+                      ("images/_latent_cache/img-1_" + "A" * 22 + ".safetensors", b"x" * 100),
+                      ("images/_t_e_cache/img-1_" + "B" * 22 + ".safetensors", b"x" * 100),
+                      ("output/rikke-20261029-143312/rikke-20261029-143312_000000250.safetensors", b"x" * 100),
+                      ("output/rikke-20261029-143312/samples/1__000000250_0.jpg", b"jpg")):
+        (run / rel).parent.mkdir(parents=True, exist_ok=True)
+        (run / rel).write_bytes(body)
+    (data / "hub.db").write_bytes(b"db")
+    tar = hu.make_backup("b1", {"version": "0.52.1"})
+    import tarfile as _tarfile
+    with _tarfile.open(tar) as t:
+        names = set(t.getnames())
+    assert "./training/rikke-20261029-143312/images/img-1.txt" in names and "./hub.db" in names
+    assert "./training/rikke-20261029-143312/run.json" in names
+    assert not [n for n in names if "/output" in n or "/_latent_cache" in n or "/_t_e_cache" in n]
+    (run / "images" / "img-1.txt").write_text("changed after the backup")
+    (data / "hub.db").write_bytes(b"new")
+    hu.restore_data("b1")
+    assert (run / "images" / "img-1.txt").read_text() == "waterx55, a park" and (data / "hub.db").read_bytes() == b"db"
+    assert (run / "output" / "rikke-20261029-143312" / "rikke-20261029-143312_000000250.safetensors").is_file()

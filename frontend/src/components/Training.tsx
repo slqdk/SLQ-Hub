@@ -102,7 +102,8 @@ export function TrainingSection({ onAdded }: { onAdded: () => void }) {
               <Lamp state={lampOf(r)} />
               <div className="grow" style={{ minWidth: 200 }}>
                 <b>{r.name}</b> <span className="tag">{KINDS[r.kind]?.label ?? r.kind}</span>
-                <div className="meta">Trigger word <b>{r.trigger}</b> · {r.images ?? 0} pictures · {progressText(r)}</div>
+                <div className="meta">Trigger word <b>{r.trigger}</b> · {r.images ?? 0} pictures · {progressText(r)}
+                  {r.size ? ` · ${bytes(r.size)}` : ""}</div>
                 <ProgressBar run={r} />
               </div>
               <button className="btn quiet small" onClick={() => setOpen(r.id)}>Open</button>
@@ -236,6 +237,8 @@ function GuideText({ guide, kind }: { guide: Guide; kind: string }) {
     <ul>
       <li><b>Keep the best first:</b> Add as LoRA on the best step - Train again deletes this training's checkpoints.
         Or Duplicate it into a v2, which keeps them here.</li>
+      <li><b>Done with it?</b> Once the LoRA you want is added, Free (at the bottom) deletes the checkpoints - a few
+        GB per training. Pictures, captions, samples and the added LoRA stay.</li>
       <li><b>One change a round,</b> so you know what helped, and name the versions (v1, v2).</li>
       <li><b>Steps:</b> best step was the last one - give it 500-1000 more. Best step was early - give it fewer, or
         just keep that one.</li>
@@ -382,6 +385,12 @@ function TrainingEditor({ rid, data, onClose, onAdded, onDuplicate }: { rid: str
           disabled={working} onConfirm={() => act("delete", () => api(`/hub/api/training/runs/${rid}`,
             { method: "DELETE" }), "Deleted").then(onClose)}>Delete training</ConfirmButton>
         <span className="grow" />
+        {run.freeable > 0 && <ConfirmButton className="btn quiet" disabled={working || !!busy}
+          confirmText="Delete its checkpoints? Pictures, captions, samples and added LoRAs stay."
+          onConfirm={() => act("free", async () => {
+            const r = await api<{ freed: number }>(`/hub/api/training/runs/${rid}/free`, { method: "POST" });
+            toast(`Freed ${bytes(r.freed)}`, "run");
+          })}>Free {bytes(run.freeable)}</ConfirmButton>}
         <button className="btn" disabled={!pics.length}
           onClick={() => onDuplicate({ ...run, images: pics.length })}><Copy size={14} /> Duplicate</button>
         <button className="btn" onClick={onClose}>Close</button>
