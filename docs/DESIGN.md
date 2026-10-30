@@ -1872,7 +1872,9 @@ files afterwards.
     optimizer state, kept while a run is stopped); a finished run goes on the
     same way once it has more steps. A run can instead be based on one of the Hub's SDXL
     checkpoints (0.56.0): ai-toolkit's "sdxl" on that file, read-only, with
-    SDXL base's config files fetched; its LoRA is an SDXL one.
+    SDXL base's config files fetched; its LoRA is an SDXL one. Its VAE runs in
+    fp32 (0.59.2): ai-toolkit's default float16 overflows the SDXL VAE when it
+    caches the pictures' latents, and the LoRA learned speckles.
   - **Families and abilities.** Each picture model in the catalog has a
     `family` (which graph) and `abilities` (generate, edit, cutout). Models
     that only generate hand edits to one that edits. `image_generate`'s

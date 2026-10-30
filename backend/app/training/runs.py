@@ -55,6 +55,10 @@ SDXL_CONFIG_REPO = "stabilityai/stable-diffusion-xl-base-1.0"
 SDXL_CONFIG_FILES = re.compile(r"\.(json|txt|model)$", re.I)
 CHECKPOINTS = "/models/comfy/checkpoints"
 SDXL_NEGATIVE = "bad hands, bad anatomy, ugly, deformed"          # RealVisXL's card, shortened
+# 0.59.2: the SDXL VAE overflows in fp16, and ai-toolkit's VAE follows the model's dtype (float16 unless set). The
+# pictures' latents came out broken - speckled photos from the first checkpoint on, while the samples' decoding (the
+# diffusers pipeline upcasts, force_upcast) and "Before training" looked clean. kohya's --no_half_vae, in effect.
+SDXL_VAE_DTYPE = "fp32"
 KINDS = ("person", "thing", "style")
 SAVE_EVERY = 250
 MIN_IMAGES, MAX_IMAGES = 5, 80
@@ -515,7 +519,7 @@ class Training:
                       "train_text_encoder": False, "gradient_checkpointing": True, "noise_scheduler": "ddpm",
                       "optimizer": "adamw", "lr": 8e-5 if run["kind"] == "style" else 1e-4, "dtype": "bf16"},
             "model": {"name_or_path": f"{CHECKPOINTS}/{run['checkpoint_path']}", "arch": "sdxl", "quantize": False,
-                      "quantize_te": False},
+                      "quantize_te": False, "vae_dtype": SDXL_VAE_DTYPE},
             "sample": {"sampler": "ddpm", "sample_every": SAVE_EVERY, "width": 1024, "height": 1024,
                        "prompts": [p.format(t=t) for p in SAMPLES[run["kind"]]], "neg": SDXL_NEGATIVE, "seed": 42,
                        "walk_seed": True, "guidance_scale": 6, "sample_steps": 30}}]},
@@ -558,6 +562,12 @@ class Training:
             for old in (self._dir(rid) / "output").glob("*"):       # a run starts over
                 shutil.rmtree(old, ignore_errors=True) if old.is_dir() else old.unlink(missing_ok=True)
             fields = {"lora": None, "trained": None, "trained_rank": run["rank"]}
+        if run.get("base") == "sdxl" and run.get("vae_dtype") != SDXL_VAE_DTYPE:
+            # latents cached with the VAE in fp16 (before 0.59.2) are broken, and their file names do not say the
+            # dtype - ai-toolkit would reuse them: made again
+            for c in self._cache_dirs(rid):
+                shutil.rmtree(c, ignore_errors=True)
+            fields["vae_dtype"] = SDXL_VAE_DTYPE
         run = self._set(rid, state="queued", error="", started=time.time(), **fields)
         self.stop[rid] = asyncio.Event()
         self.tasks[rid] = asyncio.create_task(self._train(run))

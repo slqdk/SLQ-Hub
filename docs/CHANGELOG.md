@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.59.2 - 2026-10-30
+
+- **SDXL LoRA training: no more speckled photos.** The trainer read your
+  training pictures through the SDXL VAE in half precision, which overflows,
+  so the LoRA learned from broken pictures. Its photos came out speckled from
+  the first checkpoint on, while "Before training" looked clean. The pictures
+  are now read in full precision, and a training's old cached pictures are
+  made again. Start an SDXL training over to get a clean LoRA.
+
 ## 0.59.1 - 2026-10-30
 
 - **Changing a picture says which model did it, and why.** RealVisXL and the

@@ -230,15 +230,19 @@ async def test_a_lora_is_trained_on_an_sdxl_checkpoint(signed_in, app, fakes, mo
         {"type": "file", "path": "tokenizer_2/merges.txt", "size": 50},
         {"type": "file", "path": "sd_xl_base_1.0.safetensors", "size": 6000},
         {"type": "file", "path": "unet/diffusion_pytorch_model.safetensors", "size": 5000}]}}
+    stale = t.root / rid / "images" / "_latent_cache"            # made before 0.59.2, with the VAE in fp16
+    stale.mkdir()
+    (stale / f"m0_{'A' * 22}.safetensors").write_bytes(b"x" * 50)
     fakes.trainer["hold"] = True
     assert (await signed_in.post(f"/hub/api/training/runs/{rid}/start", headers=ORIGIN)).status_code == 200
     await wait_for(lambda: t._load(rid)["state"] == "training" and rid in fakes.trainer["jobs"])
+    assert not stale.exists() and t._load(rid)["vae_dtype"] == "fp32"       # broken latents made again
     snap = hub.env.models_dir / "hf" / "hub" / "models--stabilityai--stable-diffusion-xl-base-1.0" / "snapshots" / "5d1"
     assert (snap / "model_index.json").is_file() and (snap / "unet/config.json").is_file()
     assert (snap / "tokenizer_2/merges.txt").is_file() and not list(snap.rglob("*.safetensors"))
     cfg = fakes.trainer["jobs"][rid]["config"]["config"]["process"][0]
     assert cfg["model"] == {"name_or_path": "/models/comfy/checkpoints/hub/realvisxl-v5-0.safetensors", "arch": "sdxl",
-                            "quantize": False, "quantize_te": False}
+                            "quantize": False, "quantize_te": False, "vae_dtype": "fp32"}
     assert cfg["train"]["noise_scheduler"] == "ddpm" and cfg["sample"]["sampler"] == "ddpm"
     assert "timestep_type" not in cfg["train"] and "cache_text_embeddings" not in cfg["train"]
     fakes.trainer["hold"] = False
@@ -248,6 +252,11 @@ async def test_a_lora_is_trained_on_an_sdxl_checkpoint(signed_in, app, fakes, mo
     assert lora["base"] == "sdxl" and "RealVisXL V5.0 (SDXL)" in lora["note"]
     copy = t.duplicate(rid)                                                    # a v2 keeps the base
     assert copy["base"] == "sdxl" and copy["checkpoint"] == "realvisxl-v5-0"
+    good = t.root / rid / "images" / "_latent_cache"                         # made with the fp32 VAE: kept
+    good.mkdir()
+    assert (await signed_in.post(f"/hub/api/training/runs/{rid}/start", headers=ORIGIN)).status_code == 200
+    await wait_for(lambda: t._load(rid)["state"] == "done")
+    assert good.exists()
 
 
 async def test_a_stopped_training_goes_on_from_its_last_checkpoint(signed_in, app, fakes, monkeypatch):

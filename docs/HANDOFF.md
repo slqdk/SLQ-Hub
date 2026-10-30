@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.59.1, 2026-10-30)
+## State (0.59.2, 2026-10-30)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -589,6 +589,16 @@ first installed edit model). `_made_with(pipe, item, ctx)` now adds `note` for a
 the chat's model ("RealVisXL V5.0 only makes new pictures from a description, so Qwen-Image 2.1 made this change"),
 shown under the picture and in the result. Not built: SDXL img2img (an edit redrawn by RealVisXL with its LoRA from
 a full description) - offered to Søren.
+0.59.2, Søren's SDXL training ("Rikke", RealVisXL, rank 64, 3000 steps), screenshots from his phone: "Before
+training" clean in all three samples; from the first checkpoint (250) on, the two photo samples full of green and
+yellow speckles and horizontal streaks, the watercolour clean; likeness only around 3000. ai-toolkit at b69b983:
+`ModelConfig.dtype` defaults to float16 and `vae_dtype` follows it; `encode_images` (the latent cache) runs the VAE
+in that dtype with no upcast, and the SDXL VAE overflows in fp16. The samples are decoded by diffusers'
+StableDiffusionXLPipeline, which upcasts (`force_upcast` in SDXL base's vae/config.json) - so they looked clean while
+the LoRA learned broken latents. `_sdxl_config` now sets `vae_dtype: fp32` (kohya's --no_half_vae, in effect).
+The latent cache's name has no dtype in it (`get_latent_info_dict`), so `start` drops an SDXL run's `images/_*`
+caches once, marked by run.json `vae_dtype`. klein left as it was (its VAE is fine in fp16; his klein LoRAs were
+clean). NOT seen on the card: a clean SDXL training after this - the first checkpoint's photo samples will tell.
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
 host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU
@@ -1306,7 +1316,8 @@ the host if the VM ever stops by itself.
     - **Stop and restart**: Stop during training (the card is free within about 90 s, after ai-toolkit has
       exited); a Hub restart while it trains (the leftover job is stopped before anything loads).
     - **SDXL (0.56.0)**: trains on the card (Søren, 2026-10-30: past step 1000 on RealVisXL V5.0, so the configs
-      were found offline). Not seen: the time per step, and the LoRA in a chat with RealVisXL.
+      were found offline). Its photos were speckled from step 250 (the VAE in fp16) - 0.59.2's fp32 VAE not yet
+      seen on the card. Not seen: the time per step, and the LoRA in a chat with RealVisXL.
     - **Continue (0.58.0)**: after Stop, "Continue from step N" - ai-toolkit's log should say "RESUMING FROM ..."
       and "Loading optimizer state"; the progress should start at that step. A finished run with more steps.
     - Not offered: klein 9B (gated, under BFL's own licence; ai-toolkit quantises it by default).
