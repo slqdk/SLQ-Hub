@@ -224,11 +224,20 @@ def _ignored(args: dict) -> str:
             "tell them to pick them there.")
 
 
-def _made_with(pipe, item: dict) -> dict:
+def _made_with(pipe, item: dict, ctx: ToolContext | None = None) -> dict:
     """The line under the picture (0.59.0): the model it was made with, the LoRAs used (with their strength) and
-    any left out, so the user sees what was used instead of guessing."""
-    return {"model": (pipe.entry(item["model"]) or {}).get("name") or item["model"],
-            "loras": item.get("lora_used") or [], "left_out": item.get("lora_notes") or []}
+    any left out, so the user sees what was used instead of guessing. For an edit (ctx given) also why another
+    model than the chat's made it: one that only makes new pictures (SDXL, Z-Image, Chroma, ERNIE) cannot change
+    one."""
+    name = (pipe.entry(item["model"]) or {}).get("name") or item["model"]
+    out = {"model": name, "loras": item.get("lora_used") or [], "left_out": item.get("lora_notes") or []}
+    if ctx is not None:
+        from ...images.pipeline import family
+        mine = pipe.entry(pipe.chosen(_picture_model(ctx))) or {}
+        if mine and mine.get("id") != item["model"] and family(mine) != family(pipe.entry(item["model"])):
+            out["note"] = (f"{mine.get('name') or mine['id']} only makes new pictures from a description, so {name} "
+                           "made this change - ask for a new picture, without one attached, to use it")
+    return out
 
 
 async def image_generate(ctx: ToolContext, args: dict) -> ToolResult:
@@ -278,9 +287,10 @@ async def image_edit(ctx: ToolContext, args: dict) -> ToolResult:
         return gpu_failure("Image editing failed", exc)
     paths = _save_outputs(ctx, items, args.get("save_as"), args.get("prompt") or "edit")
     where = _saved_text(paths)
-    made = _made_with(pipe, items[0])
+    made = _made_with(pipe, items[0], ctx)
+    why = f" {made['note'][0].upper()}{made['note'][1:]}." if made.get("note") else ""
     return ToolResult(f"Edited image(s) ready with {made['model']} ({len(items)}, {_size_note(items[0])})"
-                      f"{_lora_text(items[0])}.{_ignored(args)}{where}",
+                      f"{_lora_text(items[0])}.{why}{_ignored(args)}{where}",
                       images=[{"sha": it["sha"], "mime": "image/png"} for it in items],
                       display={"generated": [{"sha": it["sha"], "seed": it["seed"], "path": p}
                                              for it, p in zip(items, paths + [None] * len(items))],

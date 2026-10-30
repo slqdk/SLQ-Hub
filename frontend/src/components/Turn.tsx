@@ -319,6 +319,7 @@ function MadeWithLines({ made }: { made: MadeWith[] }) {
       <span>Made with <b>{m.model}</b>{m.loras.map((l) => (
         <span key={l.name}> · LoRA <b>{l.name}</b> {l.slider ? `${l.strength > 0 ? "+" : ""}${l.strength}`
           : `×${l.strength}`}</span>))}</span>
+      {m.note && <span className="warn-text">{m.note.charAt(0).toUpperCase() + m.note.slice(1)}.</span>}
       {m.left_out.map((n) => <span key={n} className="warn-text">{n.charAt(0).toUpperCase() + n.slice(1)}.</span>)}
     </div>
   ))}</>;

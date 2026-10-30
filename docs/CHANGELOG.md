@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.59.1 - 2026-10-30
+
+- **Changing a picture says which model did it, and why.** RealVisXL and the
+  other SDXL models (and Z-Image, Chroma and ERNIE) only make new pictures
+  from a description. A change to an attached or earlier picture is made by
+  Qwen-Image or FLUX.2 klein, so a LoRA for the chat's model cannot be used.
+  The line under the picture now says so. Ask for a new picture, without one
+  attached, to use RealVisXL and its LoRA.
+
 ## 0.59.0 - 2026-10-30
 
 - **Every picture says what made it.** Under each picture: the picture model,

@@ -333,3 +333,18 @@ async def test_new_models_in_chats(signed_in, app, fakes):
     assert (await signed_in.delete("/hub/api/models/pony-v6")).status_code == 200
     items = await pipe.generate("a fox", 1024, 1024, model="pony-v6")
     assert items[0]["model"] == "qwen-image-2.1"
+
+
+async def test_an_edit_by_another_model_says_why(app):
+    """0.59.0: a chat whose picture model only makes new pictures (Z-Image Turbo here, RealVisXL for Søren) has its
+    edits made by an edit model, and the line under the picture says why - its LoRA could not be used there."""
+    from types import SimpleNamespace
+    from app.agent.tools import images as IT
+    pipe = app.state.hub.extras["images"]
+    ctx = SimpleNamespace(chat={"settings": {"image_model": "z-image-turbo"}}, project=None)
+    made = IT._made_with(pipe, {"model": "qwen-image-2.1"}, ctx)
+    assert made["model"] == "Qwen-Image 2.1"
+    assert made["note"].startswith("Z-Image Turbo only makes new pictures from a description, so Qwen-Image 2.1 made")
+    klein = SimpleNamespace(chat={"settings": {"image_model": "flux2-klein-4b"}}, project=None)
+    assert "note" not in IT._made_with(pipe, {"model": "flux2-klein-4b"}, klein)     # it edits itself
+    assert "note" not in IT._made_with(pipe, {"model": "qwen-image-2.1"})            # a new picture: no reason

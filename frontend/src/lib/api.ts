@@ -136,7 +136,9 @@ export interface SkillQuestion { text: string; options: string[]; chosen: string
 export interface ImageRef { sha: string; mime?: string; caption?: string }
 export interface ArtifactRef { id: string; version: number; title: string; type: string; language?: string | null }
 export interface MadeWith { model: string; loras: { name: string; strength: number; slider: boolean }[];
-  left_out: string[] }
+  left_out: string[];
+  /** An edit made by another model than the chat's, and why (the chat's only makes new pictures). */
+  note?: string }
 export interface Display {
   artifact?: ArtifactRef;
   todos?: Todo[];

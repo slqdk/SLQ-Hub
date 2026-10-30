@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.59.0, 2026-10-30)
+## State (0.59.1, 2026-10-30)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -581,6 +581,14 @@ not fitting. `resolve` also returns what was used (name, strength, slider), and 
 lists every LoRA: another family's greyed with the model it needs (or that none is downloaded, or no family set);
 one that is on but does not fit is struck through above the message box ("not with ERNIE-Image Turbo"). Not on
 the card: whether his SDXL LoRAs load in RealVisXL's graph (LoraLoader) - the next picture's line will say.
+0.59.1, Søren after updating: "den vælger stadig qwen, i en helt ny chat", also with RealVisXL as Settings'
+default. His screenshot: the call was image_edit with `images: [".hub/attachments/generated-hub_00217_.png"]` (a
+picture he had put in the new chat), result "Edited image(s) ready with Qwen-Image 2.1 ... left out: it is for SDXL
+models". Working as built: an edit needs an edit model, and RealVisXL only generates (`pipeline.edit` takes the
+first installed edit model). `_made_with(pipe, item, ctx)` now adds `note` for an edit made by another family than
+the chat's model ("RealVisXL V5.0 only makes new pictures from a description, so Qwen-Image 2.1 made this change"),
+shown under the picture and in the result. Not built: SDXL img2img (an edit redrawn by RealVisXL with its LoRA from
+a full description) - offered to Søren.
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
 host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU
