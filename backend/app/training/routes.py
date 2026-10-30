@@ -155,6 +155,15 @@ async def start(rid: str, request: Request):
         _fail(exc)
 
 
+@router.post("/runs/{rid}/continue")
+async def resume(rid: str, request: Request):
+    """Go on from the newest checkpoint: a stopped run, or a finished one given more steps."""
+    try:
+        return await _t(request).start(rid, resume=True)
+    except TrainingError as exc:
+        _fail(exc)
+
+
 @router.post("/runs/{rid}/cancel")
 async def cancel(rid: str, request: Request):
     try:

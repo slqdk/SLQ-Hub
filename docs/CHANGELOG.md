@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.58.0 - 2026-10-30
+
+- **Pause a LoRA training and go on later.** Stop is now a pause: the
+  training keeps its checkpoints, and "Continue from step N" trains on from
+  the last one (one is saved every 250 steps, so at most 249 steps are done
+  again). A finished training can go on too: raise Steps and press Continue.
+  "Train again" is now called "Start over" and still deletes the checkpoints.
+- On a phone, the buttons at the bottom of a dialog wrap to a second line
+  instead of being cut off.
+
 ## 0.57.1 - 2026-10-30
 
 - **A clear message when the proxy refuses an upload.** Through hub.slq.dk a

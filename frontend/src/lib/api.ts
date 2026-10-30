@@ -251,7 +251,9 @@ export interface TrainingDetail extends TrainingRun {
   checkpoints: { step: number; file: string; size: number }[];
   samples: { step: number; n: number; path: string }[];
   /** What Free space gives back: checkpoints, ai-toolkit's optimizer state and caches. */
-  freeable: number }
+  freeable: number;
+  /** The checkpoint Continue goes on from (a stopped run, or a finished one given more steps); null when it cannot. */
+  resume_step: number | null }
 export interface TrainingOverview { service: { ok: boolean; busy: boolean; toolkit: boolean; ref: string } | null;
   runs: TrainingRun[]; base: { model: string; family: string; label: string; repo: string }; kinds: string[];
   /** What a new training can be based on: FLUX.2 klein 4B and the SDXL models the Hub has (0.56.0). */

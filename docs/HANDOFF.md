@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.57.1, 2026-10-30)
+## State (0.58.0, 2026-10-30)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -555,6 +555,19 @@ Too Large" (openresty), shown raw as the error. The proxy refused it, not the Hu
 sentence (413: raise the limit or use the LAN address; 502-504: the Hub did not answer the proxy); the phone chat
 says a 413 message is too large for the connection. NOT known: the file's size and what NPM's Advanced field holds
 - only that its limit is below the file.
+0.58.0, Søren: "kan jeg pause træningen og fortsætte?" - Stop is now a pause. ai-toolkit resumes by itself
+(BaseSDTrainProcess at b69b983: the newest `<name>*.safetensors` in the output folder by ctime, its step from the
+metadata's training_info, `optimizer.pt` when it is there, no baseline samples past step 1), so `Training.start(rid,
+resume=True)` (POST `/runs/{rid}/continue`) leaves the folder as it is; Start over still empties it. ai-toolkit saves
+nothing on SIGINT, so a pause loses the steps since the last checkpoint (at most 249). `optimizer.pt` is kept while a
+run is cancelled or failed, deleted when one is done. A finished run goes on once Steps are raised: run.json
+`trained` keeps the step of `<id>.safetensors`, which Continue renames to `<id>_<step:09d>.safetensors` (so it stays,
+and is ai-toolkit's newest); `trained_rank` blocks Continue after a rank change (another rank cannot be loaded).
+`resume_step` in the detail drives "Continue from step N". The fake trainer now resumes like ai-toolkit and writes
+the last file only when done. Also `.modal-foot` wraps (on a phone the training editor's footer cut "Delete training"
+off). Søren's report the same day: an SDXL training of a person (RealVisXL) runs on the card, past step 1000 - so
+`from_single_file` found SDXL base's configs offline; its samples show the person in all three (klein's run had a
+lake or a field in the watercolour), but less like her than klein at that point. NOT run on the card: Continue.
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
 host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU
@@ -1271,9 +1284,10 @@ the host if the VM ever stops by itself.
       ComfyUI's log means the keys do not fit), and does the trigger word bring the thing?
     - **Stop and restart**: Stop during training (the card is free within about 90 s, after ai-toolkit has
       exited); a Hub restart while it trains (the leftover job is stopped before anything loads).
-    - **SDXL (0.56.0)**: a training on RealVisXL V5.0 - does `from_single_file` find SDXL base's configs offline
-      (an error naming stabilityai/stable-diffusion-xl-base-1.0 would say not), the time per step, and the LoRA in a
-      chat with RealVisXL.
+    - **SDXL (0.56.0)**: trains on the card (Søren, 2026-10-30: past step 1000 on RealVisXL V5.0, so the configs
+      were found offline). Not seen: the time per step, and the LoRA in a chat with RealVisXL.
+    - **Continue (0.58.0)**: after Stop, "Continue from step N" - ai-toolkit's log should say "RESUMING FROM ..."
+      and "Loading optimizer state"; the progress should start at that step. A finished run with more steps.
     - Not offered: klein 9B (gated, under BFL's own licence; ai-toolkit quantises it by default).
 80. **Not pursued (Søren, 2026-10-28)** - kept here in case it is taken up again; if it stays unused, remove
     the `windows` service, `.30` from `SANDBOX_IPS`, `windows/*` from `FOLDERS` and INSTALL.md section 12.

@@ -241,7 +241,9 @@ function GuideText({ guide, kind, sdxl }: { guide: Guide; kind: string; sdxl?: b
   if (guide === "steps") return <>
     <b>Steps</b> are how long it trains. 1500 is a good start for 15-40 pictures; more pictures want more steps.
     A checkpoint with sample pictures is saved every 250 steps, so too many steps only cost time - you can choose an
-    earlier one. While it trains, the page shows the time left.</>;
+    earlier one. While it trains, the page shows the time left. Stop is a pause: Continue goes on from the last
+    checkpoint (the steps after it are trained again). Finished, and the last step was the best? Raise Steps and press
+    Continue - it trains on from there instead of starting over.</>;
   if (guide === "rank") return <>
     <b>Rank</b> is how much the LoRA can hold. 16 suits a face or a thing. 32 for fine detail or a detailed style:
     it learns more, but copies your pictures sooner, and the file is twice the size.</>;
@@ -268,13 +270,13 @@ function GuideText({ guide, kind, sdxl }: { guide: Guide; kind: string; sdxl?: b
   return <>
     <b>How to make it better</b>
     <ul>
-      <li><b>Keep the best first:</b> Add as LoRA on the best step - Train again deletes this training's checkpoints.
+      <li><b>Keep the best first:</b> Add as LoRA on the best step - Start over deletes this training's checkpoints.
         Or Duplicate it into a v2, which keeps them here.</li>
       <li><b>Done with it?</b> Once the LoRA you want is added, Free (at the bottom) deletes the checkpoints - a few
         GB per training. Pictures, captions, samples and the added LoRA stay.</li>
       <li><b>One change a round,</b> so you know what helped, and name the versions (v1, v2).</li>
-      <li><b>Steps:</b> best step was the last one - give it 500-1000 more. Best step was early - give it fewer, or
-        just keep that one.</li>
+      <li><b>Steps:</b> best step was the last one - raise Steps by 500-1000 and press Continue, which trains on from
+        there. Best step was early - just keep that one.</li>
       <li><b>Pictures matter most:</b> sharp and large (1024 px or more); 20-30 good pictures beat 35 mixed ones.
         {" "}{PICTURES[kind] ?? PICTURES.thing}</li>
       <li><b>Captions:</b> {CAPTIONS[kind] ?? CAPTIONS.thing} What a caption leaves out becomes part of the trigger
@@ -462,7 +464,7 @@ function TrainingEditor({ rid, data, onClose, onAdded, onDuplicate }: { rid: str
         <div className="callout">
           <div className="row"><Lamp state={lampOf(run)} /> <b className="grow">{progressText(run)}</b>
             {run.state !== "captioning" && run.progress?.what !== "stopping" && (
-              <ConfirmButton className="btn small" confirmText="Stop the training?"
+              <ConfirmButton className="btn small" confirmText="Stop? Continue can go on later."
                 onConfirm={() => act("stop", () => api(`/hub/api/training/runs/${rid}/cancel`, { method: "POST" }))}>
                 Stop</ConfirmButton>)}
           </div>
@@ -567,16 +569,23 @@ function TrainingEditor({ rid, data, onClose, onAdded, onDuplicate }: { rid: str
       {/* Start */}
       {editable && (
         <div className="row" style={{ flexWrap: "wrap", gap: 10 }}>
-          <span className="grow muted small">
+          <span className="grow muted small" style={{ minWidth: 200 }}>
             {pics.length < data.min_images ? `At least ${data.min_images} pictures (15-40 is best).`
               : uncaptioned ? `${uncaptioned} picture${uncaptioned === 1 ? " has" : "s have"} no caption yet.`
                 : !data.service ? "The trainer is not running (see above)."
-                  : `${run.steps} steps. The first time, about 16 GB of model files are downloaded first.`}</span>
-          <ConfirmButton className="btn primary" disabled={!ready || !data.service || !!busy}
+                  : run.resume_step != null ? `Continue trains on from step ${run.resume_step} to ${run.steps}.`
+                    : `${run.steps} steps. The first time, about 16 GB of model files are downloaded first.`}</span>
+          {run.resume_step != null && (
+            <ConfirmButton className="btn primary" disabled={!ready || !data.service || !!busy}
+              confirmText={`The card is busy until step ${run.steps} - continue?`}
+              onConfirm={() => act("continue", () => api(`/hub/api/training/runs/${rid}/continue`, { method: "POST" }))}>
+              Continue from step {run.resume_step}</ConfirmButton>)}
+          <ConfirmButton className={run.resume_step != null ? "btn" : "btn primary"}
+            disabled={!ready || !data.service || !!busy}
             confirmText={run.checkpoints.length ? "Busy for hours, and these checkpoints go (Duplicate keeps them) - start?"
               : "The card is busy for hours - start?"}
             onConfirm={() => act("start", () => api(`/hub/api/training/runs/${rid}/start`, { method: "POST" }))}>
-            {run.state === "draft" ? "Start training" : "Train again"}</ConfirmButton>
+            {run.state === "draft" ? "Start training" : "Start over"}</ConfirmButton>
         </div>
       )}
     </Modal>

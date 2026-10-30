@@ -1856,8 +1856,11 @@ files afterwards.
     three sample pictures are saved; the admin chooses one by its pictures
     and it becomes a LoRA (source "trained"). Duplicate copies a run's
     pictures and captions into a v2 (a new trigger word replaces the old one
-    in the captions), so v1 keeps its checkpoints; Train again starts the
-    same run over. A run can instead be based on one of the Hub's SDXL
+    in the captions), so v1 keeps its checkpoints; Start over empties the
+    same run. Stop is a pause (0.58.0): Continue starts ai-toolkit on the
+    same folder, where it goes on from the newest checkpoint (with its
+    optimizer state, kept while a run is stopped); a finished run goes on the
+    same way once it has more steps. A run can instead be based on one of the Hub's SDXL
     checkpoints (0.56.0): ai-toolkit's "sdxl" on that file, read-only, with
     SDXL base's config files fetched; its LoRA is an SDXL one.
   - **Families and abilities.** Each picture model in the catalog has a

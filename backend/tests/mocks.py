@@ -937,15 +937,21 @@ def make_trainer(state: dict) -> FastAPI:
 
     @app.post("/jobs")
     async def job(request: Request):
+        """Like ai-toolkit: it goes on from the newest numbered checkpoint in the folder (and its optimizer.pt), saves
+        one every 250 steps, and the last as <id>.safetensors when it is done."""
         body = await request.json()
         rid = body["id"]
-        state["jobs"][rid] = {"config": body["config"], "dir": body["dir"], "looks": 0, "cancelled": False}
+        steps = body["config"]["config"]["process"][0]["train"]["steps"]
         out = _Path(state["root"]) / rid / "output" / rid
         (out / "samples").mkdir(parents=True, exist_ok=True)
-        (out / f"{rid}_000000250.safetensors").write_bytes(lora_bytes())
-        (out / f"{rid}.safetensors").write_bytes(lora_bytes())
+        done = [int(f.stem.rsplit("_", 1)[1]) for f in out.glob(f"{rid}_*.safetensors")]
+        start = max(done, default=0)
+        state["jobs"][rid] = {"config": body["config"], "dir": body["dir"], "looks": 0, "cancelled": False,
+                              "start": start, "optimizer": (out / "optimizer.pt").is_file(), "steps": steps}
+        for step in range(start + 250 - start % 250, steps, 250):
+            (out / f"{rid}_{step:09d}.safetensors").write_bytes(lora_bytes())
+            (out / "samples" / f"{1761700000000 + step}__{step:09d}_0.jpg").write_bytes(_png((64, 64)))
         (out / "optimizer.pt").write_bytes(b"o" * 1000)             # ai-toolkit's state for resuming
-        (out / "samples" / "1761700000000__000000250_0.jpg").write_bytes(_png((64, 64)))
         return {"ok": True}
 
     @app.get("/jobs/{rid}")
@@ -954,12 +960,16 @@ def make_trainer(state: dict) -> FastAPI:
             return JSONResponse({"error": "no such job"}, status_code=404)
         j = state["jobs"][rid]
         j["looks"] += 1
+        step, total = min(j["start"] + 250, j["steps"]), j["steps"]
         if j["cancelled"]:                    # like ai-toolkit: a while to stop and let go of the card
             j["stopping"] = j.get("stopping", 0) + 1
-            return {"state": "stopping" if j["stopping"] < 3 else "cancelled", "step": 250, "total": 500, "log": []}
+            return {"state": "stopping" if j["stopping"] < 3 else "cancelled", "step": step, "total": total, "log": []}
         if j["looks"] < state.get("looks_to_finish", 2) or state.get("hold"):
-            return {"state": "running", "step": 250, "total": 500, "loss": 0.31, "eta_s": 600, "log": ["caching"]}
-        return {"state": "done", "step": 500, "total": 500, "loss": 0.29, "log": ["Done"]}
+            return {"state": "running", "step": step, "total": total, "loss": 0.31, "eta_s": 600, "log": ["caching"]}
+        out = _Path(state["root"]) / rid / "output" / rid
+        if out.is_dir():
+            (out / f"{rid}.safetensors").write_bytes(lora_bytes())
+        return {"state": "done", "step": total, "total": total, "loss": 0.29, "log": ["Done"]}
 
     @app.post("/jobs/{rid}/cancel")
     async def cancel(rid: str):

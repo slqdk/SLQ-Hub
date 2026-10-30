@@ -37,6 +37,18 @@ async def wait_for(cond, timeout: float = 10):
     raise AssertionError("timed out")
 
 
+KLEIN_REPOS = {
+    "black-forest-labs/FLUX.2-klein-base-4B": {"sha": "abc123", "tree": [
+        {"type": "file", "path": "model_index.json", "size": 40},
+        {"type": "file", "path": "flux-2-klein-base-4b.safetensors", "size": 3000},
+        {"type": "file", "path": "transformer/diffusion_pytorch_model.safetensors", "size": 3000},
+        {"type": "file", "path": "README.md", "size": 10}, {"type": "directory", "path": "vae"}]},
+    "ai-toolkit/flux2_vae": {"sha": "fed789", "tree": [{"type": "file", "path": "ae.safetensors", "size": 300}]},
+    "Qwen/Qwen3-4B": {"sha": "def456", "tree": [{"type": "file", "path": "model-00001-of-00001.safetensors",
+                                                "size": 2000}, {"type": "file", "path": "LICENSE", "size": 5},
+                                               {"type": "file", "path": "README.md", "size": 10}]}}
+
+
 async def test_a_lora_is_trained_and_added(signed_in, app, fakes, monkeypatch):
     monkeypatch.setattr(R, "POLL_S", 0.01)
     hub = app.state.hub
@@ -82,16 +94,7 @@ async def test_a_lora_is_trained_and_added(signed_in, app, fakes, monkeypatch):
 
     # Training: the base fetched first (by the Hub, into Hugging Face's cache layout - the trainer is offline), then
     # the card as "train", then ai-toolkit's job with the run's config.
-    fakes.hf["repos"] = {
-        "black-forest-labs/FLUX.2-klein-base-4B": {"sha": "abc123", "tree": [
-            {"type": "file", "path": "model_index.json", "size": 40},
-            {"type": "file", "path": "flux-2-klein-base-4b.safetensors", "size": 3000},
-            {"type": "file", "path": "transformer/diffusion_pytorch_model.safetensors", "size": 3000},
-            {"type": "file", "path": "README.md", "size": 10}, {"type": "directory", "path": "vae"}]},
-        "ai-toolkit/flux2_vae": {"sha": "fed789", "tree": [{"type": "file", "path": "ae.safetensors", "size": 300}]},
-        "Qwen/Qwen3-4B": {"sha": "def456", "tree": [{"type": "file", "path": "model-00001-of-00001.safetensors",
-                                                    "size": 2000}, {"type": "file", "path": "LICENSE", "size": 5},
-                                                   {"type": "file", "path": "README.md", "size": 10}]}}
+    fakes.hf["repos"] = KLEIN_REPOS
     fakes.trainer["hold"] = True
     r = await signed_in.post(f"/hub/api/training/runs/{rid}/start", headers=ORIGIN)
     assert r.status_code == 200, r.text
@@ -118,7 +121,7 @@ async def test_a_lora_is_trained_and_added(signed_in, app, fakes, monkeypatch):
     await wait_for(lambda: hub.scheduler.current != "train" or not hub.scheduler.running)
     detail = (await signed_in.get(f"/hub/api/training/runs/{rid}")).json()
     assert [c["step"] for c in detail["checkpoints"]] == [250, 500] and detail["samples"][0]["step"] == 250
-    assert not (t.root / rid / "output" / rid / "optimizer.pt").exists()         # resuming is not done: removed
+    assert not (t.root / rid / "output" / rid / "optimizer.pt").exists()         # finished: not kept
     pic = await signed_in.get(f"/hub/api/training/runs/{rid}/file", params={"path": detail["samples"][0]["path"]})
     assert pic.status_code == 200 and pic.headers["content-type"] == "image/jpeg"
     assert (await signed_in.get(f"/hub/api/training/runs/{rid}/file",
@@ -245,6 +248,63 @@ async def test_a_lora_is_trained_on_an_sdxl_checkpoint(signed_in, app, fakes, mo
     assert lora["base"] == "sdxl" and "RealVisXL V5.0 (SDXL)" in lora["note"]
     copy = t.duplicate(rid)                                                    # a v2 keeps the base
     assert copy["base"] == "sdxl" and copy["checkpoint"] == "realvisxl-v5-0"
+
+
+async def test_a_stopped_training_goes_on_from_its_last_checkpoint(signed_in, app, fakes, monkeypatch):
+    """0.58.0: Stop is a pause - the checkpoints and ai-toolkit's optimizer state stay, and Continue gives ai-toolkit
+    the same folder, where it goes on from the newest checkpoint. A finished run goes on the same way once it has more
+    steps (its last file becomes a numbered checkpoint first). Another rank cannot go on; Train again starts over."""
+    monkeypatch.setattr(R, "POLL_S", 0.01)
+    t = app.state.hub.extras["training"]
+    fakes.hf["repos"] = KLEIN_REPOS
+    rid = t.create("Rikke", "rkxv", "person", 1000)["id"]
+    t.add_images(rid, [(f"p{i}.jpg", photo()) for i in range(5)])
+    t.set_captions(rid, {f"p{i}.jpg": "a woman in a garden" for i in range(5)})
+    out = t.root / rid / "output" / rid
+
+    async def go(action: str, finish: bool = True) -> dict:
+        fakes.trainer["hold"] = not finish
+        r = await signed_in.post(f"/hub/api/training/runs/{rid}/{action}", headers=ORIGIN)
+        assert r.status_code == 200, r.text
+        if finish:
+            await wait_for(lambda: t._load(rid)["state"] == "done")
+        else:
+            await wait_for(lambda: (t.live.get(rid) or {}).get("what") == "training")
+        return fakes.trainer["jobs"][rid]
+
+    job = await go("start", finish=False)
+    assert job["start"] == 0
+    await signed_in.post(f"/hub/api/training/runs/{rid}/cancel", headers=ORIGIN)
+    await wait_for(lambda: t._load(rid)["state"] == "cancelled")
+    detail = (await signed_in.get(f"/hub/api/training/runs/{rid}")).json()
+    assert [c["step"] for c in detail["checkpoints"]] == [250, 500, 750] and detail["resume_step"] == 750
+    assert (out / "optimizer.pt").is_file()                                   # kept for an exact continue
+
+    job = await go("continue")
+    assert job["start"] == 750 and job["optimizer"] is True
+    detail = (await signed_in.get(f"/hub/api/training/runs/{rid}")).json()
+    assert [c["step"] for c in detail["checkpoints"]] == [250, 500, 750, 1000] and detail["resume_step"] is None
+    assert not (out / "optimizer.pt").exists() and t._load(rid)["trained"] == 1000
+    r = await signed_in.post(f"/hub/api/training/runs/{rid}/continue", headers=ORIGIN)
+    assert r.status_code == 400 and "start over" in r.json()["detail"]
+
+    # Train further: more steps, and the last checkpoint keeps its step.
+    await signed_in.patch(f"/hub/api/training/runs/{rid}", json={"steps": 1500}, headers=ORIGIN)
+    detail = (await signed_in.get(f"/hub/api/training/runs/{rid}")).json()
+    assert detail["checkpoints"][-1]["step"] == 1000 and detail["resume_step"] == 1000
+    job = await go("continue")
+    assert job["start"] == 1000 and job["optimizer"] is False
+    assert [c["step"] for c in t.checkpoints(rid)] == [250, 500, 750, 1000, 1250, 1500]
+    assert (out / f"{rid}_000001000.safetensors").is_file()
+
+    # Another rank cannot load these checkpoints; Train again empties the folder.
+    await signed_in.patch(f"/hub/api/training/runs/{rid}", json={"steps": 2000, "rank": 32}, headers=ORIGIN)
+    assert t.detail(rid)["resume_step"] is None
+    assert (await signed_in.post(f"/hub/api/training/runs/{rid}/continue", headers=ORIGIN)).status_code == 400
+    job = await go("start")
+    assert job["start"] == 0 and [c["step"] for c in t.checkpoints(rid)] == [250, 500, 750, 1000, 1250, 1500,
+                                                                             1750, 2000]
+    assert t._load(rid)["trained_rank"] == 32
 
 
 async def test_a_training_is_duplicated_with_a_new_trigger_word(signed_in, app):

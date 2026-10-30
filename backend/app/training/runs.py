@@ -261,7 +261,7 @@ class Training:
 
     def update(self, rid: str, name: str | None = None, steps: int | None = None, rank: int | None = None) -> dict:
         """Name, steps and rank of a run that is not working (the trigger word and kind are in its captions)."""
-        self._editable(rid)
+        run = self._editable(rid)
         steps, rank = self._checked(steps, rank)
         fields: dict = {}
         if name is not None:
@@ -270,8 +270,12 @@ class Training:
                 raise TrainingError("Give the LoRA a name.")
         if steps is not None:
             fields["steps"] = steps
+            if run.get("trained") is None and (self._dir(rid) / "output" / rid / f"{rid}.safetensors").is_file():
+                fields["trained"] = run["steps"]           # the last checkpoint keeps its step when Steps change
         if rank is not None:
             fields["rank"] = rank
+            if rank != run["rank"] and "trained_rank" not in run and self.checkpoints(rid):
+                fields["trained_rank"] = run["rank"]      # its checkpoints cannot be continued at another rank
         return self._set(rid, **fields)
 
     def duplicate(self, rid: str, name: str | None = None, trigger: str | None = None,
@@ -308,8 +312,20 @@ class Training:
             cap = p.with_suffix(".txt")
             images.append({"name": p.name, "caption": cap.read_text(encoding="utf-8").strip() if cap.is_file() else "",
                            "v": int(p.stat().st_mtime)})
-        return {**run, "images_list": images, "checkpoints": self.checkpoints(rid), "samples": self.samples(rid),
-                "progress": self.live.get(rid), "freeable": self._freeable(rid), "base_label": self.base_label(run)}
+        cps = self.checkpoints(rid)
+        return {**run, "images_list": images, "checkpoints": cps, "samples": self.samples(rid),
+                "progress": self.live.get(rid), "freeable": self._freeable(rid), "base_label": self.base_label(run),
+                "resume_step": self.resume_step(run, cps)}
+
+    def resume_step(self, run: dict, cps: list[dict] | None = None) -> int | None:
+        """The step Continue goes on from: the newest checkpoint, while it is short of the run's steps and made at its
+        rank (a LoRA of another rank cannot be loaded). ai-toolkit itself finds that checkpoint in the output folder,
+        with optimizer.pt when a stopped run left it."""
+        if run["state"] in ACTIVE or run.get("trained_rank", run["rank"]) != run["rank"]:
+            return None
+        cps = self.checkpoints(run["id"]) if cps is None else cps
+        step = cps[-1]["step"] if cps else None
+        return step if step is not None and 0 < step < run["steps"] else None
 
     def _cache_dirs(self, rid: str) -> list[Path]:
         return [p for p in (self._dir(rid) / "images").glob("_*") if p.is_dir()]
@@ -510,8 +526,13 @@ class Training:
             return [(SDXL_CONFIG_REPO, None, SDXL_CONFIG_FILES)]
         return [(repo, files, None) for repo, files in DOWNLOADS]
 
-    async def start(self, rid: str) -> dict:
+    async def start(self, rid: str, resume: bool = False) -> dict:
+        """Train from the start (the output folder is emptied), or with resume go on from the newest checkpoint - a
+        stopped run, or a finished one given more steps."""
         run = self._editable(rid)
+        step = self.resume_step(run) if resume else None
+        if resume and step is None:
+            raise TrainingError("There is no checkpoint to go on from (or Steps are not above it) - start over instead.")
         if run.get("base") == "sdxl" and run.get("checkpoint") not in {c["id"] for c in self.sdxl_checkpoints()}:
             raise TrainingError(f"{run.get('checkpoint_name') or 'Its SDXL model'} is no longer downloaded.")
         folder = self._dir(rid) / "images"
@@ -527,9 +548,17 @@ class Training:
                                 "and run update.sh.", 503)
         if not health.get("toolkit"):
             raise TrainingError("The trainer has no ai-toolkit - rebuild it (update.sh).", 503)
-        for old in (self._dir(rid) / "output").glob("*"):           # a run starts over
-            shutil.rmtree(old, ignore_errors=True) if old.is_dir() else old.unlink(missing_ok=True)
-        run = self._set(rid, state="queued", error="", started=time.time(), lora=None)
+        if step is not None:
+            out = self._dir(rid) / "output" / rid
+            final, numbered = out / f"{rid}.safetensors", out / f"{rid}_{step:09d}.safetensors"
+            if final.is_file() and not numbered.exists():
+                final.rename(numbered)      # the last round's end stays a checkpoint; renamed, it is ai-toolkit's newest
+            fields: dict = {"trained": None}
+        else:
+            for old in (self._dir(rid) / "output").glob("*"):       # a run starts over
+                shutil.rmtree(old, ignore_errors=True) if old.is_dir() else old.unlink(missing_ok=True)
+            fields = {"lora": None, "trained": None, "trained_rank": run["rank"]}
+        run = self._set(rid, state="queued", error="", started=time.time(), **fields)
         self.stop[rid] = asyncio.Event()
         self.tasks[rid] = asyncio.create_task(self._train(run))
         return run
@@ -591,10 +620,10 @@ class Training:
                     if st.get("state") in ("done", "failed", "cancelled"):
                         break
                     await asyncio.sleep(POLL_S)
-            state = st["state"]
-            self._set(rid, state={"done": "done", "cancelled": "cancelled"}.get(state, "failed"),
-                      error=(st.get("error") or "the trainer stopped") if state == "failed" else "", ended=time.time(),
-                      log=(st.get("log") or [])[-30:])
+            state = {"done": "done", "cancelled": "cancelled"}.get(st["state"], "failed")
+            self._set(rid, state=state, error=(st.get("error") or "the trainer stopped") if state == "failed" else "",
+                      ended=time.time(), log=(st.get("log") or [])[-30:],
+                      **({"trained": run["steps"]} if state == "done" else {}))
         except asyncio.CancelledError:
             self._set(rid, state="cancelled", error="", ended=time.time())
             raise
@@ -603,8 +632,14 @@ class Training:
             self._set(rid, state="failed", error=str(exc)[:500], ended=time.time())
         finally:
             self.live.pop(rid, None)
-            # ai-toolkit's optimizer state is for resuming a run, which the Hub does not do: hundreds of MB, gone
-            (self.root / rid / "output" / rid / "optimizer.pt").unlink(missing_ok=True)
+            # ai-toolkit's optimizer state lets Continue go on exactly where a stopped run was. A finished run's is
+            # hundreds of MB that training further can do without (AdamW starts its averages again).
+            try:
+                done = self._load(rid).get("state") not in ("cancelled", "failed")
+            except (OSError, ValueError):
+                done = True
+            if done:
+                (self.root / rid / "output" / rid / "optimizer.pt").unlink(missing_ok=True)
             if ticket is not None:
                 await ticket.release()
 
@@ -715,7 +750,7 @@ class Training:
         found = []
         for p in out_dir.glob("*.safetensors"):
             m = re.search(r"_(\d{6,})\.safetensors$", p.name)
-            step = int(m.group(1)) if m else (run["steps"] if p.stem == rid else None)
+            step = int(m.group(1)) if m else ((run.get("trained") or run["steps"]) if p.stem == rid else None)
             if step is not None:
                 found.append({"step": step, "file": p.name, "size": p.stat().st_size})
         return sorted(found, key=lambda x: x["step"])
