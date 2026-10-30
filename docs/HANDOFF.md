@@ -602,6 +602,10 @@ v2", rank 16). 0.59.3 removes `vae_dtype` and the cache dropping, and the SDXL t
 LoRA's weight change grows with the rank (about twice rank 16's at the same step), on SDXL's small attention weights;
 klein runs at rank 16 were clean. Not a suspect: `timestep_type` (TrainConfig default sigmoid) only applies to
 flowmatch. Stine v2 at rank 16 tells: clean photo samples at 250-500 would point at the rank.
+Measured 2026-10-30 17:26 (Søren's screenshot, 0.59.3): Stine v2, rank 16, same base and settings - step 250's photo
+samples clean, close to "Before training" (the rank-64 run was speckled at 250). Points at rank 64 with alpha 64;
+not yet seen whether rank 16 stays clean at 1000+. If it does: halve alpha for high ranks on SDXL, or leave 64 out
+for SDXL bases, and say so at the Rank field.
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
 host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU
