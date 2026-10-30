@@ -215,6 +215,8 @@ export interface SdxlChoices { presets: Record<string, SdxlSettings & { label: s
  * a bundled model was renamed. */
 /** A LoRA for the picture models (0.49.0) - the admin's alone. base: the family of the models it fits. */
 export interface Lora { id: string; name: string; base: string; base_label: string; trigger?: string; strength: number;
+  /** A slider LoRA (0.55.0): strength -10 to 10, plus for more of its quality, minus for the opposite. */
+  slider?: boolean;
   note?: string; size: number; added: string; source?: { kind: string; file?: string; run?: string };
   fits: { id: string; name: string }[] }
 export interface LoraList { loras: Lora[]; families: Record<string, string> }

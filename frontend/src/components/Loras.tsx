@@ -66,6 +66,7 @@ export function LorasSection() {
               <div className="grow" style={{ minWidth: 220 }}>
                 <b>{l.name}</b> <span className="tag">{l.base ? l.base_label : "Which models?"}</span>
                 {l.source?.kind === "trained" && <span className="tag">Trained here</span>}
+                {l.slider && <span className="tag">Slider</span>}
                 <div className="meta">
                   {l.trigger ? <>Trigger word <b>{l.trigger}</b> · </> : null}strength {l.strength} · {bytes(l.size)}
                   {l.fits.length ? ` · works with ${l.fits.map((m) => m.name).join(", ")}`
@@ -92,7 +93,11 @@ function LoraSettings({ lora, families, onClose, onSaved }: { lora: Lora; famili
   onClose: () => void; onSaved: () => void }) {
   const { toast } = useApp();
   const [f, setF] = useState({ name: lora.name, base: lora.base, trigger: lora.trigger ?? "",
-    strength: String(lora.strength), note: lora.note ?? "" });
+    strength: String(lora.strength), note: lora.note ?? "", slider: !!lora.slider });
+  const setSlider = (slider: boolean) => {          // a plain LoRA's strength is 0-2: bring it back in
+    const s = Number(f.strength);
+    setF({ ...f, slider, strength: slider || (s >= 0 && s <= 2) ? f.strength : String(Math.max(0, Math.min(2, s))) });
+  };
   const save = async () => {
     try {
       await api(`/hub/api/loras/${lora.id}`, { method: "PATCH", body: { ...f, strength: Number(f.strength) } });
@@ -118,10 +123,16 @@ function LoraSettings({ lora, families, onClose, onSaved }: { lora: Lora; famili
         <input className="input" value={f.trigger} maxLength={120} placeholder="e.g. cx9020x"
           onChange={(e) => setF({ ...f, trigger: e.target.value })} />
         <small>The word it was trained with. It is put in the prompt for you.</small></label>
+      <label className="row" style={{ gap: 8, alignItems: "flex-start" }}>
+        <input type="checkbox" checked={f.slider} onChange={(e) => setSlider(e.target.checked)} style={{ marginTop: 3 }} />
+        <span><b>Slider LoRA</b><br /><small className="muted">It moves one quality along a line - plus for more,
+          minus for the opposite - and takes strengths from -10 to 10, like 4 or -3. Its maker's page says which.
+          </small></span></label>
       <label className="field"><span>Strength</span>
-        <input className="input" type="number" min={0} max={2} step={0.05} value={f.strength}
-          onChange={(e) => setF({ ...f, strength: e.target.value })} />
-        <small>1 is as trained; 0.6-0.9 for a lighter touch. A chat or a request can ask for another.</small></label>
+        <input className="input" type="number" min={f.slider ? -10 : 0} max={f.slider ? 10 : 2}
+          step={f.slider ? 0.1 : 0.05} value={f.strength} onChange={(e) => setF({ ...f, strength: e.target.value })} />
+        <small>{f.slider ? "The strength its maker suggests; a chat's slider can move it from -10 to 10."
+          : "1 is as trained; 0.6-0.9 for a lighter touch. A chat or a request can ask for another."}</small></label>
       <label className="field"><span>What it is for</span>
         <input className="input" value={f.note} maxLength={500} placeholder="e.g. Our CX9020 controller, for course pictures"
           onChange={(e) => setF({ ...f, note: e.target.value })} />

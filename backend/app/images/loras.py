@@ -25,6 +25,13 @@ MAX_BYTES = 3 * 1024**3           # LoRAs are 10-300 MB as a rule; a rank-128 Qw
 HEADER_MAX = 64 * 1024 * 1024
 ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,62}$")
 NAME_MAX, TRIGGER_MAX, NOTE_MAX = 80, 120, 500
+# Strength: a LoRA as trained is 1 (0-2). A slider LoRA (0.55.0) moves one quality along a line - plus for more,
+# minus for the opposite - and is made weak per step, so its makers give strengths like 4 or -3.
+RANGE, SLIDER_RANGE = (0.0, 2.0), (-10.0, 10.0)
+
+
+def strength_range(slider: bool) -> tuple[float, float]:
+    return SLIDER_RANGE if slider else RANGE
 
 
 class LoraError(Exception):
@@ -171,8 +178,12 @@ class Loras:
     # ------------------------------------------------------------ changes
     @staticmethod
     def _clean(name: str | None = None, base: str | None = None, trigger: str | None = None,
-               strength: float | None = None, note: str | None = None) -> dict:
+               strength: float | None = None, note: str | None = None, slider: bool | None = None,
+               is_slider: bool = False) -> dict:
         out: dict = {}
+        if slider is not None:
+            out["slider"] = bool(slider)
+            is_slider = bool(slider)
         if name is not None:
             n = " ".join(str(name).split())[:NAME_MAX]
             if not n:
@@ -189,15 +200,19 @@ class Loras:
                 s = float(strength)
             except (TypeError, ValueError):
                 raise LoraError("The strength must be a number.")
-            if not 0.0 <= s <= 2.0:
-                raise LoraError("The strength is between 0 and 2 (1 is as it was trained).")
+            lo, hi = strength_range(is_slider)
+            if not lo <= s <= hi:
+                raise LoraError("A slider LoRA's strength is between -10 and 10." if is_slider
+                                else "The strength is between 0 and 2 (1 is as it was trained) - or make it a slider "
+                                     "LoRA in its settings.")
             out["strength"] = round(s, 2)
         if note is not None:
             out["note"] = str(note).strip()[:NOTE_MAX]
         return out
 
     def add_file(self, src: Path, filename: str = "", name: str = "", base: str = "", trigger: str = "",
-                 strength: float = 1.0, note: str = "", source: dict | None = None, move: bool = True) -> dict:
+                 strength: float = 1.0, note: str = "", source: dict | None = None, move: bool = True,
+                 slider: bool | None = None) -> dict:
         """A .safetensors LoRA into the list (moved, or copied with move=False). Its family is guessed when not
         given; so is its trigger word."""
         src = Path(src)
@@ -210,8 +225,11 @@ class Loras:
         if flux_size(header) == "klein-9b":
             raise LoraError("This LoRA is for FLUX.2 klein 9B. The Hub's klein is the 4B, and a LoRA only works with "
                             "the size it was trained on - look for one made for klein 4B.")
+        if slider is None:                    # "natural-beauty-slider-zit": its maker says what it is
+            said = f"{filename} {src.name} {name} {json.dumps(header.get('__metadata__') or {})[:4000]}".lower()
+            slider = "slider" in said
         fields = self._clean(name=name or Path(filename or src.name).stem, base=base or guess_base(header),
-                             trigger=trigger or guess_trigger(header), strength=strength, note=note)
+                             trigger=trigger or guess_trigger(header), strength=strength, note=note, slider=slider)
         with self._lock:
             items = self._load()
             taken = {x["id"] for x in items}
@@ -230,13 +248,17 @@ class Loras:
         return self.get(lid) or entry
 
     def update(self, lid: str, **changes) -> dict:
-        fields = self._clean(**{k: v for k, v in changes.items() if k in ("name", "base", "trigger", "strength",
-                                                                         "note") and v is not None})
         with self._lock:
             items = self._load()
             entry = next((x for x in items if x["id"] == lid), None)
             if entry is None:
                 raise LoraError("No such LoRA.", 404)
+            fields = self._clean(**{k: v for k, v in changes.items() if k in ("name", "base", "trigger", "strength",
+                                                                             "note", "slider") and v is not None},
+                                 is_slider=bool(entry.get("slider")))
+            if "strength" not in fields:                      # no longer a slider: its strength back into 0-2
+                lo, hi = strength_range(fields.get("slider", bool(entry.get("slider"))))
+                fields["strength"] = max(lo, min(hi, float(entry.get("strength", 1.0))))
             entry.update(fields)
             self._save(items)
         return self.get(lid) or entry
@@ -270,8 +292,9 @@ class Loras:
                 continue
             strength = w.get("strength") if isinstance(w, dict) and w.get("strength") is not None \
                 else entry.get("strength", 1.0)
+            lo, hi = strength_range(bool(entry.get("slider")))
             try:
-                strength = max(0.0, min(2.0, float(strength)))
+                strength = max(lo, min(hi, float(strength)))
             except (TypeError, ValueError):
                 strength = float(entry.get("strength", 1.0))
             nodes.append((self.comfy_name(lid), strength))

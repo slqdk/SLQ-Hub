@@ -30,6 +30,7 @@ export interface ComposerSettings {
 function LoraStrength({ lora, value, onCommit }: { lora: Lora; value: number | undefined;
   onCommit: (v: number | null) => void }) {
   const own = lora.strength;
+  const [lo, hi, step] = lora.slider ? [-10, 10, 0.1] : [0, 2, 0.05];    // a slider LoRA goes both ways
   const [v, setV] = useState(value ?? own);
   useEffect(() => setV(value ?? own), [value, own]);
   const commit = () => {
@@ -38,9 +39,9 @@ function LoraStrength({ lora, value, onCommit }: { lora: Lora; value: number | u
   };
   return (
     <div className="menu-slider" onClick={(e) => e.stopPropagation()} title="Strength in this chat">
-      <input type="range" min={0} max={2} step={0.05} value={v} aria-label={`Strength of ${lora.name}`}
+      <input type="range" min={lo} max={hi} step={step} value={v} aria-label={`Strength of ${lora.name}`}
         onChange={(e) => setV(Number(e.target.value))} onPointerUp={commit} onKeyUp={commit} onBlur={commit} />
-      <span className="menu-slider-value">{v.toFixed(2)}</span>
+      <span className="menu-slider-value">{lora.slider ? `${v > 0 ? "+" : ""}${v.toFixed(1)}` : v.toFixed(2)}</span>
       {value !== undefined && <button type="button" className="link-btn" title={`Its own strength: ${own}`}
         onClick={() => onCommit(null)}>Reset</button>}
     </div>
@@ -422,7 +423,8 @@ export function Composer({ running, onSend, onStop, settings, onSettings, models
                       <button className="menu-item" role="menuitemcheckbox"
                         aria-checked={settings.image_loras.includes(l.id)} onClick={() => toggleLora(l.id)}>
                         {settings.image_loras.includes(l.id) ? <Check size={15} /> : <span style={{ width: 15 }} />}
-                        <span>{l.name}<small>{l.note || (l.trigger ? `Trigger word ${l.trigger}` : `Strength ${l.strength}`)}</small></span>
+                        <span>{l.name}<small>{l.slider ? "Slider: plus for more, minus for the opposite"
+                          : l.note || (l.trigger ? `Trigger word ${l.trigger}` : `Strength ${l.strength}`)}</small></span>
                       </button>
                       {settings.image_loras.includes(l.id) && <LoraStrength lora={l}
                         value={settings.image_lora_strength[l.id]} onCommit={(v) => setStrength(l.id, v)} />}

@@ -64,6 +64,19 @@ def test_adding_changing_and_removing(tmp_path):
     assert entry["id"] == "soren-face-v2" and entry["base"] == "flux2-klein" and entry["trigger"] == "sorenx"
     assert entry["strength"] == 1.0 and (tmp_path / "models/comfy/loras/hub/soren-face-v2.safetensors").is_file()
     assert not src.exists()                                               # moved into place
+    # A slider LoRA (0.55.0): told by its name, strength -10 to 10; plain LoRAs stay 0-2; off again, it is clamped.
+    zit = tmp_path / "natural-beauty-slider-zit.safetensors"
+    zit.write_bytes(safetensors(["diffusion_model.noise_refiner.0.attention.qkv.lora_A.weight"]))
+    sl = store.add_file(zit, zit.name)
+    assert sl["slider"] is True and sl["base"] == "z-image"
+    assert store.update(sl["id"], strength=4)["strength"] == 4 and store.update(sl["id"], strength=-3)["strength"] == -3
+    with pytest.raises(LoraError, match="slider"):
+        store.update(entry["id"], strength=4)                        # a plain LoRA: 0-2
+    assert store.resolve([{"id": sl["id"], "strength": -12}], "z-image")[0][0][1] == -10.0
+    assert store.resolve([{"id": entry["id"], "strength": -1}], "flux2-klein")[0][0][1] == 0.0
+    off = store.update(sl["id"], slider=False)
+    assert off["slider"] is False and off["strength"] == 0.0           # -3 back into 0-2
+    store.delete(sl["id"])
     nine = tmp_path / "klein9b.safetensors"                              # klein 9B: refused, with the reason
     raw = json.dumps({"diffusion_model.double_blocks.7.img_attn.qkv.lora_A.weight":
                       {"dtype": "F16", "shape": [16, 4096], "data_offsets": [0, 0]}}).encode()
@@ -147,7 +160,7 @@ async def test_the_admin_adds_and_uses_a_lora_and_a_person_never_sees_one(signed
     from types import SimpleNamespace
     from app.agent.tools import images as IT
     store = app.state.hub.extras["loras"]
-    for given, used in ((0.65, 0.65), ("lots", 0.9), (7, 0.9), (None, 0.9)):
+    for given, used in ((0.65, 0.65), ("lots", 0.9), (7, 2.0), (12, 0.9), (None, 0.9)):     # 7: into its 0-2
         ctx = SimpleNamespace(engine=SimpleNamespace(device=None),          # the admin's turn
                               chat={"settings": {"image_loras": ["cx9020"], "image_lora_strength": {"cx9020": given}}})
         assert store.resolve(IT._loras(ctx, {}), "flux2-klein")[0] == [("hub/cx9020.safetensors", used)]

@@ -186,12 +186,13 @@ def _admins_turn(ctx: ToolContext) -> bool:
 
 
 def _strength(value) -> float | None:
-    """A chat's strength for a LoRA (its picture menu's slider), or None for the LoRA's own."""
+    """A chat's strength for a LoRA (its picture menu's slider), or None for the LoRA's own. The LoRA's own range
+    (0-2, a slider -10 to 10) is applied when it is used."""
     try:
         v = float(value)
     except (TypeError, ValueError):
         return None
-    return round(v, 2) if 0.0 <= v <= 2.0 else None
+    return round(v, 2) if -10.0 <= v <= 10.0 else None
 
 
 def _loras(ctx: ToolContext, args: dict) -> list[dict]:
@@ -345,7 +346,8 @@ register(Tool("image_ocr", "Read the text in an image with Tesseract OCR (defaul
               read_only=True))
 def _lora_param(ids: list[str]) -> dict:
     return {"type": "array", "description": "The admin's LoRAs to use (listed above), with a strength 0-2 (1 as "
-                                            "trained, 0.6-0.9 for a lighter touch).",
+                                            "trained, 0.6-0.9 for a lighter touch); a slider LoRA -10 to 10 (plus "
+                                            "for more of its quality, minus for the opposite).",
             "items": {"type": "object", "properties": {"id": {"type": "string", "enum": ids},
                                                        "strength": {"type": "number"}}, "required": ["id"]}}
 
@@ -375,6 +377,9 @@ def _lora_lines(ctx: ToolContext) -> tuple[str, list[str]]:
     lines = []
     for x in items:
         bits = [f"for {x['base_label']} models"]
+        if x.get("slider"):
+            bits.append(f"a slider: strength -10 to 10, now {x.get('strength', 1.0)} - plus for more, minus for "
+                        "the opposite")
         if x.get("trigger"):
             bits.append(f'trigger "{x["trigger"]}" (put in the prompt for you)')
         if x["id"] in mine:

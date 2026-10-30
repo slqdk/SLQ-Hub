@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.55.0 - 2026-10-30
+
+- **Slider LoRAs.** A slider LoRA moves one quality along a line - plus for
+  more, minus for the opposite - and takes strengths like 4 or -3. Mark it
+  in the LoRA's settings ("Slider LoRA"; a file with "slider" in its name is
+  marked for you): its strength goes from -10 to 10, and the chat's slider
+  follows. Plain LoRAs stay at 0-2.
+
 ## 0.54.0 - 2026-10-30
 
 - **A strength slider for each LoRA in a chat.** Tick a LoRA in the picture

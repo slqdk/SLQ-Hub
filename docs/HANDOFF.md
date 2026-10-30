@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.54.0, 2026-10-30)
+## State (0.55.0, 2026-10-30)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -517,7 +517,13 @@ LoRAs. `loras.flux_size` tells klein 4B (hidden 3072, 5 double / 20 single block
 FLUX.1 (3072, 19 / 38) apart by block numbers and lora_A widths - sizes read in ai-toolkit's flux2/src/model.py;
 a 9B LoRA is refused at upload, a FLUX.1-shaped one gets no family (the admin says - Chroma perhaps). NOT checked
 against real downloaded LoRAs: their key names may differ (BFL's double_blocks, diffusers' transformer_blocks and
-kohya's underscores are all matched). The config keys were checked against the same commit (`diffusion_trainer`,
+kohya's underscores are all matched).
+0.55.0, Søren found "natural-beauty-slider-zit" on Civitai (Z-Image Turbo, strength 4 - the page itself could not
+be fetched from here): a LoRA's `slider` flag (set on upload when "slider" is in its file name or metadata, or in
+its settings) widens its strength to -10..10 (`loras.strength_range`); `resolve` clamps per LoRA, `_strength` takes
+-10..10 from a chat and leaves the clamping to the LoRA; turning the flag off brings the strength into 0-2. The
+tool's LoRA list tells the assistant a slider's range and direction. NOT seen on the card: a slider LoRA on Z-Image
+Turbo (LoRAs on Z-Image are not verified either, item 83). The config keys were checked against the same commit (`diffusion_trainer`,
 arch `flux2_klein_4b`, `cache_text_embeddings` so the 8 GB text encoder leaves the card, `timestep_type`
 "weighted" as ai-toolkit's UI default for klein; no quantisation, AdamW - quanto and bitsandbytes are the least
 sure on AMD). The image follows ai-toolkit's own AMD install (`manager/spec.py`: torch 2.13.0 / torchvision 0.28.0

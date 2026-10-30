@@ -73,6 +73,7 @@ class LoraPatch(BaseModel):
     trigger: str | None = None
     strength: float | None = None
     note: str | None = None
+    slider: bool | None = None
 
 
 @router.patch("/loras/{lid}")

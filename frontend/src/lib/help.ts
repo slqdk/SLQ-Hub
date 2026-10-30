@@ -397,7 +397,10 @@ export const SECTIONS: HelpSection[] = [
         ],
         how: ["The picture chip under the message box turns a LoRA on for every picture in the chat; or name it in "
           + "the request.",
-          "Its trigger word is put in the prompt for you. Strength 1 is as trained, lower is a lighter touch.",
+          "Its trigger word is put in the prompt for you. Strength 1 is as trained, lower is a lighter touch; the "
+          + "picture menu has a slider for each LoRA you tick.",
+          "A slider LoRA (its maker says so) moves one quality - plus for more, minus for the opposite - with "
+          + "strengths from -10 to 10. Mark it in the LoRA's settings; a file named \"...slider...\" is marked for you.",
           "Only you can use LoRAs - people's chats and apps never see them."],
         owner: true,
       },
