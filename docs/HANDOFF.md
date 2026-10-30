@@ -613,6 +613,12 @@ undenoised latent noise when the LoRA shifts the model's low-noise predictions a
 SDXL samples now use "k_dpmsolver++" (DPMSolverMultistep, karras sigmas = DPM++ 2M Karras, as the Hub's own
 sdxl_t2i); `generate_images` takes `sample.sampler` apart from the training's ddpm scheduler. NOT verified: the LoRA
 in a chat (the decisive test, asked of Søren), and whether rank 64's speckles were only the sampler too.
+Measured 2026-10-31 00:24 (Søren): "Louise" (SDXL, rank 16, 3000 steps; 17+ pictures) - its step-1500 portrait
+sample speckled, café and watercolour clean; the LoRA added and used in a chat with RealVisXL (ComfyUI,
+LoraLoader, dpmpp_2m karras): a clean picture, "Made with RealVisXL V5.0 SDXL · LoRA Louise ×1" - but not yet like
+her. So an ai-toolkit SDXL LoRA loads and works in the Hub's graph, and the speckles are in ai-toolkit's sample
+pictures only. Not known: whether Louise started on 0.59.4 (DPM++ samples) - if it did, the noise is elsewhere in
+ai-toolkit's sampling (its bf16 pipeline?), not the scheduler.
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
 host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU
@@ -1331,7 +1337,8 @@ the host if the VM ever stops by itself.
       exited); a Hub restart while it trains (the leftover job is stopped before anything loads).
     - **SDXL (0.56.0)**: trains on the card (Søren, 2026-10-30: past step 1000 on RealVisXL V5.0, so the configs
       were found offline). Its photos were speckled from step 250 at rank 64 (cause open - see 0.59.2/0.59.3).
-      Not seen: a clean SDXL run, the time per step, and the LoRA in a chat with RealVisXL.
+      In a chat with RealVisXL an ai-toolkit SDXL LoRA (rank 16) gives clean pictures (2026-10-31); the speckles
+      are only in ai-toolkit's samples. Not seen: the time per step, likeness after 3000 steps.
     - **Continue (0.58.0)**: after Stop, "Continue from step N" - ai-toolkit's log should say "RESUMING FROM ..."
       and "Loading optimizer state"; the progress should start at that step. A finished run with more steps.
     - Not offered: klein 9B (gated, under BFL's own licence; ai-toolkit quantises it by default).
