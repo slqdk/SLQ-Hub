@@ -241,7 +241,7 @@ async def test_a_lora_is_trained_on_an_sdxl_checkpoint(signed_in, app, fakes, mo
     # casts the VAE to it before caching latents; 0.59.2's fp32 handed fp32 pictures to a bf16 VAE and crashed.
     assert cfg["model"] == {"name_or_path": "/models/comfy/checkpoints/hub/realvisxl-v5-0.safetensors", "arch": "sdxl",
                             "quantize": False, "quantize_te": False}
-    assert cfg["train"]["noise_scheduler"] == "ddpm" and cfg["sample"]["sampler"] == "ddpm"
+    assert cfg["train"]["noise_scheduler"] == "ddpm" and cfg["sample"]["sampler"] == "k_dpmsolver++"   # 0.59.4
     assert "timestep_type" not in cfg["train"] and "cache_text_embeddings" not in cfg["train"]
     fakes.trainer["hold"] = False
     await wait_for(lambda: t._load(rid)["state"] == "done")

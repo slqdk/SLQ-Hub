@@ -501,7 +501,9 @@ class Training:
 
     def _sdxl_config(self, run: dict) -> dict:
         """SDXL with ai-toolkit's own defaults for it (extensions_built_in/diffusion_models/ui.tsx: no quantising,
-        ddpm noise scheduler and sampler, guidance 6; no timestep type) - the text encoders are small and stay."""
+        ddpm noise scheduler, guidance 6; no timestep type) - the text encoders are small and stay. The samples use
+        DPM++ 2M Karras (0.59.4), as the Hub's own SDXL pictures do: ai-toolkit's ddpm sampler ("ddpm is not supported
+        ?" in its toolkit/sampler.py) left speckles of noise in some samples at some steps."""
         rid, t = run["id"], run["trigger"]
         remote = self._remote(rid)
         return {"job": "extension", "config": {"name": rid, "process": [{
@@ -516,7 +518,7 @@ class Training:
                       "optimizer": "adamw", "lr": 8e-5 if run["kind"] == "style" else 1e-4, "dtype": "bf16"},
             "model": {"name_or_path": f"{CHECKPOINTS}/{run['checkpoint_path']}", "arch": "sdxl", "quantize": False,
                       "quantize_te": False},     # no vae_dtype: ai-toolkit runs the VAE in the train dtype (0.59.3)
-            "sample": {"sampler": "ddpm", "sample_every": SAVE_EVERY, "width": 1024, "height": 1024,
+            "sample": {"sampler": "k_dpmsolver++", "sample_every": SAVE_EVERY, "width": 1024, "height": 1024,
                        "prompts": [p.format(t=t) for p in SAMPLES[run["kind"]]], "neg": SDXL_NEGATIVE, "seed": 42,
                        "walk_seed": True, "guidance_scale": 6, "sample_steps": 30}}]},
             "meta": {"name": run["name"], "version": "1.0"}}

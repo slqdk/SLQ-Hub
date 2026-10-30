@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.59.3, 2026-10-30)
+## State (0.59.4, 2026-10-30)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -606,6 +606,13 @@ Measured 2026-10-30 17:26 (Søren's screenshot, 0.59.3): Stine v2, rank 16, same
 samples clean, close to "Before training" (the rank-64 run was speckled at 250). Points at rank 64 with alpha 64;
 not yet seen whether rank 16 stays clean at 1000+. If it does: halve alpha for high ranks on SDXL, or leave 64 out
 for SDXL bases, and say so at the Rank field.
+0.59.4, Stine v2 (rank 16) at 17:53: noise only in the café sample at 750 and 1750, clean at 500 and 1000-1500,
+park and watercolour clean throughout - on and off, not growing with the steps as burning does. Read as the preview
+sampler: ai-toolkit's "ddpm" (stochastic, 30 steps; `# ddpm is not supported ?` in toolkit/sampler.py) leaves
+undenoised latent noise when the LoRA shifts the model's low-noise predictions a little - more at rank 64. The
+SDXL samples now use "k_dpmsolver++" (DPMSolverMultistep, karras sigmas = DPM++ 2M Karras, as the Hub's own
+sdxl_t2i); `generate_images` takes `sample.sampler` apart from the training's ddpm scheduler. NOT verified: the LoRA
+in a chat (the decisive test, asked of Søren), and whether rank 64's speckles were only the sampler too.
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
 host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU

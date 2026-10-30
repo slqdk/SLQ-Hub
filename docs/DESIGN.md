@@ -1872,7 +1872,8 @@ files afterwards.
     optimizer state, kept while a run is stopped); a finished run goes on the
     same way once it has more steps. A run can instead be based on one of the Hub's SDXL
     checkpoints (0.56.0): ai-toolkit's "sdxl" on that file, read-only, with
-    SDXL base's config files fetched; its LoRA is an SDXL one. No `vae_dtype`:
+    SDXL base's config files fetched; its LoRA is an SDXL one. Its samples use
+    DPM++ 2M Karras (0.59.4; ai-toolkit's ddpm left noise). No `vae_dtype`:
     ai-toolkit runs the VAE in the train dtype (bf16) and casts it so before
     caching latents; another dtype crashes the caching (0.59.2, undone).
   - **Families and abilities.** Each picture model in the catalog has a

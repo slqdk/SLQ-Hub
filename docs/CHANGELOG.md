@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.59.4 - 2026-10-30
+
+- **SDXL training's sample pictures without the speckles of noise.** They
+  were made with a sampler (DDPM) that left noise in some pictures at some
+  steps; the trainer's own code doubts that sampler. The samples now use
+  DPM++ 2M Karras, as the Hub's own SDXL pictures do, so they show what the
+  LoRA will look like in a chat. Only the samples change, not the training.
+
 ## 0.59.3 - 2026-10-30
 
 - **SDXL LoRA training starts again.** 0.59.2's change stopped every SDXL
