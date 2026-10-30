@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.59.3 - 2026-10-30
+
+- **SDXL LoRA training starts again.** 0.59.2's change stopped every SDXL
+  training at the start ("Input type (float) and bias type (c10::BFloat16)
+  should be the same") and is undone. Its reasoning was wrong: the trainer
+  already reads the pictures in a precision that does not overflow. The
+  speckles have another cause; rank 64 is the next suspect, so try rank 16.
+
 ## 0.59.2 - 2026-10-30
 
 - **SDXL LoRA training: no more speckled photos.** The trainer read your

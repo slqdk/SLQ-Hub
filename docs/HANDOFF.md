@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.59.2, 2026-10-30)
+## State (0.59.3, 2026-10-30)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -589,16 +589,19 @@ first installed edit model). `_made_with(pipe, item, ctx)` now adds `note` for a
 the chat's model ("RealVisXL V5.0 only makes new pictures from a description, so Qwen-Image 2.1 made this change"),
 shown under the picture and in the result. Not built: SDXL img2img (an edit redrawn by RealVisXL with its LoRA from
 a full description) - offered to Søren.
-0.59.2, Søren's SDXL training ("Rikke", RealVisXL, rank 64, 3000 steps), screenshots from his phone: "Before
-training" clean in all three samples; from the first checkpoint (250) on, the two photo samples full of green and
-yellow speckles and horizontal streaks, the watercolour clean; likeness only around 3000. ai-toolkit at b69b983:
-`ModelConfig.dtype` defaults to float16 and `vae_dtype` follows it; `encode_images` (the latent cache) runs the VAE
-in that dtype with no upcast, and the SDXL VAE overflows in fp16. The samples are decoded by diffusers'
-StableDiffusionXLPipeline, which upcasts (`force_upcast` in SDXL base's vae/config.json) - so they looked clean while
-the LoRA learned broken latents. `_sdxl_config` now sets `vae_dtype: fp32` (kohya's --no_half_vae, in effect).
-The latent cache's name has no dtype in it (`get_latent_info_dict`), so `start` drops an SDXL run's `images/_*`
-caches once, marked by run.json `vae_dtype`. klein left as it was (its VAE is fine in fp16; his klein LoRAs were
-clean). NOT seen on the card: a clean SDXL training after this - the first checkpoint's photo samples will tell.
+0.59.2 (WRONG, undone in 0.59.3), Søren's SDXL training ("Rikke", RealVisXL, rank 64, 3000 steps), phone
+screenshots: "Before training" clean in all three samples; from the first checkpoint (250) on, the two photo samples
+full of green and yellow speckles and horizontal streaks, the watercolour clean; likeness only around 3000. I read
+`ModelConfig.dtype`'s default (float16) and set `vae_dtype: fp32` for SDXL, believing the VAE overflowed in fp16.
+It did not run in fp16: BaseSDTrainProcess sets `model_config['dtype'] = train dtype` (line 117 at b69b983, so the
+VAE is bf16, which does not overflow), and `run()` casts the VAE to the train dtype again (line 1881) before the
+latent cache, while `encode_images` casts the pictures to `vae_torch_dtype` - fp32 pictures into a bf16 VAE:
+"RuntimeError: Input type (float) and bias type (c10::BFloat16) should be the same" on Søren's next start ("Stine
+v2", rank 16). 0.59.3 removes `vae_dtype` and the cache dropping, and the SDXL test asserts the model config has no
+`vae_dtype`. The speckles' cause is open. Next suspect: rank 64 with alpha 64 at lr 1e-4 - with alpha = rank, a
+LoRA's weight change grows with the rank (about twice rank 16's at the same step), on SDXL's small attention weights;
+klein runs at rank 16 were clean. Not a suspect: `timestep_type` (TrainConfig default sigmoid) only applies to
+flowmatch. Stine v2 at rank 16 tells: clean photo samples at 250-500 would point at the rank.
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
 host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU
@@ -1316,8 +1319,8 @@ the host if the VM ever stops by itself.
     - **Stop and restart**: Stop during training (the card is free within about 90 s, after ai-toolkit has
       exited); a Hub restart while it trains (the leftover job is stopped before anything loads).
     - **SDXL (0.56.0)**: trains on the card (Søren, 2026-10-30: past step 1000 on RealVisXL V5.0, so the configs
-      were found offline). Its photos were speckled from step 250 (the VAE in fp16) - 0.59.2's fp32 VAE not yet
-      seen on the card. Not seen: the time per step, and the LoRA in a chat with RealVisXL.
+      were found offline). Its photos were speckled from step 250 at rank 64 (cause open - see 0.59.2/0.59.3).
+      Not seen: a clean SDXL run, the time per step, and the LoRA in a chat with RealVisXL.
     - **Continue (0.58.0)**: after Stop, "Continue from step N" - ai-toolkit's log should say "RESUMING FROM ..."
       and "Loading optimizer state"; the progress should start at that step. A finished run with more steps.
     - Not offered: klein 9B (gated, under BFL's own licence; ai-toolkit quantises it by default).
