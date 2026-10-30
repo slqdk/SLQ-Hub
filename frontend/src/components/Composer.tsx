@@ -136,6 +136,25 @@ export function Composer({ running, onSend, onStop, settings, onSettings, models
       }
     });
   };
+  // A LoRA's trigger word into the message, where the caret is (0.57.0: Søren wanted it at hand when a LoRA is on;
+  // the Hub puts it in the picture prompt anyway, this is for writing with it)
+  const insertWord = (word: string) => {
+    const el = ta.current;
+    const at = el && document.activeElement === el ? el.selectionStart ?? text.length : text.length;
+    const before = text.slice(0, at);
+    const after = text.slice(at);
+    const lead = before && !/\s$/.test(before) ? " " : "";
+    const trail = after && !/^\s/.test(after) ? " " : "";
+    setText(before + lead + word + trail + after);
+    const pos = (before + lead + word + trail).length;
+    requestAnimationFrame(() => {
+      const e = ta.current;
+      if (e) {
+        e.focus();
+        e.setSelectionRange(pos, pos);
+      }
+    });
+  };
   const toggleSkill = (ref: string) => onSettings({ skills: settings.skills.includes(ref)
     ? settings.skills.filter((x) => x !== ref) : [...settings.skills, ref] });
   // Make a skill: the skill maker joins the chat, and an empty message box gets the start of the request.
@@ -266,8 +285,21 @@ export function Composer({ running, onSend, onStop, settings, onSettings, models
           </div>
         );
       })}
-      {(pending.length > 0 || refs.length > 0 || chosen.length > 0) && (
+      {(pending.length > 0 || refs.length > 0 || chosen.length > 0 || lorasOn.length > 0) && (
         <div className="pending">
+          {lorasOn.map((l) => (
+            <div className="pending-item lora" key={`lora:${l.id}`}
+              title={l.trigger ? `${l.name}: trigger word ${l.trigger} - put in the picture's prompt for you. Click the `
+                + "word to write it in your message." : l.name}>
+              <ImageIcon size={14} />
+              <span className="ellipsis">{l.name}</span>
+              {l.trigger && <button className="open trigger" onClick={() => insertWord(l.trigger!)}
+                aria-label={`Write ${l.trigger} in the message`}>{l.trigger}</button>}
+              <span className="faint">{l.slider ? `${strengthOf(l) > 0 ? "+" : ""}${strengthOf(l)}` : `×${strengthOf(l)}`}</span>
+              <button className="icon-btn small x" aria-label={`Stop using the LoRA ${l.name} in this chat`}
+                onClick={() => toggleLora(l.id)}><X size={13} /></button>
+            </div>
+          ))}
           {chosen.map((k) => (
             <div className="pending-item skill" key={`skill:${k.ref}`} title={k.description || k.title}>
               <Sparkles size={14} />
@@ -424,7 +456,8 @@ export function Composer({ running, onSend, onStop, settings, onSettings, models
                         aria-checked={settings.image_loras.includes(l.id)} onClick={() => toggleLora(l.id)}>
                         {settings.image_loras.includes(l.id) ? <Check size={15} /> : <span style={{ width: 15 }} />}
                         <span>{l.name}<small>{l.slider ? "Slider: plus for more, minus for the opposite"
-                          : l.note || (l.trigger ? `Trigger word ${l.trigger}` : `Strength ${l.strength}`)}</small></span>
+                          : [l.trigger && `Trigger word ${l.trigger}`, l.note].filter(Boolean).join(" · ")
+                            || `Strength ${l.strength}`}</small></span>
                       </button>
                       {settings.image_loras.includes(l.id) && <LoraStrength lora={l}
                         value={settings.image_lora_strength[l.id]} onCommit={(v) => setStrength(l.id, v)} />}

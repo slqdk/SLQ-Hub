@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.57.0 - 2026-10-30
+
+- **A chosen LoRA shows above the message box, with its trigger word.** A
+  click on the word writes it into your message; the cross turns the LoRA off
+  for the chat. The Hub still puts the trigger word in the picture's prompt by
+  itself. The picture menu now shows a LoRA's trigger word next to its note.
+
 ## 0.56.0 - 2026-10-30
 
 - **Train a LoRA on an SDXL model.** New training can now be based on one of

@@ -991,3 +991,4 @@ div.tests-result-head { cursor: default; }
 .menu-slider { display: flex; align-items: center; gap: 8px; padding: 0 10px 8px 36px; font-size: 13px; color: var(--ink-2); }
 .menu-slider input[type="range"] { flex: 1 1 60px; min-width: 0; width: 60px; accent-color: var(--run); }
 .menu-slider-value { width: 34px; text-align: right; font-variant-numeric: tabular-nums; }
+.pending-item.lora .trigger { font-family: var(--font-mono); font-size: 12.5px; text-decoration: underline dotted; }

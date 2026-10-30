@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.56.0, 2026-10-30)
+## State (0.57.0, 2026-10-30)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -535,7 +535,11 @@ fetches only SDXL base's config files (.json/.txt/.model of stabilityai/stable-d
 cache. The LoRA is family sdxl. `loras.flux_size` now looks only at FLUX-shaped LoRAs (double/single blocks), so an
 SDXL LoRA's transformer_blocks never read as klein 9B. The image-model lookup no longer repeats the repository's
 name in the suggestion. NOT run on the card: SDXL training with ai-toolkit on ROCm, diffusers finding the configs
-offline, ComfyUI loading ai-toolkit's SDXL LoRA (item 84). The config keys were checked against the same commit (`diffusion_trainer`,
+offline, ComfyUI loading ai-toolkit's SDXL LoRA (item 84).
+0.57.0, Søren: the trigger word should be at hand when a LoRA is chosen. The composer's pending row shows each
+LoRA on in the chat (name, trigger word, strength, a cross to turn it off); a click on the trigger word writes it
+into the message at the caret (`insertWord`). The picture menu showed the note instead of the trigger word when a
+LoRA had one (his trained LoRAs all have one) - now both. The config keys were checked against the same commit (`diffusion_trainer`,
 arch `flux2_klein_4b`, `cache_text_embeddings` so the 8 GB text encoder leaves the card, `timestep_type`
 "weighted" as ai-toolkit's UI default for klein; no quantisation, AdamW - quanto and bitsandbytes are the least
 sure on AMD). The image follows ai-toolkit's own AMD install (`manager/spec.py`: torch 2.13.0 / torchvision 0.28.0
