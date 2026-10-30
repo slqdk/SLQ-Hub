@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.56.0 - 2026-10-30
+
+- **Train a LoRA on an SDXL model.** New training can now be based on one of
+  your SDXL models (RealVisXL 5.0 and others added under Settings -> Models)
+  instead of FLUX.2 klein 4B. SDXL trains quicker, its LoRAs are small, and
+  they work with every SDXL model - best with the one they were trained on.
+  The first SDXL training fetches a few small configuration files.
+- Adding an image model from Hugging Face no longer repeats the repository's
+  name in the suggested name ("RealVisXL V5.0", not "RealVisXL V5.0 RealVisXL
+  V5.0 fp16").
+
 ## 0.55.0 - 2026-10-30
 
 - **Slider LoRAs.** A slider LoRA moves one quality along a line - plus for

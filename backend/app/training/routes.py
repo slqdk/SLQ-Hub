@@ -27,7 +27,7 @@ def _fail(exc: TrainingError):
 @router.get("")
 async def overview(request: Request):
     t = _t(request)
-    return {"service": await t.service(), "runs": t.list(), "base": BASE, "kinds": list(KINDS),
+    return {"service": await t.service(), "runs": t.list(), "base": BASE, "bases": t.bases(), "kinds": list(KINDS),
             "min_images": MIN_IMAGES, "max_images": MAX_IMAGES, "can_caption": t.captioner() is not None}
 
 
@@ -37,12 +37,13 @@ class RunIn(BaseModel):
     kind: str = "thing"
     steps: int = 1500
     rank: int = 16
+    base: str | None = None          # "flux2-klein-4b" or "sdxl:<an SDXL model's id>" (0.56.0)
 
 
 @router.post("/runs")
 async def create_run(body: RunIn, request: Request):
     try:
-        return _t(request).create(body.name, body.trigger, body.kind, body.steps, body.rank)
+        return _t(request).create(body.name, body.trigger, body.kind, body.steps, body.rank, body.base)
     except TrainingError as exc:
         _fail(exc)
 

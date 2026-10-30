@@ -1857,7 +1857,9 @@ files afterwards.
     and it becomes a LoRA (source "trained"). Duplicate copies a run's
     pictures and captions into a v2 (a new trigger word replaces the old one
     in the captions), so v1 keeps its checkpoints; Train again starts the
-    same run over.
+    same run over. A run can instead be based on one of the Hub's SDXL
+    checkpoints (0.56.0): ai-toolkit's "sdxl" on that file, read-only, with
+    SDXL base's config files fetched; its LoRA is an SDXL one.
   - **Families and abilities.** Each picture model in the catalog has a
     `family` (which graph) and `abilities` (generate, edit, cutout). Models
     that only generate hand edits to one that edits. `image_generate`'s

@@ -47,6 +47,14 @@ BASE = {"model": "flux2-klein-4b", "family": "flux2-klein", "label": "FLUX.2 kle
 DOWNLOADS = ((BASE["repo"], ("flux-2-klein-base-4b.safetensors",)),
              ("ai-toolkit/flux2_vae", ("ae.safetensors",)),
              (BASE["te_repo"], None))
+# SDXL (0.56.0): a LoRA trained on one of the Hub's SDXL checkpoints (RealVisXL 5.0 ...), used with any SDXL model.
+# ai-toolkit loads the checkpoint as one file (arch "sdxl": StableDiffusionXLPipeline.from_single_file, read in its
+# stable_diffusion_model.py); diffusers takes the layout from SDXL base's config files - small, fetched by the Hub
+# like the base models (weights none). The trainer sees the checkpoints read-only.
+SDXL_CONFIG_REPO = "stabilityai/stable-diffusion-xl-base-1.0"
+SDXL_CONFIG_FILES = re.compile(r"\.(json|txt|model)$", re.I)
+CHECKPOINTS = "/models/comfy/checkpoints"
+SDXL_NEGATIVE = "bad hands, bad anatomy, ugly, deformed"          # RealVisXL's card, shortened
 KINDS = ("person", "thing", "style")
 SAVE_EVERY = 250
 MIN_IMAGES, MAX_IMAGES = 5, 80
@@ -174,10 +182,49 @@ class Training:
             if (d / "run.json").is_file():
                 run = json.loads((d / "run.json").read_text())
                 out.append({**run, "images": len(list((d / "images").glob("*.jpg"))), "progress": self.live.get(d.name),
-                            "size": _size(d)})
+                            "size": _size(d), "base_label": self.base_label(run)})
         return out
 
-    def create(self, name: str, trigger: str, kind: str = "thing", steps: int = 1500, rank: int = 16) -> dict:
+    # ------------------------------------------------------------ the base a run trains on
+    def sdxl_checkpoints(self) -> list[dict]:
+        """The SDXL checkpoints the Hub has downloaded (Settings -> Models -> Add image model): id, name and the
+        file under models/comfy/checkpoints."""
+        out = []
+        for e in self.hub.catalog.entries("comfy"):
+            if e.get("family") != "sdxl" or not self.hub.catalog.installed(e):
+                continue
+            dest = next((str(f.get("dest")) for f in e.get("files") or []
+                         if str(f.get("dest") or "").startswith("comfy/checkpoints/")), "")
+            rel = dest[len("comfy/checkpoints/"):]
+            if rel.endswith(".safetensors") and ".." not in Path(rel).parts:
+                out.append({"id": e["id"], "name": e.get("name") or e["id"], "path": rel})
+        return out
+
+    def bases(self) -> list[dict]:
+        return [{"id": BASE["model"], "label": BASE["label"], "family": BASE["family"]}] + [
+            {"id": f"sdxl:{c['id']}", "label": f"{c['name']} (SDXL)", "family": "sdxl"} for c in self.sdxl_checkpoints()]
+
+    @staticmethod
+    def base_label(run: dict) -> str:
+        return f"{run.get('checkpoint_name') or 'SDXL'} (SDXL)" if run.get("base") == "sdxl" else BASE["label"]
+
+    @staticmethod
+    def family(run: dict) -> str:
+        return "sdxl" if run.get("base") == "sdxl" else BASE["family"]
+
+    def _base_fields(self, base: str | None) -> dict:
+        base = base or BASE["model"]
+        if base == BASE["model"]:
+            return {"base": BASE["model"]}
+        if base.startswith("sdxl:"):
+            ck = next((c for c in self.sdxl_checkpoints() if c["id"] == base[5:]), None)
+            if ck is None:
+                raise TrainingError("That SDXL model is not downloaded (Settings -> Models -> Add image model).")
+            return {"base": "sdxl", "checkpoint": ck["id"], "checkpoint_name": ck["name"], "checkpoint_path": ck["path"]}
+        raise TrainingError("Train on FLUX.2 klein 4B or on one of your SDXL models.")
+
+    def create(self, name: str, trigger: str, kind: str = "thing", steps: int = 1500, rank: int = 16,
+               base: str | None = None) -> dict:
         name = " ".join(str(name).split())[:80]
         trigger = str(trigger).strip()[:41]
         if not name:
@@ -187,6 +234,7 @@ class Training:
         if kind not in KINDS:
             raise TrainingError("What is it: a person, a thing or a style?")
         steps, rank = self._checked(steps, rank)
+        on = self._base_fields(base)
         rid = f"{_slug(name, 30)}-{time.strftime('%Y%m%d-%H%M%S')}"
         if (self.root / rid).exists():
             rid = f"{rid}-{secrets.token_hex(2)}"
@@ -194,7 +242,7 @@ class Training:
         (d / "images").mkdir(parents=True)
         (d / "output").mkdir()
         run = {"id": rid, "name": name, "trigger": trigger, "kind": kind, "steps": steps, "rank": rank,
-               "base": BASE["model"], "state": "draft", "error": "", "created": time.time(), "lora": None}
+               **on, "state": "draft", "error": "", "created": time.time(), "lora": None}
         self._save(run)
         return run
 
@@ -233,7 +281,8 @@ class Training:
         src = self._load(rid)
         folder = self._dir(rid) / "images"
         run = self.create(name or _next_name(src["name"]), trigger or src["trigger"], kind or src["kind"],
-                          src["steps"], src["rank"])
+                          src["steps"], src["rank"],
+                          base=f"sdxl:{src.get('checkpoint')}" if src.get("base") == "sdxl" else BASE["model"])
         old, new = src["trigger"], run["trigger"]
         word = re.compile(rf"(?<![A-Za-z0-9_]){re.escape(old)}(?![A-Za-z0-9_])", re.I)
         dest = self.root / run["id"] / "images"
@@ -260,7 +309,7 @@ class Training:
             images.append({"name": p.name, "caption": cap.read_text(encoding="utf-8").strip() if cap.is_file() else "",
                            "v": int(p.stat().st_mtime)})
         return {**run, "images_list": images, "checkpoints": self.checkpoints(rid), "samples": self.samples(rid),
-                "progress": self.live.get(rid), "freeable": self._freeable(rid)}
+                "progress": self.live.get(rid), "freeable": self._freeable(rid), "base_label": self.base_label(run)}
 
     def _cache_dirs(self, rid: str) -> list[Path]:
         return [p for p in (self._dir(rid) / "images").glob("_*") if p.is_dir()]
@@ -408,6 +457,8 @@ class Training:
     # ------------------------------------------------------------ training
     def config(self, run: dict) -> dict:
         """ai-toolkit's config (its JSON form) for a run - the keys of its FLUX.2 klein examples."""
+        if run.get("base") == "sdxl":
+            return self._sdxl_config(run)
         rid, t = run["id"], run["trigger"]
         remote = self._remote(rid)
         lr = 8e-5 if run["kind"] == "style" else 1e-4               # BFL: lower for style, higher for characters
@@ -432,8 +483,37 @@ class Training:
                        "walk_seed": True, "guidance_scale": 4, "sample_steps": 25}}]},
             "meta": {"name": run["name"], "version": "1.0"}}
 
+    def _sdxl_config(self, run: dict) -> dict:
+        """SDXL with ai-toolkit's own defaults for it (extensions_built_in/diffusion_models/ui.tsx: no quantising,
+        ddpm noise scheduler and sampler, guidance 6; no timestep type) - the text encoders are small and stay."""
+        rid, t = run["id"], run["trigger"]
+        remote = self._remote(rid)
+        return {"job": "extension", "config": {"name": rid, "process": [{
+            "type": "diffusion_trainer", "training_folder": f"{remote}/output", "device": "cuda",
+            "trigger_word": t,
+            "network": {"type": "lora", "linear": run["rank"], "linear_alpha": run["rank"]},
+            "save": {"dtype": "fp16", "save_every": SAVE_EVERY, "max_step_saves_to_keep": 40},
+            "datasets": [{"folder_path": f"{remote}/images", "caption_ext": "txt", "cache_latents_to_disk": True,
+                          "resolution": [768, 1024]}],
+            "train": {"batch_size": 1, "steps": run["steps"], "gradient_accumulation": 1, "train_unet": True,
+                      "train_text_encoder": False, "gradient_checkpointing": True, "noise_scheduler": "ddpm",
+                      "optimizer": "adamw", "lr": 8e-5 if run["kind"] == "style" else 1e-4, "dtype": "bf16"},
+            "model": {"name_or_path": f"{CHECKPOINTS}/{run['checkpoint_path']}", "arch": "sdxl", "quantize": False,
+                      "quantize_te": False},
+            "sample": {"sampler": "ddpm", "sample_every": SAVE_EVERY, "width": 1024, "height": 1024,
+                       "prompts": [p.format(t=t) for p in SAMPLES[run["kind"]]], "neg": SDXL_NEGATIVE, "seed": 42,
+                       "walk_seed": True, "guidance_scale": 6, "sample_steps": 30}}]},
+            "meta": {"name": run["name"], "version": "1.0"}}
+
+    def downloads(self, run: dict) -> list[tuple[str, tuple[str, ...] | None, re.Pattern | None]]:
+        if run.get("base") == "sdxl":
+            return [(SDXL_CONFIG_REPO, None, SDXL_CONFIG_FILES)]
+        return [(repo, files, None) for repo, files in DOWNLOADS]
+
     async def start(self, rid: str) -> dict:
         run = self._editable(rid)
+        if run.get("base") == "sdxl" and run.get("checkpoint") not in {c["id"] for c in self.sdxl_checkpoints()}:
+            raise TrainingError(f"{run.get('checkpoint_name') or 'Its SDXL model'} is no longer downloaded.")
         folder = self._dir(rid) / "images"
         pics = list(folder.glob("*.jpg"))
         if len(pics) < MIN_IMAGES:
@@ -471,8 +551,8 @@ class Training:
         try:
             # 1. the base model's files, before the card is taken (they are big, and need no GPU)
             self._set(rid, state="preparing")
-            for repo, files in DOWNLOADS:
-                await self.fetch(repo, rid, files)
+            for repo, files, pattern in self.downloads(run):
+                await self.fetch(repo, rid, files, pattern)
             # 2. the whole card, through the queue
             self._set(rid, state="queued")
             self.live[rid] = {"what": "queue"}
@@ -532,7 +612,8 @@ class Training:
     def cache_dir(self, repo: str) -> Path:
         return Path(self.hub.env.models_dir) / "hf" / "hub" / f"models--{repo.replace('/', '--')}"
 
-    async def fetch(self, repo: str, rid: str | None = None, only: tuple[str, ...] | None = None) -> None:
+    async def fetch(self, repo: str, rid: str | None = None, only: tuple[str, ...] | None = None,
+                    pattern: re.Pattern | None = None) -> None:
         """A Hugging Face repository (or `only` these files of it) into models/hf in the cache's own layout
         (refs/main and snapshots/<commit>), which the trainer's libraries read with HF_HUB_OFFLINE. Files there at
         their size are kept; a partial download goes on where it stopped. HF_TOKEN (the VM's .env) for a gated
@@ -549,6 +630,8 @@ class Training:
             sha = re.sub(r"[^0-9a-f]", "", str((info.json() or {}).get("sha") or ""))[:40] or "hub"
             files = [x for x in await _tree(c, repo) if x.get("type") == "file" and not re.search(
                 r"\.(gguf|onnx|png|jpe?g|gif|webp|mp4|md)$|^\.", x.get("path", ""), re.I)]
+            if pattern is not None:                         # SDXL base: its config files, not its weights
+                files = [x for x in files if pattern.search(str(x.get("path") or ""))]
             if only is not None:
                 files = [x for x in files if x.get("path") in only]
                 missing = set(only) - {x.get("path") for x in files}
@@ -668,9 +751,10 @@ class Training:
         store = self.hub.extras["loras"]
         src = self._dir(rid) / "output" / rid / cp["file"]
         label = run["name"] if cp == cps[-1] else f"{run['name']} (step {cp['step']})"
-        entry = store.add_file(src, src.name, name=label, base=BASE["family"], trigger=run["trigger"], move=False,
-                               note=f"Trained here from {len(list((self._dir(rid) / 'images').glob('*.jpg')))} "
-                                    f"pictures ({run['kind']}, step {cp['step']} of {run['steps']}).",
+        entry = store.add_file(src, src.name, name=label, base=self.family(run), trigger=run["trigger"], move=False,
+                               note=f"Trained here on {self.base_label(run)} from "
+                                    f"{len(list((self._dir(rid) / 'images').glob('*.jpg')))} pictures ({run['kind']}, "
+                                    f"step {cp['step']} of {run['steps']}).",
                                source={"kind": "trained", "run": rid, "step": cp["step"]})
         self._set(rid, lora=entry["id"])
         return entry

@@ -201,6 +201,52 @@ async def test_a_training_left_from_before_a_restart_is_stopped_first(app, fakes
     assert hub.scheduler.current == "train" and not hub.scheduler.running      # it had the card, and gave it back
 
 
+async def test_a_lora_is_trained_on_an_sdxl_checkpoint(signed_in, app, fakes, monkeypatch):
+    """0.56.0: an SDXL checkpoint the Hub has (RealVisXL 5.0) as the base - ai-toolkit's arch "sdxl" on the file as
+    the trainer sees it, SDXL base's config files fetched (not its weights), and the LoRA marked SDXL."""
+    monkeypatch.setattr(R, "POLL_S", 0.01)
+    hub = app.state.hub
+    t = hub.extras["training"]
+    monkeypatch.setattr(t, "sdxl_checkpoints", lambda: [{"id": "realvisxl-v5-0", "name": "RealVisXL V5.0",
+                                                         "path": "hub/realvisxl-v5-0.safetensors"}])
+    over = (await signed_in.get("/hub/api/training")).json()
+    assert [b["id"] for b in over["bases"]] == ["flux2-klein-4b", "sdxl:realvisxl-v5-0"]
+    for bad in ("sdxl:gone", "sd15"):
+        r = await signed_in.post("/hub/api/training/runs", json={"name": "X", "trigger": "rkxv", "base": bad},
+                                 headers=ORIGIN)
+        assert r.status_code == 400
+    run = (await signed_in.post("/hub/api/training/runs", json={"name": "Mira", "trigger": "mirx", "kind": "person",
+                                                                "steps": 500, "base": "sdxl:realvisxl-v5-0"},
+                                headers=ORIGIN)).json()
+    rid = run["id"]
+    assert run["base"] == "sdxl" and run["checkpoint_path"] == "hub/realvisxl-v5-0.safetensors"
+    t.add_images(rid, [(f"m{i}.jpg", photo()) for i in range(5)])
+    t.set_captions(rid, {f"m{i}.jpg": "on a beach" for i in range(5)})
+    fakes.hf["repos"] = {"stabilityai/stable-diffusion-xl-base-1.0": {"sha": "5d1", "tree": [
+        {"type": "file", "path": "model_index.json", "size": 60}, {"type": "file", "path": "unet/config.json", "size": 80},
+        {"type": "file", "path": "tokenizer_2/merges.txt", "size": 50},
+        {"type": "file", "path": "sd_xl_base_1.0.safetensors", "size": 6000},
+        {"type": "file", "path": "unet/diffusion_pytorch_model.safetensors", "size": 5000}]}}
+    fakes.trainer["hold"] = True
+    assert (await signed_in.post(f"/hub/api/training/runs/{rid}/start", headers=ORIGIN)).status_code == 200
+    await wait_for(lambda: t._load(rid)["state"] == "training" and rid in fakes.trainer["jobs"])
+    snap = hub.env.models_dir / "hf" / "hub" / "models--stabilityai--stable-diffusion-xl-base-1.0" / "snapshots" / "5d1"
+    assert (snap / "model_index.json").is_file() and (snap / "unet/config.json").is_file()
+    assert (snap / "tokenizer_2/merges.txt").is_file() and not list(snap.rglob("*.safetensors"))
+    cfg = fakes.trainer["jobs"][rid]["config"]["config"]["process"][0]
+    assert cfg["model"] == {"name_or_path": "/models/comfy/checkpoints/hub/realvisxl-v5-0.safetensors", "arch": "sdxl",
+                            "quantize": False, "quantize_te": False}
+    assert cfg["train"]["noise_scheduler"] == "ddpm" and cfg["sample"]["sampler"] == "ddpm"
+    assert "timestep_type" not in cfg["train"] and "cache_text_embeddings" not in cfg["train"]
+    fakes.trainer["hold"] = False
+    await wait_for(lambda: t._load(rid)["state"] == "done")
+    assert t.detail(rid)["base_label"] == "RealVisXL V5.0 (SDXL)"
+    lora = (await signed_in.post(f"/hub/api/training/runs/{rid}/use", json={}, headers=ORIGIN)).json()
+    assert lora["base"] == "sdxl" and "RealVisXL V5.0 (SDXL)" in lora["note"]
+    copy = t.duplicate(rid)                                                    # a v2 keeps the base
+    assert copy["base"] == "sdxl" and copy["checkpoint"] == "realvisxl-v5-0"
+
+
 async def test_a_training_is_duplicated_with_a_new_trigger_word(signed_in, app):
     """Duplicate (0.51.0): the pictures, captions and settings into a new training - not its results or ai-toolkit's
     caches - with a new trigger word put in the captions; the name counts up."""

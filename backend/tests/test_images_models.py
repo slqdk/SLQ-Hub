@@ -55,6 +55,8 @@ def _repos(fakes) -> None:
         "someone/noob-vpred": {"tree": [_f("noobai-vpred.safetensors", int(6.9 * GB), sdxl_header(vpred=True))]},
         "someone/diffusers-only": {"tree": [_f("model_index.json", 500),
                                             _f("unet/diffusion_pytorch_model.safetensors", int(5.1 * GB))]},
+        "SG161222/RealVisXL_V5.0": {"tree": [_f("RealVisXL_V5.0_fp16.safetensors", int(6.5 * GB), sdxl_header()),
+                                             _f("RealVisXL_V5.0_fp32.safetensors", int(12.9 * GB), sdxl_header())]},
     })
 
 
@@ -185,6 +187,10 @@ async def test_sdxl_from_hugging_face(signed_in, app, fakes):
     chosen = next(o for o in res["options"] if o["key"] == res["pick"])
     assert chosen["supported"] is True and chosen["preset"] == "pony"
     assert res["suggested"]["preset"] == "pony" and res["suggested"]["id"] == "pony-mirror-ponydiffusionv6xl"
+    # a file named like its repository, with a number format: neither repeated in the name (RealVisXL, 0.56.0)
+    r = await signed_in.get("/hub/api/models/images/lookup", params={
+        "link": "https://huggingface.co/SG161222/RealVisXL_V5.0", "pick": "RealVisXL_V5.0_fp16.safetensors"})
+    assert r.json()["suggested"]["name"] == "RealVisXL V5.0" and r.json()["suggested"]["id"] == "realvisxl-v5.0"
     r = await signed_in.get("/hub/api/models/images/lookup",
                             params={"link": "someone/pony-mirror", "pick": "old/sd15-model.safetensors"})
     sd15 = next(o for o in r.json()["options"] if o["key"] == "old/sd15-model.safetensors")

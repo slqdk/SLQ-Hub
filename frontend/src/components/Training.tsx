@@ -103,9 +103,9 @@ export function TrainingSection({ onAdded }: { onAdded: () => void }) {
         <h4 className="grow" style={{ margin: 0 }}>Train a LoRA</h4>
         <button className="btn small" onClick={() => setCreating(true)}><GraduationCap size={14} /> New training</button>
       </div>
-      <p className="muted small" style={{ marginTop: 0 }}>Teach {data.base.label} a thing, a person or a style from your
-        own pictures, here on the card. A training takes the whole card for a few hours: chats and pictures wait
-        until it is done.</p>
+      <p className="muted small" style={{ marginTop: 0 }}>Teach {data.bases.length > 1 ? `${data.base.label} or one of
+        your SDXL models` : data.base.label} a thing, a person or a style from your own pictures, here on the card. A
+        training takes the whole card for a few hours: chats and pictures wait until it is done.</p>
       {!data.service && (
         <div className="callout small" style={{ marginBottom: 8 }}>The trainer is not running. Pictures and captions
           can be prepared now; to train, add <code>COMPOSE_PROFILES=training</code> to <code>/srv/slq-hub/.env</code> on
@@ -118,8 +118,8 @@ export function TrainingSection({ onAdded }: { onAdded: () => void }) {
               <Lamp state={lampOf(r)} />
               <div className="grow" style={{ minWidth: 200 }}>
                 <b>{r.name}</b> <span className="tag">{KINDS[r.kind]?.label ?? r.kind}</span>
-                <div className="meta">Trigger word <b>{r.trigger}</b> · {r.images ?? 0} pictures · {progressText(r)}
-                  {r.size ? ` · ${bytes(r.size)}` : ""}</div>
+                <div className="meta">Trigger word <b>{r.trigger}</b> · {r.base_label ?? data.base.label} ·{" "}
+                  {r.images ?? 0} pictures · {progressText(r)}{r.size ? ` · ${bytes(r.size)}` : ""}</div>
                 <ProgressBar run={r} />
               </div>
               <button className="btn quiet small" onClick={() => setOpen(r.id)}>Open</button>
@@ -140,8 +140,10 @@ export function TrainingSection({ onAdded }: { onAdded: () => void }) {
 function NewTraining({ data, onClose, onMade }: { data: TrainingOverview; onClose: () => void;
   onMade: (id: string) => void }) {
   const { toast } = useApp();
-  const [f, setF] = useState({ name: "", trigger: "", kind: "thing", steps: "1500", rank: "16" });
+  const [f, setF] = useState({ name: "", trigger: "", kind: "thing", steps: "1500", rank: "16",
+    base: data.bases[0]?.id ?? data.base.model });
   const [busy, setBusy] = useState(false);
+  const chosen = data.bases.find((b) => b.id === f.base) ?? data.bases[0];
   const make = async () => {
     setBusy(true);
     try {
@@ -185,8 +187,15 @@ function NewTraining({ data, onClose, onMade }: { data: TrainingOverview; onClos
           </select>
           <small>16 suits most. Higher learns finer detail and makes a bigger file.</small></label>
       </div>
-      <small className="muted">Trained on {data.base.label}'s base model, used with {data.base.label} in your chats.
-        Only you can use it.</small>
+      {data.bases.length > 1 && <label className="field"><span>Train on</span>
+        <select className="input" value={f.base} onChange={(e) => setF({ ...f, base: e.target.value })}>
+          {data.bases.map((b) => <option key={b.id} value={b.id}>{b.label}</option>)}
+        </select>
+        <small>{chosen?.family === "sdxl"
+          ? "Its LoRA works with every SDXL model, best with this one. SDXL trains quicker and its LoRAs are small."
+          : "FLUX.2 klein's base model; its LoRA is used with FLUX.2 klein 4B in your chats."}</small></label>}
+      <small className="muted">{data.bases.length > 1 ? "" : `Trained on ${data.base.label}'s base model, used with `
+        + `${data.base.label} in your chats. `}Only you can use it.</small>
     </Modal>
   );
 }
@@ -227,7 +236,7 @@ const PICTURE_HINT: Record<string, string> = {
 };
 
 /** The advice for a training (Søren: "write it into the interface, or I cannot remember it"). */
-function GuideText({ guide, kind }: { guide: Guide; kind: string }) {
+function GuideText({ guide, kind, sdxl }: { guide: Guide; kind: string; sdxl?: boolean }) {
   const likeness = kind === "style" ? "has the style" : kind === "person" ? "looks like the person" : "looks like the thing";
   if (guide === "steps") return <>
     <b>Steps</b> are how long it trains. 1500 is a good start for 15-40 pictures; more pictures want more steps.
@@ -251,8 +260,10 @@ function GuideText({ guide, kind }: { guide: Guide; kind: string }) {
         same seed at every step). Prefer a step where all three show them. A trigger word with a real word in it
         (water..., lora...) makes it worse - give a v2 a new one with Duplicate. Scribbles in a corner are the
         trigger word written as a signature.</li>
-      <li>Add as LoRA on that step and try it in a chat. Weaker there than in the samples? Raise its strength to
-        1.1-1.2 in the LoRA's settings: the samples use the base model, chats the fast 4-step one.</li>
+      <li>Add as LoRA on that step and try it in a chat. {sdxl ? "Weaker there than in the samples? Use it with " +
+        "the SDXL model it was trained on, or raise its strength a little in the LoRA's settings." : "Weaker there " +
+        "than in the samples? Raise its strength to 1.1-1.2 in the LoRA's settings: the samples use the base model, " +
+        "chats the fast 4-step one."}</li>
     </ul></>;
   return <>
     <b>How to make it better</b>
@@ -437,13 +448,14 @@ function TrainingEditor({ rid, data, onClose, onAdded, onDuplicate }: { rid: str
       </div>
       <div className="row train-info">
         <span className="grow muted small">
-          {KINDS[run.kind]?.label ?? run.kind} · trigger word <b>{run.trigger}</b> · {data.base.label}</span>
+          {KINDS[run.kind]?.label ?? run.kind} · trigger word <b>{run.trigger}</b> · {run.base_label ?? data.base.label}</span>
         <button type="button" className={`btn quiet small ${guide === "choose" ? "on" : ""}`}
           aria-expanded={guide === "choose"} onClick={() => toggle("choose")}><CircleHelp size={14} /> Which step?</button>
         <button type="button" className={`btn quiet small ${guide === "better" ? "on" : ""}`}
           aria-expanded={guide === "better"} onClick={() => toggle("better")}><CircleHelp size={14} /> Make it better</button>
       </div>
-      {guide && <div className="callout train-guide" ref={guideBox}><GuideText guide={guide} kind={run.kind} /></div>}
+      {guide && <div className="callout train-guide" ref={guideBox}><GuideText guide={guide} kind={run.kind}
+        sdxl={run.base === "sdxl"} /></div>}
 
       {/* Where it is */}
       {working && (

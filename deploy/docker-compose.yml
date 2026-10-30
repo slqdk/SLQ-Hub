@@ -136,6 +136,7 @@ services:
     volumes:
       - ${HUB_ROOT:-/srv/slq-hub}/data/training:/training
       - ${HUB_ROOT:-/srv/slq-hub}/models/hf:/models/hf
+      - ${HUB_ROOT:-/srv/slq-hub}/models/comfy/checkpoints:/models/comfy/checkpoints:ro   # SDXL bases (0.56.0)
     networks:
       inner:
         ipv4_address: 172.31.251.14

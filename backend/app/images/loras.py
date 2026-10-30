@@ -96,6 +96,9 @@ def flux_size(header: dict) -> str:
     or "" (klein 4B, or it cannot be told). The sizes are ai-toolkit's (flux2/src/model.py): klein 4B has hidden
     size 3072, 5 double and 20 single blocks; klein 9B 4096, 8 and 24; FLUX.1 3072, 19 and 38. A LoRA works only
     with the size it was trained on."""
+    names = "\n".join(k for k in header if k != "__metadata__")
+    if not re.search(r"double_blocks|single_blocks|single_transformer_blocks|to_qkv_mlp_proj", names):
+        return ""                         # not FLUX-shaped: SDXL and Qwen-Image have transformer_blocks too
     double = single = -1
     widths: set[int] = set()
     for k, v in header.items():

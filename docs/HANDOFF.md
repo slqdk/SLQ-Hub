@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.55.0, 2026-10-30)
+## State (0.56.0, 2026-10-30)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -523,7 +523,19 @@ be fetched from here): a LoRA's `slider` flag (set on upload when "slider" is in
 its settings) widens its strength to -10..10 (`loras.strength_range`); `resolve` clamps per LoRA, `_strength` takes
 -10..10 from a chat and leaves the clamping to the LoRA; turning the flag off brings the strength into 0-2. The
 tool's LoRA list tells the assistant a slider's range and direction. NOT seen on the card: a slider LoRA on Z-Image
-Turbo (LoRAs on Z-Image are not verified either, item 83). The config keys were checked against the same commit (`diffusion_trainer`,
+Turbo (LoRAs on Z-Image are not verified either, item 83).
+0.56.0, Søren adds RealVisXL V5.0 (its card: "Can produce sfw and nsfw images of decent quality") and wants LoRA
+training on it. A run has a base: "flux2-klein-4b" or "sdxl" with `checkpoint`, `checkpoint_name` and
+`checkpoint_path` (one of `Training.sdxl_checkpoints()`: installed comfy entries of family sdxl, their file under
+models/comfy/checkpoints). `_sdxl_config`: ai-toolkit's arch "sdxl" on `/models/comfy/checkpoints/<path>` (the
+trainer mounts that folder read-only; compose and FOLDERS), its own SDXL defaults from ui.tsx (no quantising, ddpm
+scheduler and sampler, guidance 6, no timestep type), text encoders kept (small), LoRA saved fp16, samples with
+RealVisXL's negative. ai-toolkit loads a single file with `StableDiffusionXLPipeline.from_single_file`, so the Hub
+fetches only SDXL base's config files (.json/.txt/.model of stabilityai/stable-diffusion-xl-base-1.0) into the HF
+cache. The LoRA is family sdxl. `loras.flux_size` now looks only at FLUX-shaped LoRAs (double/single blocks), so an
+SDXL LoRA's transformer_blocks never read as klein 9B. The image-model lookup no longer repeats the repository's
+name in the suggestion. NOT run on the card: SDXL training with ai-toolkit on ROCm, diffusers finding the configs
+offline, ComfyUI loading ai-toolkit's SDXL LoRA (item 84). The config keys were checked against the same commit (`diffusion_trainer`,
 arch `flux2_klein_4b`, `cache_text_embeddings` so the 8 GB text encoder leaves the card, `timestep_type`
 "weighted" as ai-toolkit's UI default for klein; no quantisation, AdamW - quanto and bitsandbytes are the least
 sure on AMD). The image follows ai-toolkit's own AMD install (`manager/spec.py`: torch 2.13.0 / torchvision 0.28.0
@@ -1247,6 +1259,9 @@ the host if the VM ever stops by itself.
       ComfyUI's log means the keys do not fit), and does the trigger word bring the thing?
     - **Stop and restart**: Stop during training (the card is free within about 90 s, after ai-toolkit has
       exited); a Hub restart while it trains (the leftover job is stopped before anything loads).
+    - **SDXL (0.56.0)**: a training on RealVisXL V5.0 - does `from_single_file` find SDXL base's configs offline
+      (an error naming stabilityai/stable-diffusion-xl-base-1.0 would say not), the time per step, and the LoRA in a
+      chat with RealVisXL.
     - Not offered: klein 9B (gated, under BFL's own licence; ai-toolkit quantises it by default).
 80. **Not pursued (Søren, 2026-10-28)** - kept here in case it is taken up again; if it stays unused, remove
     the `windows` service, `.30` from `SANDBOX_IPS`, `windows/*` from `FOLDERS` and INSTALL.md section 12.

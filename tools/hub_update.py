@@ -83,7 +83,7 @@ BUILT = ("hub", "llm", "comfyui", "sandbox", "speech", "trainer")  # services wi
 # Folders the services mount, made (owned by uid 1000, the containers' user) before they start: Docker would
 # create a missing one as root, and the Hub could not download into it.
 FOLDERS = ("data", "models/llm", "models/comfy", "models/speech", "comfy/input", "comfy/output", "comfy/user",
-           "windows/storage", "windows/oem", "windows/shared", "data/training", "models/hf")
+           "windows/storage", "windows/oem", "windows/shared", "data/training", "models/hf", "models/comfy/checkpoints")
 KEEP = 3
 TIMEOUT = 300
 POLL = float(os.environ.get("HUB_UPDATE_POLL", "3"))

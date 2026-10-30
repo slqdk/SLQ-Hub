@@ -229,7 +229,9 @@ export interface TrainingRun { id: string; name: string; trigger: string; kind: 
   steps: number; rank: number; base: string; state: TrainingState; error: string; created: number; started?: number;
   ended?: number; lora: string | null; images?: number; log?: string[]; progress?: TrainingProgress | null;
   /** Bytes on disk (the list). */
-  size?: number }
+  size?: number;
+  /** What it trains on (0.56.0): "FLUX.2 klein 4B", or an SDXL model such as "RealVisXL V5.0 (SDXL)". */
+  base_label?: string; checkpoint?: string; checkpoint_name?: string }
 export interface TrainingDetail extends TrainingRun {
   images_list: { name: string; caption: string; v: number }[];
   checkpoints: { step: number; file: string; size: number }[];
@@ -238,6 +240,8 @@ export interface TrainingDetail extends TrainingRun {
   freeable: number }
 export interface TrainingOverview { service: { ok: boolean; busy: boolean; toolkit: boolean; ref: string } | null;
   runs: TrainingRun[]; base: { model: string; family: string; label: string; repo: string }; kinds: string[];
+  /** What a new training can be based on: FLUX.2 klein 4B and the SDXL models the Hub has (0.56.0). */
+  bases: { id: string; label: string; family: string }[];
   min_images: number; max_images: number; can_caption: boolean }
 
 export interface ModelEntry { id: string; name: string; name_card?: string; description?: string; default?: boolean; installed: boolean;

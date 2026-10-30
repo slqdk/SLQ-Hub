@@ -332,11 +332,16 @@ async def lookup(link: str, pick: str | None = None, transport: httpx.AsyncBaseT
             raise SourceError(f"Could not reach {site} ({exc.__class__.__name__}).", 502)
     chosen = next((o for o in res["options"] if o["key"] == res["pick"]), None)
     several = sum(1 for o in res["options"] if o["supported"] is not False) > 1
-    name = res["title"].split("/", 1)[-1] if res["site"] == "hf" else res["title"]
+    name = re.sub(r"[-_]+", " ", res["title"].split("/", 1)[-1] if res["site"] == "hf" else res["title"]).strip()
     if chosen and several:
-        name = f"{name} {chosen['label'].rsplit('/', 1)[-1].removesuffix('.safetensors')}"
-    res["suggested"] = {"id": _slug(name), "name": re.sub(r"[-_]+", " ", name).strip()[:80],
-                        "preset": chosen["preset"] if chosen else "sdxl"}
+        # The file tells it from the others - but not by repeating the repository's name, or by its number format
+        # ("RealVisXL_V5.0" / "RealVisXL_V5.0_fp16" was "RealVisXL V5.0 RealVisXL V5.0 fp16", 2026-10-30)
+        stem = re.sub(r"[-_]+", " ", chosen["label"].rsplit("/", 1)[-1].removesuffix(".safetensors")).strip()
+        if stem.lower().startswith(name.lower()):
+            stem = stem[len(name):].strip()
+        extra = " ".join(w for w in stem.split() if w.lower() not in ("fp16", "fp32", "bf16", "fp8"))
+        name = f"{name} {extra}".strip()
+    res["suggested"] = {"id": _slug(name), "name": name[:80], "preset": chosen["preset"] if chosen else "sdxl"}
     return res
 
 

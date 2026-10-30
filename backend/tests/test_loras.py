@@ -51,6 +51,9 @@ def test_the_family_is_read_from_the_file():
     assert flux_size(blocks(19, 38)) == "flux1" and guess_base(blocks(19, 38)) == ""
     assert flux_size(blocks(8, 24, 4096)) == "klein-9b" and flux_size(blocks(2, 0, 4096)) == "klein-9b"
     assert flux_size({"transformer.single_transformer_blocks.23.attn.to_qkv_mlp_proj.lora_A.weight": T}) == "klein-9b"
+    sdxl = {f"lora_unet_output_blocks_2_1_transformer_blocks_{i}_attn1_to_q.lora_down.weight":
+            {"dtype": "F16", "shape": [16, 1280], "data_offsets": [0, 0]} for i in range(6)}
+    assert flux_size(sdxl) == ""                                   # SDXL's transformer blocks: not a FLUX at all
     assert with_triggers("a man on a bike", ["sorenx"]) == "sorenx, a man on a bike"
     assert with_triggers("sorenx on a bike", ["sorenx"]) == "sorenx on a bike"
     assert with_triggers("an explorative walk", ["lora"]) == "lora, an explorative walk"     # a word, not a part

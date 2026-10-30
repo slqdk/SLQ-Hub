@@ -407,8 +407,9 @@ export const SECTIONS: HelpSection[] = [
       {
         id: "lora-training",
         title: "Train a LoRA on your own pictures",
-        what: "Settings, Models, LoRAs, Train a LoRA teaches FLUX.2 klein 4B a thing, a person or a style from 15-40 of "
-          + "your pictures, here on the card. It needs the trainer turned on (COMPOSE_PROFILES=training on the VM).",
+        what: "Settings, Models, LoRAs, Train a LoRA teaches FLUX.2 klein 4B - or one of your SDXL models, such as "
+          + "RealVisXL - a thing, a person or a style from 15-40 of your pictures, here on the card. It needs the "
+          + "trainer turned on (COMPOSE_PROFILES=training on the VM).",
         examples: [
           { text: "New training: CX9020 controller, trigger word cx9020x, 25 photos of it" },
           { text: "Then: Draw cx9020x in a control cabinet, with my CX9020 LoRA" },
