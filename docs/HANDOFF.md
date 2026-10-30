@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.59.4, 2026-10-30)
+## State (0.59.5, 2026-10-31)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -619,6 +619,12 @@ LoraLoader, dpmpp_2m karras): a clean picture, "Made with RealVisXL V5.0 SDXL ·
 her. So an ai-toolkit SDXL LoRA loads and works in the Hub's graph, and the speckles are in ai-toolkit's sample
 pictures only. Not known: whether Louise started on 0.59.4 (DPM++ samples) - if it did, the noise is elsewhere in
 ai-toolkit's sampling (its bf16 pipeline?), not the scheduler.
+0.59.5: it did - Søren updated to 0.59.4 before starting Louise, so DPM++ samples are speckled too: the scheduler
+is ruled out, like the VAE dtype (bf16 already) and the LoRA weights (clean in ComfyUI). Left: ai-toolkit's own
+sampling path - the LoRA as forward hooks in bf16 on ROCm (ComfyUI patches the weights), CFG/negative. Not chased:
+the LoRAs are fine, so the training page now says SDXL samples can show noise the LoRA does not have, and
+"Which step?" says to judge the faces and try a step in a chat. Two wrong guesses today (0.59.2, 0.59.4): measure
+in ai-toolkit itself (a sample with the LoRA merged, or in fp32) before changing the trainer again.
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
 host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU

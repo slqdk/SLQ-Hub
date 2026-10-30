@@ -502,8 +502,8 @@ class Training:
     def _sdxl_config(self, run: dict) -> dict:
         """SDXL with ai-toolkit's own defaults for it (extensions_built_in/diffusion_models/ui.tsx: no quantising,
         ddpm noise scheduler, guidance 6; no timestep type) - the text encoders are small and stay. The samples use
-        DPM++ 2M Karras (0.59.4), as the Hub's own SDXL pictures do: ai-toolkit's ddpm sampler ("ddpm is not supported
-        ?" in its toolkit/sampler.py) left speckles of noise in some samples at some steps."""
+        DPM++ 2M Karras (0.59.4), as the Hub's own SDXL pictures do. Some samples still show speckles of noise that
+        the LoRA does not have in a chat (0.59.5) - their cause in ai-toolkit's sampling is open."""
         rid, t = run["id"], run["trigger"]
         remote = self._remote(rid)
         return {"job": "extension", "config": {"name": rid, "process": [{

@@ -1873,7 +1873,8 @@ files afterwards.
     same way once it has more steps. A run can instead be based on one of the Hub's SDXL
     checkpoints (0.56.0): ai-toolkit's "sdxl" on that file, read-only, with
     SDXL base's config files fetched; its LoRA is an SDXL one. Its samples use
-    DPM++ 2M Karras (0.59.4; ai-toolkit's ddpm left noise). No `vae_dtype`:
+    DPM++ 2M Karras and can show speckles the LoRA does not have in a chat
+    (cause in ai-toolkit's sampling open; the page says so). No `vae_dtype`:
     ai-toolkit runs the VAE in the train dtype (bf16) and casts it so before
     caching latents; another dtype crashes the caching (0.59.2, undone).
   - **Families and abilities.** Each picture model in the catalog has a

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.59.5 - 2026-10-31
+
+- **SDXL trainings say what their noisy samples mean.** The trainer's sample
+  pictures for an SDXL training can show speckles of noise that the LoRA
+  itself does not have: tried in a chat, the same step is clean. The training
+  page now says so, and "Which step?" says to judge the faces and try a step
+  in a chat. 0.59.4's new sampler did not remove the speckles.
+
 ## 0.59.4 - 2026-10-30
 
 - **SDXL training's sample pictures without the speckles of noise.** They

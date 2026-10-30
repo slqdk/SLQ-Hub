@@ -262,6 +262,8 @@ function GuideText({ guide, kind, sdxl }: { guide: Guide; kind: string; sdxl?: b
         same seed at every step). Prefer a step where all three show them. A trigger word with a real word in it
         (water..., lora...) makes it worse - give a v2 a new one with Duplicate. Scribbles in a corner are the
         trigger word written as a signature.</li>
+      {sdxl && <li><b>Speckles of noise</b> in an SDXL sample come from the trainer's own picture-making, not the
+        LoRA: the same step is clean in a chat. Judge the faces, not the noise.</li>}
       <li>Add as LoRA on that step and try it in a chat. {sdxl ? "Weaker there than in the samples? Use it with " +
         "the SDXL model it was trained on, or raise its strength a little in the LoRA's settings." : "Weaker there " +
         "than in the samples? Raise its strength to 1.1-1.2 in the LoRA's settings: the samples use the base model, " +
@@ -490,6 +492,8 @@ function TrainingEditor({ rid, data, onClose, onAdded, onDuplicate }: { rid: str
           <p className="muted small" style={{ marginTop: 0 }}>Made with the trigger word every 250 steps. Choose the
             step where it looks right before it starts to look stiff or copy the pictures - that is the one to
             keep. <button type="button" className="link-btn" onClick={() => openGuide("choose")}>How to tell</button></p>
+          {run.base === "sdxl" && <p className="muted small"><b>SDXL:</b> the trainer's samples can show speckles of
+            noise that the LoRA itself does not have - judge the faces, and try a step in a chat before you decide.</p>}
           <div className="train-steps">
             {steps.map((st) => {
               const cp = checkpoint(st);
