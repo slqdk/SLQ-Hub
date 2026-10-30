@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.53.0, 2026-10-30)
+## State (0.53.1, 2026-10-30)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -502,7 +502,13 @@ reclaimable). Now `hub_update.BACKUP_EXCLUDE_RE` leaves out `training/<id>/outpu
 captions and run.json over it - a rollback never deletes checkpoints. `Training.free_space` (route `/free`, the
 "Free <size>" button) deletes a run's *.safetensors, optimizer.pt and caches; the samples stay (without Add as
 LoRA). optimizer.pt is deleted when a run ends. NOT measured: how much of each run's output was optimizer.pt and
-how much checkpoints - `ls -lh` of one output folder would say. The config keys were checked against the same commit (`diffusion_trainer`,
+how much checkpoints - `ls -lh` of one output folder would say.
+0.53.1, Søren's screenshot of a 3000-step training (trigger "waterx55"): the portrait and café samples looked like
+the person at 2250-3000, the watercolour showed her at 2250 and 2750 but a lake or field at 2500 and 3000, with
+scribbled "signatures". Read as: the prompt "waterx55 as a watercolour painting" tips between two pictures (same
+seed at every step), "water" in the trigger pulls towards water, the digits get written as text. `triggerWarning`
+in Training.tsx (a short list of known words, and digits) warns in New training and Duplicate; "Which step?" has
+a bullet on it. NOT tested: whether a letters-only trigger fixes the watercolour (a v2 would show it). The config keys were checked against the same commit (`diffusion_trainer`,
 arch `flux2_klein_4b`, `cache_text_embeddings` so the 8 GB text encoder leaves the card, `timestep_type`
 "weighted" as ai-toolkit's UI default for klein; no quantisation, AdamW - quanto and bitsandbytes are the least
 sure on AMD). The image follows ai-toolkit's own AMD install (`manager/spec.py`: torch 2.13.0 / torchvision 0.28.0

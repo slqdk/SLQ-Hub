@@ -986,3 +986,4 @@ div.tests-result-head { cursor: default; }
 .btn.on { color: var(--run); }
 .link-btn { padding: 0; border: 0; background: none; color: var(--run); font: inherit; text-decoration: underline; cursor: pointer; }
 @media (max-width: 560px) { .train-info > .grow { flex-basis: 100%; } }
+.field small.warn-text { color: color-mix(in srgb, var(--wait) 55%, var(--ink)); }

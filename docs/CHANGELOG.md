@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.53.1 - 2026-10-30
+
+- **Trigger words: a warning when one has a real word or digits in it.**
+  "waterx55" turned the watercolour sample into a lake at some steps - the
+  model read "water". New training and Duplicate now say so as you type,
+  and suggest letters only.
+- "Which step?" explains a sample that shows something else at some steps
+  (a landscape instead of the person): choose a step where all three show
+  them, and the scribbles in a corner are the trigger word as a signature.
+
 ## 0.53.0 - 2026-10-30
 
 - **Backups without the trainings' checkpoints.** A training's checkpoints,

@@ -19,6 +19,22 @@ const UPLOAD_BATCH = 6;
 const fileUrl = (rid: string, path: string, v?: number) =>
   `/hub/api/training/runs/${rid}/file?path=${encodeURIComponent(path)}${v ? `&v=${v}` : ""}`;
 
+/** Words a picture model knows, found inside a trigger word: it reads them (Søren's "waterx55" turned the
+ *  watercolour sample into a lake - 2026-10-30). Four letters or more, so a made-up word rarely hits one. */
+const KNOWN_WORDS = ["water", "lora", "woman", "girl", "photo", "style", "paint", "color", "colour", "light", "fire",
+  "snow", "rock", "gold", "blue", "pink", "black", "white", "green", "bird", "lake", "tree", "star", "moon", "rose",
+  "love", "baby", "lady", "king", "queen", "face", "hair", "body", "art", "cat", "dog", "man", "car", "sun", "sea"];
+
+export function triggerWarning(word: string): string {
+  const w = word.toLowerCase();
+  const known = KNOWN_WORDS.filter((k) => k.length >= 4 || w === k || w.startsWith(k) || w.endsWith(k))
+    .find((k) => w.includes(k));
+  if (known) return `It has the word "${known}" in it - the model reads it, and it can pull the pictures towards ` +
+    `${known === "lora" ? "other things" : `"${known}"`}. A made-up word without real words works better.`;
+  if (/\d/.test(w)) return "Digits can come out as text in the pictures (a signature, a label). Letters only work best.";
+  return "";
+}
+
 /** One line on where a run is: "Step 750 of 2000 · 41 min left". */
 export function progressText(run: TrainingRun): string {
   const p = run.progress;
@@ -152,10 +168,11 @@ function NewTraining({ data, onClose, onMade }: { data: TrainingOverview; onClos
         </select>
         <small>{KINDS[f.kind].hint}</small></label>
       <label className="field"><span>Trigger word</span>
-        <input className="input" value={f.trigger} maxLength={40} placeholder="e.g. cx9020x"
+        <input className="input" value={f.trigger} maxLength={40} placeholder="e.g. rkxv"
           onChange={(e) => setF({ ...f, trigger: e.target.value.replace(/[^A-Za-z0-9_]/g, "") })} />
-        <small>One made-up word the model does not know, 3-40 letters or digits. A prompt with it gets what the LoRA
-          learned.</small></label>
+        <small>One made-up word the model does not know, 3-40 letters - no real word inside it. A prompt with it gets
+          what the LoRA learned.</small>
+        {triggerWarning(f.trigger) && <small className="warn-text">{triggerWarning(f.trigger)}</small>}</label>
       <div className="row" style={{ gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
         <label className="field grow" style={{ minWidth: 180 }}><span>Steps</span>
           <input className="input" type="number" min={250} max={6000} step={250} value={f.steps}
@@ -229,6 +246,11 @@ function GuideText({ guide, kind }: { guide: Guide; kind: string }) {
       <li><b>Too early:</b> it does not look like it yet.</li>
       <li><b>Too late:</b> stiff or plastic faces, the same pose, clothes or background as in your pictures, burnt
         colours, the watercolour turning into a photo.</li>
+      <li><b>A sample that shows something else</b> at some steps - a lake or a field instead of them in the
+        watercolour: it is not yet sure of them outside photos, and the prompt tips either way (the samples use the
+        same seed at every step). Prefer a step where all three show them. A trigger word with a real word in it
+        (water..., lora...) makes it worse - give a v2 a new one with Duplicate. Scribbles in a corner are the
+        trigger word written as a signature.</li>
       <li>Add as LoRA on that step and try it in a chat. Weaker there than in the samples? Raise its strength to
         1.1-1.2 in the LoRA's settings: the samples use the base model, chats the fast 4-step one.</li>
     </ul></>;
@@ -291,7 +313,8 @@ function DuplicateTraining({ run, onClose, onMade }: { run: TrainingRun; onClose
       <label className="field"><span>Trigger word</span>
         <input className="input" value={f.trigger} maxLength={40}
           onChange={(e) => setF({ ...f, trigger: e.target.value.replace(/[^A-Za-z0-9_]/g, "") })} />
-        <small>A new one replaces {run.trigger} in every caption.</small></label>
+        <small>A new one replaces {run.trigger} in every caption.</small>
+        {triggerWarning(f.trigger) && <small className="warn-text">{triggerWarning(f.trigger)}</small>}</label>
       <label className="field"><span>What it learns</span>
         <select className="input" value={f.kind} onChange={(e) => setF({ ...f, kind: e.target.value })}>
           {Object.entries(KINDS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
