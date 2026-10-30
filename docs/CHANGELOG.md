@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.59.0 - 2026-10-30
+
+- **Every picture says what made it.** Under each picture: the picture model,
+  the LoRAs it used with their strength, and any LoRA that was left out and
+  why (a LoRA works only with picture models of its family).
+- **The picture menu decides.** The assistant can no longer pick another
+  picture model or add LoRAs in its own call. It used to copy them from
+  earlier pictures, so a chat set to RealVisXL could still draw with
+  Qwen-Image and leave an SDXL LoRA out. Switch the model or the LoRAs in the
+  menu at any time, also in the middle of a chat.
+- The picture menu lists all your LoRAs. Those for another family are greyed
+  out with the model they need. A LoRA that is on but does not fit the chat's
+  model is struck through above the message box.
+
 ## 0.58.0 - 2026-10-30
 
 - **Pause a LoRA training and go on later.** Stop is now a pause: the

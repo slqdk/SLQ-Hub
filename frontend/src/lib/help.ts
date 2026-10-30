@@ -392,11 +392,14 @@ export const SECTIONS: HelpSection[] = [
         what: "A LoRA is a small add-on that teaches a picture model one thing - a person, a product or a style. Add "
           + "one in Settings, Models, LoRAs (a .safetensors file); it works with the picture models of its family.",
         examples: [
-          { text: "Draw our CX9020 controller on a workbench, with my cx9020 LoRA" },
-          { text: "Make a Christmas card of the family in my watercolour style" },
+          { text: "Draw our CX9020 controller on a workbench (with the CX9020 LoRA ticked in the picture menu)" },
+          { text: "Make a Christmas card of the family (with your watercolour style LoRA ticked)" },
         ],
-        how: ["The picture chip under the message box turns a LoRA on for every picture in the chat; or name it in "
-          + "the request.",
+        how: ["The picture menu under the message box chooses the picture model and turns LoRAs on for every "
+          + "picture in the chat - the assistant cannot pick others. A LoRA that is on shows above the message box.",
+          "A LoRA works only with picture models of its family: the menu shows the others greyed out with the model "
+          + "they need, and one that is on but does not fit the chat's model is struck through.",
+          "Under every picture: the model that made it and the LoRAs it used - or which were left out, and why.",
           "Its trigger word is put in the prompt for you. Strength 1 is as trained, lower is a lighter touch; the "
           + "picture menu has a slider for each LoRA you tick.",
           "A slider LoRA (its maker says so) moves one quality - plus for more, minus for the opposite - with "
@@ -412,7 +415,7 @@ export const SECTIONS: HelpSection[] = [
           + "trainer turned on (COMPOSE_PROFILES=training on the VM).",
         examples: [
           { text: "New training: CX9020 controller, trigger word cx9020x, 25 photos of it" },
-          { text: "Then: Draw cx9020x in a control cabinet, with my CX9020 LoRA" },
+          { text: "Then: tick the CX9020 LoRA in a chat's picture menu, and ask for cx9020x in a control cabinet" },
         ],
         how: ["Add the pictures, let the chat model write the captions (or type them), then Start. The card is busy "
           + "for a few hours - chats and pictures wait.",

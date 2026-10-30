@@ -992,3 +992,11 @@ div.tests-result-head { cursor: default; }
 .menu-slider input[type="range"] { flex: 1 1 60px; min-width: 0; width: 60px; accent-color: var(--run); }
 .menu-slider-value { width: 34px; text-align: right; font-variant-numeric: tabular-nums; }
 .pending-item.lora .trigger { font-family: var(--font-mono); font-size: 12.5px; text-decoration: underline dotted; }
+/* 0.59.0: what made a picture, under it; a LoRA that does not fit the chat's picture model */
+.made-with { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; color: var(--ink-2); }
+.made-with .warn-text, .pending-item.lora.unfit .unfit-note, .menu-item.unfit small {
+  color: color-mix(in srgb, var(--wait) 55%, var(--ink)); }
+.pending-item.lora.unfit { max-width: 340px; }
+.pending-item.lora.unfit > .ellipsis { text-decoration: line-through; color: var(--ink-3); flex: none; max-width: 120px; }
+.pending-item.lora.unfit .unfit-note { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.menu-item.unfit > span:not(small) { color: var(--ink-3); }

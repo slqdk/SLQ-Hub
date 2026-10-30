@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.58.0, 2026-10-30)
+## State (0.59.0, 2026-10-30)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -568,6 +568,19 @@ the last file only when done. Also `.modal-foot` wraps (on a phone the training 
 off). Søren's report the same day: an SDXL training of a person (RealVisXL) runs on the card, past step 1000 - so
 `from_single_file` found SDXL base's configs offline; its samples show the person in all three (klein's run had a
 lake or a field in the watercolour), but less like her than klein at that point. NOT run on the card: Continue.
+0.59.0, Søren: "det kunne være rart at man kan se OM en model bruger lora'en.. og også hvilken billedmodel" and
+"man kan ikke skifte billedmodel midt i en chat... eller Lora"; he had not got a downloaded LoRA to work. His
+screenshot of the call: `"model": "qwen-image-2.1", "loras": [{"id": "titcupv2-sdxl"...` in a chat set to
+RealVisXL - the model wrote the model and the LoRA into its call itself (copying earlier calls), the call won over
+the chat's menu, and the SDXL LoRA was left out on Qwen-Image (the assistant: "noted but not applied"). Now the
+tools have no `model` or `loras` parameter: `_picture_model(ctx)` is the chat's, else the project's, else Settings';
+`_loras(ctx)` the chat's ticked ones with its strengths; a call naming them anyway gets "was not used" in its
+result. The description names only the chat's model (with its prompt hint) and which LoRAs are on, off, or on but
+not fitting. `resolve` also returns what was used (name, strength, slider), and `display.made_with` puts "Made with
+<model> · LoRA <name> ×1" and any "left out" note under each picture (Turn.tsx `MadeWithLines`). The picture menu
+lists every LoRA: another family's greyed with the model it needs (or that none is downloaded, or no family set);
+one that is on but does not fit is struck through above the message box ("not with ERNIE-Image Turbo"). Not on
+the card: whether his SDXL LoRAs load in RealVisXL's graph (LoraLoader) - the next picture's line will say.
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
 host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU

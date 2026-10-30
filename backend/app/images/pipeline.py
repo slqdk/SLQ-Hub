@@ -197,15 +197,17 @@ class ImagePipeline:
             saved.append({**up, "width": w, "height": h})
         return saved
 
-    def _loras(self, wanted: list | None, fam: str, prompt: str) -> tuple[list, str, list[str], list[str]]:
+    def _loras(self, wanted: list | None, fam: str, prompt: str) -> tuple[list, str, dict]:
         """The LoRAs asked for that fit this model's family (0.49.0, the admin's own chats only - the caller decides)
-        -> (graph nodes, the prompt with their trigger words, their names, notes on any left out)."""
+        -> (graph nodes, the prompt with their trigger words, what goes on each result: their names, notes on any
+        left out, and what was used with its strength)."""
         store = self.hub.extras.get("loras")
         if not wanted or store is None:
-            return [], prompt, [], []
+            return [], prompt, {}
         from .loras import with_triggers
-        nodes, triggers, names, notes = store.resolve(wanted, fam)
-        return nodes, with_triggers(prompt, triggers), names, notes
+        nodes, triggers, names, notes, used = store.resolve(wanted, fam)
+        extra = {**({"loras": names, "lora_used": used} if names else {}), **({"lora_notes": notes} if notes else {})}
+        return nodes, with_triggers(prompt, triggers), extra
 
     async def generate(self, prompt: str, width: int = 1024, height: int = 1024, count: int = 1,
                        seed: int | None = None, fast: bool = False, model: str | None = None, negative: str = "",
@@ -221,8 +223,7 @@ class ImagePipeline:
             raise ImageError(f"the image model {model} is not downloaded (Settings -> Models)")
         entry = self.entry(model) or {}
         fam = family(entry)
-        lora_nodes, prompt, lora_names, lora_notes = self._loras(loras, fam, prompt)
-        extra = {**({"loras": lora_names} if lora_names else {}), **({"lora_notes": lora_notes} if lora_notes else {})}
+        lora_nodes, prompt, extra = self._loras(loras, fam, prompt)
         results = []
         for i in range(max(1, min(int(count), 4))):
             sd = (int(seed) + i) if seed is not None else random.randint(1, 2**31 - 1)
@@ -281,8 +282,7 @@ class ImagePipeline:
             model = "qwen-image-2.1-turbo"
         if not self.available(model):
             raise ImageError(f"the image model {model} is not downloaded (Settings -> Models)")
-        lora_nodes, prompt, lora_names, lora_notes = self._loras(loras, family(self.entry(model)), prompt)
-        extra = {**({"loras": lora_names} if lora_names else {}), **({"lora_notes": lora_notes} if lora_notes else {})}
+        lora_nodes, prompt, extra = self._loras(loras, family(self.entry(model)), prompt)
         results = []
         for i in range(max(1, min(int(count), 4))):
             names = await self._upload_inputs(images)

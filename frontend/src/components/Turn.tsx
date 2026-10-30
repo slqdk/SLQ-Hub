@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { AppWindow, Brain, Check, ChevronDown, ChevronRight, Code2, Download, FileText, GitBranch, Image as ImageIcon, Shapes,
   Sparkles } from "lucide-react";
-import { api, mediaUrl, type ArtifactRef, type Skill, type SkillCardData, type SkillDraft } from "../lib/api";
+import { api, mediaUrl, type ArtifactRef, type MadeWith, type Skill, type SkillCardData, type SkillDraft } from "../lib/api";
 import { bytes, seconds } from "../lib/format";
 import { thoughtGist, toolAbout, toolLabel, toolOutcome, toolSummary, workSummary, type Decision, type Item,
   type ReviewItem, type ToolView } from "../lib/turns";
@@ -243,7 +243,8 @@ function WorkBlock({ items, actions }: { items: Item[]; actions: TurnActions }) 
         <span className="tool-time">{tools.length} step{tools.length === 1 ? "" : "s"}</span>
       </button>
       {open && <div className="work-body"><Items items={items} actions={{ ...actions, live: false }} flat /></div>}
-      {!open && images.length > 0 && <div className="tool-body"><ToolImages images={images} /></div>}
+      {!open && images.length > 0 && <div className="tool-body"><ToolImages images={images}
+        made={tools.flatMap((t) => t.images?.length && t.display?.made_with ? [t.display.made_with] : [])} /></div>}
     </div>
   );
 }
@@ -285,22 +286,42 @@ function ToolRow({ tool, actions, hint = "" }: { tool: ToolView; actions: TurnAc
       )}
       {open && <ToolDetail tool={tool} />}
       {!open && tool.images && tool.images.length > 0 && (
-        <div className="tool-body"><ToolImages images={tool.images} /></div>
+        <div className="tool-body"><ToolImages images={tool.images} made={tool.display?.made_with ? [tool.display.made_with] : []} /></div>
       )}
     </div>
   );
 }
 
-function ToolImages({ images }: { images: { sha: string; caption?: string }[] }) {
+function ToolImages({ images, made = [] }: { images: { sha: string; caption?: string }[]; made?: MadeWith[] }) {
   return (
-    <div className="tool-images">
-      {images.map((im) => (
-        <a key={im.sha} href={mediaUrl(im.sha)} target="_blank" rel="noreferrer" title={im.caption}>
-          <img src={mediaUrl(im.sha)} alt={im.caption ?? "image from the tool"} loading="lazy" />
-        </a>
-      ))}
-    </div>
+    <>
+      <div className="tool-images">
+        {images.map((im) => (
+          <a key={im.sha} href={mediaUrl(im.sha)} target="_blank" rel="noreferrer" title={im.caption}>
+            <img src={mediaUrl(im.sha)} alt={im.caption ?? "image from the tool"} loading="lazy" />
+          </a>
+        ))}
+      </div>
+      <MadeWithLines made={made} />
+    </>
   );
+}
+
+/** Under a picture (0.59.0): what made it - the model, the LoRAs with their strength, and any LoRA left out. */
+function MadeWithLines({ made }: { made: MadeWith[] }) {
+  const seen = new Set<string>();
+  const lines = made.filter((m) => {
+    const key = JSON.stringify(m);
+    return !seen.has(key) && (seen.add(key), true);
+  });
+  return <>{lines.map((m, i) => (
+    <div key={i} className="made-with small">
+      <span>Made with <b>{m.model}</b>{m.loras.map((l) => (
+        <span key={l.name}> · LoRA <b>{l.name}</b> {l.slider ? `${l.strength > 0 ? "+" : ""}${l.strength}`
+          : `×${l.strength}`}</span>))}</span>
+      {m.left_out.map((n) => <span key={n} className="warn-text">{n.charAt(0).toUpperCase() + n.slice(1)}.</span>)}
+    </div>
+  ))}</>;
 }
 
 function ToolDetail({ tool }: { tool: ToolView }) {

@@ -102,11 +102,14 @@ def test_adding_changing_and_removing(tmp_path):
     with pytest.raises(LoraError, match="not a .safetensors"):
         store.add_file(junk, junk.name)
     # what fits a family; the strength of a call wins; another family's is left out with a note
-    nodes, triggers, names, notes = store.resolve([{"id": "soren-face-v2", "strength": 0.6}, "soren-face-v2-2",
-                                                   "nope"], "flux2-klein")
+    nodes, triggers, names, notes, used = store.resolve([{"id": "soren-face-v2", "strength": 0.6}, "soren-face-v2-2",
+                                                         "nope"], "flux2-klein")
     assert nodes == [("hub/soren-face-v2.safetensors", 0.6), ("hub/soren-face-v2-2.safetensors", 1.0)]
-    assert triggers == ["sorenx"] and names == ["Soren face v2", "Soren face v2"] and "not there" in notes[0]
-    assert store.resolve(["soren-face-v2"], "qwen-image")[0] == []
+    assert triggers == ["sorenx"] and names == ["Soren face v2", "Soren face v2"] and "no longer there" in notes[0]
+    assert used[0] == {"name": "Soren face v2", "strength": 0.6, "slider": False}      # for the line under a picture
+    other = store.resolve(["soren-face-v2"], "qwen-image")
+    assert other[0] == [] and other[3] == ["the LoRA Soren face v2 was left out: it is for FLUX.2 klein models, not "
+                                           "this one"]
     store.delete("soren-face-v2-2")
     assert [x["id"] for x in store.list()] == ["soren-face-v2"]
 
@@ -153,24 +156,49 @@ async def test_the_admin_adds_and_uses_a_lora_and_a_person_never_sees_one(signed
                                                             "strength_model": 0.9}
     assert _node(g, "CLIPTextEncode")[0]["inputs"]["text"] == "cx9020x, on a workbench"
     tool = next(t for t in fakes.llama["requests"][0]["tools"] if t["function"]["name"] == "image_generate")
-    assert "cx9020: CX9020" in tool["function"]["description"]
-    assert tool["function"]["parameters"]["properties"]["loras"]["items"]["properties"]["id"]["enum"] == ["cx9020"]
-    result = next(e["data"]["text"] for e in run.events if e["type"] == "tool_result")
-    assert "with the LoRA CX9020" in result
+    desc = tool["function"]["description"]
+    assert "On in this chat, used on every picture:\n- CX9020 (for FLUX.2 klein models" in desc
+    props = tool["function"]["parameters"]["properties"]
+    assert "loras" not in props and "model" not in props                  # 0.59.0: the picture menu decides
+    res = next(e["data"] for e in run.events if e["type"] == "tool_result")
+    assert "with the LoRA CX9020" in res["text"]
+    assert res["display"]["made_with"] == {"model": "FLUX.2 [klein] 4B", "left_out": [],
+                                           "loras": [{"name": "CX9020", "strength": 0.9, "slider": False}]}
 
-    # The chat's own strength (the slider in its picture menu, 0.54.0) wins over the LoRA's; nonsense is ignored,
-    # and a strength the call names wins over both.
+    # A call that still names a model and LoRAs (copied from an earlier call) cannot override the menu: a chat on
+    # FLUX.2 klein without the LoRA gets neither the other model nor the LoRA, and the result says why.
+    c2 = await new_chat(signed_in, settings={"image_model": "flux2-klein-4b", "image_loras": []})
+    fakes.llama["requests"] = []
+    fakes.llama["replies"] = [{"tool_calls": [{"name": "image_generate", "arguments": {
+        "prompt": "on a shelf", "model": "qwen-image-2.1", "loras": [{"id": "cx9020", "strength": 1.2}]}}]},
+        {"content": "Here."}, {"content": "CX"}]
+    run = await finish(app, await say(signed_in, c2["id"], "Draw it again"))
+    g = fakes.comfy["prompts"][-1]
+    assert not _node(g, "LoraLoaderModelOnly") and _node(g, "CLIPTextEncode")[0]["inputs"]["text"] == "on a shelf"
+    res = next(e["data"] for e in run.events if e["type"] == "tool_result")
+    assert res["display"]["made_with"]["model"] == "FLUX.2 [klein] 4B" and not res["display"]["made_with"]["loras"]
+    assert "model and LoRAs were not used" in res["text"] and "picture menu" in res["text"]
+
+    # A LoRA on in the chat that does not fit its picture model: left out, said under the picture and to the model.
+    c3 = await new_chat(signed_in, settings={"image_model": "qwen-image-2.1", "image_loras": ["cx9020"]})
+    fakes.llama["requests"] = []
+    fakes.llama["replies"] = [{"tool_calls": [{"name": "image_generate", "arguments": {"prompt": "a desk"}}]},
+                              {"content": "Here."}, {"content": "CX"}]
+    run = await finish(app, await say(signed_in, c3["id"], "Draw a desk"))
+    res = next(e["data"] for e in run.events if e["type"] == "tool_result")
+    assert res["display"]["made_with"]["left_out"] == ["the LoRA CX9020 was left out: it is for FLUX.2 klein "
+                                                       "models, not this one"]
+    tool = next(t for t in fakes.llama["requests"][0]["tools"] if t["function"]["name"] == "image_generate")
+    assert "NOT used: it does not fit this chat's picture model" in tool["function"]["description"]
+
+    # The chat's own strength (the slider in its picture menu, 0.54.0) wins over the LoRA's; nonsense is ignored.
     from types import SimpleNamespace
     from app.agent.tools import images as IT
     store = app.state.hub.extras["loras"]
     for given, used in ((0.65, 0.65), ("lots", 0.9), (7, 2.0), (12, 0.9), (None, 0.9)):     # 7: into its 0-2
         ctx = SimpleNamespace(engine=SimpleNamespace(device=None),          # the admin's turn
                               chat={"settings": {"image_loras": ["cx9020"], "image_lora_strength": {"cx9020": given}}})
-        assert store.resolve(IT._loras(ctx, {}), "flux2-klein")[0] == [("hub/cx9020.safetensors", used)]
-    ctx = SimpleNamespace(engine=SimpleNamespace(device=None),
-                          chat={"settings": {"image_loras": ["cx9020"], "image_lora_strength": {"cx9020": 0.65}}})
-    named = IT._loras(ctx, {"loras": [{"id": "cx9020", "strength": 1.2}]})
-    assert store.resolve(named, "flux2-klein")[0] == [("hub/cx9020.safetensors", 1.2)]
+        assert store.resolve(IT._loras(ctx), "flux2-klein")[0] == [("hub/cx9020.safetensors", used)]
 
     # A person: no LoRA routes, no LoRA in the tool, and one named in a device turn is not used.
     await add_person(signed_in)

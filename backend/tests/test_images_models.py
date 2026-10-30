@@ -327,9 +327,8 @@ async def test_new_models_in_chats(signed_in, app, fakes):
     # The tool told the model which picture model this chat uses and how to prompt it.
     tool = next(t for t in fakes.llama["requests"][0]["tools"] if t["function"]["name"] == "image_generate")
     desc = tool["function"]["description"]
-    assert "this chat uses Pony V6" in desc and "Danbooru-style tags" in desc and "Z-Image Turbo" in desc
-    assert set(tool["function"]["parameters"]["properties"]["model"]["enum"]) == {
-        "qwen-image-2.1", "z-image-turbo", "chroma1-hd", "pony-v6"}
+    assert "with Pony V6, this chat's picture model" in desc and "Danbooru-style tags" in desc
+    assert "Z-Image Turbo" not in desc and "model" not in tool["function"]["parameters"]["properties"]
     # A chat whose model was removed falls back to the Settings model.
     assert (await signed_in.delete("/hub/api/models/pony-v6")).status_code == 200
     items = await pipe.generate("a fox", 1024, 1024, model="pony-v6")

@@ -135,6 +135,8 @@ export interface SkillQuestion { text: string; options: string[]; chosen: string
 
 export interface ImageRef { sha: string; mime?: string; caption?: string }
 export interface ArtifactRef { id: string; version: number; title: string; type: string; language?: string | null }
+export interface MadeWith { model: string; loras: { name: string; strength: number; slider: boolean }[];
+  left_out: string[] }
 export interface Display {
   artifact?: ArtifactRef;
   todos?: Todo[];
@@ -144,6 +146,8 @@ export interface Display {
   sources?: { title: string; url: string }[];
   mcp?: { server: string; tool: string };
   audio?: { path: string; seconds: number; model: string }[];
+  /** A picture tool's result (0.59.0): the model that made it, the LoRAs used and any left out. */
+  made_with?: MadeWith;
   answers?: string[][];          // ask_user (0.43.0): what the user chose, per question
   video?: { path: string; seconds: number; model: string }[];
   skill?: SkillCardData;

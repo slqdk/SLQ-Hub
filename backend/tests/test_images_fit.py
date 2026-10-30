@@ -72,5 +72,5 @@ async def test_the_tools_give_the_original_size_and_say_so(signed_in, app, fakes
     assert run.status == "done", run.events[-1]
     cut, edit = [e["data"] for e in run.events if e["type"] == "tool_result"]
     assert cut["ok"] and "(PNG with transparency, 768x512 px, the original's size)" in cut["text"], cut["text"]
-    assert edit["ok"] and "Edited image(s) ready (1, 768x512 px, the original's size)" in edit["text"], edit["text"]
+    assert edit["ok"] and "ready with Qwen-Image 2.1 (1, 768x512 px, the original's size)" in edit["text"], edit["text"]
     assert _open((folder / "ball-cutout.png").read_bytes()).size == (768, 512)

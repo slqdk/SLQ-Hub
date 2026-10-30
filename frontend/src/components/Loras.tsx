@@ -54,8 +54,8 @@ export function LorasSection() {
           onChange={(e) => { const f = e.target.files?.[0]; if (f) add(f); e.target.value = ""; }} />
       </div>
       <p className="muted small" style={{ marginTop: -4 }}>Small add-ons that teach a picture model a person, a thing or
-        a style. Only you can use them - people's chats and apps never see them. Choose one for a chat in its picture
-        menu, or ask for it by name. A LoRA works only with models of its family.</p>
+        a style. Only you can use them - people's chats and apps never see them. Turn one on for a chat in its picture
+        menu, with a picture model of its family - each picture says what it was made with.</p>
       <div className="list">
         {data === null ? <div className="faint">Loading</div> : data.loras.length === 0
           ? <div className="list-row"><span className="muted">No LoRAs yet. Add a .safetensors LoRA from your computer,

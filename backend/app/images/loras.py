@@ -275,11 +275,13 @@ class Loras:
             self.path(lid).unlink(missing_ok=True)
 
     # ------------------------------------------------------------ use
-    def resolve(self, wanted: list, fam: str) -> tuple[list[tuple[str, float]], list[str], list[str], list[str]]:
+    def resolve(self, wanted: list, fam: str) -> tuple[list[tuple[str, float]], list[str], list[str], list[str],
+                                                    list[dict]]:
         """The LoRAs asked for ([{"id", "strength"}] or ids) that fit a model family -> (ComfyUI names with their
-        strength, their trigger words, their names, notes on any left out)."""
+        strength, their trigger words, their names, notes on any left out, and what was used - name, strength,
+        slider - for the line under the picture)."""
         nodes: list[tuple[str, float]] = []
-        triggers, names, notes = [], [], []
+        triggers, names, notes, used = [], [], [], []
         seen: set[str] = set()
         for w in wanted or []:
             lid = w.get("id") if isinstance(w, dict) else w
@@ -288,10 +290,11 @@ class Loras:
             seen.add(lid)
             entry = self.get(lid)
             if entry is None:
-                notes.append(f"the LoRA {lid} is not there (Settings -> Models)")
+                notes.append(f"the LoRA {lid} was left out: it is no longer there (Settings -> Models)")
                 continue
             if entry.get("base") != fam:
-                notes.append(f"the LoRA {entry['name']} is for {entry['base_label']} models, not this one - left out")
+                notes.append(f"the LoRA {entry['name']} was left out: it is for "
+                             f"{entry.get('base_label') or 'another family of'} models, not this one")
                 continue
             strength = w.get("strength") if isinstance(w, dict) and w.get("strength") is not None \
                 else entry.get("strength", 1.0)
@@ -302,9 +305,10 @@ class Loras:
                 strength = float(entry.get("strength", 1.0))
             nodes.append((self.comfy_name(lid), strength))
             names.append(entry["name"])
+            used.append({"name": entry["name"], "strength": round(strength, 2), "slider": bool(entry.get("slider"))})
             if entry.get("trigger"):
                 triggers.append(entry["trigger"])
-        return nodes, triggers, names, notes
+        return nodes, triggers, names, notes, used
 
 
 def has_word(text: str, word: str) -> bool:

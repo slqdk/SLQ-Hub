@@ -103,7 +103,7 @@ async def test_a_picture_model_goes_by_the_owners_name(signed_in, app, fakes):
     run = await finish(app, await say(signed_in, c["id"], "Tegn en ræv"))
     assert run.status == "done", run.events[-1]
     tools = {t["function"]["name"]: t["function"] for t in fakes.llama["requests"][0]["tools"]}
-    assert "qwen-image-2.1: Billedmaskinen (Qwen-Image 2.1)" in tools["image_generate"]["description"]
+    assert "with Billedmaskinen (Qwen-Image 2.1), this chat's picture model" in tools["image_generate"]["description"]
     result = next(e["data"] for e in run.events if e["type"] == "tool_result")
     assert "with Billedmaskinen" in result["text"], result["text"]
     comfy = {e["id"]: e["name"] for e in (await signed_in.get("/hub/api/models")).json()["comfy"]}

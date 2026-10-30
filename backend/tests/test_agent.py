@@ -475,9 +475,9 @@ async def test_ernie_image_with_its_prompt_enhancer(signed_in, app, fakes):
         p.write_bytes(b"fake")
     fakes.comfy["preview_text"] = "A red fox stands in deep fresh snow at dusk, soft blue light, photorealistic."
     fakes.llama["replies"] = [
-        {"tool_calls": [{"name": "image_generate", "arguments": {"prompt": "a fox in snow", "model": "ernie-image"}}]},
+        {"tool_calls": [{"name": "image_generate", "arguments": {"prompt": "a fox in snow", "model": "qwen-image-2.1"}}]},
         {"content": "Here it is."}, {"content": "Fox"}]
-    c = await new_chat(signed_in)
+    c = await new_chat(signed_in, settings={"image_model": "ernie-image"})
     run = await finish(app, await say(signed_in, c["id"], "Draw a fox"))
     assert run.status == "done", run.events[-1]
     graph = fakes.comfy["prompts"][-1]
@@ -485,8 +485,9 @@ async def test_ernie_image_with_its_prompt_enhancer(signed_in, app, fakes):
     assert any(n["inputs"].get("unet_name") == "ernie-image-turbo.safetensors" for n in graph.values())
     result = next(e for e in run.events if e["type"] == "tool_result")
     assert result["data"]["ok"] and "prompt enhancer turned the prompt into: A red fox stands" in result["data"]["text"]
-    # the call named another model than the chat's (Settings: Qwen-Image 2.1): the result says so
-    assert "The call asked for ernie-image; this chat's picture model is Qwen-Image 2.1." in result["data"]["text"]
+    # the call named another model than the chat's (copied from an earlier call): the picture menu decides (0.59.0)
+    assert "The call's model was not used: the picture model and the LoRAs are chosen in this chat's picture menu" \
+        in result["data"]["text"] and result["data"]["display"]["made_with"]["model"] == "ERNIE-Image Turbo"
     tool_msg = next(m for m in fakes.llama["requests"][1]["messages"] if m["role"] == "tool")
     assert "A red fox stands in deep fresh snow" in json.dumps(tool_msg)
 

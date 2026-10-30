@@ -235,8 +235,14 @@ export function Composer({ running, onSend, onStop, settings, onSettings, models
   const pictureId = settings.image_model ?? pictureDefault;
   const picture = pictureModels.find((m) => m.id === pictureId) ?? pictureModels[0];
   const pictureDefaultName = pictureModels.find((m) => m.id === pictureDefault)?.name ?? pictureDefault;
-  const fitting = loras.filter((l) => l.fits.some((m) => m.id === picture?.id));       // for this chat's model
+  const fits = (l: Lora) => l.fits.some((m) => m.id === picture?.id);                  // this chat's picture model
+  const fitting = loras.filter(fits);
   const lorasOn = fitting.filter((l) => settings.image_loras.includes(l.id));
+  // 0.59.0: on in this chat but for another family than its picture model - left out, so shown as such
+  const unfitOn = loras.filter((l) => !fits(l) && settings.image_loras.includes(l.id));
+  const unfitText = (l: Lora) => !l.base ? "No model family set - choose one in its settings (Settings, Models)"
+    : l.fits.length ? `For ${l.base_label} models - choose ${l.fits.map((m) => m.name).join(" or ")} above`
+      : `For ${l.base_label} models - none of those is downloaded`;
   const toggleLora = (id: string) => onSettings({ image_loras: settings.image_loras.includes(id)
     ? settings.image_loras.filter((x) => x !== id) : [...settings.image_loras, id] });
   const setStrength = (id: string, v: number | null) => {
@@ -285,7 +291,7 @@ export function Composer({ running, onSend, onStop, settings, onSettings, models
           </div>
         );
       })}
-      {(pending.length > 0 || refs.length > 0 || chosen.length > 0 || lorasOn.length > 0) && (
+      {(pending.length > 0 || refs.length > 0 || chosen.length > 0 || lorasOn.length > 0 || unfitOn.length > 0) && (
         <div className="pending">
           {lorasOn.map((l) => (
             <div className="pending-item lora" key={`lora:${l.id}`}
@@ -296,6 +302,16 @@ export function Composer({ running, onSend, onStop, settings, onSettings, models
               {l.trigger && <button className="open trigger" onClick={() => insertWord(l.trigger!)}
                 aria-label={`Write ${l.trigger} in the message`}>{l.trigger}</button>}
               <span className="faint">{l.slider ? `${strengthOf(l) > 0 ? "+" : ""}${strengthOf(l)}` : `×${strengthOf(l)}`}</span>
+              <button className="icon-btn small x" aria-label={`Stop using the LoRA ${l.name} in this chat`}
+                onClick={() => toggleLora(l.id)}><X size={13} /></button>
+            </div>
+          ))}
+          {unfitOn.map((l) => (
+            <div className="pending-item lora unfit" key={`lora:${l.id}`}
+              title={`${l.name} is not used with ${picture?.name ?? "this chat's picture model"}. ${unfitText(l)}, or turn it off.`}>
+              <ImageIcon size={14} />
+              <span className="ellipsis">{l.name}</span>
+              <span className="unfit-note small">not with {picture?.name ?? "this model"}</span>
               <button className="icon-btn small x" aria-label={`Stop using the LoRA ${l.name} in this chat`}
                 onClick={() => toggleLora(l.id)}><X size={13} /></button>
             </div>
@@ -429,10 +445,10 @@ export function Composer({ running, onSend, onStop, settings, onSettings, models
             </>
           )}
         </MenuButton>
-        {(pictureModels.length > 1 || fitting.length > 0) && (
+        {(pictureModels.length > 1 || loras.length > 0) && (
           <MenuButton up label={<><ImageIcon size={15} /> <span className="ellipsis chip-picture hide-narrow">{picture?.name ?? "Pictures"}
             {lorasOn.length ? ` + ${lorasOn.length} LoRA${lorasOn.length > 1 ? "s" : ""}` : ""}</span></>}
-            title={`Model for pictures: ${picture?.name ?? "none"}${lorasOn.length ? `, with ${lorasOn.map((l) => `${l.name} (${strengthOf(l)})`).join(", ")}` : ""}`}>
+            title={`Model for pictures: ${picture?.name ?? "none"}${lorasOn.length ? `, with ${lorasOn.map((l) => `${l.name} (${strengthOf(l)})`).join(", ")}` : ""}${unfitOn.length ? `; not used with it: ${unfitOn.map((l) => l.name).join(", ")}` : ""}`}>
             {(close) => (
               <>
                 <div className="menu-head">Pictures in this chat</div>
@@ -447,7 +463,7 @@ export function Composer({ running, onSend, onStop, settings, onSettings, models
                     <span>{m.name}<small>{m.description?.split(". ")[0]}</small></span>
                   </button>
                 ))}
-                {fitting.length > 0 && <>
+                {loras.length > 0 && <>
                   <div className="menu-sep" />
                   <div className="menu-head">LoRAs on every picture</div>
                   {fitting.map((l) => (
@@ -463,6 +479,16 @@ export function Composer({ running, onSend, onStop, settings, onSettings, models
                         value={settings.image_lora_strength[l.id]} onCommit={(v) => setStrength(l.id, v)} />}
                     </div>
                   ))}
+                  {loras.filter((l) => !fits(l)).map((l) => {
+                    const on = settings.image_loras.includes(l.id);       // on: can be turned off; off: cannot be used
+                    return (
+                      <button key={l.id} className="menu-item unfit" role="menuitemcheckbox" aria-checked={on}
+                        disabled={!on} onClick={() => toggleLora(l.id)}>
+                        {on ? <Check size={15} /> : <span style={{ width: 15 }} />}
+                        <span>{l.name}<small>{on ? "Not used with this model - click to turn it off" : unfitText(l)}</small></span>
+                      </button>
+                    );
+                  })}
                 </>}
               </>
             )}

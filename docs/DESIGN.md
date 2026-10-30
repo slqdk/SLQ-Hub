@@ -1833,13 +1833,23 @@ files afterwards.
     .safetensors LoRA (`backend/app/images/loras.py`): the file must be a
     LoRA, its family (`base`) and trigger word are read from its header and
     can be changed, with a default strength and a note the assistant reads.
-    A chat's `image_loras` (the picture chip) and the tools' `loras` add them;
-    one for another family than the model used is left out with a note, and
-    the trigger word is put first in the prompt when it is missing. The graph
-    gets LoraLoaderModelOnly after the model's loader (LoraLoader for SDXL).
+    A chat's `image_loras` (its picture menu) turns them on; one for another
+    family than the model used is left out with a note, and the trigger word
+    is put first in the prompt when it is missing. The graph gets
+    LoraLoaderModelOnly after the model's loader (LoraLoader for SDXL).
     People's chats, devices and apps never see or use a LoRA: the routes are
-    the owner's, the setting is not a device setting, and the parameter is
-    only offered in the owner's turns.
+    the owner's and the setting is not a device setting.
+  - **The picture menu decides (0.59.0).** The picture tools have no `model`
+    or `loras` parameter any more: the model copied an earlier call's model
+    and LoRAs into later calls, so the menu showed one model and another was
+    used (Søren: a Qwen-Image picture with an SDXL LoRA left out, in a chat
+    set to RealVisXL). The chat's model (else the project's, else Settings')
+    and its ticked LoRAs are used; a call that still names them gets a note
+    saying they were not used. Each result's `display.made_with` (the model's
+    name, the LoRAs used with their strength, the notes on any left out) is
+    shown under the picture. The menu lists every LoRA - those of another
+    family greyed out with the model they need - and a LoRA that is on but
+    does not fit is struck through above the message box.
   - **Training a LoRA (0.50.0, the admin's alone).** Settings -> Models ->
     LoRAs -> Train a LoRA (`backend/app/training/`). A run is a folder in
     `data/training`: pictures with a caption beside each (the chat model
