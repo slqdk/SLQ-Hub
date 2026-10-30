@@ -183,12 +183,18 @@ Add a proxy host:
 | Websockets support | on |
 | SSL | Let's Encrypt certificate, Force SSL, HTTP/2 |
 
-Under **Advanced** (long answers stream, and uploads can be large):
+Under **Advanced** (long answers stream, and uploads can be large - the
+largest is a LoRA file of up to 3 GB):
 
-    client_max_body_size 600m;
+    client_max_body_size 3200m;
+    proxy_request_buffering off;
     proxy_read_timeout 3600s;
     proxy_send_timeout 3600s;
     proxy_buffering off;
+
+Without it the proxy refuses a big upload with its own page, "413 Request
+Entity Too Large". `proxy_request_buffering off` passes an upload straight
+on, instead of storing it on the proxy's disk first.
 
 The model API (`/v1`, `/api`) is refused when it arrives through the proxy
 from outside. That is deliberate: apps use the LAN address. A key set to

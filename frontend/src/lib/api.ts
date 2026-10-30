@@ -63,8 +63,22 @@ function errorText(data: unknown, status: number): string {
     if (typeof d === "string") return d;
     if (Array.isArray(d)) return d.map((x) => (x as { msg?: string }).msg ?? String(x)).join("; ");
   }
+  if (typeof data === "string" && /<html|<!doctype/i.test(data)) return proxyText(data, status);
   if (typeof data === "string" && data.trim()) return data.slice(0, 300);
   return `The Hub answered ${status}.`;
+}
+
+// The Hub answers errors in JSON: an HTML page comes from the proxy in front of it (Nginx Proxy Manager).
+function proxyText(html: string, status: number): string {
+  if (status === 413) {
+    return `Too large for the proxy in front of the Hub (${location.host} answered 413). Raise client_max_body_size ` +
+      "under Advanced for the Hub in Nginx Proxy Manager (docs/INSTALL.md, step 4), or use the Hub's LAN address.";
+  }
+  const title = /<title>([^<]*)<\/title>/i.exec(html)?.[1]?.trim() || String(status);
+  if (status >= 502 && status <= 504) {
+    return `The proxy in front of the Hub answered "${title}": the Hub did not answer it (restarting?). Try again in a moment.`;
+  }
+  return `The proxy in front of the Hub answered "${title}".`;
 }
 
 export async function upload(file: File | Blob, name?: string): Promise<Upload> {

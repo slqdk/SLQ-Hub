@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.57.0, 2026-10-30)
+## State (0.57.1, 2026-10-30)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -452,7 +452,15 @@ the queue's Stop works too. `services/trainer/traind.py` (stdlib HTTP on 7300) r
 <dir>/config.json` and parses tqdm's bar for step, ETA and loss; a cancel is SIGINT, SIGTERM, SIGKILL, and the job
 says "stopping" until ai-toolkit has exited - the Hub keeps the card until then. A job the trainer no longer knows
 (it restarted) or a minute without an answer fails the run with the reason. After a Hub restart a leftover job is
-told to stop first, then the Hub holds the card until the trainer is idle.
+told to stop first, then the Hub holds the card until the trainer is idle. The config keys were checked against the same commit (`diffusion_trainer`,
+arch `flux2_klein_4b`, `cache_text_embeddings` so the 8 GB text encoder leaves the card, `timestep_type`
+"weighted" as ai-toolkit's UI default for klein; no quantisation, AdamW - quanto and bitsandbytes are the least
+sure on AMD). The image follows ai-toolkit's own AMD install (`manager/spec.py`: torch 2.13.0 / torchvision 0.28.0
+/ torchaudio 2.11.0 from the rocm7.1 index, held by a constraint while its requirements go in) - not ComfyUI's
+torch 2.14.1+rocm7.14. Checkpoints `<id>_000000250.safetensors` (the last `<id>.safetensors`) and samples
+`samples/<time>__<step>_<n>.jpg`, as in BaseSDTrainProcess. Tested here against a fake trainer, traind against a
+fake run.py, and the UI on the dev server (captions, start, progress, stop, Add as LoRA). NOT built or run on the
+card (item 84).
 0.50.1, Søren's screenshot: 12 pictures with captions, "The trainer is not running". My 0.50.0 note said "add the
 profile, run update.sh" - but with nothing new to fetch the updater stopped at "Already up to date". Now
 `start_new_services` (in that branch) builds and starts services in `compose config --services` that have no
@@ -539,15 +547,14 @@ offline, ComfyUI loading ai-toolkit's SDXL LoRA (item 84).
 0.57.0, Søren: the trigger word should be at hand when a LoRA is chosen. The composer's pending row shows each
 LoRA on in the chat (name, trigger word, strength, a cross to turn it off); a click on the trigger word writes it
 into the message at the caret (`insertWord`). The picture menu showed the note instead of the trigger word when a
-LoRA had one (his trained LoRAs all have one) - now both. The config keys were checked against the same commit (`diffusion_trainer`,
-arch `flux2_klein_4b`, `cache_text_embeddings` so the 8 GB text encoder leaves the card, `timestep_type`
-"weighted" as ai-toolkit's UI default for klein; no quantisation, AdamW - quanto and bitsandbytes are the least
-sure on AMD). The image follows ai-toolkit's own AMD install (`manager/spec.py`: torch 2.13.0 / torchvision 0.28.0
-/ torchaudio 2.11.0 from the rocm7.1 index, held by a constraint while its requirements go in) - not ComfyUI's
-torch 2.14.1+rocm7.14. Checkpoints `<id>_000000250.safetensors` (the last `<id>.safetensors`) and samples
-`samples/<time>__<step>_<n>.jpg`, as in BaseSDTrainProcess. Tested here against a fake trainer, traind against a
-fake run.py, and the UI on the dev server (captions, start, progress, stop, Add as LoRA). NOT built or run on the
-card (item 84).
+LoRA had one (his trained LoRAs all have one) - now both.
+0.57.1, Søren's LoRA upload through hub.slq.dk came back as Nginx Proxy Manager's own page, "413 Request Entity
+Too Large" (openresty), shown raw as the error. The proxy refused it, not the Hub: INSTALL.md step 4 said
+`client_max_body_size 600m` while the Hub takes a LoRA of up to 3 GB - now 3200m, plus `proxy_request_buffering off`
+(an upload goes straight on instead of onto the proxy's disk first). `api.ts` turns an HTML error page into a
+sentence (413: raise the limit or use the LAN address; 502-504: the Hub did not answer the proxy); the phone chat
+says a 413 message is too large for the connection. NOT known: the file's size and what NPM's Advanced field holds
+- only that its limit is below the file.
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
 host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU
@@ -769,7 +776,8 @@ the host if the VM ever stops by itself.
 6. **Nginx Proxy Manager**: hub.slq.dk works from Søren's phone (2026-10-22:
    signed in, the start page with his models). Not confirmed through it yet:
    SSE streaming of a long answer (`proxy_buffering off`), uploads
-   (`client_max_body_size`).
+   (`client_max_body_size`): 2026-10-30 a LoRA upload got NPM's 413 (INSTALL.md said 600m, now
+   3200m) - not yet seen to go through after the change.
 7. **PWA** install on a phone through hub.slq.dk.
 8. **FamilyLog** against the Hub's Ollama API with its real settings, and
    TwinCAT Coagent (format still unknown; all three formats and CORS exist).

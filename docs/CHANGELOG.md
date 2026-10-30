@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.57.1 - 2026-10-30
+
+- **A clear message when the proxy refuses an upload.** Through hub.slq.dk a
+  big file, such as a LoRA, could come back as Nginx Proxy Manager's raw
+  "413 Request Entity Too Large" page. The Hub now says what happened and what
+  to do. The proxy setup in docs/INSTALL.md (step 4) now allows 3200 MB, as a
+  LoRA can be up to 3 GB; it said 600 MB.
+
 ## 0.57.0 - 2026-10-30
 
 - **A chosen LoRA shows above the message box, with its trigger word.** A

@@ -92,6 +92,10 @@ async function errorFrom(res: Response): Promise<HubError> {
     return new HubError("address", `This key may not be used from this phone's address (${ip}).` +
       (viaProxy ? "" : " Is it on the home Wi-Fi?"), 403);
   }
+  if (res.status === 413 && !text) {
+    return new HubError("other", `The message is larger than the connection through ${location.host} lets through. ` +
+      "Send fewer or smaller files.", 413);
+  }
   if (res.status === 503) return new HubError("busy", text || "The Hub is busy. Try again in a moment.", 503);
   return new HubError("other", text || `The Hub answered ${res.status}.`, res.status);
 }
