@@ -288,7 +288,8 @@ export function PersonApp() {
     const thinking = !chosen && (mode === "on" || mode === "off") ? mode === "on" : level !== "quick";
     return { model, thinking, level,
       effort: cs.effort ?? entry?.thinking?.default_effort ?? (settings?.agent?.effort as string | undefined) ?? "medium",
-      skills: cs.skills ?? [], libraries: [], image_model: cs.image_model ?? null, image_loras: [] };   // no LoRAs: the admin's
+      skills: cs.skills ?? [], libraries: [], image_model: cs.image_model ?? null, image_loras: [],
+      image_lora_strength: {} };   // no LoRAs: the admin's
   }, [chat, draft, settings, llms]);
 
   const changeSettings = async (patch: Partial<ComposerSettings>) => {

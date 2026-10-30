@@ -22,6 +22,29 @@ export interface ComposerSettings {
   libraries: number[];
   image_model: string | null;      // null: the project's or Settings' model for pictures
   image_loras: string[];           // 0.49.0: the admin's LoRAs on every picture in this chat
+  image_lora_strength: Record<string, number>;   // 0.54.0: their strength in this chat (else the LoRA's own)
+}
+
+/** A LoRA's strength in this chat (0.54.0, Søren: "a slider when I choose it"). Saved when let go, not on every
+ *  move; at the LoRA's own strength nothing is saved, so a later change in its settings still applies. */
+function LoraStrength({ lora, value, onCommit }: { lora: Lora; value: number | undefined;
+  onCommit: (v: number | null) => void }) {
+  const own = lora.strength;
+  const [v, setV] = useState(value ?? own);
+  useEffect(() => setV(value ?? own), [value, own]);
+  const commit = () => {
+    const next = Math.abs(v - own) < 0.001 ? null : v;
+    if (next !== (value ?? null)) onCommit(next);
+  };
+  return (
+    <div className="menu-slider" onClick={(e) => e.stopPropagation()} title="Strength in this chat">
+      <input type="range" min={0} max={2} step={0.05} value={v} aria-label={`Strength of ${lora.name}`}
+        onChange={(e) => setV(Number(e.target.value))} onPointerUp={commit} onKeyUp={commit} onBlur={commit} />
+      <span className="menu-slider-value">{v.toFixed(2)}</span>
+      {value !== undefined && <button type="button" className="link-btn" title={`Its own strength: ${own}`}
+        onClick={() => onCommit(null)}>Reset</button>}
+    </div>
+  );
 }
 
 interface Pending { key: number; name: string; size: number; preview: string | null; state: "uploading" | "done" | "failed";
@@ -196,6 +219,13 @@ export function Composer({ running, onSend, onStop, settings, onSettings, models
   const lorasOn = fitting.filter((l) => settings.image_loras.includes(l.id));
   const toggleLora = (id: string) => onSettings({ image_loras: settings.image_loras.includes(id)
     ? settings.image_loras.filter((x) => x !== id) : [...settings.image_loras, id] });
+  const setStrength = (id: string, v: number | null) => {
+    const next = { ...settings.image_lora_strength };
+    if (v === null) delete next[id];
+    else next[id] = Math.round(v * 100) / 100;
+    onSettings({ image_lora_strength: next });
+  };
+  const strengthOf = (l: Lora) => settings.image_lora_strength[l.id] ?? l.strength;
 
   return (
     <div className={`composer ${drag ? "drag" : ""}`}
@@ -369,7 +399,7 @@ export function Composer({ running, onSend, onStop, settings, onSettings, models
         {(pictureModels.length > 1 || fitting.length > 0) && (
           <MenuButton up label={<><ImageIcon size={15} /> <span className="ellipsis chip-picture hide-narrow">{picture?.name ?? "Pictures"}
             {lorasOn.length ? ` + ${lorasOn.length} LoRA${lorasOn.length > 1 ? "s" : ""}` : ""}</span></>}
-            title={`Model for pictures: ${picture?.name ?? "none"}${lorasOn.length ? `, with ${lorasOn.map((l) => l.name).join(", ")}` : ""}`}>
+            title={`Model for pictures: ${picture?.name ?? "none"}${lorasOn.length ? `, with ${lorasOn.map((l) => `${l.name} (${strengthOf(l)})`).join(", ")}` : ""}`}>
             {(close) => (
               <>
                 <div className="menu-head">Pictures in this chat</div>
@@ -388,11 +418,15 @@ export function Composer({ running, onSend, onStop, settings, onSettings, models
                   <div className="menu-sep" />
                   <div className="menu-head">LoRAs on every picture</div>
                   {fitting.map((l) => (
-                    <button key={l.id} className="menu-item" role="menuitemcheckbox"
-                      aria-checked={settings.image_loras.includes(l.id)} onClick={() => toggleLora(l.id)}>
-                      {settings.image_loras.includes(l.id) ? <Check size={15} /> : <span style={{ width: 15 }} />}
-                      <span>{l.name}<small>{l.note || (l.trigger ? `Trigger word ${l.trigger}` : `Strength ${l.strength}`)}</small></span>
-                    </button>
+                    <div key={l.id}>
+                      <button className="menu-item" role="menuitemcheckbox"
+                        aria-checked={settings.image_loras.includes(l.id)} onClick={() => toggleLora(l.id)}>
+                        {settings.image_loras.includes(l.id) ? <Check size={15} /> : <span style={{ width: 15 }} />}
+                        <span>{l.name}<small>{l.note || (l.trigger ? `Trigger word ${l.trigger}` : `Strength ${l.strength}`)}</small></span>
+                      </button>
+                      {settings.image_loras.includes(l.id) && <LoraStrength lora={l}
+                        value={settings.image_lora_strength[l.id]} onCommit={(v) => setStrength(l.id, v)} />}
+                    </div>
                   ))}
                 </>}
               </>

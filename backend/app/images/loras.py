@@ -78,7 +78,36 @@ def guess_base(header: dict) -> str:
         return "ernie-image"
     if any(w in said for w in ("klein", "flux2", "flux.2", "flux_2")) or "to_qkv_mlp_proj" in keys \
             or "double_blocks" in keys or "single_blocks" in keys or "single_transformer_blocks" in keys:
-        return "flux2-klein"              # (a FLUX.1 LoRA looks the same - it does not fit klein)
+        # FLUX-shaped: klein 4B only when its blocks and sizes say so - a FLUX.1 LoRA (deeper) is left for the
+        # admin to say (Chroma, perhaps); klein 9B is refused when it is added (flux_size)
+        return "" if flux_size(header) == "flux1" else "flux2-klein"
+    return ""
+
+
+def flux_size(header: dict) -> str:
+    """Which FLUX a FLUX-shaped LoRA was trained on, from its block numbers and layer widths - "klein-9b", "flux1",
+    or "" (klein 4B, or it cannot be told). The sizes are ai-toolkit's (flux2/src/model.py): klein 4B has hidden
+    size 3072, 5 double and 20 single blocks; klein 9B 4096, 8 and 24; FLUX.1 3072, 19 and 38. A LoRA works only
+    with the size it was trained on."""
+    double = single = -1
+    widths: set[int] = set()
+    for k, v in header.items():
+        if k == "__metadata__":
+            continue
+        m = re.search(r"single(?:_transformer)?_blocks[._](\d+)[._]", k)
+        if m:
+            single = max(single, int(m.group(1)))
+        else:
+            m = re.search(r"(?:double_blocks|transformer_blocks)[._](\d+)[._]", k)
+            if m:
+                double = max(double, int(m.group(1)))
+        shape = v.get("shape") if isinstance(v, dict) else None
+        if m and re.search(r"lora_(?:A|down)", k) and isinstance(shape, list) and len(shape) == 2:
+            widths.add(int(shape[1]))
+    if double >= 8 or single >= 24:
+        return "flux1"
+    if 4096 in widths or double >= 5 or single >= 20:
+        return "klein-9b"
     return ""
 
 
@@ -178,6 +207,9 @@ class Loras:
         header = read_header(src)
         if not is_lora(header):
             raise LoraError("This .safetensors file is not a LoRA (a whole model is added under Picture models).")
+        if flux_size(header) == "klein-9b":
+            raise LoraError("This LoRA is for FLUX.2 klein 9B. The Hub's klein is the 4B, and a LoRA only works with "
+                            "the size it was trained on - look for one made for klein 4B.")
         fields = self._clean(name=name or Path(filename or src.name).stem, base=base or guess_base(header),
                              trigger=trigger or guess_trigger(header), strength=strength, note=note)
         with self._lock:

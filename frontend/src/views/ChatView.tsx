@@ -243,7 +243,7 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
     const thinking = !chosen && (mode === "on" || mode === "off") ? mode === "on" : level !== "quick";
     return { model, thinking, level, effort: cs.effort ?? entry?.thinking?.default_effort ?? agent.effort ?? "medium",
       skills: cs.skills ?? [], libraries: cs.libraries ?? [], image_model: cs.image_model ?? null,
-      image_loras: cs.image_loras ?? [] };
+      image_loras: cs.image_loras ?? [], image_lora_strength: cs.image_lora_strength ?? {} };
   }, [data, draft, project, settings, models, llms]);
 
   const changeSettings = async (patch: Partial<ComposerSettings>) => {

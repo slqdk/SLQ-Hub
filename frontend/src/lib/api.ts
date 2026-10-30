@@ -142,7 +142,8 @@ export interface Message { id: number; chat_id: number; role: "user" | "assistan
 
 export interface ChatSettings { model: string | null; thinking: boolean | null; effort: string | null; skills: string[];
   libraries: number[]; image_model: string | null; level?: string | null;
-  image_loras?: string[] }       // 0.49.0: the admin's LoRAs on every picture in the chat
+  image_loras?: string[];        // 0.49.0: the admin's LoRAs on every picture in the chat
+  image_lora_strength?: Record<string, number> }   // 0.54.0: their strength in this chat
 export interface Chat { id: number; project_id: number | null; title: string; settings: ChatSettings; summary?: string;
   summary_upto?: number;
   created_at: string; updated_at: string; test_run?: string | null }

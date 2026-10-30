@@ -29,7 +29,8 @@ from ..projects import blobs
 
 CHAT_DEFAULTS = {"model": None, "thinking": None, "effort": None, "skills": [], "libraries": [], "image_model": None,
                  "level": None,                 # effort (0.38.0): quick | think | extra; None = the project's or Settings'
-                 "image_loras": []}             # 0.49.0: the admin's LoRAs on every picture in the chat (ids)
+                 "image_loras": [],             # 0.49.0: the admin's LoRAs on every picture in the chat (ids)
+                 "image_lora_strength": {}}     # 0.54.0: their strength in this chat (id -> 0..2), else the LoRA's
 
 
 def _chat(r) -> dict:

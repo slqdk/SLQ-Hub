@@ -9,7 +9,7 @@ import struct
 import pytest
 
 from app.images import workflows as W
-from app.images.loras import LoraError, Loras, guess_base, with_triggers
+from app.images.loras import LoraError, Loras, flux_size, guess_base, with_triggers
 
 from .test_agent import finish, new_chat, say
 from .test_images_models import _install, _node
@@ -40,6 +40,17 @@ def test_the_family_is_read_from_the_file():
     assert guess_base({k: T for k in ZIMG}) == "z-image"
     assert guess_base({"x.lora_A.weight": T, "__metadata__": {"ss_base_model_version": "flux2_klein_4b"}}) == "flux2-klein"
     assert guess_base({"x.lora_A.weight": T}) == ""
+    # klein 4B against FLUX.1 and klein 9B, by block numbers and widths (0.54.0)
+    def blocks(double, single, width=3072):
+        h = {f"diffusion_model.double_blocks.{i}.img_attn.qkv.lora_A.weight":
+             {"dtype": "F16", "shape": [16, width], "data_offsets": [0, 0]} for i in range(double)}
+        h.update({f"diffusion_model.single_blocks.{i}.linear1.lora_A.weight":
+                  {"dtype": "F16", "shape": [16, width], "data_offsets": [0, 0]} for i in range(single)})
+        return h
+    assert flux_size(blocks(5, 20)) == "" and guess_base(blocks(5, 20)) == "flux2-klein"
+    assert flux_size(blocks(19, 38)) == "flux1" and guess_base(blocks(19, 38)) == ""
+    assert flux_size(blocks(8, 24, 4096)) == "klein-9b" and flux_size(blocks(2, 0, 4096)) == "klein-9b"
+    assert flux_size({"transformer.single_transformer_blocks.23.attn.to_qkv_mlp_proj.lora_A.weight": T}) == "klein-9b"
     assert with_triggers("a man on a bike", ["sorenx"]) == "sorenx, a man on a bike"
     assert with_triggers("sorenx on a bike", ["sorenx"]) == "sorenx on a bike"
     assert with_triggers("an explorative walk", ["lora"]) == "lora, an explorative walk"     # a word, not a part
@@ -53,6 +64,12 @@ def test_adding_changing_and_removing(tmp_path):
     assert entry["id"] == "soren-face-v2" and entry["base"] == "flux2-klein" and entry["trigger"] == "sorenx"
     assert entry["strength"] == 1.0 and (tmp_path / "models/comfy/loras/hub/soren-face-v2.safetensors").is_file()
     assert not src.exists()                                               # moved into place
+    nine = tmp_path / "klein9b.safetensors"                              # klein 9B: refused, with the reason
+    raw = json.dumps({"diffusion_model.double_blocks.7.img_attn.qkv.lora_A.weight":
+                      {"dtype": "F16", "shape": [16, 4096], "data_offsets": [0, 0]}}).encode()
+    nine.write_bytes(struct.pack("<Q", len(raw)) + raw)
+    with pytest.raises(LoraError, match="klein 9B"):
+        store.add_file(nine, nine.name)
     again = tmp_path / "again.safetensors"
     again.write_bytes(safetensors(KLEIN))
     assert store.add_file(again, again.name, name="Soren face v2")["id"] == "soren-face-v2-2"
@@ -124,6 +141,20 @@ async def test_the_admin_adds_and_uses_a_lora_and_a_person_never_sees_one(signed
     assert tool["function"]["parameters"]["properties"]["loras"]["items"]["properties"]["id"]["enum"] == ["cx9020"]
     result = next(e["data"]["text"] for e in run.events if e["type"] == "tool_result")
     assert "with the LoRA CX9020" in result
+
+    # The chat's own strength (the slider in its picture menu, 0.54.0) wins over the LoRA's; nonsense is ignored,
+    # and a strength the call names wins over both.
+    from types import SimpleNamespace
+    from app.agent.tools import images as IT
+    store = app.state.hub.extras["loras"]
+    for given, used in ((0.65, 0.65), ("lots", 0.9), (7, 0.9), (None, 0.9)):
+        ctx = SimpleNamespace(engine=SimpleNamespace(device=None),          # the admin's turn
+                              chat={"settings": {"image_loras": ["cx9020"], "image_lora_strength": {"cx9020": given}}})
+        assert store.resolve(IT._loras(ctx, {}), "flux2-klein")[0] == [("hub/cx9020.safetensors", used)]
+    ctx = SimpleNamespace(engine=SimpleNamespace(device=None),
+                          chat={"settings": {"image_loras": ["cx9020"], "image_lora_strength": {"cx9020": 0.65}}})
+    named = IT._loras(ctx, {"loras": [{"id": "cx9020", "strength": 1.2}]})
+    assert store.resolve(named, "flux2-klein")[0] == [("hub/cx9020.safetensors", 1.2)]
 
     # A person: no LoRA routes, no LoRA in the tool, and one named in a device turn is not used.
     await add_person(signed_in)

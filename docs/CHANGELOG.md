@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.54.0 - 2026-10-30
+
+- **A strength slider for each LoRA in a chat.** Tick a LoRA in the picture
+  menu and a slider shows under it (0-2); the chat keeps it, and Reset goes
+  back to the LoRA's own strength (its settings). A strength named in a
+  request still wins.
+- **A LoRA for the wrong FLUX is caught.** A LoRA made for FLUX.2 klein 9B is
+  refused with the reason - the Hub's klein is the 4B, and a LoRA works only
+  with the size it was trained on. A FLUX.1 LoRA is no longer taken for a
+  klein one; you say which models it is for.
+
 ## 0.53.1 - 2026-10-30
 
 - **Trigger words: a warning when one has a real word or digits in it.**

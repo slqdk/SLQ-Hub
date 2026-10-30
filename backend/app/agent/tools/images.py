@@ -185,12 +185,26 @@ def _admins_turn(ctx: ToolContext) -> bool:
     return getattr(ctx.engine, "device", None) is None
 
 
+def _strength(value) -> float | None:
+    """A chat's strength for a LoRA (its picture menu's slider), or None for the LoRA's own."""
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return None
+    return round(v, 2) if 0.0 <= v <= 2.0 else None
+
+
 def _loras(ctx: ToolContext, args: dict) -> list[dict]:
     """The LoRAs for this call: the chat's own (its picture menu), then the ones the call names (their strength
     wins). None in a person's chat."""
     if not _admins_turn(ctx):
         return []
-    out = [{"id": x} for x in (((ctx.chat or {}).get("settings") or {}).get("image_loras") or []) if isinstance(x, str)]
+    settings = (ctx.chat or {}).get("settings") or {}
+    strengths = settings.get("image_lora_strength") or {}
+    if not isinstance(strengths, dict):
+        strengths = {}
+    out = [{"id": x, "strength": _strength(strengths.get(x))} for x in (settings.get("image_loras") or [])
+           if isinstance(x, str)]
     for item in args.get("loras") or []:
         item = {"id": item} if isinstance(item, str) else item
         lid = item.get("id") or item.get("name") if isinstance(item, dict) else None
