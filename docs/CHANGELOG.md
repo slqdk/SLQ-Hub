@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.60.0 - 2026-10-31
+
+- **Duplicate a training onto another model.** The Duplicate dialog has a
+  "Train on" choice, so an SDXL training can become a FLUX.2 klein one (or
+  the other way round) with its pictures and captions, without adding the
+  pictures again. A klein LoRA works in new pictures and in changes to a
+  picture; SDXL models only make new pictures.
+
 ## 0.59.5 - 2026-10-31
 
 - **SDXL trainings say what their noisy samples mean.** The trainer's sample

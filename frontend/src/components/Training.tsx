@@ -131,7 +131,8 @@ export function TrainingSection({ onAdded }: { onAdded: () => void }) {
         onMade={(id) => { setCreating(false); load(); setOpen(id); }} />}
       {open && <TrainingEditor key={open} rid={open} data={data} onClose={() => { setOpen(null); load(); }}
         onAdded={onAdded} onDuplicate={(run) => { setOpen(null); setCopying(run); }} />}
-      {copying && <DuplicateTraining run={copying} onClose={() => { setOpen(copying.id); setCopying(null); }}
+      {copying && <DuplicateTraining run={copying} bases={data.bases}
+        onClose={() => { setOpen(copying.id); setCopying(null); }}
         onMade={(id) => { setCopying(null); load(); setOpen(id); }} />}
     </div>
   );
@@ -298,10 +299,14 @@ function nextName(name: string): string {
   return m ? `${m[1]} v${Number(m[2]) + 1}` : `${name.trim().slice(0, 76)} v2`;
 }
 
-function DuplicateTraining({ run, onClose, onMade }: { run: TrainingRun; onClose: () => void;
-  onMade: (id: string) => void }) {
+function DuplicateTraining({ run, bases, onClose, onMade }: { run: TrainingRun; bases: TrainingOverview["bases"];
+  onClose: () => void; onMade: (id: string) => void }) {
   const { toast } = useApp();
-  const [f, setF] = useState({ name: nextName(run.name), trigger: run.trigger, kind: run.kind as string });
+  // 0.60.0: the copy can train on another model (an SDXL person moved to FLUX.2 klein) - it starts at this one's
+  const own = run.base === "sdxl" ? `sdxl:${run.checkpoint}` : (bases[0]?.id ?? "");
+  const [f, setF] = useState({ name: nextName(run.name), trigger: run.trigger, kind: run.kind as string,
+    base: bases.some((b) => b.id === own) ? own : (bases[0]?.id ?? "") });
+  const chosen = bases.find((b) => b.id === f.base);
   const [busy, setBusy] = useState(false);
   const make = async () => {
     setBusy(true);
@@ -321,7 +326,8 @@ function DuplicateTraining({ run, onClose, onMade }: { run: TrainingRun; onClose
         <button className="btn primary" disabled={busy || !f.name.trim() || f.trigger.length < 3} onClick={make}>
           Duplicate</button></>}>
       <p className="muted small" style={{ margin: 0 }}>A new training with the same pictures, captions, steps and rank -
-        not the checkpoints or samples, which stay with {run.name}. Change what you want to try in the copy.</p>
+        not the checkpoints or samples, which stay with {run.name}. Change what you want to try in the copy, also the
+        model it trains on.</p>
       <label className="field"><span>Name</span>
         <input className="input" value={f.name} maxLength={80} autoFocus
           onChange={(e) => setF({ ...f, name: e.target.value })} /></label>
@@ -334,6 +340,14 @@ function DuplicateTraining({ run, onClose, onMade }: { run: TrainingRun; onClose
         <select className="input" value={f.kind} onChange={(e) => setF({ ...f, kind: e.target.value })}>
           {Object.entries(KINDS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
         </select></label>
+      {bases.length > 1 && <label className="field"><span>Train on</span>
+        <select className="input" value={f.base} onChange={(e) => setF({ ...f, base: e.target.value })}>
+          {bases.map((b) => <option key={b.id} value={b.id}>{b.label}</option>)}
+        </select>
+        <small>{chosen?.family === "sdxl"
+          ? "Its LoRA works with every SDXL model, best with this one. SDXL models only make new pictures."
+          : "Its LoRA is used with FLUX.2 klein 4B in your chats - in new pictures and in changes to a picture."}</small>
+      </label>}
     </Modal>
   );
 }

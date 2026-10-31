@@ -250,6 +250,15 @@ async def test_a_lora_is_trained_on_an_sdxl_checkpoint(signed_in, app, fakes, mo
     assert lora["base"] == "sdxl" and "RealVisXL V5.0 (SDXL)" in lora["note"]
     copy = t.duplicate(rid)                                                    # a v2 keeps the base
     assert copy["base"] == "sdxl" and copy["checkpoint"] == "realvisxl-v5-0"
+    # 0.60.0: a copy trained on another model - the SDXL person moved to FLUX.2 klein with pictures and captions
+    r = await signed_in.post(f"/hub/api/training/runs/{rid}/duplicate", json={"name": "Mira klein",
+                                                                            "base": "flux2-klein-4b"}, headers=ORIGIN)
+    moved = r.json()
+    assert r.status_code == 200 and moved["base"] == "flux2-klein-4b" and "checkpoint" not in moved
+    assert sorted(p.name for p in (t.root / moved["id"] / "images").iterdir()) == \
+        sorted(f"m{i}.{ext}" for i in range(5) for ext in ("jpg", "txt"))
+    bad = await signed_in.post(f"/hub/api/training/runs/{rid}/duplicate", json={"base": "sdxl:gone"}, headers=ORIGIN)
+    assert bad.status_code == 400 and "not downloaded" in bad.json()["detail"]
 
 
 async def test_a_stopped_training_goes_on_from_its_last_checkpoint(signed_in, app, fakes, monkeypatch):

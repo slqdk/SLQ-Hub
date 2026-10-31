@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.59.5, 2026-10-31)
+## State (0.60.0, 2026-10-31)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -625,6 +625,11 @@ sampling path - the LoRA as forward hooks in bf16 on ROCm (ComfyUI patches the w
 the LoRAs are fine, so the training page now says SDXL samples can show noise the LoRA does not have, and
 "Which step?" says to judge the faces and try a step in a chat. Two wrong guesses today (0.59.2, 0.59.4): measure
 in ai-toolkit itself (a sample with the LoRA merged, or in fp32) before changing the trainer again.
+0.60.0, Søren finds RealVisXL weak for likeness (Louise at 1500 clean in a chat but not like her) and wants LoRA
+pictures changed too - FLUX.2 klein does both (it edits, and the pipeline applies a klein LoRA to klein edits), and
+his klein Rikke was closer at the same steps. `Training.duplicate(..., base=)` and DuplicateIn `base` train the copy
+on another model (validated by `_base_fields`; without it the copy keeps the source's); the dialog has "Train on"
+when there is more than one base, starting at the source's. Not seen on the card: a klein copy of an SDXL training.
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
 host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU

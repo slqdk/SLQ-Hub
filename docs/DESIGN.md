@@ -1866,7 +1866,8 @@ files afterwards.
     three sample pictures are saved; the admin chooses one by its pictures
     and it becomes a LoRA (source "trained"). Duplicate copies a run's
     pictures and captions into a v2 (a new trigger word replaces the old one
-    in the captions), so v1 keeps its checkpoints; Start over empties the
+    in the captions, and the copy can train on another model, 0.60.0), so v1
+    keeps its checkpoints; Start over empties the
     same run. Stop is a pause (0.58.0): Continue starts ai-toolkit on the
     same folder, where it goes on from the newest checkpoint (with its
     optimizer state, kept while a run is stopped); a finished run goes on the

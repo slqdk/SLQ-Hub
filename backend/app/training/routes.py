@@ -74,12 +74,14 @@ class DuplicateIn(BaseModel):
     name: str | None = None
     trigger: str | None = None
     kind: str | None = None
+    base: str | None = None       # 0.60.0: train the copy on another model ("flux2-klein-4b" or "sdxl:<id>")
 
 
 @router.post("/runs/{rid}/duplicate")
 async def duplicate_run(rid: str, body: DuplicateIn, request: Request):
     try:
-        return _t(request).duplicate(rid, body.name or None, body.trigger or None, body.kind or None)
+        return _t(request).duplicate(rid, body.name or None, body.trigger or None, body.kind or None,
+                                     body.base or None)
     except TrainingError as exc:
         _fail(exc)
 

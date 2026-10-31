@@ -279,14 +279,16 @@ class Training:
         return self._set(rid, **fields)
 
     def duplicate(self, rid: str, name: str | None = None, trigger: str | None = None,
-                  kind: str | None = None) -> dict:
+                  kind: str | None = None, base: str | None = None) -> dict:
         """A new training with this one's pictures, captions, steps and rank - not its checkpoints or samples, so a
-        v2 can be tried while v1's results stay. A new trigger word replaces the old one in the captions."""
+        v2 can be tried while v1's results stay. A new trigger word replaces the old one in the captions. `base`
+        (0.60.0) trains the copy on another model - an SDXL person moved to FLUX.2 klein without adding the pictures
+        again; without it the copy keeps this one's."""
         src = self._load(rid)
         folder = self._dir(rid) / "images"
         run = self.create(name or _next_name(src["name"]), trigger or src["trigger"], kind or src["kind"],
                           src["steps"], src["rank"],
-                          base=f"sdxl:{src.get('checkpoint')}" if src.get("base") == "sdxl" else BASE["model"])
+                          base=base or (f"sdxl:{src.get('checkpoint')}" if src.get("base") == "sdxl" else BASE["model"]))
         old, new = src["trigger"], run["trigger"]
         word = re.compile(rf"(?<![A-Za-z0-9_]){re.escape(old)}(?![A-Za-z0-9_])", re.I)
         dest = self.root / run["id"] / "images"
