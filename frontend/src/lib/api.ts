@@ -270,10 +270,10 @@ export interface TrainingOverview { service: { ok: boolean; busy: boolean; toolk
   runs: TrainingRun[]; base: { model: string; family: string; label: string; repo: string }; kinds: string[];
   /** What a new training can be based on: FLUX.2 klein 4B and 9B (0.61.0), then the SDXL models the Hub has
    *  (0.56.0). A klein base says the picture model its LoRA is used with, what a first start downloads and its
-   *  licence; gated: the Hugging Face page to accept it on (it needs HF_TOKEN too). */
+   *  licence; gated: the Hugging Face pages to accept it on (it needs a Hugging Face token too). */
   bases: TrainingBase[];
   min_images: number; max_images: number; can_caption: boolean;
-  /** HF_TOKEN is set on the VM (0.61.0): klein 9B is gated on Hugging Face. */
+  /** A Hugging Face token is set (0.61.0; Sign-ins for downloads or HF_TOKEN, 0.64.0): klein 9B is gated. */
   hf_token?: boolean }
 export interface TrainingBase { id: string; label: string; family: string; lora_for?: string; download_gb?: number;
   licence?: string;

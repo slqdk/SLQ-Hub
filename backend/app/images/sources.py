@@ -12,19 +12,19 @@ Hugging Face says nothing about a file's architecture, so the chosen file's
 header is read (two Range requests, a few hundred KB of a 7 GB file): an SDXL
 checkpoint has the UNet with SDXL's 2816-wide class embedding, both text
 encoders and the VAE. Civitai's model API names each version's base model.
-Gated or login-only files need HF_TOKEN or CIVITAI_TOKEN in the VM's .env.
+Gated or login-only files need a token: Settings -> Models -> Sign-ins for downloads (0.64.0, app/tokens.py), or
+HF_TOKEN / CIVITAI_TOKEN in the VM's .env.
 """
 from __future__ import annotations
 
 import datetime as dt
 import json
-import os
 import re
 from urllib.parse import parse_qs, quote, urlparse
 
 import httpx
 
-from .. import hf
+from .. import hf, tokens
 from . import workflows as W
 
 CIVITAI = "https://civitai.com"
@@ -38,8 +38,7 @@ COMPONENT_DIRS = {"unet", "text_encoder", "text_encoder_2", "vae", "tokenizer", 
                   "scheduler", "vae_decoder", "vae_encoder"}
 ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,62}$")
 CIVITAI_TOKEN_HELP = ("Civitai wants a signed-in user for this file. Create an API key at civitai.com (Account "
-                      "settings -> API keys), put CIVITAI_TOKEN=... in /srv/slq-hub/.env and restart the Hub "
-                      "(update.sh compose up -d).")
+                      "settings -> API keys) and add it under Settings -> Models -> Sign-ins for downloads.")
 
 # Settings per kind of SDXL model, from where they are documented:
 #   sdxl:        ComfyUI's official SDXL template (image_sdxl_simple.json); its negative prompt without the two
@@ -131,8 +130,8 @@ async def _range(c: httpx.AsyncClient, url: str, headers: dict, start: int, end:
     want = end - start + 1
     async with c.stream("GET", url, headers={**headers, "Range": f"bytes={start}-{end}"}) as r:
         if r.status_code in (401, 403):
-            raise SourceError("The file is gated or private: accept its terms on huggingface.co and put an access "
-                              "token in /srv/slq-hub/.env as HF_TOKEN=..., then restart the Hub.", 403)
+            raise SourceError("The file is gated or private: accept its terms on huggingface.co and add a read token "
+                              "of that account under Settings -> Models -> Sign-ins for downloads.", 403)
         if r.status_code >= 400:
             raise SourceError(f"Reading the file's header failed ({r.status_code}).", 502)
         skip = start if r.status_code == 200 else 0
@@ -239,8 +238,8 @@ async def _hf(c: httpx.AsyncClient, repo: str, file: str | None, pick: str | Non
 
 def _civitai_headers() -> dict:
     h = {"User-Agent": "slq-hub/1", "Accept": "application/json"}
-    if os.environ.get("CIVITAI_TOKEN"):
-        h["Authorization"] = f"Bearer {os.environ['CIVITAI_TOKEN']}"
+    if tokens.civitai():
+        h["Authorization"] = f"Bearer {tokens.civitai()}"
     return h
 
 

@@ -44,10 +44,10 @@ function useSettings() {
       forgetSettings();
       if (section === "web") refreshAuth();           // whether the internet asks first shapes how answers show
       toast("Saved", "run");
-      return true;
+      return r.settings;                               // what was saved, as the Hub shows it (secrets masked)
     } catch (e) {
       toast((e as Error).message, "fault");
-      return false;
+      return null;
     }
   }, [toast, refreshAuth]);
   return { data, save, reload: load };
@@ -90,8 +90,8 @@ type S = ReturnType<typeof useSettings>;
 interface FieldSpec { key: string; label: string; type: "number" | "text" | "bool" | "select" | "password";
   help?: ReactNode; options?: { value: string; label: string }[]; min?: number; max?: number; step?: number }
 
-function SectionForm({ s, section, fields, title, intro }: { s: S; section: string; fields: FieldSpec[]; title?: string;
-  intro?: ReactNode }) {
+function SectionForm({ s, section, fields, title, intro, onSaved, children }: { s: S; section: string;
+  fields: FieldSpec[]; title?: string; intro?: ReactNode; onSaved?: () => void; children?: ReactNode }) {
   const saved = s.data?.settings[section] ?? {};
   const [values, setValues] = useState<Record<string, unknown>>(saved);
   const key = JSON.stringify(saved);
@@ -122,12 +122,72 @@ function SectionForm({ s, section, fields, title, intro }: { s: S; section: stri
       {fields.filter((f) => f.type === "bool").map((f) => (
         <SwitchRow key={f.key} checked={!!values[f.key]} onChange={(v) => setValues({ ...values, [f.key]: v })} title={f.label}>{f.help}</SwitchRow>
       ))}
-      <div><button className="btn primary" disabled={!dirty} onClick={() => s.save(section, values)}>Save changes</button></div>
+      {children}
+      <div><button className="btn primary" disabled={!dirty} onClick={async () => {
+        const now = await s.save(section, values);
+        if (now) {
+          setValues(now[section] ?? {});   // a secret saved again shows the same mask: the form would stay "changed"
+          onSaved?.();
+        }
+      }}>Save changes</button></div>
     </section>
   );
 }
 
 // ------------------------------------------------------------ models
+
+interface TokenState { from: "settings" | "env" | "";
+  check?: { ok: boolean; error?: string; name?: string; role?: string; gated?: boolean } }
+
+/** Sign-ins for downloads (0.64.0): the Hugging Face token gated models need (FLUX.2 klein 9B and its uncensored
+ *  encoder) and a Civitai API key - kept on the Hub, shown masked, used from the next download on. HF_TOKEN and
+ *  CIVITAI_TOKEN in .env still work; one saved here wins. Hugging Face is asked whether it takes its token. */
+function DownloadSignIns({ s }: { s: S }) {
+  const [state, setState] = useState<Record<"huggingface" | "civitai", TokenState> | null>(null);
+  const [checking, setChecking] = useState(false);
+  const look = useCallback(async (check: boolean) => {
+    setChecking(check);
+    try {
+      setState(await api(`/hub/api/tokens${check ? "?check=true" : ""}`));
+    } catch {
+      setState(null);
+    } finally {
+      setChecking(false);
+    }
+  }, []);
+  useEffect(() => { look(false); }, [look]);
+  const hf = state?.huggingface;
+  const c = hf?.check;
+  return (
+    <SectionForm s={s} section="tokens" title="Sign-ins for downloads" onSaved={() => look(true)}
+      intro={<>Some models download only for a signed-in account: gated ones on Hugging Face (FLUX.2 [klein] 9B and
+        its uncensored encoder), some files on Civitai. Kept on the Hub and shown masked; only you see them.</>}
+      fields={[
+        { key: "huggingface", label: "Hugging Face token", type: "password",
+          help: <>A Read token: huggingface.co, Settings, Access Tokens. A gated model's licence is accepted on its
+            page with the same account.</> },
+        { key: "civitai", label: "Civitai API key", type: "password",
+          help: <>civitai.com, Account settings, API keys.</> },
+      ]}>
+      {state && <div className="stack sign-ins">
+        <small className={c && !c.ok ? "warn-text" : "muted"}>
+          Hugging Face: {!hf?.from ? "no token yet - gated models cannot be downloaded."
+            : checking ? "asking Hugging Face..."
+              : c ? (c.ok ? `it takes the token${c.name ? ` - ${c.name}'s` : ""}${c.role ? ` ${c.role === "fineGrained"
+                ? "fine-grained" : c.role} token` : ""}${hf.from === "env" ? " (HF_TOKEN in .env)" : ""}.` : c.error)
+                : <>{hf.from === "env" ? "HF_TOKEN in .env on the VM is used; a token saved here is used instead."
+                  : "saved."} <button type="button" className="link-btn" onClick={() => look(true)}>Check it</button></>}
+        </small>
+        {c?.ok && c.gated === false && <small className="warn-text">This fine-grained token may not read gated
+          repositories: on Hugging Face, tick "Read access to contents of all public gated repos you can access" in its
+          permissions, or make a Read token instead.</small>}
+        <small className="muted">Civitai: {state.civitai.from === "settings" ? "saved."
+          : state.civitai.from === "env" ? "CIVITAI_TOKEN in .env on the VM is used; a key saved here is used instead."
+            : "no key - files that want a signed-in user cannot be downloaded."}</small>
+      </div>}
+    </SectionForm>
+  );
+}
 
 function ModelsTab({ s }: { s: S }) {
   const { models, refreshModels, toast, queue, modelNames } = useApp();
@@ -205,6 +265,7 @@ function ModelsTab({ s }: { s: S }) {
           help: "An app asking for llama3 or gpt-4o gets this model instead of an error." },
         { key: "preload", label: "Load the chat model when the Hub starts", type: "bool" },
       ]} />
+      <DownloadSignIns s={s} />
       <ModelGroup title="Language models" items={models.llm} busy={busy} onDownload={download} onCancel={cancel}
         onUpload={setUploadingFiles} onMove={(i, by) => move("llm", models.llm, i, by)}
         note="In this order in the chat's model choices. Move them with the arrows."
@@ -782,8 +843,7 @@ function AddImageModel({ choices, onClose, onAdded }: { choices: SdxlChoices; on
         <SdxlFields value={settings} choices={choices} onChange={(v) => { setSettings(v); setTuned(true); }} />
         {found.site === "civitai" && !found.tokens.civitai && <p className="muted small" style={{ margin: 0 }}>Many
           Civitai models download only for signed-in users. If this one does, the download says so: create an API key
-          at civitai.com (Account settings, API keys), put <code>CIVITAI_TOKEN=...</code> in /srv/slq-hub/.env and
-          restart the Hub (<code>update.sh compose up -d</code>).</p>}
+          at civitai.com (Account settings, API keys) and add it under Sign-ins for downloads, on this page.</p>}
         <div className="muted small">Download {chosen?.size ? bytes(chosen.size) : "-"} · {bytes(found.freeDisk)} free on the disk</div>
       </>)}
     </Modal>

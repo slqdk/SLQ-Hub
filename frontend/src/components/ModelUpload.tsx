@@ -354,7 +354,8 @@ export function TrainingBaseFiles({ base, label, onClose }: { base: string; labe
     <Modal wide title={`${label}: base model files`} onClose={onClose}
       footer={<button className="btn" onClick={onClose}>Close</button>}>
       <p className="muted small" style={{ margin: 0 }}>What a training on {label} reads. Missing files are downloaded
-        when it starts{gated.length ? ` - the gated one${one ? "" : "s"} only with HF_TOKEN set` : ""}; or upload any
+        when it starts{gated.length ? ` - the gated one${one ? "" : "s"} only with a Hugging Face token (Settings,
+        Models, Sign-ins for downloads)` : ""}; or upload any
         of them from this computer instead, exactly as Hugging Face has them.{repos.length > 0 && <>
           {" "}{one ? `${baseName(gated[0].path)} is` : "They are"} on {repos.map((r, i) => <span key={r}>
             {i > 0 && " and "}<a href={`https://huggingface.co/${r}`} target="_blank" rel="noreferrer">{r}</a></span>)}:

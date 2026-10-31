@@ -272,7 +272,7 @@ async def test_sdxl_from_civitai(signed_in, app, fakes, monkeypatch):
     # Civitai wants a signed-in user: the download fails and says how to fix it.
     await _drain(hub)
     st = next(d for d in hub.extras["downloads"].snapshot()["files"] if d["model"] == "pony-civitai")
-    assert st["status"] == "failed" and "CIVITAI_TOKEN" in st["error"]
+    assert st["status"] == "failed" and "Sign-ins for downloads" in st["error"]          # 0.64.0: set in the UI
     # With the key, the download goes through Civitai's redirect; the key stays with Civitai.
     monkeypatch.setenv("CIVITAI_TOKEN", "civ-tok")
     assert (await signed_in.post("/hub/api/models/pony-civitai/download")).status_code == 200

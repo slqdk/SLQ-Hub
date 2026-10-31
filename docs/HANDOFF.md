@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.63.0, 2026-10-31)
+## State (0.64.0, 2026-10-31)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -748,6 +748,19 @@ are; Søren was told, nothing restricts it. A test that had passed for months fa
 from here on (test_usage: the card's idle energy 2.014-2.024 Wh against < 2.01): a ~0.3 s garbage collection fell
 inside it - a gcprobe plugin found gen-2 collections of 0.28 s in that file - so it freezes the meter's clock now.
 NOT tried on the card (item 84): any of it.
+0.64.0, Søren (a screenshot of klein 9B uncensored's failed download, from his phone): "Can i somehow put in the
+token in the ui in stead?" Settings section `tokens` (`huggingface`, `civitai`) in DEFAULTS, in SECRET_SETTINGS (masked
+as the cloud API key is; the mask sent back keeps the value), not in the export's SAFE_SECTIONS, not in `_for_people`,
+and PUT /hub/api/settings is the owner's (not in MEMBER_ROUTES). `app/tokens.py`: `use(settings)` in build_hub,
+`hf()`/`civitai()` - Settings first, then .env - read at each request by hf.py `_headers`, downloads.py `_source` and
+`hf_login`, images/sources.py, the training's fetch and overview, so no restart; tests reset it after each test
+(conftest `_tokens_forget_the_hub`). `GET /hub/api/tokens` says where each comes from ("settings", "env", "") and,
+with check=true, asks Hugging Face's `/api/whoami-v2` with the token: name, role, and for a fine-grained token
+`canReadGatedRepos` - that field and the reply's shape (auth.accessToken.role) are from memory of the API, NOT seen
+in a real reply here (no token in this sandbox; a different shape only loses the name/role/warning, not the check).
+UI: "Sign-ins for downloads" under Defaults in Settings -> Models (SectionForm got `onSaved` and children), the
+status under it; the gated-download, training and upload hints point there. tools/models.py (the installer) still
+reads HF_TOKEN only. NOT tried on the VM: a real token saved in the UI and a gated download with it.
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
 host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU

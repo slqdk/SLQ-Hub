@@ -87,7 +87,8 @@ function orList(items: string[]): string {
 }
 
 /** What choosing a base means: the picture model its LoRA is used with, and for klein 9B (0.61.0) its size, its
- *  download, and that it is gated on Hugging Face (HF_TOKEN on the VM, the licence accepted on its page). */
+ *  download, and that it is gated on Hugging Face (a token - Settings, Models, Sign-ins for downloads, 0.64.0 - and
+ *  the licence accepted on its page). */
 function BaseHint({ base, hfToken, copy }: { base?: TrainingBase; hfToken?: boolean; copy?: boolean }) {
   if (!base) return null;
   if (base.family === "sdxl") return <small>{copy
@@ -106,10 +107,9 @@ function BaseHint({ base, hfToken, copy }: { base?: TrainingBase; hfToken?: bool
       {pages.length > 1 ? " the licences on " : " its licence on "}{pages.map((url, i) => <span key={url}>
         {i > 0 && (i === pages.length - 1 ? " and " : ", ")}
         <a href={url} target="_blank" rel="noreferrer">{url.replace("https://huggingface.co/", "")}</a></span>)}{hfToken
-        ? " with the account of the Hub's HF_TOKEN."
-        : ", then put a read token as HF_TOKEN in /srv/slq-hub/.env on the VM and restart the Hub " +
-          "(update.sh compose up -d). No HF_TOKEN is set now - or upload the base model's files from this " +
-          "computer, on the training's page."}</small>}
+        ? " with the account of the Hub's Hugging Face token."
+        : ", then add a read token of that account under Sign-ins for downloads (Settings, Models). None is " +
+          "set now - or upload the base model's files from this computer, on the training's page."}</small>}
   </>;
 }
 
@@ -632,7 +632,8 @@ function TrainingEditor({ rid, data, onClose, onAdded, onDuplicate, onBaseFiles 
                   : run.resume_step != null ? `Continue trains on from step ${run.resume_step} to ${run.steps}.`
                     : `${run.steps} steps.${base?.download_gb ? ` The first time on ${base.label}, about `
                       + `${base.download_gb} GB of model files are downloaded first${base.gated && !data.hf_token
-                        ? " - it is gated on Hugging Face, which needs HF_TOKEN on the VM (not set now)" : ""}.`
+                        ? " - it is gated on Hugging Face, which needs a token (Sign-ins for downloads; none yet)"
+                        : ""}.`
                       : ""}`}
             {base?.download_gb && <> <button type="button" className="link-btn" onClick={() => onBaseFiles(base)}>
               Base model files</button></>}</span>

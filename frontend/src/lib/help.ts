@@ -428,7 +428,8 @@ export const SECTIONS: HelpSection[] = [
           "The training page's Which step? and Make it better buttons, and the ? at Steps and Rank, explain how to "
           + "choose and what to change.",
           "The first training on a model downloads its files: about 16 GB for klein 4B, 35 GB for klein 9B. klein 9B "
-          + "is gated on Hugging Face: accept its licence there and set HF_TOKEN on the VM first - or upload its base "
+          + "is gated on Hugging Face: accept its licence there and add a Hugging Face token under Settings, Models, "
+          + "Sign-ins for downloads first - or upload its base "
           + "model files from the computer (Base model files, on the training). A LoRA works only with the model size "
           + "it was trained on.",
           "klein 9B uncensored trains the same model with ponpoke's uncensored text encoder, the one FLUX.2 [klein] 9B "

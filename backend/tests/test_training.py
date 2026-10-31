@@ -537,7 +537,7 @@ async def test_a_lora_is_trained_on_klein_9b(signed_in, app, fakes, monkeypatch)
     assert r.status_code == 200, r.text
     await wait_for(lambda: t._load(rid)["state"] == "failed")
     err = t._load(rid)["error"]
-    assert "gated" in err and "HF_TOKEN" in err and "huggingface.co/black-forest-labs/FLUX.2-klein-base-9B" in err
+    assert "gated" in err and "Sign-ins for downloads" in err and "huggingface.co/black-forest-labs/FLUX.2-klein-base-9B" in err
     assert fakes.hf["downloaded"] == [] and rid not in fakes.trainer["jobs"]     # nothing fetched, the card not taken
 
     monkeypatch.setenv("HF_TOKEN", "hf_someone_else")                # a token whose account has not accepted it
@@ -545,7 +545,7 @@ async def test_a_lora_is_trained_on_klein_9b(signed_in, app, fakes, monkeypatch)
     await wait_for(lambda: t._load(rid)["state"] == "failed")
     assert "accept its licence" in t._load(rid)["error"] and "account the token belongs to" in t._load(rid)["error"]
     # a token Hugging Face does not take at all (wrong or expired) answers 401: said as such, not as the licence
-    assert "did not take the HF_TOKEN" in R.gated_help("black-forest-labs/FLUX.2-klein-base-9B", True, 401)
+    assert "did not take the token" in R.gated_help("black-forest-labs/FLUX.2-klein-base-9B", True, 401)
 
     monkeypatch.setenv("HF_TOKEN", "hf_ok")
     assert (await signed_in.get("/hub/api/training")).json()["hf_token"] is True

@@ -15,6 +15,15 @@ from .mocks import (HostRouter, make_civitai, make_civitai_delivery, make_comfy,
 CATALOG = Path(__file__).resolve().parents[1] / "app" / "catalog" / "models.json"
 
 
+@pytest.fixture(autouse=True)
+def _tokens_forget_the_hub():
+    """The download sign-ins (app/tokens.py, 0.64.0) follow the Hub built last: after each test, none - so a token one
+    test saves in Settings never reaches the next, which may have no Hub of its own."""
+    yield
+    from app import tokens
+    tokens.use(None)
+
+
 def _install_fake_models(models_dir: Path, ids: set[str]) -> None:
     cat = json.loads(CATALOG.read_text())
     for group in ("llm", "aux", "comfy", "audio", "video"):

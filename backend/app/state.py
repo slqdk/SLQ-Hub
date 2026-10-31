@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 import httpx
 from fastapi import Request
 
-from . import db
+from . import db, tokens
 from .catalog import Catalog
 from .config import Env, Settings
 from .gpu.aux import AuxManager
@@ -76,6 +76,7 @@ def build_hub(env: Env, transports: Transports | None = None) -> Hub:
     env.data_dir.mkdir(parents=True, exist_ok=True)
     db.configure(env.db_path)
     settings = Settings(env.data_dir / "settings.json")
+    tokens.use(settings)                     # download sign-ins from Settings (0.64.0), as db is configured above
     catalog = Catalog(env.models_dir, env.data_dir / "models.override.json")
     runner = Runner(env.llm_url, env.internal_token, env.llm_host, transport=t.runner)
     comfy = Comfy(env.comfy_url, transport=t.comfy, files=env.comfy_files)

@@ -830,6 +830,16 @@ def make_hf(state: dict) -> FastAPI:
         hits.sort(key=lambda m: -m.get("downloads", 0))
         return hits[:int(q.get("limit") or 50)]
 
+    @app.get("/api/whoami-v2")
+    async def whoami(request: Request):
+        """Who a token belongs to (0.64.0, Settings -> Models -> Sign-ins for downloads): state["whoami"][token] is
+        the reply; any other token gets the real API's 401."""
+        token = (request.headers.get("authorization") or "").removeprefix("Bearer ")
+        reply = (state.get("whoami") or {}).get(token)
+        if reply is None:
+            return JSONResponse({"error": "Invalid credentials in Authorization header"}, status_code=401)
+        return reply
+
     @app.get("/api/models/{owner}/{name}/tree/main")
     async def tree(owner: str, name: str, recursive: bool = False):
         r = repo_of(owner, name)

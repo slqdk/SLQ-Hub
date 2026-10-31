@@ -91,7 +91,7 @@ async def test_a_gated_file_says_what_to_do(tmp_path, monkeypatch):
         assert len(st["error"]) <= 300
     assert seen == [None, "Bearer hf_x"]
     from app.downloads import hf_login                       # a token Hugging Face does not take: 401 with a token
-    assert "did not take the HF_TOKEN" in hf_login("acme/big", 401) and len(hf_login("acme/big", 401)) <= 300
+    assert "did not take the token" in hf_login("acme/big", 401) and len(hf_login("acme/big", 401)) <= 300
 
 
 async def test_a_file_a_training_fetched_is_linked_not_downloaded(tmp_path):

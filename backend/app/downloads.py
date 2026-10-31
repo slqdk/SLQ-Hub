@@ -12,25 +12,25 @@ from urllib.parse import urlparse
 
 import httpx
 
+from . import tokens
 from .catalog import GROUPS, Catalog
 
 CIVITAI_LOGIN = ("Civitai wants a signed-in user for this file: create an API key at civitai.com (Account settings -> "
-                 "API keys), put CIVITAI_TOKEN=... in /srv/slq-hub/.env, restart the Hub (update.sh compose up -d) "
-                 "and download again.")
+                 "API keys), add it under Settings -> Models -> Sign-ins for downloads and download again.")
 
 
 def hf_login(repo: str, status: int = 403) -> str:
-    """A gated Hugging Face file (FLUX.2 klein 9B's, 0.61.0): 401 without HF_TOKEN or with one Hugging Face does not
-    take (wrong or expired), 403 when its account has not accepted the model's licence. (The queue keeps 300
-    characters of an error.)"""
-    if not os.environ.get("HF_TOKEN"):
-        return (f"{repo} is gated: sign in on Hugging Face, accept its licence at huggingface.co/{repo}, put a read "
-                "token as HF_TOKEN=... in /srv/slq-hub/.env, restart the Hub (update.sh compose up -d) and download "
-                "again.")
+    """A gated Hugging Face file (FLUX.2 klein 9B's, 0.61.0): 401 without a token or with one Hugging Face does not
+    take (wrong or expired), 403 when its account has not accepted the model's licence. The token is set in
+    Settings -> Models -> Sign-ins for downloads (0.64.0; or HF_TOKEN in .env). (The queue keeps 300 characters of an
+    error.)"""
+    if not tokens.hf():
+        return (f"{repo} is gated: sign in on Hugging Face, accept its licence at huggingface.co/{repo}, add a read "
+                "token of that account under Settings -> Models -> Sign-ins for downloads, and download again.")
     if status == 401:
-        return (f"Hugging Face did not take the HF_TOKEN for {repo}: is it a valid read token, and has its account "
-                f"accepted the licence at huggingface.co/{repo}?")
-    return (f"Hugging Face refused {repo} for this HF_TOKEN: accept its licence at huggingface.co/{repo} with the "
+        return (f"Hugging Face did not take the token for {repo}: is it a valid read token (Settings -> Models -> "
+                f"Sign-ins for downloads), and has its account accepted the licence at huggingface.co/{repo}?")
+    return (f"Hugging Face refused {repo} for this token: accept its licence at huggingface.co/{repo} with the "
             "account the token belongs to (it is granted at once) and download again.")
 
 
@@ -46,11 +46,11 @@ def _source(f: dict) -> tuple[str, dict, str]:
     if f.get("url"):
         host = (urlparse(f["url"]).hostname or "").lower()
         civitai = host == "civitai.com" or host.endswith(".civitai.com")
-        if civitai and os.environ.get("CIVITAI_TOKEN"):
-            headers["Authorization"] = f"Bearer {os.environ['CIVITAI_TOKEN']}"
+        if civitai and tokens.civitai():
+            headers["Authorization"] = f"Bearer {tokens.civitai()}"
         return f["url"], headers, "Civitai" if civitai else host
-    if os.environ.get("HF_TOKEN"):
-        headers["Authorization"] = f"Bearer {os.environ['HF_TOKEN']}"
+    if tokens.hf():
+        headers["Authorization"] = f"Bearer {tokens.hf()}"
     return f"https://huggingface.co/{f['repo']}/resolve/main/{f['path']}?download=true", headers, "Hugging Face"
 
 

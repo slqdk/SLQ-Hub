@@ -228,7 +228,7 @@ async def test_hugging_face_problems(signed_in, app, fakes, monkeypatch):
     r = await get("acme/Nothing-GGUF")
     assert r.status_code == 404 and "no model called" in r.json()["detail"]
     r = await get("acme/Gated-GGUF")
-    assert r.status_code == 403 and "HF_TOKEN" in r.json()["detail"]
+    assert r.status_code == 403 and "Sign-ins for downloads" in r.json()["detail"]      # 0.64.0: set in the UI
     r = await get("acme/Safetensors-only")
     assert r.status_code == 400 and "GGUF" in r.json()["detail"]
     assert (await get("not a repo")).status_code == 400

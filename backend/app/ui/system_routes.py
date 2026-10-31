@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import re
 import shutil
 
@@ -12,7 +11,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from .. import auth, hf
+from .. import auth, hf, tokens
 from ..catalog import GROUPS
 from ..config import DEFAULTS
 from ..gpu.scheduler import SchedulerError
@@ -21,7 +20,7 @@ from ..images import workflows as W
 from ..state import get_hub
 
 router = APIRouter()
-SECRET_SETTINGS = {("cloud", "api_key")}
+SECRET_SETTINGS = {("cloud", "api_key"), ("tokens", "huggingface"), ("tokens", "civitai")}   # shown masked
 
 
 # ---------------------------------------------------------------- queue + events
@@ -161,6 +160,55 @@ async def put_settings(body: SettingsPatch, request: Request):
     if body.section == "mcp" and "mcp" in hub.extras:
         asyncio.get_running_loop().create_task(hub.extras["mcp"].reload())
     return {"settings": _masked(hub.settings.all())}
+
+
+# ---------------------------------------------------------------- sign-ins for downloads (0.64.0)
+
+async def _hf_whoami(hub) -> dict:
+    """Whether Hugging Face takes the token, whose it is, and - for a fine-grained token, which may be made without -
+    whether it may read gated repositories (FLUX.2 klein 9B's). Its own API (whoami-v2), with the token only. The
+    errors follow "Hugging Face: " in the page."""
+    token = tokens.hf()
+    if not token:
+        return {"ok": False, "error": "No token is set."}
+    try:
+        async with httpx.AsyncClient(timeout=20, transport=hub.transports.web) as c:
+            r = await c.get(f"{hf.HF}/api/whoami-v2", headers={"Authorization": f"Bearer {token}",
+                                                               "User-Agent": "slq-hub/1"})
+    except httpx.HTTPError as exc:
+        return {"ok": False, "error": f"it could not be reached ({exc.__class__.__name__}) - try again."}
+    if r.status_code == 401:
+        return {"ok": False, "error": "it does not take this token - wrong, expired or deleted? Make a new read "
+                                      "token on huggingface.co (Settings, Access Tokens)."}
+    if r.status_code == 429:                 # huggingface_hub: "intentionally strict for security reasons"
+        return {"ok": False, "error": "it lets this be asked only now and then - check again in a few minutes. A "
+                                      "download tries the token anyway."}
+    if r.status_code >= 400:
+        return {"ok": False, "error": f"it answered {r.status_code} - try again later."}
+    try:
+        data = r.json()
+    except ValueError:
+        data = {}
+
+    def part(d, key: str) -> dict:
+        v = d.get(key) if isinstance(d, dict) else None
+        return v if isinstance(v, dict) else {}
+    access = part(part(data, "auth"), "accessToken")
+    role = str(access.get("role") or "")
+    gated = part(access, "fineGrained").get("canReadGatedRepos") if role == "fineGrained" else None
+    return {"ok": True, "name": str(data.get("name") or "") if isinstance(data, dict) else "", "role": role,
+            **({"gated": bool(gated)} if gated is not None else {})}
+
+
+@router.get("/hub/api/tokens")
+async def download_tokens(request: Request, check: bool = False):
+    """Where each sign-in for downloads comes from - "settings" (Settings -> Models), "env" (.env on the VM) or "" -
+    never the token itself. check=true asks Hugging Face whether it takes its token."""
+    hub = get_hub(request)
+    out: dict = {name: {"from": tokens.where(name)} for name in tokens.ENV}
+    if check and out["huggingface"]["from"]:
+        out["huggingface"]["check"] = await _hf_whoami(hub)
+    return out
 
 
 # ---------------------------------------------------------------- models
@@ -323,7 +371,7 @@ async def image_lookup(link: str, request: Request, pick: str | None = None):
     res["presets"] = sources.PRESETS
     res["samplers"] = list(W.SDXL_SAMPLERS)
     res["schedulers"] = list(W.SDXL_SCHEDULERS)
-    res["tokens"] = {"hf": bool(os.environ.get("HF_TOKEN")), "civitai": bool(os.environ.get("CIVITAI_TOKEN"))}
+    res["tokens"] = {"hf": bool(tokens.hf()), "civitai": bool(tokens.civitai())}
     return res
 
 

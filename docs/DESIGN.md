@@ -311,7 +311,8 @@ speculative decoding left out; two files of one quantisation, like `Model-Q4_K_M
 and `Model-noMTP-Q4_K_M`, by what their names do not share), rates each
 against the card's VRAM, and stores the entry in `data/models.custom.json`
 (files under `models/llm/hf/<owner>--<name>/`, downloaded by the Hub's own
-queue; `HF_TOKEN` in `.env` for gated repositories). They start with two slots
+queue; a Hugging Face token for gated repositories - Settings → Models →
+Sign-ins for downloads, or `HF_TOKEN` in `.env`). They start with two slots
 in a unified KV pool, q8_0 cache and the context chosen when adding them:
 
 | Id | File | Context | Notes |
@@ -405,6 +406,19 @@ are rounded in the catalog) and its SHA-256 when the catalog has one; a
 training base's file Hugging Face's size exactly. An uploaded model has no
 source to download from again: a lost file is uploaded again. The updater
 waits for an upload that is coming in.
+
+**Sign-ins for downloads (0.64.0).** The Hugging Face read token (gated
+models: klein 9B, its uncensored encoder) and the Civitai API key are
+settings (`tokens`), set in Settings → Models like the cloud API key in
+Settings → Cloud: in `data/settings.json` on the VM, masked in the UI (the
+mask sent back leaves them as they are), the owner's alone, outside the
+troubleshooting export's sections. `app/tokens.py` gives every download path
+the token when it sends a request - Settings first, then `HF_TOKEN` /
+`CIVITAI_TOKEN` in `.env`, which still work - so a saved token works without
+a restart. Each goes only to its own site. Hugging Face's whoami API says
+whether it takes a token, whose it is and, for a fine-grained token, whether
+it may read gated repositories (a common reason for a 403 with the licence
+accepted).
 
 Searching by name (Add from Hugging Face): the Hub asks
 `/api/models?search=<longest word>&filter=gguf&sort=downloads` and keeps the

@@ -157,6 +157,10 @@ DEFAULTS: dict = {
         "base_url": "",                    # OpenAI-compatible base URL (DeepSeek, OpenRouter, ...)
         "max_tokens": 16000,
     },
+    "tokens": {                            # sign-ins for model downloads (0.64.0, app/tokens.py); "" = .env's, if any
+        "huggingface": "",                 # a read token: gated models (FLUX.2 klein 9B, its uncensored encoder)
+        "civitai": "",                     # an API key: Civitai files that want a signed-in user
+    },
     "web": {
         "access": "allow",                 # allow | ask: internet for the assistant - ask first: web search, pages
                                            # and code that goes online wait for the user's answer

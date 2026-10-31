@@ -144,7 +144,7 @@
     {
       "id": "flux2-klein-9b",
       "name": "FLUX.2 [klein] 9B",
-      "description": "The larger klein (4 steps): generation and multi-reference editing, and LoRAs trained on klein 9B. 8-bit files as in ComfyUI's template. FLUX Non-Commercial licence and gated on Hugging Face: accept it at huggingface.co/black-forest-labs/FLUX.2-klein-9b-fp8 and set HF_TOKEN in .env before downloading.",
+      "description": "The larger klein (4 steps): generation and multi-reference editing, and LoRAs trained on klein 9B. 8-bit files as in ComfyUI's template. FLUX Non-Commercial licence and gated on Hugging Face: accept it at huggingface.co/black-forest-labs/FLUX.2-klein-9b-fp8 and add your Hugging Face token under Sign-ins for downloads before downloading.",
       "default": false,
       "family": "flux2-klein-9b",
       "abilities": ["generate", "edit"],
@@ -157,7 +157,7 @@
     {
       "id": "flux2-klein-9b-uncensored",
       "name": "FLUX.2 [klein] 9B uncensored",
-      "description": "klein 9B with ponpoke's uncensored text encoder (Qwen3-8B with its refusals abliterated, F16, 16.4 GB): prompts reach the model as written. It still draws only what klein learned - for the rest, train a LoRA on klein 9B uncensored. Shares klein 9B's model and VAE; klein 9B LoRAs fit. FLUX Non-Commercial licence; both repositories are gated on Hugging Face: accept them at huggingface.co/black-forest-labs/FLUX.2-klein-9b-fp8 and huggingface.co/ponpoke/flux2-klein-9b-uncensored-text-encoder and set HF_TOKEN in .env.",
+      "description": "klein 9B with ponpoke's uncensored text encoder (Qwen3-8B with its refusals abliterated, F16, 16.4 GB): prompts reach the model as written. It still draws only what klein learned - for the rest, train a LoRA on klein 9B uncensored. Shares klein 9B's model and VAE; klein 9B LoRAs fit. FLUX Non-Commercial licence; both repositories are gated on Hugging Face: accept them at huggingface.co/black-forest-labs/FLUX.2-klein-9b-fp8 and huggingface.co/ponpoke/flux2-klein-9b-uncensored-text-encoder and add your Hugging Face token under Sign-ins for downloads.",
       "default": false,
       "family": "flux2-klein-9b",
       "abilities": ["generate", "edit"],

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.64.0 - 2026-10-31
+
+- **Sign-ins for downloads in Settings -> Models**: paste the Hugging Face
+  token (gated models such as FLUX.2 [klein] 9B and its uncensored encoder)
+  and the Civitai API key there instead of editing .env on the VM. They are
+  kept on the Hub, shown masked, and used from the next download on - no
+  restart. "Check it" asks Hugging Face whether it takes the token, and says
+  when a fine-grained token may not read gated models.
+- HF_TOKEN and CIVITAI_TOKEN in .env still work; a token saved in Settings
+  is used instead. The messages about gated downloads point to Settings now.
+
 ## 0.63.0 - 2026-10-31
 
 - **FLUX.2 [klein] 9B uncensored** (Settings -> Models -> Image models):

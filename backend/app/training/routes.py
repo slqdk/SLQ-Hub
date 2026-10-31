@@ -2,13 +2,11 @@
 (the gate keeps people off these routes already)."""
 from __future__ import annotations
 
-import os
-
 from fastapi import APIRouter, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from .. import auth
+from .. import auth, tokens
 from ..state import get_hub
 from .runs import BASE, KINDS, MAX_IMAGES, MIN_IMAGES, TrainingError
 
@@ -30,9 +28,10 @@ def _fail(exc: TrainingError):
 async def overview(request: Request):
     t = _t(request)
     # hf_token (0.61.0): FLUX.2 klein 9B is gated on Hugging Face - the page says so before a start fails on it
+    # (0.64.0: the token from Settings -> Models -> Sign-ins for downloads, or HF_TOKEN in .env)
     return {"service": await t.service(), "runs": t.list(), "base": BASE, "bases": t.bases(), "kinds": list(KINDS),
             "min_images": MIN_IMAGES, "max_images": MAX_IMAGES, "can_caption": t.captioner() is not None,
-            "hf_token": bool(os.environ.get("HF_TOKEN"))}
+            "hf_token": bool(tokens.hf())}
 
 
 class RunIn(BaseModel):

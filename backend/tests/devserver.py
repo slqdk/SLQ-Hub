@@ -513,6 +513,9 @@ HF_DEMO["repos"]["black-forest-labs/FLUX.2-klein-base-9B"] = {"sha": "9b0c1d", "
 HF_DEMO["repos"]["Qwen/Qwen3-8B"] = {"sha": "8c9d0e", "tree": [
     _hf_file(f"model-0000{i}-of-00005.safetensors", gb) for i, gb in ((1, 4.0), (2, 3.99), (3, 3.96), (4, 3.19),
                                                                      (5, 1.24))] + [_hf_file("config.json", 0.000001)]}
+# Sign-ins for downloads (0.64.0): Hugging Face takes this token (Check it), no other
+HF_DEMO["whoami"] = {"hf_demo_read_token": {"type": "user", "name": "soren", "auth": {
+    "type": "access_token", "accessToken": {"displayName": "hub", "role": "read"}}}}
 # klein 9B uncensored (0.63.0): ponpoke's text encoder - its GGUF files are not fetched
 HF_DEMO["repos"]["ponpoke/flux2-klein-9b-uncensored-text-encoder"] = {"sha": "5e6f7a", "tree": [
     _hf_file("model.safetensors", 15.26), _hf_file("config.json", 0.000002), _hf_file("tokenizer.json", 0.0107),

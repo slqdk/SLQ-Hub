@@ -425,10 +425,11 @@ All commands run in the VM from `/opt/slq-hub`:
 | The speech service's log | `sudo bash /opt/slq-hub/update.sh compose logs -f speech` |
 | Backups / roll back | `sudo bash /opt/slq-hub/update.sh backups` / `... rollback` |
 | Run the self-test again | `sudo bash /opt/slq-hub/update.sh compose exec hub python -m app.cli selftest` |
-| More language models | Settings → Models → Add from Hugging Face (GGUF repositories; gated ones need `HF_TOKEN` in `.env`) |
-| More picture models | Settings → Models → Add image model (an SDXL checkpoint on Civitai or Hugging Face; Civitai files for signed-in users need `CIVITAI_TOKEN` in `.env`) |
+| More language models | Settings → Models → Add from Hugging Face (GGUF repositories; gated ones need a Hugging Face token: Settings → Models → Sign-ins for downloads, or `HF_TOKEN` in `.env`) |
+| More picture models | Settings → Models → Add image model (an SDXL checkpoint on Civitai or Hugging Face; Civitai files for signed-in users need a Civitai API key: Settings → Models → Sign-ins for downloads, or `CIVITAI_TOKEN` in `.env`) |
+| Sign-ins for downloads | Settings → Models → Sign-ins for downloads (0.64.0): a Hugging Face read token and a Civitai API key, kept on the Hub, shown masked, used from the next download on - no restart. They win over `HF_TOKEN` / `CIVITAI_TOKEN` in `.env`, which still work (and are what `tools/models.py` reads) |
 | A model from your computer | Settings → Models → Upload (a .gguf language model or an SDXL checkpoint), Upload on a listed model that is not downloaded (its files), or Base model files on a klein training. Sent in 32 MiB pieces, so the proxy's body limit does not apply and an interrupted upload goes on when the same file is chosen again |
-| FLUX.2 klein 9B (the picture model, and LoRA training on it) | Gated on Hugging Face: sign in there, accept the licence on huggingface.co/black-forest-labs/FLUX.2-klein-9b-fp8 (the picture model) and huggingface.co/black-forest-labs/FLUX.2-klein-base-9B (training), create a read token and put it in `.env` as `HF_TOKEN=...`, then `update.sh compose up -d` |
+| FLUX.2 klein 9B (the picture model, and LoRA training on it) | Gated on Hugging Face: sign in there, accept the licence on huggingface.co/black-forest-labs/FLUX.2-klein-9b-fp8 (the picture model) and huggingface.co/black-forest-labs/FLUX.2-klein-base-9B (training), create a read token and add it under Settings → Models → Sign-ins for downloads (or `HF_TOKEN=...` in `.env`, then `update.sh compose up -d`) |
 | FLUX.2 klein 9B uncensored (the picture model, and training on it) | As klein 9B, and accept the licence on huggingface.co/ponpoke/flux2-klein-9b-uncensored-text-encoder with the same account (granted at once) |
 
 Settings that belong to the machine (ports, proxy IP, LAN networks, image

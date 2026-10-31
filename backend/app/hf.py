@@ -4,8 +4,9 @@
 choices a person makes: one quantisation (split files kept together), and,
 apart from it, the vision projectors (mmproj). `make_entry()` turns a choice
 into a catalog entry like the bundled ones; the Hub's own download queue then
-fetches the files. Only public repositories work without a token; HF_TOKEN in
-the environment (the VM's .env) is sent along for gated ones.
+fetches the files. Only public repositories work without a token; the one in
+Settings -> Models -> Sign-ins for downloads (or HF_TOKEN in the VM's .env) is
+sent along for gated ones (app/tokens.py).
 """
 from __future__ import annotations
 
@@ -14,6 +15,8 @@ import os
 import re
 
 import httpx
+
+from . import tokens
 
 HF = "https://huggingface.co"
 REPO_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,95}/[A-Za-z0-9][A-Za-z0-9._-]{0,95}$")
@@ -57,15 +60,16 @@ def quant_label(stem: str) -> str:
 
 def _headers() -> dict:
     h = {"User-Agent": "slq-hub/1", "Accept": "application/json"}
-    if os.environ.get("HF_TOKEN"):
-        h["Authorization"] = f"Bearer {os.environ['HF_TOKEN']}"
+    token = tokens.hf()                       # Settings -> Models -> Sign-ins, or HF_TOKEN in .env (0.64.0)
+    if token:
+        h["Authorization"] = f"Bearer {token}"
     return h
 
 
 def _raise_for(r: httpx.Response, repo: str) -> None:
     if r.status_code in (401, 403):
-        raise HFError(f"{repo} is gated or private. Accept its terms on huggingface.co, put an access token in "
-                      "/srv/slq-hub/.env as HF_TOKEN=..., and restart the Hub (update.sh compose up -d).", 403)
+        raise HFError(f"{repo} is gated or private. Accept its terms on huggingface.co with your account, and add "
+                      "a read token of that account under Settings -> Models -> Sign-ins for downloads.", 403)
     if r.status_code == 404:
         raise HFError(f"Hugging Face has no model called {repo}.", 404)
     if r.status_code >= 400:

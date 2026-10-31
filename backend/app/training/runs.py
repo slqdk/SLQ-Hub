@@ -40,6 +40,7 @@ from pathlib import Path
 import httpx
 from PIL import Image, ImageOps
 
+from .. import tokens
 from ..images.loras import has_word
 
 log = logging.getLogger("hub.training")
@@ -48,7 +49,7 @@ log = logging.getLogger("hub.training")
 # own (app/images/loras.py). `file` is the single file ai-toolkit loads from `repo`, `te_repo` its text encoder (both
 # fetched by the Hub), `lora_for` the catalog's picture model that uses the LoRA, `download_gb` what a first start
 # fetches (the VAE is shared).
-# 9B (0.61.0, Søren): FLUX Non-Commercial licence, gated on Hugging Face (HF_TOKEN). Its transformer is 18.2 GB in
+# 9B (0.61.0, Søren): FLUX Non-Commercial licence, gated on Hugging Face (a token). Its transformer is 18.2 GB in
 # bf16 and Qwen3-8B 16.4 GB, so in bf16 it does not fit in 24 GB even with the text encoder gone after caching. Both
 # are quantised to 8 bit on load with quanto's qfloat8 - ai-toolkit's own default for this model (its ui.tsx): fp8
 # weights, multiplied in bf16 (optimum-quanto 0.2.4's qbytes_mm dequantises; no fp8 maths, which RDNA3 lacks) - about
@@ -61,7 +62,7 @@ log = logging.getLogger("hub.training")
 # is a whole Hugging Face model (config.json, model.safetensors in F16, tokenizer.json saved by transformers 5), which
 # from_pretrained reads as it reads Qwen/Qwen3-8B; its GGUF files are not fetched. Its one 16.4 GB file is the picture
 # model's text encoder too: linked, not fetched twice (Training.fetch, app/downloads.py). `gated`: the repositories a
-# training needs an accepted licence (and HF_TOKEN) for.
+# training needs an accepted licence (and a token, app/tokens.py) for.
 KLEIN = {
     "flux2-klein-4b": {"model": "flux2-klein-4b", "family": "flux2-klein", "label": "FLUX.2 klein 4B",
                        "repo": "black-forest-labs/FLUX.2-klein-base-4B", "file": "flux-2-klein-base-4b.safetensors",
@@ -90,19 +91,18 @@ VAE_REPO, VAE_FILE = "ai-toolkit/flux2_vae", "ae.safetensors"
 
 
 def gated_help(repo: str, token: bool, status: int | None = None) -> str:
-    """What to do about a gated Hugging Face repository (FLUX.2 klein 9B's): no HF_TOKEN; a token Hugging Face does
-    not take (401 - wrong or expired); or one whose account has not accepted the licence (403)."""
+    """What to do about a gated Hugging Face repository (FLUX.2 klein 9B's): no token; a token Hugging Face does not
+    take (401 - wrong or expired); or one whose account has not accepted the licence (403). The token: Settings ->
+    Models -> Sign-ins for downloads (0.64.0), or HF_TOKEN in .env."""
     page = f"https://huggingface.co/{repo}"
     if not token:
         return (f"{repo} is gated on Hugging Face: sign in there, accept its licence on {page}, create a read token "
-                "(Settings -> Access Tokens), put HF_TOKEN=... in /srv/slq-hub/.env and restart the Hub "
-                "(update.sh compose up -d). Or upload its files from your computer: Base model files, on the "
-                "training's page.")
+                "(Settings -> Access Tokens there) and add it here under Settings -> Models -> Sign-ins for "
+                "downloads. Or upload its files from your computer: Base model files, on the training's page.")
     if status == 401:
-        return (f"Hugging Face did not take the HF_TOKEN for {repo} - is it a valid read token, and has its account "
-                f"accepted the licence on {page}? Fix it in /srv/slq-hub/.env and restart the Hub (update.sh compose "
-                "up -d).")
-    return (f"Hugging Face refused {repo} for this HF_TOKEN: accept its licence on {page} with the account the token "
+        return (f"Hugging Face did not take the token for {repo} - is it a valid read token (Settings -> Models -> "
+                f"Sign-ins for downloads), and has its account accepted the licence on {page}?")
+    return (f"Hugging Face refused {repo} for this token: accept its licence on {page} with the account the token "
             "belongs to (it is granted at once), then start again.")
 # SDXL (0.56.0): a LoRA trained on one of the Hub's SDXL checkpoints (RealVisXL 5.0 ...), used with any SDXL model.
 # ai-toolkit loads the checkpoint as one file (arch "sdxl": StableDiffusionXLPipeline.from_single_file, read in its
@@ -771,7 +771,7 @@ class Training:
         """(the commit, the files ai-toolkit reads of a repository with their sizes, the repository's info) - from
         Hugging Face's API, which lists a gated repository's files to anyone."""
         from ..hf import HF, _headers, _tree
-        token = bool(os.environ.get("HF_TOKEN"))
+        token = bool(tokens.hf())
         info = await c.get(f"{HF}/api/models/{repo}", headers=_headers())
         if info.status_code in (401, 403):
             raise TrainingError(gated_help(repo, token, info.status_code), 403)
@@ -880,10 +880,10 @@ class Training:
                     pattern: re.Pattern | None = None) -> None:
         """A Hugging Face repository (or `only` these files of it) into models/hf in the cache's own layout
         (refs/main and snapshots/<commit>), which the trainer's libraries read with HF_HUB_OFFLINE. Files there at
-        their size are kept; a partial download goes on where it stopped. HF_TOKEN (the VM's .env) for a gated
+        their size are kept; a partial download goes on where it stopped. The Hugging Face token (app/tokens.py) for a gated
         repository."""
         from ..hf import HF, _headers
-        token = bool(os.environ.get("HF_TOKEN"))
+        token = bool(tokens.hf())
         async with self._hf_client() as c:
             sha, files, meta = await self._listing(c, repo, only, pattern)
             base = self.cache_dir(repo)
