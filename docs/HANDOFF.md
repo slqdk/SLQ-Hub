@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.60.0, 2026-10-31)
+## State (0.61.0, 2026-10-31)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -630,6 +630,45 @@ pictures changed too - FLUX.2 klein does both (it edits, and the pipeline applie
 his klein Rikke was closer at the same steps. `Training.duplicate(..., base=)` and DuplicateIn `base` train the copy
 on another model (validated by `_base_fields`; without it the copy keeps the source's); the dialog has "Train on"
 when there is more than one base, starting at the source's. Not seen on the card: a klein copy of an SDXL training.
+0.61.0, Søren: "udvid mit lora træningsværktøj til at understøtte Flux1 klein 9B" (FLUX.2 klein 9B - there is no
+FLUX.1 klein; the trainer offered only 4B). `runs.KLEIN` holds both sizes; a run's base is "flux2-klein-4b" or
+"flux2-klein-9b" (or sdxl), `Training.klein(run)` its entry (runs without a base: 4B). Read in ai-toolkit at b69b983
+(flux2_klein_model.py, flux2/src/model.py): arch `flux2_klein_9b`, the single file `flux-2-klein-base-9b.safetensors` of
+black-forest-labs/FLUX.2-klein-base-9B (18,157,185,168 bytes, bf16; gated "auto", FLUX Non-Commercial licence), the
+text encoder Qwen/Qwen3-8B (a class attribute; all of it, 16.4 GB; Qwen3TextEncoder registers no ComfyUI weights, so
+it loads from the repo as 4B's does), the same VAE repo; hidden 4096, 8 double / 24 single blocks. bf16 cannot fit:
+the transformer alone is 18.2 GB, and while captions are encoded Qwen3-8B (16.4) sits beside it (4B measured 15.4 GB
+there and about 12 GB training). So 9B quantises both on load with quanto's qfloat8 - ai-toolkit's own UI default for
+this arch. Read in optimum-quanto 0.2.4 (ai-toolkit's pin): fp8 weights with per-channel scales; `qbytes_mm`
+dequantises to bf16 and uses torch.matmul (the CUDA impl only takes the int8 path for int8 activations; the compiled
+extension is for int4/AWQ, not qfloat8) - so no fp8 maths, only fp8 storage and casts. Estimated, NOT measured: about
+17 GB once both are loaded (then ai-toolkit parks the transformer in RAM while it encodes the captions -
+set_device_state_preset("cache_text_encoder") - so the peak is right after loading, as 4B's 15.4 GB was), about 9 GB
+plus the training after. `low_vram` stays off (it would park both in the VM's RAM, about 25 of 40 GB). Gated: Hugging
+Face lists the repo's files to anyone (tree 200) and serves them with 401 without a token and with a token it does not
+take (both checked 2026-10-31), 403 for an account that has not accepted (not seen); `gated_help(repo, token, status)`
+says which, before anything is fetched and not when the files are all here. The overview has `hf_token`; each klein base `lora_for`, `ready` (its
+picture model downloaded), `download_gb`, `licence` and `gated` (its page) for the page's hints (`BaseHint`).
+The picture model: catalog `flux2-klein-9b` (family `flux2-klein-9b`) with the files of ComfyUI's official template
+image_flux2_klein_image_edit_9b_distilled.json (workflow_templates main, read 2026-10-31):
+`flux-2-klein-9b-fp8.safetensors` of black-forest-labs/FLUX.2-klein-9b-fp8 (gated, 9.43 GB) and `qwen_3_8b_fp8mixed.safetensors` of
+Comfy-Org/Flux-2-Klein-9B (8.66 GB, not gated - Comfy-Org has no 9B diffusion model); the graph is 4B's (cfg 1,
+Flux2Scheduler 4 steps, euler): `workflows.KLEIN_FILES` per family, `klein_t2i`/`klein_edit(files=)`. The template's
+VAE is BFL's small decoder; the Hub keeps the shared flux2-vae. LoRAs: family `flux2-klein-9b` ("FLUX.2 klein 9B";
+4B's label is now "FLUX.2 klein 4B"); `guess_base` tells it by `flux_size` or by ai-toolkit's metadata
+("flux2_klein_9b"); the refusal at upload is gone. Found by an independent review: `guess_base` took any LoRA with
+img_mlp/txt_mlp for Qwen-Image - but FLUX's double blocks have them too (double_blocks.N.img_mlp.0), so an uploaded
+klein LoRA with MLP layers was filed as Qwen-Image (4B since 0.49.0; trained ones were not affected, `use` names the
+family). FLUX block names now win over that check. `downloads.hf_login` explains a gated catalog file's 401/403 (under
+the 300 characters the queue keeps).
+Søren also asked whether Pony Diffusion V6 XL can be added and fits the card. The Hub's own `sources.lookup` against
+the real Civitai API found version 290640 "V6 (start with this one)": base Pony, 6.9 GB fp16, preset pony, and the
+download redirects to storage without a login - an SDXL checkpoint like RealVisXL, added from its link, no code. What
+changed for it: an SDXL run keeps its checkpoint's quality tags and negative prompt (`sample_prefix`,
+`sample_negative`, from `sdxl_checkpoints`, when it is made) and `_sdxl_config` puts them on the samples, joined as
+`sdxl_t2i` joins them (Pony: score tags and no negative), as its pictures in a chat get them. Runs made before have
+neither and keep SDXL_NEGATIVE, so a Continue does not change a run's samples halfway; a new RealVisXL run's samples
+use its preset's negative now. NOT run on the card: anything of 9B (item 84), a Pony training.
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
 host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU
@@ -1352,7 +1391,17 @@ the host if the VM ever stops by itself.
       are only in ai-toolkit's samples. Not seen: the time per step, likeness after 3000 steps.
     - **Continue (0.58.0)**: after Stop, "Continue from step N" - ai-toolkit's log should say "RESUMING FROM ..."
       and "Loading optimizer state"; the progress should start at that step. A finished run with more steps.
-    - Not offered: klein 9B (gated, under BFL's own licence; ai-toolkit quantises it by default).
+    - **klein 9B (0.61.0)** - none of it has run. In order: HF_TOKEN set, the licence accepted for
+      FLUX.2-klein-base-9B by the token's account, and room on the disk (`df -h /srv`: about 35 GB to fetch). Then
+      ai-toolkit's log should say "Quantizing (qfloat8)" for the transformer and again for the text encoder - a
+      float8 error there means fp8 storage does not work in this torch on gfx1100: set KLEIN's 9B `qtype` to "qint8"
+      (quanto's int8 weights, the same dequantising path). Measure as in 0.51.1: the card once both are loaded,
+      before the captions are encoded (estimated 17 GB), and while it trains, and the VM's RAM (`free -g`: the 18 GB
+      base file is read into RAM before it is quantised). Then the time per step, samples that look like the person, and a checkpoint as a LoRA in a
+      chat with FLUX.2 [klein] 9B (ComfyUI's log: no "lora key not loaded"). The picture model is untried too: fp8
+      weights and the fp8mixed text encoder on RDNA3 (ComfyUI should dequantise them; if not, BFL's bf16
+      `flux-2-klein-9b.safetensors`, 18.2 GB in black-forest-labs/FLUX.2-klein-9B, and Comfy-Org's
+      `qwen_3_8b.safetensors`, 16.4 GB, are the fallback).
 80. **Not pursued (Søren, 2026-10-28)** - kept here in case it is taken up again; if it stays unused, remove
     the `windows` service, `.30` from `SANDBOX_IPS`, `windows/*` from `FOLDERS` and INSTALL.md section 12.
     **0.39.0's Windows container on VM 222**: `COMPOSE_PROFILES=windows` in

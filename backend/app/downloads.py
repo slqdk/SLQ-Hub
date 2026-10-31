@@ -19,6 +19,21 @@ CIVITAI_LOGIN = ("Civitai wants a signed-in user for this file: create an API ke
                  "and download again.")
 
 
+def hf_login(repo: str, status: int = 403) -> str:
+    """A gated Hugging Face file (FLUX.2 klein 9B's, 0.61.0): 401 without HF_TOKEN or with one Hugging Face does not
+    take (wrong or expired), 403 when its account has not accepted the model's licence. (The queue keeps 300
+    characters of an error.)"""
+    if not os.environ.get("HF_TOKEN"):
+        return (f"{repo} is gated: sign in on Hugging Face, accept its licence at huggingface.co/{repo}, put a read "
+                "token as HF_TOKEN=... in /srv/slq-hub/.env, restart the Hub (update.sh compose up -d) and download "
+                "again.")
+    if status == 401:
+        return (f"Hugging Face did not take the HF_TOKEN for {repo}: is it a valid read token, and has its account "
+                f"accepted the licence at huggingface.co/{repo}?")
+    return (f"Hugging Face refused {repo} for this HF_TOKEN: accept its licence at huggingface.co/{repo} with the "
+            "account the token belongs to (it is granted at once) and download again.")
+
+
 class _UserCancelled(Exception):
     """Cancel in Settings -> Models: this file stops, the queue goes on (not the task's own CancelledError, which
     ended the queue and left the other models' files waiting for ever)."""
@@ -129,6 +144,8 @@ class Downloads:
                             break
                         if r.status_code in (401, 403) and site == "Civitai":
                             raise RuntimeError(CIVITAI_LOGIN)
+                        if r.status_code in (401, 403) and site == "Hugging Face":
+                            raise RuntimeError(hf_login(f["repo"], r.status_code))
                         if r.status_code >= 400:
                             raise RuntimeError(f"{site} answered {r.status_code}")
                         if have and r.status_code != 206:

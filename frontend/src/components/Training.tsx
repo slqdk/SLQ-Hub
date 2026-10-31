@@ -3,7 +3,7 @@
 // checkpoint - chosen by its sample pictures - becomes a LoRA.
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { CircleHelp, Copy, GraduationCap, ImagePlus, Sparkles, X } from "lucide-react";
-import { api, type TrainingDetail, type TrainingOverview, type TrainingRun } from "../lib/api";
+import { api, type TrainingBase, type TrainingDetail, type TrainingOverview, type TrainingRun } from "../lib/api";
 import { bytes, seconds } from "../lib/format";
 import { useApp } from "../state";
 import { ConfirmButton, Lamp, type LampState, Modal } from "./ui";
@@ -80,6 +80,33 @@ function ProgressBar({ run }: { run: TrainingRun }) {
     <span style={{ width: `${Math.max(2, Math.min(100, f * 100))}%` }} /></div>;
 }
 
+/** "a, b or c" */
+function orList(items: string[]): string {
+  return items.length < 2 ? (items[0] ?? "") : `${items.slice(0, -1).join(", ")} or ${items[items.length - 1]}`;
+}
+
+/** What choosing a base means: the picture model its LoRA is used with, and for klein 9B (0.61.0) its size, its
+ *  download, and that it is gated on Hugging Face (HF_TOKEN on the VM, the licence accepted on its page). */
+function BaseHint({ base, hfToken, copy }: { base?: TrainingBase; hfToken?: boolean; copy?: boolean }) {
+  if (!base) return null;
+  if (base.family === "sdxl") return <small>{copy
+    ? "Its LoRA works with every SDXL model, best with this one. SDXL models only make new pictures."
+    : "Its LoRA works with every SDXL model, best with this one. SDXL trains quicker and its LoRAs are small."}</small>;
+  const nine = base.family === "flux2-klein-9b";
+  return <>
+    <small>Trained on {base.label}'s base model; its LoRA is used with {base.lora_for} in your chats - in new pictures
+      and in changes to a picture{base.ready ? "." : `. Download ${base.lora_for} under Image models to use it.`}
+      {" "}It works only with that size.</small>
+    {nine && <small>Bigger than 4B and slower to train: the trainer keeps it in 8 bit to fit the card. The first
+      start downloads about {base.download_gb ?? 35} GB. {base.licence} licence.</small>}
+    {base.gated && <small className={hfToken ? undefined : "warn-text"}>Gated on Hugging Face: accept its licence
+      on <a href={base.gated} target="_blank" rel="noreferrer">its page</a>{hfToken
+        ? " with the account of the Hub's HF_TOKEN."
+        : ", then put a read token as HF_TOKEN in /srv/slq-hub/.env on the VM and restart the Hub " +
+          "(update.sh compose up -d). No HF_TOKEN is set now."}</small>}
+  </>;
+}
+
 export function TrainingSection({ onAdded }: { onAdded: () => void }) {
   const [data, setData] = useState<TrainingOverview | null>(null);
   const [failed, setFailed] = useState(false);
@@ -103,9 +130,11 @@ export function TrainingSection({ onAdded }: { onAdded: () => void }) {
         <h4 className="grow" style={{ margin: 0 }}>Train a LoRA</h4>
         <button className="btn small" onClick={() => setCreating(true)}><GraduationCap size={14} /> New training</button>
       </div>
-      <p className="muted small" style={{ marginTop: 0 }}>Teach {data.bases.length > 1 ? `${data.base.label} or one of
-        your SDXL models` : data.base.label} a thing, a person or a style from your own pictures, here on the card. A
-        training takes the whole card for a few hours: chats and pictures wait until it is done.</p>
+      <p className="muted small" style={{ marginTop: 0 }}>Teach {orList([
+        ...data.bases.filter((b) => b.family !== "sdxl").map((b) => b.label),
+        ...(data.bases.some((b) => b.family === "sdxl") ? ["one of your SDXL models"] : [])])} a thing, a person or a
+        style from your own pictures, here on the card. A training takes the whole card for a few hours: chats and
+        pictures wait until it is done.</p>
       {!data.service && (
         <div className="callout small" style={{ marginBottom: 8 }}>The trainer is not running. Pictures and captions
           can be prepared now; to train, add <code>COMPOSE_PROFILES=training</code> to <code>/srv/slq-hub/.env</code> on
@@ -131,7 +160,7 @@ export function TrainingSection({ onAdded }: { onAdded: () => void }) {
         onMade={(id) => { setCreating(false); load(); setOpen(id); }} />}
       {open && <TrainingEditor key={open} rid={open} data={data} onClose={() => { setOpen(null); load(); }}
         onAdded={onAdded} onDuplicate={(run) => { setOpen(null); setCopying(run); }} />}
-      {copying && <DuplicateTraining run={copying} bases={data.bases}
+      {copying && <DuplicateTraining run={copying} bases={data.bases} hfToken={data.hf_token}
         onClose={() => { setOpen(copying.id); setCopying(null); }}
         onMade={(id) => { setCopying(null); load(); setOpen(id); }} />}
     </div>
@@ -192,9 +221,7 @@ function NewTraining({ data, onClose, onMade }: { data: TrainingOverview; onClos
         <select className="input" value={f.base} onChange={(e) => setF({ ...f, base: e.target.value })}>
           {data.bases.map((b) => <option key={b.id} value={b.id}>{b.label}</option>)}
         </select>
-        <small>{chosen?.family === "sdxl"
-          ? "Its LoRA works with every SDXL model, best with this one. SDXL trains quicker and its LoRAs are small."
-          : "FLUX.2 klein's base model; its LoRA is used with FLUX.2 klein 4B in your chats."}</small></label>}
+        <BaseHint base={chosen} hfToken={data.hf_token} /></label>}
       <small className="muted">{data.bases.length > 1 ? "" : `Trained on ${data.base.label}'s base model, used with `
         + `${data.base.label} in your chats. `}Only you can use it.</small>
     </Modal>
@@ -299,11 +326,12 @@ function nextName(name: string): string {
   return m ? `${m[1]} v${Number(m[2]) + 1}` : `${name.trim().slice(0, 76)} v2`;
 }
 
-function DuplicateTraining({ run, bases, onClose, onMade }: { run: TrainingRun; bases: TrainingOverview["bases"];
-  onClose: () => void; onMade: (id: string) => void }) {
+function DuplicateTraining({ run, bases, hfToken, onClose, onMade }: { run: TrainingRun;
+  bases: TrainingOverview["bases"]; hfToken?: boolean; onClose: () => void; onMade: (id: string) => void }) {
   const { toast } = useApp();
   // 0.60.0: the copy can train on another model (an SDXL person moved to FLUX.2 klein) - it starts at this one's
-  const own = run.base === "sdxl" ? `sdxl:${run.checkpoint}` : (bases[0]?.id ?? "");
+  // (a klein 9B training's copy stays on 9B, 0.61.0)
+  const own = run.base === "sdxl" ? `sdxl:${run.checkpoint}` : (run.base || (bases[0]?.id ?? ""));
   const [f, setF] = useState({ name: nextName(run.name), trigger: run.trigger, kind: run.kind as string,
     base: bases.some((b) => b.id === own) ? own : (bases[0]?.id ?? "") });
   const chosen = bases.find((b) => b.id === f.base);
@@ -344,10 +372,7 @@ function DuplicateTraining({ run, bases, onClose, onMade }: { run: TrainingRun; 
         <select className="input" value={f.base} onChange={(e) => setF({ ...f, base: e.target.value })}>
           {bases.map((b) => <option key={b.id} value={b.id}>{b.label}</option>)}
         </select>
-        <small>{chosen?.family === "sdxl"
-          ? "Its LoRA works with every SDXL model, best with this one. SDXL models only make new pictures."
-          : "Its LoRA is used with FLUX.2 klein 4B in your chats - in new pictures and in changes to a picture."}</small>
-      </label>}
+        <BaseHint base={chosen} hfToken={hfToken} copy /></label>}
     </Modal>
   );
 }
@@ -429,6 +454,7 @@ function TrainingEditor({ rid, data, onClose, onAdded, onDuplicate }: { rid: str
   const checkpoint = (step: number) => run.checkpoints.find((c) => c.step === step);
   const ready = pics.length >= data.min_images && uncaptioned === 0;
   const s = settings ?? { name: run.name, steps: String(run.steps) };
+  const base = data.bases.find((b) => b.id === run.base);          // a klein size (SDXL runs have "sdxl")
 
   return (
     <Modal title={`Training: ${run.name}`} onClose={onClose} wide
@@ -592,7 +618,10 @@ function TrainingEditor({ rid, data, onClose, onAdded, onDuplicate }: { rid: str
               : uncaptioned ? `${uncaptioned} picture${uncaptioned === 1 ? " has" : "s have"} no caption yet.`
                 : !data.service ? "The trainer is not running (see above)."
                   : run.resume_step != null ? `Continue trains on from step ${run.resume_step} to ${run.steps}.`
-                    : `${run.steps} steps. The first time, about 16 GB of model files are downloaded first.`}</span>
+                    : `${run.steps} steps.${base?.download_gb ? ` The first time on ${base.label}, about `
+                      + `${base.download_gb} GB of model files are downloaded first${base.gated && !data.hf_token
+                        ? " - it is gated on Hugging Face, which needs HF_TOKEN on the VM (not set now)" : ""}.`
+                      : ""}`}</span>
           {run.resume_step != null && (
             <ConfirmButton className="btn primary" disabled={!ready || !data.service || !!busy}
               confirmText={`The card is busy until step ${run.steps} - continue?`}

@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.61.0 - 2026-10-31
+
+- **Train LoRAs on FLUX.2 klein 9B.** "Train on" offers klein 9B beside 4B.
+  It is more than twice the size, so the trainer keeps it in 8 bit to fit
+  the card, and it trains slower. The first start downloads about 35 GB. A
+  copy made with Duplicate stays on 9B.
+- **FLUX.2 [klein] 9B as a picture model** (Settings -> Models -> Image
+  models), for new pictures and changes to a picture, with its LoRAs. A LoRA
+  for klein 9B is no longer refused: 4B and 9B are two families now, because
+  a LoRA works only with the size it was trained on.
+- klein 9B is under the FLUX Non-Commercial licence and gated on Hugging
+  Face: accept its licence there and put HF_TOKEN in the VM's .env first.
+  The training page says so, and a training or download without it stops
+  with the steps to take instead of "401".
+- **SDXL trainings' sample pictures use the model's own quality tags and
+  negative prompt**, as its pictures in a chat do - Pony's score tags above
+  all. Only new trainings: one made before keeps its samples as they were.
+  Pony Diffusion V6 XL is added like any SDXL model: Settings -> Models ->
+  Add image model, with its Civitai link.
+- A LoRA you upload for FLUX.2 klein is no longer taken for a Qwen-Image one
+  when it has the model's MLP layers. Check the family of klein LoRAs you
+  uploaded before (Settings -> Models -> LoRAs).
+
 ## 0.60.0 - 2026-10-31
 
 - **Duplicate a training onto another model.** The Duplicate dialog has a

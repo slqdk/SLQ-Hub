@@ -14,13 +14,14 @@ The steps, each started by the admin:
    or failed;
 4. a checkpoint - chosen by its sample pictures - becomes a LoRA (app/images/loras.py, source "trained").
 
-The base is FLUX.2 klein 4B: a LoRA is trained on its undistilled base (black-forest-labs/FLUX.2-klein-base-4B)
-and used on the 4-step model the Hub has (BFL's and Hugging Face's guides). What ai-toolkit reads for it (checked in
-its source at the commit the trainer image pins, AI_TOOLKIT_REF): the base's single file
-flux-2-klein-base-4b.safetensors (not its diffusers folders), the VAE from ai-toolkit/flux2_vae (ae.safetensors) and
-the text encoder from Qwen/Qwen3-4B - about 16 GB, fetched once. In bf16 it fits in 24 GB when the captions'
-text embeddings are cached and the text encoder leaves the card (cache_text_embeddings), so the config needs no
-quantisation and no 8-bit optimiser - the libraries for those are the least sure on AMD.
+The bases are FLUX.2 klein 4B and 9B (KLEIN), or one of the Hub's SDXL checkpoints. A klein LoRA is trained on the
+undistilled base (black-forest-labs/FLUX.2-klein-base-4B or -9B) and used on the 4-step model in ComfyUI (BFL's and
+Hugging Face's guides). What ai-toolkit reads for it (checked in its source at the commit the trainer image pins,
+AI_TOOLKIT_REF - flux2_klein_model.py): the base's single file (not its diffusers folders), the VAE from
+ai-toolkit/flux2_vae (ae.safetensors) and the text encoder from the Qwen3 repository the model class names (a class
+attribute, not a config key). 4B in bf16 fits in 24 GB when the captions' text embeddings are cached and the text
+encoder leaves the card (cache_text_embeddings), so its config needs no quantisation - the least sure part on AMD.
+9B (0.61.0) cannot: its transformer alone is 18 GB in bf16, see KLEIN.
 """
 from __future__ import annotations
 
@@ -28,6 +29,7 @@ import asyncio
 import io
 import json
 import logging
+import os
 import re
 import secrets
 import shutil
@@ -41,12 +43,45 @@ from ..images.loras import has_word
 
 log = logging.getLogger("hub.training")
 
-BASE = {"model": "flux2-klein-4b", "family": "flux2-klein", "label": "FLUX.2 klein 4B",
-        "repo": "black-forest-labs/FLUX.2-klein-base-4B", "arch": "flux2_klein_4b", "te_repo": "Qwen/Qwen3-4B"}
-# What ai-toolkit loads for the base, per repository: (repo, the files - None for all but read-mes and pictures)
-DOWNLOADS = ((BASE["repo"], ("flux-2-klein-base-4b.safetensors",)),
-             ("ai-toolkit/flux2_vae", ("ae.safetensors",)),
-             (BASE["te_repo"], None))
+# The FLUX.2 klein bases. A LoRA fits only the size it was trained on, so each size is a picture-model family of its
+# own (app/images/loras.py). `file` is the single file ai-toolkit loads from `repo`, `te_repo` its text encoder (both
+# fetched by the Hub), `lora_for` the catalog's picture model that uses the LoRA, `download_gb` what a first start
+# fetches (the VAE is shared).
+# 9B (0.61.0, Søren): FLUX Non-Commercial licence, gated on Hugging Face (HF_TOKEN). Its transformer is 18.2 GB in
+# bf16 and Qwen3-8B 16.4 GB, so in bf16 it does not fit in 24 GB even with the text encoder gone after caching. Both
+# are quantised to 8 bit on load with quanto's qfloat8 - ai-toolkit's own default for this model (its ui.tsx): fp8
+# weights, multiplied in bf16 (optimum-quanto 0.2.4's qbytes_mm dequantises; no fp8 maths, which RDNA3 lacks) - about
+# 9 + 8 GB once both are loaded (ai-toolkit then parks the transformer in RAM while it encodes the captions), then
+# about 9 GB plus the training. Estimates; fp8 storage has NOT run on this card before (the HANDOFF says what to watch).
+KLEIN = {
+    "flux2-klein-4b": {"model": "flux2-klein-4b", "family": "flux2-klein", "label": "FLUX.2 klein 4B",
+                       "repo": "black-forest-labs/FLUX.2-klein-base-4B", "file": "flux-2-klein-base-4b.safetensors",
+                       "arch": "flux2_klein_4b", "te_repo": "Qwen/Qwen3-4B", "qtype": None,
+                       "lora_for": "FLUX.2 [klein] 4B", "download_gb": 16, "licence": "Apache 2.0", "gated": False},
+    "flux2-klein-9b": {"model": "flux2-klein-9b", "family": "flux2-klein-9b", "label": "FLUX.2 klein 9B",
+                       "repo": "black-forest-labs/FLUX.2-klein-base-9B", "file": "flux-2-klein-base-9b.safetensors",
+                       "arch": "flux2_klein_9b", "te_repo": "Qwen/Qwen3-8B", "qtype": "qfloat8",
+                       "lora_for": "FLUX.2 [klein] 9B", "download_gb": 35, "licence": "FLUX Non-Commercial",
+                       "gated": True},
+}
+BASE = KLEIN["flux2-klein-4b"]          # the default base
+VAE_REPO, VAE_FILE = "ai-toolkit/flux2_vae", "ae.safetensors"
+
+
+def gated_help(repo: str, token: bool, status: int | None = None) -> str:
+    """What to do about a gated Hugging Face repository (FLUX.2 klein 9B's): no HF_TOKEN; a token Hugging Face does
+    not take (401 - wrong or expired); or one whose account has not accepted the licence (403)."""
+    page = f"https://huggingface.co/{repo}"
+    if not token:
+        return (f"{repo} is gated on Hugging Face: sign in there, accept its licence on {page}, create a read token "
+                "(Settings -> Access Tokens), put HF_TOKEN=... in /srv/slq-hub/.env and restart the Hub "
+                "(update.sh compose up -d).")
+    if status == 401:
+        return (f"Hugging Face did not take the HF_TOKEN for {repo} - is it a valid read token, and has its account "
+                f"accepted the licence on {page}? Fix it in /srv/slq-hub/.env and restart the Hub (update.sh compose "
+                "up -d).")
+    return (f"Hugging Face refused {repo} for this HF_TOKEN: accept its licence on {page} with the account the token "
+            "belongs to (it is granted at once), then start again.")
 # SDXL (0.56.0): a LoRA trained on one of the Hub's SDXL checkpoints (RealVisXL 5.0 ...), used with any SDXL model.
 # ai-toolkit loads the checkpoint as one file (arch "sdxl": StableDiffusionXLPipeline.from_single_file, read in its
 # stable_diffusion_model.py); diffusers takes the layout from SDXL base's config files - small, fetched by the Hub
@@ -187,8 +222,9 @@ class Training:
 
     # ------------------------------------------------------------ the base a run trains on
     def sdxl_checkpoints(self) -> list[dict]:
-        """The SDXL checkpoints the Hub has downloaded (Settings -> Models -> Add image model): id, name and the
-        file under models/comfy/checkpoints."""
+        """The SDXL checkpoints the Hub has downloaded (Settings -> Models -> Add image model): id, name, the file
+        under models/comfy/checkpoints, and the quality tags and negative prompt the Hub makes its pictures with
+        (its settings: Pony's score tags, Illustrious' quality tags)."""
         out = []
         for e in self.hub.catalog.entries("comfy"):
             if e.get("family") != "sdxl" or not self.hub.catalog.installed(e):
@@ -197,31 +233,53 @@ class Training:
                          if str(f.get("dest") or "").startswith("comfy/checkpoints/")), "")
             rel = dest[len("comfy/checkpoints/"):]
             if rel.endswith(".safetensors") and ".." not in Path(rel).parts:
-                out.append({"id": e["id"], "name": e.get("name") or e["id"], "path": rel})
+                own = e.get("sdxl") or {}
+                out.append({"id": e["id"], "name": e.get("name") or e["id"], "path": rel,
+                            "prefix": str(own.get("prefix") or "").strip(),
+                            "negative": str(own.get("negative") or "").strip() if "negative" in own else None})
         return out
 
     def bases(self) -> list[dict]:
-        return [{"id": BASE["model"], "label": BASE["label"], "family": BASE["family"]}] + [
-            {"id": f"sdxl:{c['id']}", "label": f"{c['name']} (SDXL)", "family": "sdxl"} for c in self.sdxl_checkpoints()]
+        """What a new training can be based on: the klein sizes (gated: the page to accept the licence on), then
+        the SDXL checkpoints the Hub has."""
+        cat = self.hub.catalog
+        klein = [{"id": k["model"], "label": k["label"], "family": k["family"], "lora_for": k["lora_for"],
+                  # its picture model is downloaded (the catalog entry has the base's id), so the LoRA can be used
+                  "ready": bool((e := cat.get("comfy", k["model"])) and cat.installed(e)),
+                  "download_gb": k["download_gb"], "licence": k["licence"],
+                  **({"gated": f"https://huggingface.co/{k['repo']}"} if k["gated"] else {})} for k in KLEIN.values()]
+        return klein + [{"id": f"sdxl:{c['id']}", "label": f"{c['name']} (SDXL)", "family": "sdxl"}
+                        for c in self.sdxl_checkpoints()]
 
     @staticmethod
-    def base_label(run: dict) -> str:
-        return f"{run.get('checkpoint_name') or 'SDXL'} (SDXL)" if run.get("base") == "sdxl" else BASE["label"]
+    def klein(run: dict) -> dict:
+        """The klein base of a run (runs from before 0.56.0 have no base: 4B, the only one then)."""
+        return KLEIN.get(str(run.get("base") or ""), BASE)
 
-    @staticmethod
-    def family(run: dict) -> str:
-        return "sdxl" if run.get("base") == "sdxl" else BASE["family"]
+    @classmethod
+    def base_label(cls, run: dict) -> str:
+        if run.get("base") == "sdxl":
+            return f"{run.get('checkpoint_name') or 'SDXL'} (SDXL)"
+        return cls.klein(run)["label"]
+
+    @classmethod
+    def family(cls, run: dict) -> str:
+        return "sdxl" if run.get("base") == "sdxl" else cls.klein(run)["family"]
 
     def _base_fields(self, base: str | None) -> dict:
         base = base or BASE["model"]
-        if base == BASE["model"]:
-            return {"base": BASE["model"]}
+        if base in KLEIN:
+            return {"base": base}
         if base.startswith("sdxl:"):
             ck = next((c for c in self.sdxl_checkpoints() if c["id"] == base[5:]), None)
             if ck is None:
                 raise TrainingError("That SDXL model is not downloaded (Settings -> Models -> Add image model).")
-            return {"base": "sdxl", "checkpoint": ck["id"], "checkpoint_name": ck["name"], "checkpoint_path": ck["path"]}
-        raise TrainingError("Train on FLUX.2 klein 4B or on one of your SDXL models.")
+            # its quality tags and negative prompt for the samples (0.61.0), kept with the run: a training made
+            # before goes on with the samples it had (SDXL_NEGATIVE, no tags), so its steps stay comparable
+            return {"base": "sdxl", "checkpoint": ck["id"], "checkpoint_name": ck["name"], "checkpoint_path": ck["path"],
+                    "sample_prefix": str(ck.get("prefix") or ""),
+                    **({"sample_negative": str(ck["negative"])} if ck.get("negative") is not None else {})}
+        raise TrainingError("Train on FLUX.2 klein 4B or 9B, or on one of your SDXL models.")
 
     def create(self, name: str, trigger: str, kind: str = "thing", steps: int = 1500, rank: int = 16,
                base: str | None = None) -> dict:
@@ -288,7 +346,8 @@ class Training:
         folder = self._dir(rid) / "images"
         run = self.create(name or _next_name(src["name"]), trigger or src["trigger"], kind or src["kind"],
                           src["steps"], src["rank"],
-                          base=base or (f"sdxl:{src.get('checkpoint')}" if src.get("base") == "sdxl" else BASE["model"]))
+                          base=base or (f"sdxl:{src.get('checkpoint')}" if src.get("base") == "sdxl"
+                                        else self.klein(src)["model"]))
         old, new = src["trigger"], run["trigger"]
         word = re.compile(rf"(?<![A-Za-z0-9_]){re.escape(old)}(?![A-Za-z0-9_])", re.I)
         dest = self.root / run["id"] / "images"
@@ -473,11 +532,19 @@ class Training:
                 await ticket.release()
 
     # ------------------------------------------------------------ training
+    @staticmethod
+    def _quantise(k: dict) -> dict:
+        """The model's quantisation keys: none for 4B; for 9B the transformer and the text encoder in 8 bit (KLEIN)."""
+        if not k["qtype"]:
+            return {"quantize": False, "quantize_te": False}
+        return {"quantize": True, "qtype": k["qtype"], "quantize_te": True, "qtype_te": k["qtype"]}
+
     def config(self, run: dict) -> dict:
         """ai-toolkit's config (its JSON form) for a run - the keys of its FLUX.2 klein examples."""
         if run.get("base") == "sdxl":
             return self._sdxl_config(run)
         rid, t = run["id"], run["trigger"]
+        k = self.klein(run)
         remote = self._remote(rid)
         lr = 8e-5 if run["kind"] == "style" else 1e-4               # BFL: lower for style, higher for characters
         return {"job": "extension", "config": {"name": rid, "process": [{
@@ -487,15 +554,14 @@ class Training:
             "save": {"dtype": "bf16", "save_every": SAVE_EVERY, "max_step_saves_to_keep": 40},
             "datasets": [{"folder_path": f"{remote}/images", "caption_ext": "txt", "cache_latents_to_disk": True,
                           "resolution": [512, 768, 1024]}],
-            # cache_text_embeddings: each caption (and sample prompt) is encoded once, then the 8 GB text encoder
-            # leaves the card - what lets bf16 fit in 24 GB without quantising
+            # cache_text_embeddings: each caption (and sample prompt) is encoded once, then the text encoder leaves
+            # the card - what lets 4B fit in 24 GB in bf16, and 9B in 8 bit
             "train": {"batch_size": 1, "steps": run["steps"], "gradient_accumulation": 1, "train_unet": True,
                       "train_text_encoder": False, "gradient_checkpointing": True, "noise_scheduler": "flowmatch",
                       "optimizer": "adamw", "lr": lr, "timestep_type": "weighted", "dtype": "bf16",
                       "cache_text_embeddings": True,
                       "content_or_style": {"person": "content", "thing": "content"}.get(run["kind"], "style")},
-            "model": {"name_or_path": BASE["repo"], "arch": BASE["arch"], "quantize": False, "quantize_te": False,
-                      "low_vram": False},
+            "model": {"name_or_path": k["repo"], "arch": k["arch"], **self._quantise(k), "low_vram": False},
             "sample": {"sampler": "flowmatch", "sample_every": SAVE_EVERY, "width": 1024, "height": 1024,
                        "prompts": [p.format(t=t) for p in SAMPLES[run["kind"]]], "neg": "", "seed": 42,
                        "walk_seed": True, "guidance_scale": 4, "sample_steps": 25}}]},
@@ -505,9 +571,15 @@ class Training:
         """SDXL with ai-toolkit's own defaults for it (extensions_built_in/diffusion_models/ui.tsx: no quantising,
         ddpm noise scheduler, guidance 6; no timestep type) - the text encoders are small and stay. The samples use
         DPM++ 2M Karras (0.59.4), as the Hub's own SDXL pictures do. Some samples still show speckles of noise that
-        the LoRA does not have in a chat (0.59.5) - their cause in ai-toolkit's sampling is open."""
+        the LoRA does not have in a chat (0.59.5) - their cause in ai-toolkit's sampling is open.
+        The sample prompts get the checkpoint's own quality tags and negative prompt (0.61.0, stored with the run
+        when it is made), as its pictures in a chat do: Pony without its score tags makes poor pictures, so its
+        samples would look worse than the LoRA. The tags are joined as workflows.sdxl_t2i joins them."""
         rid, t = run["id"], run["trigger"]
         remote = self._remote(rid)
+        head = str(run.get("sample_prefix") or "").strip().rstrip(",").strip()
+        negative = SDXL_NEGATIVE if run.get("sample_negative") is None else str(run["sample_negative"])
+        prompts = [f"{head}, {p.format(t=t)}" if head else p.format(t=t) for p in SAMPLES[run["kind"]]]
         return {"job": "extension", "config": {"name": rid, "process": [{
             "type": "diffusion_trainer", "training_folder": f"{remote}/output", "device": "cuda",
             "trigger_word": t,
@@ -521,14 +593,17 @@ class Training:
             "model": {"name_or_path": f"{CHECKPOINTS}/{run['checkpoint_path']}", "arch": "sdxl", "quantize": False,
                       "quantize_te": False},     # no vae_dtype: ai-toolkit runs the VAE in the train dtype (0.59.3)
             "sample": {"sampler": "k_dpmsolver++", "sample_every": SAVE_EVERY, "width": 1024, "height": 1024,
-                       "prompts": [p.format(t=t) for p in SAMPLES[run["kind"]]], "neg": SDXL_NEGATIVE, "seed": 42,
+                       "prompts": prompts, "neg": negative, "seed": 42,
                        "walk_seed": True, "guidance_scale": 6, "sample_steps": 30}}]},
             "meta": {"name": run["name"], "version": "1.0"}}
 
     def downloads(self, run: dict) -> list[tuple[str, tuple[str, ...] | None, re.Pattern | None]]:
+        """What ai-toolkit loads for a run's base, per repository: (repo, the files - None for all but read-mes and
+        pictures, a pattern the files must match)."""
         if run.get("base") == "sdxl":
             return [(SDXL_CONFIG_REPO, None, SDXL_CONFIG_FILES)]
-        return [(repo, files, None) for repo, files in DOWNLOADS]
+        k = self.klein(run)
+        return [(k["repo"], (k["file"],), None), (VAE_REPO, (VAE_FILE,), None), (k["te_repo"], None, None)]
 
     async def start(self, rid: str, resume: bool = False) -> dict:
         """Train from the start (the output folder is emptied), or with resume go on from the newest checkpoint - a
@@ -658,15 +733,16 @@ class Training:
         their size are kept; a partial download goes on where it stopped. HF_TOKEN (the VM's .env) for a gated
         repository."""
         from ..hf import HF, _headers, _tree
+        token = bool(os.environ.get("HF_TOKEN"))
         async with httpx.AsyncClient(timeout=httpx.Timeout(120, connect=30), follow_redirects=True,
                                      transport=self.hub.transports.web) as c:
             info = await c.get(f"{HF}/api/models/{repo}", headers=_headers())
             if info.status_code in (401, 403):
-                raise TrainingError(f"Hugging Face wants a signed-in user for {repo}: put HF_TOKEN=... in "
-                                    "/srv/slq-hub/.env and run update.sh.", 403)
+                raise TrainingError(gated_help(repo, token, info.status_code), 403)
             if info.status_code >= 400:
                 raise TrainingError(f"Hugging Face answered {info.status_code} for {repo}.", 502)
-            sha = re.sub(r"[^0-9a-f]", "", str((info.json() or {}).get("sha") or ""))[:40] or "hub"
+            meta = info.json() or {}
+            sha = re.sub(r"[^0-9a-f]", "", str(meta.get("sha") or ""))[:40] or "hub"
             files = [x for x in await _tree(c, repo) if x.get("type") == "file" and not re.search(
                 r"\.(gguf|onnx|png|jpe?g|gif|webp|mp4|md)$|^\.", x.get("path", ""), re.I)]
             if pattern is not None:                         # SDXL base: its config files, not its weights
@@ -680,6 +756,13 @@ class Training:
             base = self.cache_dir(repo)
             snap = base / "snapshots" / sha
             total = sum(int(x.get("size") or 0) for x in files)
+            # A gated repository (FLUX.2 klein 9B's) lists its files to anyone but serves them only to a signed-in
+            # user who accepted its licence: said before anything is fetched - and not when all is here already.
+            if meta.get("gated") and not token and any(
+                    not (snap / str(f["path"])).is_file()
+                    or (int(f.get("size") or 0) and (snap / str(f["path"])).stat().st_size != int(f["size"]))
+                    for f in files):
+                raise TrainingError(gated_help(repo, token), 403)
             done = 0
             for f in files:
                 path = str(f["path"])
@@ -695,6 +778,8 @@ class Training:
                 have = part.stat().st_size if part.exists() else 0
                 h = {**_headers(), **({"Range": f"bytes={have}-"} if have else {})}
                 async with c.stream("GET", f"{HF}/{repo}/resolve/main/{path}", headers=h) as r:
+                    if r.status_code in (401, 403):
+                        raise TrainingError(gated_help(repo, token, r.status_code), 403)
                     if r.status_code >= 400 and r.status_code != 416:
                         raise TrainingError(f"Hugging Face answered {r.status_code} for {repo}/{path}.", 502)
                     if r.status_code != 206:

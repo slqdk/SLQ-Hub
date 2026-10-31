@@ -64,3 +64,31 @@ async def test_cancel_stops_one_model_and_the_queue_goes_on(tmp_path):
             break
         await asyncio.sleep(0.01)
     assert d.state["llm/big.gguf"]["status"] == "done" and cat.path(cat.entries["big"]["files"][0]).is_file()
+
+
+async def test_a_gated_file_says_what_to_do(tmp_path, monkeypatch):
+    """0.61.0: FLUX.2 klein 9B's model file is gated on Hugging Face - 401 without HF_TOKEN, 403 when the token's
+    account has not accepted the licence. The download fails with the steps to take, not a bare status code."""
+    seen = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.headers.get("authorization"))
+        return httpx.Response(401 if not request.headers.get("authorization") else 403)
+    cat = Catalog(tmp_path)
+    for token, wanted in ((None, "is gated: sign in on Hugging Face"), ("hf_x", "accept its licence at huggingface.co")):
+        if token:
+            monkeypatch.setenv("HF_TOKEN", token)
+        else:
+            monkeypatch.delenv("HF_TOKEN", raising=False)
+        d = Downloads(cat, transport=httpx.MockTransport(handler))
+        d.enqueue("big")
+        for _ in range(300):
+            if not d.snapshot()["active"]:
+                break
+            await asyncio.sleep(0.01)
+        st = d.state["llm/big.gguf"]
+        assert st["status"] == "failed" and wanted in st["error"] and "acme/big" in st["error"], st
+        assert len(st["error"]) <= 300
+    assert seen == [None, "Bearer hf_x"]
+    from app.downloads import hf_login                       # a token Hugging Face does not take: 401 with a token
+    assert "did not take the HF_TOKEN" in hf_login("acme/big", 401) and len(hf_login("acme/big", 401)) <= 300

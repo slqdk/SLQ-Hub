@@ -2,6 +2,8 @@
 (the gate keeps people off these routes already)."""
 from __future__ import annotations
 
+import os
+
 from fastapi import APIRouter, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -27,8 +29,10 @@ def _fail(exc: TrainingError):
 @router.get("")
 async def overview(request: Request):
     t = _t(request)
+    # hf_token (0.61.0): FLUX.2 klein 9B is gated on Hugging Face - the page says so before a start fails on it
     return {"service": await t.service(), "runs": t.list(), "base": BASE, "bases": t.bases(), "kinds": list(KINDS),
-            "min_images": MIN_IMAGES, "max_images": MAX_IMAGES, "can_caption": t.captioner() is not None}
+            "min_images": MIN_IMAGES, "max_images": MAX_IMAGES, "can_caption": t.captioner() is not None,
+            "hf_token": bool(os.environ.get("HF_TOKEN"))}
 
 
 class RunIn(BaseModel):
@@ -37,7 +41,7 @@ class RunIn(BaseModel):
     kind: str = "thing"
     steps: int = 1500
     rank: int = 16
-    base: str | None = None          # "flux2-klein-4b" or "sdxl:<an SDXL model's id>" (0.56.0)
+    base: str | None = None          # "flux2-klein-4b", "flux2-klein-9b" (0.61.0) or "sdxl:<an SDXL model's id>"
 
 
 @router.post("/runs")
@@ -74,7 +78,7 @@ class DuplicateIn(BaseModel):
     name: str | None = None
     trigger: str | None = None
     kind: str | None = None
-    base: str | None = None       # 0.60.0: train the copy on another model ("flux2-klein-4b" or "sdxl:<id>")
+    base: str | None = None       # 0.60.0: train the copy on another model (a klein size or "sdxl:<id>")
 
 
 @router.post("/runs/{rid}/duplicate")

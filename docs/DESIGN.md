@@ -1793,7 +1793,10 @@ files afterwards.
   - **Background removal** is the official template: an edit with the prompt
     "Remove the background, and output a PNG image". It saves PNG with alpha.
   - **FLUX.2 [klein] 4B** (Apache 2.0, 4 steps) is in the catalog as an
-    optional fast model.
+    optional fast model, and **FLUX.2 [klein] 9B** (0.61.0; FLUX
+    Non-Commercial licence, gated on Hugging Face: HF_TOKEN) as its larger
+    sibling, with the 8-bit files of ComfyUI's template and 4B's graph. Each
+    size is a family of its own, because a LoRA fits only one size.
   - **ERNIE-Image and ERNIE-Image Turbo** (Baidu, 8B, Apache 2.0) are
     optional too: photorealistic, generation only (an edit with ERNIE chosen
     goes to Qwen-Image or FLUX.2 klein). Files from `Comfy-Org/ERNIE-Image`:
@@ -1862,7 +1865,10 @@ files afterwards.
     `training`, optional) is Ostris' ai-toolkit with a small HTTP service
     that runs one job and reports its step, time left and loss. The base is
     FLUX.2 klein 4B (Apache 2.0): trained on klein-base-4B in bf16 without
-    quantising, used on the 4-step model. Every 250 steps a checkpoint and
+    quantising, used on the 4-step model - or klein 9B (0.61.0): its 18 GB
+    transformer does not fit 24 GB in bf16, so it and its text encoder are
+    loaded in 8 bit (quanto's qfloat8, ai-toolkit's default for it), and its
+    gated base is fetched with HF_TOKEN. Every 250 steps a checkpoint and
     three sample pictures are saved; the admin chooses one by its pictures
     and it becomes a LoRA (source "trained"). Duplicate copies a run's
     pictures and captions into a v2 (a new trigger word replaces the old one
@@ -1874,6 +1880,8 @@ files afterwards.
     same way once it has more steps. A run can instead be based on one of the Hub's SDXL
     checkpoints (0.56.0): ai-toolkit's "sdxl" on that file, read-only, with
     SDXL base's config files fetched; its LoRA is an SDXL one. Its samples use
+    the checkpoint's own quality tags and negative prompt (Pony's score tags;
+    trainings made since 0.61.0) and
     DPM++ 2M Karras and can show speckles the LoRA does not have in a chat
     (cause in ai-toolkit's sampling open; the page says so). No `vae_dtype`:
     ai-toolkit runs the VAE in the train dtype (bf16) and casts it so before

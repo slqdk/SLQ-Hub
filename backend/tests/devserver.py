@@ -507,6 +507,12 @@ HF_DEMO["repos"]["ai-toolkit/flux2_vae"] = {"sha": "3d4e5f", "tree": [_hf_file("
 HF_DEMO["repos"]["Qwen/Qwen3-4B"] = {"sha": "6a7b8c", "tree": [
     _hf_file("model-00001-of-00003.safetensors", 3.96), _hf_file("model-00002-of-00003.safetensors", 3.99),
     _hf_file("model-00003-of-00003.safetensors", 0.1), _hf_file("config.json", 0.000001)]}
+# klein 9B (0.61.0) - not gated here, so a training on it can be clicked through without a token
+HF_DEMO["repos"]["black-forest-labs/FLUX.2-klein-base-9B"] = {"sha": "9b0c1d", "tree": [
+    _hf_file("flux-2-klein-base-9b.safetensors", 18.16)]}
+HF_DEMO["repos"]["Qwen/Qwen3-8B"] = {"sha": "8c9d0e", "tree": [
+    _hf_file(f"model-0000{i}-of-00005.safetensors", gb) for i, gb in ((1, 4.0), (2, 3.99), (3, 3.96), (4, 3.19),
+                                                                     (5, 1.24))] + [_hf_file("config.json", 0.000001)]}
 HF_DEMO["repos"]["ornith-ai/Ornith-1.5-9B-GGUF"] = {
     "tree": [_hf_file(f"Ornith-1.5-9B-{q}.gguf", gb) for q, gb in
              (("Q4_K_M", 5.38), ("Q5_K_M", 6.18), ("Q6_K", 7.04), ("Q8_0", 9.12), ("BF16", 17.14))]

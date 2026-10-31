@@ -427,6 +427,7 @@ All commands run in the VM from `/opt/slq-hub`:
 | Run the self-test again | `sudo bash /opt/slq-hub/update.sh compose exec hub python -m app.cli selftest` |
 | More language models | Settings → Models → Add from Hugging Face (GGUF repositories; gated ones need `HF_TOKEN` in `.env`) |
 | More picture models | Settings → Models → Add image model (an SDXL checkpoint on Civitai or Hugging Face; Civitai files for signed-in users need `CIVITAI_TOKEN` in `.env`) |
+| FLUX.2 klein 9B (the picture model, and LoRA training on it) | Gated on Hugging Face: sign in there, accept the licence on huggingface.co/black-forest-labs/FLUX.2-klein-9b-fp8 (the picture model) and huggingface.co/black-forest-labs/FLUX.2-klein-base-9B (training), create a read token and put it in `.env` as `HF_TOKEN=...`, then `update.sh compose up -d` |
 
 Settings that belong to the machine (ports, proxy IP, LAN networks, image
 versions) are in `/srv/slq-hub/.env`. After editing it, run:

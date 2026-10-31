@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "notes": "Model catalog. File paths are verified against Hugging Face (2026-10-21) - except mel-band-roformer-vocals and seed-vc (0.18.0): their paths come from the projects' own code and their sizes are estimates; the video models' (0.19.0) paths come from ComfyUI's official templates and were checked on Hugging Face's pages (2026-10-24), sizes as the pages round them. 'dest' is relative to the models root (/srv/slq-hub/models on the VM, /models in the containers). Sizes are decimal bytes, used for progress only.",
+  "notes": "Model catalog. File paths are verified against Hugging Face (2026-10-21) - except mel-band-roformer-vocals and seed-vc (0.18.0): their paths come from the projects' own code and their sizes are estimates; the video models' (0.19.0) paths come from ComfyUI's official templates and were checked on Hugging Face's pages (2026-10-24), sizes as the pages round them; flux2-klein-9b's (0.61.0) were listed through Hugging Face's API with their exact sizes (2026-10-31; its model file is gated, so its header was not read). 'dest' is relative to the models root (/srv/slq-hub/models on the VM, /models in the containers). Sizes are decimal bytes, used for progress only.",
   "llm": [
     {
       "id": "qwen3.8-27b",
@@ -138,6 +138,19 @@
       "files": [
         {"repo": "Comfy-Org/flux2-klein", "path": "split_files/diffusion_models/flux-2-klein-4b.safetensors", "dest": "comfy/diffusion_models/flux-2-klein-4b.safetensors", "size": 7750000000},
         {"repo": "Comfy-Org/flux2-klein", "path": "split_files/text_encoders/qwen_3_4b.safetensors", "dest": "comfy/text_encoders/qwen_3_4b.safetensors", "size": 8044982048},
+        {"repo": "Comfy-Org/flux2-dev", "path": "split_files/vae/flux2-vae.safetensors", "dest": "comfy/vae/flux2-vae.safetensors", "size": 340000000}
+      ]
+    },
+    {
+      "id": "flux2-klein-9b",
+      "name": "FLUX.2 [klein] 9B",
+      "description": "The larger klein (4 steps): generation and multi-reference editing, and LoRAs trained on klein 9B. 8-bit files as in ComfyUI's template. FLUX Non-Commercial licence and gated on Hugging Face: accept it at huggingface.co/black-forest-labs/FLUX.2-klein-9b-fp8 and set HF_TOKEN in .env before downloading.",
+      "default": false,
+      "family": "flux2-klein-9b",
+      "abilities": ["generate", "edit"],
+      "files": [
+        {"repo": "black-forest-labs/FLUX.2-klein-9b-fp8", "path": "flux-2-klein-9b-fp8.safetensors", "dest": "comfy/diffusion_models/flux-2-klein-9b-fp8.safetensors", "size": 9433061528},
+        {"repo": "Comfy-Org/Flux-2-Klein-9B", "path": "split_files/text_encoders/qwen_3_8b_fp8mixed.safetensors", "dest": "comfy/text_encoders/qwen_3_8b_fp8mixed.safetensors", "size": 8664848742},
         {"repo": "Comfy-Org/flux2-dev", "path": "split_files/vae/flux2-vae.safetensors", "dest": "comfy/vae/flux2-vae.safetensors", "size": 340000000}
       ]
     },

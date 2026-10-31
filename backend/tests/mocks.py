@@ -809,7 +809,10 @@ def make_hf(state: dict) -> FastAPI:
     """The bits of huggingface.co the Hub uses: the tree and model-info APIs and
     file downloads. state["repos"][repo] = {"tree": [...], "gguf": {...}} or
     {"status": 401}; downloads serve b"g" * size, or a .safetensors file when
-    the tree entry has a "header"; Range requests get their part."""
+    the tree entry has a "header"; Range requests get their part. A repo with
+    "gated" (0.61.0: FLUX.2 klein 9B's) is listed to anyone, as the real one is,
+    but its files are served only with "Authorization: Bearer <its token>" -
+    401 without one, 403 with another."""
     app = FastAPI()
 
     def repo_of(owner: str, name: str) -> dict | None:
@@ -841,7 +844,8 @@ def make_hf(state: dict) -> FastAPI:
         r = repo_of(owner, name)
         if r is None or r.get("status"):
             return JSONResponse({"error": "no"}, status_code=404)
-        return {"_id": "x", "id": f"{owner}/{name}", "gguf": r.get("gguf") or {}, **({"sha": r["sha"]} if r.get("sha") else {})}
+        return {"_id": "x", "id": f"{owner}/{name}", "gguf": r.get("gguf") or {}, "gated": r.get("gated") or False,
+                **({"sha": r["sha"]} if r.get("sha") else {})}
 
     @app.get("/{owner}/{name}/resolve/main/{path:path}")
     async def resolve(owner: str, name: str, path: str, request: Request):
@@ -849,6 +853,14 @@ def make_hf(state: dict) -> FastAPI:
         f = next((x for x in r.get("tree", []) if x.get("path") == path), None)
         if f is None:
             return PlainTextResponse("Entry not found", status_code=404)
+        if r.get("gated"):
+            auth = request.headers.get("authorization") or ""
+            if not auth:
+                return PlainTextResponse(f"Access to model {owner}/{name} is restricted. Please log in.",
+                                         status_code=401)
+            if auth != f"Bearer {r.get('token')}":
+                return PlainTextResponse(f"Access to model {owner}/{name} is restricted and you are not in the "
+                                         "authorized list.", status_code=403)
         rng = request.headers.get("range") or ""
         if not rng or rng.endswith("-"):                    # a download, not a header read
             state.setdefault("downloaded", []).append(f"{owner}/{name}/{path}")

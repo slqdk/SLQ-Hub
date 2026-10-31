@@ -250,7 +250,8 @@ export interface TrainingRun { id: string; name: string; trigger: string; kind: 
   ended?: number; lora: string | null; images?: number; log?: string[]; progress?: TrainingProgress | null;
   /** Bytes on disk (the list). */
   size?: number;
-  /** What it trains on (0.56.0): "FLUX.2 klein 4B", or an SDXL model such as "RealVisXL V5.0 (SDXL)". */
+  /** What it trains on (0.56.0): "FLUX.2 klein 4B" or "9B" (0.61.0), or an SDXL model such as "RealVisXL V5.0
+   *  (SDXL)". */
   base_label?: string; checkpoint?: string; checkpoint_name?: string }
 export interface TrainingDetail extends TrainingRun {
   images_list: { name: string; caption: string; v: number }[];
@@ -262,9 +263,17 @@ export interface TrainingDetail extends TrainingRun {
   resume_step: number | null }
 export interface TrainingOverview { service: { ok: boolean; busy: boolean; toolkit: boolean; ref: string } | null;
   runs: TrainingRun[]; base: { model: string; family: string; label: string; repo: string }; kinds: string[];
-  /** What a new training can be based on: FLUX.2 klein 4B and the SDXL models the Hub has (0.56.0). */
-  bases: { id: string; label: string; family: string }[];
-  min_images: number; max_images: number; can_caption: boolean }
+  /** What a new training can be based on: FLUX.2 klein 4B and 9B (0.61.0), then the SDXL models the Hub has
+   *  (0.56.0). A klein base says the picture model its LoRA is used with, what a first start downloads and its
+   *  licence; gated: the Hugging Face page to accept it on (it needs HF_TOKEN too). */
+  bases: TrainingBase[];
+  min_images: number; max_images: number; can_caption: boolean;
+  /** HF_TOKEN is set on the VM (0.61.0): klein 9B is gated on Hugging Face. */
+  hf_token?: boolean }
+export interface TrainingBase { id: string; label: string; family: string; lora_for?: string; download_gb?: number;
+  licence?: string; gated?: string;
+  /** Its picture model (lora_for) is downloaded, so the LoRA can be used. */
+  ready?: boolean }
 
 export interface ModelEntry { id: string; name: string; name_card?: string; description?: string; default?: boolean; installed: boolean;
   loaded?: boolean; downloads: DownloadState[]; capabilities?: string[]; kind?: string;

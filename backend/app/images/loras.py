@@ -3,10 +3,12 @@
 The admin's alone (Søren: "LoRa is Admin only! also for using"): added in Settings -> Models, used in the admin's own
 chats. People (members), their devices and apps on the model API never see or use one.
 
-A LoRA belongs to one model family - `base`, the family of the picture models it fits ("flux2-klein", "qwen-image",
-"z-image", "chroma", "ernie-image", "sdxl"). Its file is models/comfy/loras/hub/<id>.safetensors, which ComfyUI's
-loaders list as hub/<id>.safetensors; the list is data/loras.json. A file that arrives is read for its header: it
-must be a .safetensors LoRA, and its family is guessed from its tensor names and metadata (the admin can change it).
+A LoRA belongs to one model family - `base`, the family of the picture models it fits ("flux2-klein" (4B),
+"flux2-klein-9b", "qwen-image", "z-image", "chroma", "ernie-image", "sdxl"). The two klein sizes are families of their
+own: a LoRA works only with the size it was trained on. Its file is models/comfy/loras/hub/<id>.safetensors, which
+ComfyUI's loaders list as hub/<id>.safetensors; the list is data/loras.json. A file that arrives is read for its
+header: it must be a .safetensors LoRA, and its family is guessed from its tensor names and metadata (the admin can
+change it).
 """
 from __future__ import annotations
 
@@ -19,8 +21,8 @@ import struct
 import threading
 from pathlib import Path
 
-FAMILIES = {"flux2-klein": "FLUX.2 klein", "qwen-image": "Qwen-Image", "z-image": "Z-Image", "chroma": "Chroma",
-            "ernie-image": "ERNIE-Image", "sdxl": "SDXL"}
+FAMILIES = {"flux2-klein": "FLUX.2 klein 4B", "flux2-klein-9b": "FLUX.2 klein 9B", "qwen-image": "Qwen-Image",
+            "z-image": "Z-Image", "chroma": "Chroma", "ernie-image": "ERNIE-Image", "sdxl": "SDXL"}
 MAX_BYTES = 3 * 1024**3           # LoRAs are 10-300 MB as a rule; a rank-128 Qwen-Image one is about 1.2 GB
 HEADER_MAX = 64 * 1024 * 1024
 ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,62}$")
@@ -71,7 +73,10 @@ def guess_base(header: dict) -> str:
                     if k in ("ss_base_model_version", "modelspec.architecture", "ss_sd_model_name", "base_model",
                              "base_model_name", "model_type", "architecture", "name")).lower()
     keys = "\n".join(k for k in list(header)[:6000] if k != "__metadata__")
-    if "qwen" in said or "img_mlp" in keys or "txt_mlp" in keys:
+    # FLUX's double blocks have img_mlp/txt_mlp too (BFL's and ai-toolkit's names, double_blocks.N.img_mlp.0): a LoRA
+    # with FLUX's block names is never Qwen-Image's (whose blocks are transformer_blocks.N), whatever else it says
+    flux_shaped = re.search(r"double_blocks|single_blocks|single_transformer_blocks|to_qkv_mlp_proj", keys) is not None
+    if not flux_shaped and ("qwen" in said or "img_mlp" in keys or "txt_mlp" in keys):
         return "qwen-image"
     if ("sdxl" in said or "stable-diffusion-xl" in said or "lora_te1_" in keys or "lora_te2_" in keys
             or "lora_unet_input_blocks" in keys or "lora_unet_down_blocks" in keys):
@@ -83,11 +88,14 @@ def guess_base(header: dict) -> str:
         return "chroma"
     if "ernie" in said:
         return "ernie-image"
-    if any(w in said for w in ("klein", "flux2", "flux.2", "flux_2")) or "to_qkv_mlp_proj" in keys \
-            or "double_blocks" in keys or "single_blocks" in keys or "single_transformer_blocks" in keys:
-        # FLUX-shaped: klein 4B only when its blocks and sizes say so - a FLUX.1 LoRA (deeper) is left for the
-        # admin to say (Chroma, perhaps); klein 9B is refused when it is added (flux_size)
-        return "" if flux_size(header) == "flux1" else "flux2-klein"
+    if flux_shaped or any(w in said for w in ("klein", "flux2", "flux.2", "flux_2")):
+        # FLUX-shaped: the klein size by its blocks and widths (flux_size), else by what its trainer wrote
+        # (ai-toolkit: "flux2_klein_9b"); a FLUX.1 LoRA (deeper) is left for the admin to say (Chroma, perhaps)
+        size = flux_size(header)
+        if size == "flux1":
+            return ""
+        nine = size == "klein-9b" or re.search(r"klein[ _.-]?(?:base[ _.-]?)?9b", said) is not None
+        return "flux2-klein-9b" if nine else "flux2-klein"
     return ""
 
 
@@ -95,7 +103,7 @@ def flux_size(header: dict) -> str:
     """Which FLUX a FLUX-shaped LoRA was trained on, from its block numbers and layer widths - "klein-9b", "flux1",
     or "" (klein 4B, or it cannot be told). The sizes are ai-toolkit's (flux2/src/model.py): klein 4B has hidden
     size 3072, 5 double and 20 single blocks; klein 9B 4096, 8 and 24; FLUX.1 3072, 19 and 38. A LoRA works only
-    with the size it was trained on."""
+    with the size it was trained on (guess_base makes the two klein sizes two families)."""
     names = "\n".join(k for k in header if k != "__metadata__")
     if not re.search(r"double_blocks|single_blocks|single_transformer_blocks|to_qkv_mlp_proj", names):
         return ""                         # not FLUX-shaped: SDXL and Qwen-Image have transformer_blocks too
@@ -225,9 +233,6 @@ class Loras:
         header = read_header(src)
         if not is_lora(header):
             raise LoraError("This .safetensors file is not a LoRA (a whole model is added under Picture models).")
-        if flux_size(header) == "klein-9b":
-            raise LoraError("This LoRA is for FLUX.2 klein 9B. The Hub's klein is the 4B, and a LoRA only works with "
-                            "the size it was trained on - look for one made for klein 4B.")
         if slider is None:                    # "natural-beauty-slider-zit": its maker says what it is
             said = f"{filename} {src.name} {name} {json.dumps(header.get('__metadata__') or {})[:4000]}".lower()
             slider = "slider" in said

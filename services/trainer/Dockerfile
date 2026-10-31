@@ -6,8 +6,9 @@
 # PyTorch as ai-toolkit's own installer sets it up for AMD (manager/spec.py: torch 2.13.0 / torchvision 0.28.0 /
 # torchaudio 2.11.0 from the rocm7.1 index - "experimental and largely untested" there too), and, as that installer
 # does, held in place by a constraint while ai-toolkit's requirements go in: a package that wants another torch fails
-# the build instead of quietly swapping in PyPI's CUDA build. The config the Hub writes needs no quantisation and no
-# 8-bit optimiser - the least sure parts on AMD. The first real run is the test.
+# the build instead of quietly swapping in PyPI's CUDA build. The config the Hub writes for klein 4B and SDXL needs no
+# quantisation and no 8-bit optimiser - the least sure parts on AMD. klein 9B (0.61.0) does not fit in bf16: its
+# config loads it in 8 bit (quanto's qfloat8, which dequantises to bf16 - no fp8 maths), untried on this card.
 FROM ubuntu:24.04
 # (PYTORCH_HIP_ALLOC_CONF below is NOT passed on to ai-toolkit - traind.py's toolkit_env says why. It stays here so
 # the layers built already are reused; it only affects the image's own torch check.)

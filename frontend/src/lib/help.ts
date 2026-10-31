@@ -62,7 +62,7 @@ export const NEEDS: Record<Need, { missing: string; get: string; tab?: string }>
   "mcp": { missing: "No MCP server is connected", get: "Add one under Settings, MCP servers.", tab: "mcp" },
   "handover": { missing: "No model is chosen to take over", get: "Choose one under Settings, Assistant: When the model gets stuck, hand over to.", tab: "agent" },
   "images.generate": { missing: "Needs a picture model", get: "Download one under Settings, Models, Image models (Qwen-Image 2.1, FLUX.2 [klein], ERNIE-Image, Z-Image, Chroma).", tab: "models" },
-  "images.edit": { missing: "Needs a model that edits", get: "Download Qwen-Image 2.1 or FLUX.2 [klein] 4B under Settings, Models, Image models.", tab: "models" },
+  "images.edit": { missing: "Needs a model that edits", get: "Download Qwen-Image 2.1 or FLUX.2 [klein] 4B or 9B under Settings, Models, Image models.", tab: "models" },
   "images.cutout": { missing: "Needs Qwen-Image 2.1", get: "Download it under Settings, Models, Image models.", tab: "models" },
   "sound.speech": { missing: "Needs a voice model", get: "Download Røst v3 Turbo (Danish) or Chatterbox Multilingual V3 under Settings, Models, Sound, music and speech.", tab: "models" },
   "sound.music": { missing: "Needs a music model", get: "Download ACE-Step 1.5 under Settings, Models, Sound, music and speech.", tab: "models" },
@@ -410,9 +410,9 @@ export const SECTIONS: HelpSection[] = [
       {
         id: "lora-training",
         title: "Train a LoRA on your own pictures",
-        what: "Settings, Models, LoRAs, Train a LoRA teaches FLUX.2 klein 4B - or one of your SDXL models, such as "
-          + "RealVisXL - a thing, a person or a style from 15-40 of your pictures, here on the card. It needs the "
-          + "trainer turned on (COMPOSE_PROFILES=training on the VM).",
+        what: "Settings, Models, LoRAs, Train a LoRA teaches FLUX.2 klein 4B or 9B - or one of your SDXL models, such "
+          + "as RealVisXL or Pony - a thing, a person or a style from 15-40 of your pictures, here on the card. It "
+          + "needs the trainer turned on (COMPOSE_PROFILES=training on the VM).",
         examples: [
           { text: "New training: CX9020 controller, trigger word cx9020x, 25 photos of it" },
           { text: "Then: tick the CX9020 LoRA in a chat's picture menu, and ask for cx9020x in a control cabinet" },
@@ -425,7 +425,10 @@ export const SECTIONS: HelpSection[] = [
           + "the training: the copy gets the pictures and captions, and v1 keeps its checkpoints.",
           "The training page's Which step? and Make it better buttons, and the ? at Steps and Rank, explain how to "
           + "choose and what to change.",
-          "The first training downloads about 16 GB of model files. Only you can train or use LoRAs."],
+          "The first training on a model downloads its files: about 16 GB for klein 4B, 35 GB for klein 9B. klein 9B "
+          + "is gated on Hugging Face: accept its licence there and set HF_TOKEN on the VM first. A LoRA works only "
+          + "with the model size it was trained on.",
+          "Only you can train or use LoRAs."],
         owner: true,
       },
       {

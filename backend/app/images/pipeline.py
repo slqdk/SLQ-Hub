@@ -47,6 +47,7 @@ HINTS = {
     "qwen-image": "Detailed English prompt (other languages work): subject, style, composition, lighting, exact text "
                   "in quotes. Good at text in images; fast=true uses its 8-step turbo.",
     "flux2-klein": "Fast (4 steps). Detailed natural-language prompt.",
+    "flux2-klein-9b": "Fast (4 steps). Detailed natural-language prompt.",
     "ernie-image": "Photorealistic. Its own prompt enhancer expands the prompt, so a short clear description is enough.",
     "z-image": "Fast (8 steps), photorealistic. Detailed natural-language prompt in English or Chinese, exact text in "
                "quotes. No negative prompt.",
@@ -240,8 +241,8 @@ class ImagePipeline:
                     results.append({**item, "seed": sd, "model": model, **extra,
                                     **({"prompt_used": used} if used else {})})
                 continue
-            if fam == "flux2-klein":
-                graph = W.klein_t2i(prompt, width, height, sd, steps=steps or 4)
+            if fam in W.KLEIN_FILES:                        # FLUX.2 klein 4B or 9B: one graph, its own files
+                graph = W.klein_t2i(prompt, width, height, sd, steps=steps or 4, files=W.KLEIN_FILES[fam])
             elif fam == "z-image":
                 graph = W.zimage_t2i(prompt, width, height, sd, steps=steps or int(s.get("turbo_steps", 8)))
             elif fam == "chroma":
@@ -282,13 +283,14 @@ class ImagePipeline:
             model = "qwen-image-2.1-turbo"
         if not self.available(model):
             raise ImageError(f"the image model {model} is not downloaded (Settings -> Models)")
-        lora_nodes, prompt, extra = self._loras(loras, family(self.entry(model)), prompt)
+        fam = family(self.entry(model))
+        lora_nodes, prompt, extra = self._loras(loras, fam, prompt)
         results = []
         for i in range(max(1, min(int(count), 4))):
             names = await self._upload_inputs(images)
             sd = (int(seed) + i) if seed is not None else random.randint(1, 2**31 - 1)
-            if family(self.entry(model)) == "flux2-klein":
-                graph = W.klein_edit(prompt, names, sd, steps=steps or 4)
+            if fam in W.KLEIN_FILES:
+                graph = W.klein_edit(prompt, names, sd, steps=steps or 4, files=W.KLEIN_FILES[fam])
             else:
                 graph = W.qwen_edit(prompt, names, sd, steps=steps or int(s.get("steps", 25)),
                                     cfg=float(s.get("cfg", 1.0)), turbo=model.endswith("turbo"))

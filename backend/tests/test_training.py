@@ -213,7 +213,7 @@ async def test_a_lora_is_trained_on_an_sdxl_checkpoint(signed_in, app, fakes, mo
     monkeypatch.setattr(t, "sdxl_checkpoints", lambda: [{"id": "realvisxl-v5-0", "name": "RealVisXL V5.0",
                                                          "path": "hub/realvisxl-v5-0.safetensors"}])
     over = (await signed_in.get("/hub/api/training")).json()
-    assert [b["id"] for b in over["bases"]] == ["flux2-klein-4b", "sdxl:realvisxl-v5-0"]
+    assert [b["id"] for b in over["bases"]] == ["flux2-klein-4b", "flux2-klein-9b", "sdxl:realvisxl-v5-0"]
     for bad in ("sdxl:gone", "sd15"):
         r = await signed_in.post("/hub/api/training/runs", json={"name": "X", "trigger": "rkxv", "base": bad},
                                  headers=ORIGIN)
@@ -243,6 +243,7 @@ async def test_a_lora_is_trained_on_an_sdxl_checkpoint(signed_in, app, fakes, mo
                             "quantize": False, "quantize_te": False}
     assert cfg["train"]["noise_scheduler"] == "ddpm" and cfg["sample"]["sampler"] == "k_dpmsolver++"   # 0.59.4
     assert "timestep_type" not in cfg["train"] and "cache_text_embeddings" not in cfg["train"]
+    assert cfg["sample"]["neg"] == R.SDXL_NEGATIVE and cfg["sample"]["prompts"][0].startswith("mirx, ")
     fakes.trainer["hold"] = False
     await wait_for(lambda: t._load(rid)["state"] == "done")
     assert t.detail(rid)["base_label"] == "RealVisXL V5.0 (SDXL)"
@@ -441,3 +442,100 @@ def test_the_trainer_stops_a_job(traind):
         time.sleep(0.05)
     assert mod.jobs["r1"]["proc"].poll() is not None and mod.jobs["r1"]["state"] == "cancelled"
     assert not mod.busy()
+
+
+async def test_a_lora_is_trained_on_klein_9b(signed_in, app, fakes, monkeypatch):
+    """0.61.0: FLUX.2 klein 9B as the base. Gated on Hugging Face: without HF_TOKEN a start stops before anything is
+    fetched, with the steps to take; with a token its account has not accepted the licence for, Hugging Face's 403 is
+    explained. Then its base file, Qwen3-8B and the shared VAE are fetched, the transformer and text encoder are
+    quantised to 8 bit (18 GB in bf16 does not fit the card), and the LoRA belongs to the 9B family."""
+    monkeypatch.setattr(R, "POLL_S", 0.01)
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    hub = app.state.hub
+    t = hub.extras["training"]
+    over = (await signed_in.get("/hub/api/training")).json()
+    nine = next(b for b in over["bases"] if b["id"] == "flux2-klein-9b")
+    assert nine["family"] == "flux2-klein-9b" and nine["lora_for"] == "FLUX.2 [klein] 9B" and nine["ready"] is False
+    assert nine["gated"] == "https://huggingface.co/black-forest-labs/FLUX.2-klein-base-9B" and over["hf_token"] is False
+    assert "gated" not in over["bases"][0] and over["bases"][0]["download_gb"] == 16
+    run = (await signed_in.post("/hub/api/training/runs", json={"name": "Rikke 9B", "trigger": "rkxv", "kind": "person",
+                                                                "steps": 500, "base": "flux2-klein-9b"},
+                                headers=ORIGIN)).json()
+    rid = run["id"]
+    assert run["base"] == "flux2-klein-9b" and t.detail(rid)["base_label"] == "FLUX.2 klein 9B"
+    t.add_images(rid, [(f"p{i}.jpg", photo()) for i in range(5)])
+    t.set_captions(rid, {f"p{i}.jpg": "a woman in a garden" for i in range(5)})
+    repos = {"black-forest-labs/FLUX.2-klein-base-9B": {"sha": "9b9b9b", "gated": "auto", "token": "hf_ok", "tree": [
+                 {"type": "file", "path": "flux-2-klein-base-9b.safetensors", "size": 4000},
+                 {"type": "file", "path": "transformer/diffusion_pytorch_model-00001-of-00002.safetensors",
+                  "size": 2000}, {"type": "file", "path": "LICENSE.md", "size": 10}]},
+             "ai-toolkit/flux2_vae": KLEIN_REPOS["ai-toolkit/flux2_vae"],
+             "Qwen/Qwen3-8B": {"sha": "8b8b8b", "tree": [
+                 {"type": "file", "path": "model-00001-of-00002.safetensors", "size": 1500},
+                 {"type": "file", "path": "model-00002-of-00002.safetensors", "size": 1500},
+                 {"type": "file", "path": "tokenizer.json", "size": 20}]}}
+    fakes.hf["repos"] = repos
+    fakes.hf["downloaded"] = []
+    r = await signed_in.post(f"/hub/api/training/runs/{rid}/start", headers=ORIGIN)
+    assert r.status_code == 200, r.text
+    await wait_for(lambda: t._load(rid)["state"] == "failed")
+    err = t._load(rid)["error"]
+    assert "gated" in err and "HF_TOKEN" in err and "huggingface.co/black-forest-labs/FLUX.2-klein-base-9B" in err
+    assert fakes.hf["downloaded"] == [] and rid not in fakes.trainer["jobs"]     # nothing fetched, the card not taken
+
+    monkeypatch.setenv("HF_TOKEN", "hf_someone_else")                # a token whose account has not accepted it
+    await signed_in.post(f"/hub/api/training/runs/{rid}/start", headers=ORIGIN)
+    await wait_for(lambda: t._load(rid)["state"] == "failed")
+    assert "accept its licence" in t._load(rid)["error"] and "account the token belongs to" in t._load(rid)["error"]
+    # a token Hugging Face does not take at all (wrong or expired) answers 401: said as such, not as the licence
+    assert "did not take the HF_TOKEN" in R.gated_help("black-forest-labs/FLUX.2-klein-base-9B", True, 401)
+
+    monkeypatch.setenv("HF_TOKEN", "hf_ok")
+    assert (await signed_in.get("/hub/api/training")).json()["hf_token"] is True
+    fakes.trainer["hold"] = True
+    assert (await signed_in.post(f"/hub/api/training/runs/{rid}/start", headers=ORIGIN)).status_code == 200
+    await wait_for(lambda: t._load(rid)["state"] == "training" and rid in fakes.trainer["jobs"])
+    hf = hub.env.models_dir / "hf" / "hub"
+    base = hf / "models--black-forest-labs--FLUX.2-klein-base-9B" / "snapshots" / "9b9b9b"
+    assert (base / "flux-2-klein-base-9b.safetensors").stat().st_size == 4000 and not (base / "transformer").exists()
+    assert (hf / "models--Qwen--Qwen3-8B/snapshots/8b8b8b/model-00002-of-00002.safetensors").is_file()
+    assert (hf / "models--ai-toolkit--flux2_vae/snapshots/fed789/ae.safetensors").is_file()
+    cfg = fakes.trainer["jobs"][rid]["config"]["config"]["process"][0]
+    assert cfg["model"] == {"name_or_path": "black-forest-labs/FLUX.2-klein-base-9B", "arch": "flux2_klein_9b",
+                            "quantize": True, "qtype": "qfloat8", "quantize_te": True, "qtype_te": "qfloat8",
+                            "low_vram": False}
+    assert cfg["train"]["cache_text_embeddings"] is True and cfg["sample"]["guidance_scale"] == 4
+    fakes.trainer["hold"] = False
+    await wait_for(lambda: t._load(rid)["state"] == "done")
+    lora = (await signed_in.post(f"/hub/api/training/runs/{rid}/use", json={}, headers=ORIGIN)).json()
+    assert lora["base"] == "flux2-klein-9b" and "FLUX.2 klein 9B" in lora["note"]
+    assert t.duplicate(rid)["base"] == "flux2-klein-9b"                        # a v2 stays on 9B
+    assert t.duplicate(rid, base="flux2-klein-4b")["base"] == "flux2-klein-4b"
+
+    # Started again with the files here: no token needed for what is already fetched.
+    monkeypatch.delenv("HF_TOKEN")
+    fakes.hf["downloaded"] = []
+    await signed_in.post(f"/hub/api/training/runs/{rid}/start", headers=ORIGIN)
+    await wait_for(lambda: t._load(rid)["state"] == "done")
+    assert fakes.hf["downloaded"] == []
+
+
+def test_sdxl_samples_are_made_as_the_hub_makes_that_models_pictures(app, monkeypatch):
+    """0.61.0: the samples of a training on Pony get its score tags and its own (empty) negative prompt, as Pony's
+    pictures in a chat do - without them Pony's samples looked worse than its LoRA. They are kept with the run when
+    it is made: a training made before keeps the samples it had, so its steps stay comparable."""
+    t = app.state.hub.extras["training"]
+    pony = {"id": "pony-v6", "name": "Pony Diffusion V6 XL", "path": "hub/pony-v6.safetensors",
+            "prefix": "score_9, score_8_up, score_7_up,", "negative": ""}            # a trailing comma, as typed
+    monkeypatch.setattr(t, "sdxl_checkpoints", lambda: [pony])
+    run = t.create("Mira", "mirx", "person", 500, base="sdxl:pony-v6")
+    assert run["sample_prefix"] == "score_9, score_8_up, score_7_up," and run["sample_negative"] == ""
+    cfg = t.config(t._load(run["id"]))["config"]["process"][0]
+    assert cfg["sample"]["prompts"][0] == "score_9, score_8_up, score_7_up, mirx, smiling, a portrait photo outdoors " \
+                                          "in soft light"
+    assert cfg["sample"]["neg"] == "" and cfg["model"]["name_or_path"].endswith("hub/pony-v6.safetensors")
+    assert t.duplicate(run["id"])["sample_prefix"] == pony["prefix"]               # a v2 takes the model's again
+    older = t._set(run["id"], sample_prefix=None, sample_negative=None)              # as a run from before 0.61.0
+    older.pop("sample_prefix"), older.pop("sample_negative")
+    cfg = t.config(older)["config"]["process"][0]
+    assert cfg["sample"]["neg"] == R.SDXL_NEGATIVE and cfg["sample"]["prompts"][0].startswith("mirx, ")

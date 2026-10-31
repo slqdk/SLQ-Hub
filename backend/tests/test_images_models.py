@@ -310,6 +310,9 @@ async def test_new_models_in_chats(signed_in, app, fakes):
         "settings": {"preset": "pony"}})
     assert r.status_code == 200, r.text
     await _drain(hub)
+    # 0.61.0: a LoRA training on it makes its samples with Pony's score tags and its (empty) negative prompt
+    ck = next(c for c in hub.extras["training"].sdxl_checkpoints() if c["id"] == "pony-v6")
+    assert ck["prefix"].startswith("score_9, score_8_up") and ck["negative"] == ""
     c = await new_chat(signed_in, settings={"image_model": "pony-v6"})
     fakes.llama["requests"] = []
     fakes.llama["replies"] = [

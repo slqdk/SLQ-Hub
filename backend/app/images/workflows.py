@@ -28,6 +28,12 @@ QWEN = {
 }
 QWEN_TURBO_SIGMAS = "1.0, 0.978453, 0.95418, 0.926626, 0.89508, 0.845148, 0.704534, 0.414568, 0"
 KLEIN = {"unet": "flux-2-klein-4b.safetensors", "clip": "qwen_3_4b.safetensors", "vae": "flux2-vae.safetensors"}
+# FLUX.2 klein 9B (0.61.0): the same graph with its own files - the 8-bit ones of ComfyUI's official template
+# (image_flux2_klein_image_edit_9b_distilled.json: BFL's fp8 model, Qwen3-8B fp8mixed, cfg 1, 4 steps), with the
+# FLUX.2 VAE that 4B and ERNIE share (the template's small decoder is only quicker).
+KLEIN_9B = {"unet": "flux-2-klein-9b-fp8.safetensors", "clip": "qwen_3_8b_fp8mixed.safetensors",
+            "vae": "flux2-vae.safetensors"}
+KLEIN_FILES = {"flux2-klein": KLEIN, "flux2-klein-9b": KLEIN_9B}       # by catalog family
 
 
 def snap(v: int, step: int = 32, lo: int = 256, hi: int = 2048) -> int:
@@ -112,17 +118,19 @@ def qwen_remove_background(image_name: str, seed: int, steps: int = 25, resoluti
                      resolution=resolution, prefix=prefix, png_alpha=True)
 
 
-def _klein_base() -> dict:
+def _klein_base(files: dict) -> dict:
     return {
-        "1": {"class_type": "UNETLoader", "inputs": {"unet_name": KLEIN["unet"], "weight_dtype": "default"}},
-        "3": {"class_type": "CLIPLoader", "inputs": {"clip_name": KLEIN["clip"], "type": "flux2", "device": "default"}},
-        "4": {"class_type": "VAELoader", "inputs": {"vae_name": KLEIN["vae"]}},
+        "1": {"class_type": "UNETLoader", "inputs": {"unet_name": files["unet"], "weight_dtype": "default"}},
+        "3": {"class_type": "CLIPLoader", "inputs": {"clip_name": files["clip"], "type": "flux2", "device": "default"}},
+        "4": {"class_type": "VAELoader", "inputs": {"vae_name": files["vae"]}},
     }
 
 
-def klein_t2i(prompt: str, width: int, height: int, seed: int, steps: int = 4, prefix: str = "hub") -> dict:
+def klein_t2i(prompt: str, width: int, height: int, seed: int, steps: int = 4, prefix: str = "hub",
+              files: dict = KLEIN) -> dict:
+    """FLUX.2 klein, 4B or 9B (`files`: KLEIN or KLEIN_9B)."""
     w, h = snap(width, 16), snap(height, 16)
-    g = _klein_base()
+    g = _klein_base(files)
     g["5"] = {"class_type": "CLIPTextEncode", "inputs": {"clip": ["3", 0], "text": prompt}}
     g["6"] = {"class_type": "ConditioningZeroOut", "inputs": {"conditioning": ["5", 0]}}
     g["7"] = {"class_type": "EmptyFlux2LatentImage", "inputs": {"width": w, "height": h, "batch_size": 1}}
@@ -139,10 +147,11 @@ def klein_t2i(prompt: str, width: int, height: int, seed: int, steps: int = 4, p
     return g
 
 
-def klein_edit(prompt: str, image_names: list[str], seed: int, steps: int = 4, prefix: str = "hub") -> dict:
+def klein_edit(prompt: str, image_names: list[str], seed: int, steps: int = 4, prefix: str = "hub",
+               files: dict = KLEIN) -> dict:
     if not image_names:
         raise ValueError("an edit needs at least one image")
-    g = _klein_base()
+    g = _klein_base(files)
     g["5"] = {"class_type": "CLIPTextEncode", "inputs": {"clip": ["3", 0], "text": prompt}}
     g["6"] = {"class_type": "ConditioningZeroOut", "inputs": {"conditioning": ["5", 0]}}
     pos, neg = ["5", 0], ["6", 0]

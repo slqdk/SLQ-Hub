@@ -51,6 +51,20 @@ def test_the_family_is_read_from_the_file():
     assert flux_size(blocks(19, 38)) == "flux1" and guess_base(blocks(19, 38)) == ""
     assert flux_size(blocks(8, 24, 4096)) == "klein-9b" and flux_size(blocks(2, 0, 4096)) == "klein-9b"
     assert flux_size({"transformer.single_transformer_blocks.23.attn.to_qkv_mlp_proj.lora_A.weight": T}) == "klein-9b"
+    # 0.61.0: klein 9B is a family of its own (a LoRA works only with the size it was trained on) - by its blocks and
+    # widths, or by what ai-toolkit wrote into it
+    assert guess_base(blocks(8, 24, 4096)) == "flux2-klein-9b"
+    assert guess_base({"x.lora_A.weight": T, "__metadata__": {"ss_base_model_version": "flux2_klein_9b"}}) == \
+        "flux2-klein-9b"
+    assert guess_base({**{k: T for k in KLEIN}, "__metadata__": {"name": "FLUX.2-klein-base-9B portrait"}}) == \
+        "flux2-klein-9b"
+    # FLUX's double blocks have img_mlp too (double_blocks.N.img_mlp.0, as ai-toolkit saves them): FLUX, not Qwen-Image
+    mlp = {f"diffusion_model.double_blocks.{i}.{part}.lora_A.weight":
+           {"dtype": "F16", "shape": [16, width], "data_offsets": [0, 0]}
+           for i in range(5) for part, width in (("img_mlp.0", 3072), ("txt_mlp.2", 9216))}
+    assert guess_base(mlp) == "flux2-klein"
+    mlp9 = {k: {**v, "shape": [16, 4096 if v["shape"][1] == 3072 else 12288]} for k, v in mlp.items()}
+    assert guess_base({**mlp9, "__metadata__": {"name": "qwen look"}}) == "flux2-klein-9b"      # the blocks decide
     sdxl = {f"lora_unet_output_blocks_2_1_transformer_blocks_{i}_attn1_to_q.lora_down.weight":
             {"dtype": "F16", "shape": [16, 1280], "data_offsets": [0, 0]} for i in range(6)}
     assert flux_size(sdxl) == ""                                   # SDXL's transformer blocks: not a FLUX at all
@@ -80,12 +94,16 @@ def test_adding_changing_and_removing(tmp_path):
     off = store.update(sl["id"], slider=False)
     assert off["slider"] is False and off["strength"] == 0.0           # -3 back into 0-2
     store.delete(sl["id"])
-    nine = tmp_path / "klein9b.safetensors"                              # klein 9B: refused, with the reason
+    nine = tmp_path / "klein9b.safetensors"            # klein 9B (0.61.0): its own family, no longer refused
     raw = json.dumps({"diffusion_model.double_blocks.7.img_attn.qkv.lora_A.weight":
                       {"dtype": "F16", "shape": [16, 4096], "data_offsets": [0, 0]}}).encode()
     nine.write_bytes(struct.pack("<Q", len(raw)) + raw)
-    with pytest.raises(LoraError, match="klein 9B"):
-        store.add_file(nine, nine.name)
+    big = store.add_file(nine, nine.name)
+    assert big["base"] == "flux2-klein-9b" and big["base_label"] == "FLUX.2 klein 9B"
+    assert store.resolve([big["id"]], "flux2-klein")[3] == [f"the LoRA {big['name']} was left out: it is for FLUX.2 "
+                                                            "klein 9B models, not this one"]
+    assert store.resolve([big["id"]], "flux2-klein-9b")[0] == [(f"hub/{big['id']}.safetensors", 1.0)]
+    store.delete(big["id"])
     again = tmp_path / "again.safetensors"
     again.write_bytes(safetensors(KLEIN))
     assert store.add_file(again, again.name, name="Soren face v2")["id"] == "soren-face-v2-2"
@@ -108,8 +126,9 @@ def test_adding_changing_and_removing(tmp_path):
     assert triggers == ["sorenx"] and names == ["Soren face v2", "Soren face v2"] and "no longer there" in notes[0]
     assert used[0] == {"name": "Soren face v2", "strength": 0.6, "slider": False}      # for the line under a picture
     other = store.resolve(["soren-face-v2"], "qwen-image")
-    assert other[0] == [] and other[3] == ["the LoRA Soren face v2 was left out: it is for FLUX.2 klein models, not "
-                                           "this one"]
+    assert other[0] == [] and other[3] == ["the LoRA Soren face v2 was left out: it is for FLUX.2 klein 4B models, "
+                                           "not this one"]
+    assert store.resolve(["soren-face-v2"], "flux2-klein-9b")[0] == []           # a 4B LoRA does not fit 9B either
     store.delete("soren-face-v2-2")
     assert [x["id"] for x in store.list()] == ["soren-face-v2"]
 
@@ -157,7 +176,7 @@ async def test_the_admin_adds_and_uses_a_lora_and_a_person_never_sees_one(signed
     assert _node(g, "CLIPTextEncode")[0]["inputs"]["text"] == "cx9020x, on a workbench"
     tool = next(t for t in fakes.llama["requests"][0]["tools"] if t["function"]["name"] == "image_generate")
     desc = tool["function"]["description"]
-    assert "On in this chat, used on every picture:\n- CX9020 (for FLUX.2 klein models" in desc
+    assert "On in this chat, used on every picture:\n- CX9020 (for FLUX.2 klein 4B models" in desc
     props = tool["function"]["parameters"]["properties"]
     assert "loras" not in props and "model" not in props                  # 0.59.0: the picture menu decides
     res = next(e["data"] for e in run.events if e["type"] == "tool_result")
@@ -187,7 +206,7 @@ async def test_the_admin_adds_and_uses_a_lora_and_a_person_never_sees_one(signed
     run = await finish(app, await say(signed_in, c3["id"], "Draw a desk"))
     res = next(e["data"] for e in run.events if e["type"] == "tool_result")
     assert res["display"]["made_with"]["left_out"] == ["the LoRA CX9020 was left out: it is for FLUX.2 klein "
-                                                       "models, not this one"]
+                                                       "4B models, not this one"]
     tool = next(t for t in fakes.llama["requests"][0]["tools"] if t["function"]["name"] == "image_generate")
     assert "NOT used: it does not fit this chat's picture model" in tool["function"]["description"]
 
@@ -221,3 +240,43 @@ async def test_the_admin_adds_and_uses_a_lora_and_a_person_never_sees_one(signed
         assert "LoRA" not in tool["function"]["description"]
         assert len(fakes.comfy["prompts"]) == n + 1 and not _node(fakes.comfy["prompts"][-1], "LoraLoaderModelOnly")
     assert (await signed_in.delete("/hub/api/loras/cx9020", headers=ORIGIN)).status_code == 200
+
+
+async def test_klein_9b_draws_and_edits_with_its_own_files_and_loras(signed_in, app, fakes):
+    """0.61.0: FLUX.2 klein 9B is a picture model of its own family - the klein graph with its 8-bit files from
+    ComfyUI's template - and takes only LoRAs made for 9B (a 4B one is left out, with the reason)."""
+    from .mocks import _png
+    hub = app.state.hub
+    pipe = hub.extras["images"]
+    _install(hub, "flux2-klein-9b")
+    nine = {"diffusion_model.single_blocks.23.linear1.lora_A.weight":
+            {"dtype": "F16", "shape": [16, 4096], "data_offsets": [0, 0]}}
+    raw = json.dumps(nine).encode()
+    r = await signed_in.post("/hub/api/loras", files={"file": ("rikke9.safetensors", struct.pack("<Q", len(raw)) + raw,
+                                                               "application/octet-stream")},
+                             data={"trigger": "rkxv"}, headers=ORIGIN)
+    assert r.status_code == 200, r.text
+    lora = r.json()
+    assert lora["base"] == "flux2-klein-9b" and [m["id"] for m in lora["fits"]] == ["flux2-klein-9b"]
+    four = (await signed_in.post("/hub/api/loras", files={"file": ("cx.safetensors", safetensors(KLEIN), "x")},
+                                 headers=ORIGIN)).json()
+    assert four["base"] == "flux2-klein" and four["fits"] == []                  # klein 4B is not downloaded here
+
+    items = await pipe.generate("a fox", 1024, 1024, model="flux2-klein-9b", loras=[lora["id"], four["id"]])
+    g = fakes.comfy["prompts"][-1]
+    assert _node(g, "UNETLoader")[0]["inputs"]["unet_name"] == "flux-2-klein-9b-fp8.safetensors"
+    assert _node(g, "CLIPLoader")[0]["inputs"] == {"clip_name": "qwen_3_8b_fp8mixed.safetensors", "type": "flux2",
+                                                   "device": "default"}
+    assert _node(g, "VAELoader")[0]["inputs"]["vae_name"] == "flux2-vae.safetensors"
+    assert _node(g, "Flux2Scheduler")[0]["inputs"]["steps"] == 4
+    assert [n["inputs"]["lora_name"] for n in _node(g, "LoraLoaderModelOnly")] == [f"hub/{lora['id']}.safetensors"]
+    assert _node(g, "CLIPTextEncode")[0]["inputs"]["text"] == "rkxv, a fox"
+    assert items[0]["model"] == "flux2-klein-9b" and "FLUX.2 klein 4B models" in items[0]["lora_notes"][0]
+
+    items = await pipe.edit("make it red", [_png((8, 8))], model="flux2-klein-9b", loras=[lora["id"]])
+    g = fakes.comfy["prompts"][-1]
+    assert items[0]["model"] == "flux2-klein-9b" and _node(g, "ReferenceLatent")
+    assert _node(g, "UNETLoader")[0]["inputs"]["unet_name"] == "flux-2-klein-9b-fp8.safetensors"
+    assert _node(g, "LoraLoaderModelOnly")[0]["inputs"]["lora_name"] == f"hub/{lora['id']}.safetensors"
+    families = (await signed_in.get("/hub/api/loras")).json()["families"]
+    assert families["flux2-klein"] == "FLUX.2 klein 4B" and families["flux2-klein-9b"] == "FLUX.2 klein 9B"
