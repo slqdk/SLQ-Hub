@@ -1,7 +1,7 @@
 // Settings: models, the queue, apps and keys, the agent, memory, MCP, cloud, system (skills have their own page).
 import { LEVEL_OPTIONS } from "../lib/effort";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { ChevronDown, ChevronUp, Copy, Download, Menu, Plus, RefreshCw, X } from "lucide-react";
+import { ChevronDown, ChevronUp, Copy, Download, Menu, Plus, RefreshCw, Upload, X } from "lucide-react";
 import { api, type ApiKey, type Person, type HFLookup, type HFSearchHit, type ImageLookup, type McpServerConfig, type McpStatus,
   type MemoryFile, type ModelEntry, type Sampling, type SdxlChoices, type SdxlSettings, type Settings, type UsageData,
   type UsageRow } from "../lib/api";
@@ -12,6 +12,8 @@ import { QueueModal, plateState } from "../components/Queue";
 import { ConfirmButton, Empty, Lamp, Modal, Switch, SwitchRow, Tabs, copyText, useInterval, type LampState } from "../components/ui";
 import { TestsTab } from "../components/TestsTab";
 import { LorasSection } from "../components/Loras";
+import { UploadImageModel, UploadLanguageModel, UploadModelFiles } from "../components/ModelUpload";
+import { presetSettings, SdxlFields } from "../components/SdxlFields";
 import { forgetSettings } from "./ChatView";
 
 const TABS = [
@@ -176,6 +178,10 @@ function ModelsTab({ s }: { s: S }) {
   });
   const [addingHF, setAddingHF] = useState(false);
   const [addingImage, setAddingImage] = useState(false);
+  // 0.62.0: from this computer - a language model, an image model, or a listed model's missing files
+  const [uploadingLlm, setUploadingLlm] = useState(false);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [uploadingFiles, setUploadingFiles] = useState<ModelEntry | null>(null);
   const [imageSettings, setImageSettings] = useState<ModelEntry | null>(null);
   const [renaming, setRenaming] = useState<ModelEntry | null>(null);
   const renameButton = (m: ModelEntry) => <button className="btn quiet small" onClick={() => setRenaming(m)}>Rename</button>;
@@ -198,9 +204,11 @@ function ModelsTab({ s }: { s: S }) {
         { key: "preload", label: "Load the chat model when the Hub starts", type: "bool" },
       ]} />
       <ModelGroup title="Language models" items={models.llm} busy={busy} onDownload={download} onCancel={cancel}
-        onMove={(i, by) => move("llm", models.llm, i, by)}
+        onUpload={setUploadingFiles} onMove={(i, by) => move("llm", models.llm, i, by)}
         note="In this order in the chat's model choices. Move them with the arrows."
-        action={<button className="btn small" onClick={() => setAddingHF(true)}><Plus size={14} /> Add from Hugging Face</button>}
+        action={<span className="row" style={{ gap: 6 }}>
+          <button className="btn small" onClick={() => setUploadingLlm(true)}><Upload size={14} /> Upload</button>
+          <button className="btn small" onClick={() => setAddingHF(true)}><Plus size={14} /> Add from Hugging Face</button></span>}
         extra={(m) => <>
           {m.installed && (m.loaded ? <span className="tag"><Lamp state="run" size="sm" /> Loaded</span>
             : <button className="btn small" disabled={!!busy} onClick={() => load(m.id)}>{busy === `load-${m.id}` ? "Loading" : "Load"}</button>)}
@@ -211,10 +219,13 @@ function ModelsTab({ s }: { s: S }) {
           {deleteButton(m)}
         </>} />
       <ModelGroup title="Helpers for libraries" items={models.aux} busy={busy} onDownload={download} onCancel={cancel}
+        onUpload={setUploadingFiles}
         note="Run on the CPU (the image embedder can use the GPU, see Assistant, Libraries)." extra={deleteButton} />
       <ModelGroup title="Image models (ComfyUI)" items={models.comfy} busy={busy} onDownload={download} onCancel={cancel}
-        onMove={(i, by) => move("comfy", models.comfy, i, by)}
-        action={models.sdxl && <button className="btn small" onClick={() => setAddingImage(true)}><Plus size={14} /> Add image model</button>}
+        onUpload={setUploadingFiles} onMove={(i, by) => move("comfy", models.comfy, i, by)}
+        action={models.sdxl && <span className="row" style={{ gap: 6 }}>
+          <button className="btn small" onClick={() => setUploadingImage(true)}><Upload size={14} /> Upload</button>
+          <button className="btn small" onClick={() => setAddingImage(true)}><Plus size={14} /> Add image model</button></span>}
         extra={(m) => <>
           {renameButton(m)}
           {m.custom && m.sdxl && <button className="btn quiet small" onClick={() => setImageSettings(m)}>Settings</button>}
@@ -224,11 +235,11 @@ function ModelsTab({ s }: { s: S }) {
         </>} />
       <LorasSection />
       {!!models.audio?.length && <ModelGroup title="Sound, music and speech" items={models.audio} busy={busy}
-        onDownload={download} onCancel={cancel}
+        onDownload={download} onCancel={cancel} onUpload={setUploadingFiles}
         note="Speech runs on the CPU, so the chat model stays loaded; music, sound effects, stems and other voices run on the card through ComfyUI. Once one is downloaded, ask for it in any chat - with a sound file attached for a remake, stems or another voice."
         extra={(m) => <><span className="tag">{m.engine === "speech" ? "CPU" : "GPU"}</span>{deleteButton(m)}</>} />}
       {!!models.video?.length && <ModelGroup title="Video models" items={models.video} busy={busy}
-        onDownload={download} onCancel={cancel}
+        onDownload={download} onCancel={cancel} onUpload={setUploadingFiles}
         note="Run on the card through ComfyUI and take minutes per clip. Once one is downloaded, ask for a video in any chat - from a description, or with a picture attached to start from. Choose which one is used in Assistant, Video."
         extra={(m) => <><span className="tag">GPU</span>{deleteButton(m)}</>} />}
       {advanced && <ModelSettings model={advanced} thinkingInChats={(s.data?.settings.agent?.level_chats ?? "quick") !== "quick"}
@@ -240,12 +251,20 @@ function ModelsTab({ s }: { s: S }) {
         onClose={() => setImageSettings(null)} onSaved={() => { setImageSettings(null); refreshModels(); }} />}
       {renaming && <RenameModel model={renaming} onClose={() => setRenaming(null)}
         onSaved={() => { setRenaming(null); refreshModels(); }} />}
+      {uploadingLlm && <UploadLanguageModel onClose={() => setUploadingLlm(false)}
+        onAdded={() => { setUploadingLlm(false); refreshModels(); }} />}
+      {uploadingImage && models.sdxl && <UploadImageModel choices={models.sdxl} onClose={() => setUploadingImage(false)}
+        onAdded={() => { setUploadingImage(false); refreshModels(); }} />}
+      {uploadingFiles && <UploadModelFiles model={uploadingFiles} onClose={() => setUploadingFiles(null)}
+        onDone={refreshModels} />}
     </div>
   );
 }
 
-function ModelGroup({ title, items, busy, onDownload, onCancel, extra, note, action, onMove }: { title: string;
+function ModelGroup({ title, items, busy, onDownload, onCancel, onUpload, extra, note, action, onMove }: { title: string;
   items: ModelEntry[]; busy: string | null; onDownload: (id: string) => void; onCancel: (id: string) => void;
+  /** 0.62.0: a model that is not all here - its files from this computer instead of a download */
+  onUpload?: (m: ModelEntry) => void;
   extra?: (m: ModelEntry) => ReactNode; note?: string; action?: ReactNode; onMove?: (index: number, by: -1 | 1) => void }) {
   return (
     <section style={{ marginBottom: 26 }}>
@@ -264,7 +283,9 @@ function ModelGroup({ title, items, busy, onDownload, onCancel, extra, note, act
               <Lamp state={m.installed ? (m.loaded ? "run" : "off") : active.length ? "wait" : "off"} pulse={!!active.length} />
               <div className="grow" style={{ minWidth: 220 }}>
                 <b>{m.name}</b>{m.name_card && <span className="muted small"> ({m.name_card})</span>} {m.custom && m.source
-                  ? <><a className="tag" href={m.source.url} target="_blank" rel="noreferrer">
+                  ? m.source.site === "upload"
+                    ? <span className="tag" title={m.source.file ? `From ${m.source.file}` : undefined}>Uploaded</span>
+                    : <><a className="tag" href={m.source.url} target="_blank" rel="noreferrer">
                       {m.source.site === "civitai" ? "Civitai" : "Hugging Face"}</a>
                     {m.source.nsfw && <span className="tag" title="Civitai marks this model NSFW">NSFW</span>}</>
                   : m.default ? null : <span className="tag">optional</span>}
@@ -282,7 +303,10 @@ function ModelGroup({ title, items, busy, onDownload, onCancel, extra, note, act
                     aria-label={`Move ${m.name} down`} title="Move down"><ChevronDown size={16} /></button>
                 </span>}
                 {extra?.(m)}
-                {!m.installed && (active.length
+                {!m.installed && !active.length && onUpload && <button className={`btn small ${m.source?.site === "upload"
+                  ? "" : "quiet"}`} onClick={() => onUpload(m)} title="Its files from this computer instead of a download">
+                  <Upload size={14} /> Upload</button>}
+                {!m.installed && m.source?.site !== "upload" && (active.length
                   ? <button className="btn small" onClick={() => onCancel(m.id)}>Stop download</button>
                   : <button className="btn small" disabled={busy === `dl-${m.id}`} onClick={() => onDownload(m.id)}><Download size={14} /> Download</button>)}
               </div>
@@ -643,46 +667,6 @@ function AddFromHF({ onClose, onAdded }: { onClose: () => void; onAdded: () => v
 }
 
 // ------------------------------------------------------------ picture models from a link
-
-function presetSettings(choices: SdxlChoices, key: string): SdxlSettings {
-  const { label: _label, ...rest } = choices.presets[key] ?? choices.presets.sdxl;
-  return { ...rest, preset: choices.presets[key] ? key : "sdxl" };
-}
-
-/** Kind (preset), sampler settings, quality tags and negative prompt of an SDXL model. */
-function SdxlFields({ value, onChange, choices }: { value: SdxlSettings; onChange: (v: SdxlSettings) => void;
-  choices: SdxlChoices }) {
-  const set = (patch: Partial<SdxlSettings>) => onChange({ ...value, ...patch });
-  return (<>
-    <label className="field"><span>Kind</span>
-      <select className="select" value={value.preset} onChange={(e) => onChange(presetSettings(choices, e.target.value))}>
-        {Object.entries(choices.presets).map(([k, p]) => <option key={k} value={k}>{p.label}</option>)}</select>
-      <small>Sets the quality tags, sampler and clip skip that kind of model is made for.</small></label>
-    <details className="sdxl-more">
-      <summary>Sampler, tags and negative prompt</summary>
-      <div className="stack" style={{ marginTop: 10 }}>
-        <div className="form-grid">
-          <label className="field"><span>Steps</span><input className="input" type="number" min={1} max={100}
-            value={value.steps} onChange={(e) => set({ steps: Number(e.target.value) })} /></label>
-          <label className="field"><span>CFG</span><input className="input" type="number" min={0} max={30} step={0.5}
-            value={value.cfg} onChange={(e) => set({ cfg: Number(e.target.value) })} /></label>
-          <label className="field"><span>Sampler</span><select className="select" value={value.sampler}
-            onChange={(e) => set({ sampler: e.target.value })}>{choices.samplers.map((x) => <option key={x} value={x}>{x}</option>)}</select></label>
-          <label className="field"><span>Scheduler</span><select className="select" value={value.scheduler}
-            onChange={(e) => set({ scheduler: e.target.value })}>{choices.schedulers.map((x) => <option key={x} value={x}>{x}</option>)}</select></label>
-          <label className="field"><span>Clip skip</span><select className="select" value={value.clip_skip}
-            onChange={(e) => set({ clip_skip: Number(e.target.value) })}>
-            <option value={1}>1 (most models)</option><option value={2}>2 (Pony and its finetunes)</option></select></label>
-        </div>
-        <label className="field"><span>Quality tags, put before every prompt</span>
-          <textarea className="textarea" rows={2} style={{ minHeight: 56 }} value={value.prefix} onChange={(e) => set({ prefix: e.target.value })} /></label>
-        <label className="field"><span>Negative prompt</span>
-          <textarea className="textarea" rows={2} style={{ minHeight: 56 }} value={value.negative} onChange={(e) => set({ negative: e.target.value })} />
-          <small>What the assistant asks to avoid is added to this.</small></label>
-      </div>
-    </details>
-  </>);
-}
 
 function AddImageModel({ choices, onClose, onAdded }: { choices: SdxlChoices; onClose: () => void; onAdded: () => void }) {
   const { toast } = useApp();

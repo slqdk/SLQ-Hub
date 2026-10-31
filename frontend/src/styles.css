@@ -222,6 +222,7 @@ a.btn { text-decoration: none; }
   color: var(--ink-2);
 }
 .field small { color: var(--ink-3); font-size: 13px; }
+.upload-field .meta { color: var(--ink-3); font-size: 13px; margin-top: 2px; }   /* a file's progress (0.62.0) */
 .input, .textarea, .select {
   width: 100%;
   border: 1px solid var(--rule);

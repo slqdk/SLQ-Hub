@@ -314,3 +314,51 @@ def make_entry(repo: str, choice: dict, mmproj: dict | None, model_id: str, name
     if thinking:
         entry["thinking"] = {"default": False, "efforts": [], "default_effort": None}
     return entry
+
+
+UPLOAD_NAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def upload_file_name(name: str) -> str:
+    """An uploaded file's name as it is stored: letters, digits, dots, dashes and underscores."""
+    base = re.sub(r"-+(?=\.)", "", UPLOAD_NAME_RE.sub("-", name)).strip("-.") or "model.gguf"
+    return base[:150]
+
+
+def make_local_entry(model_id: str, name: str, file_name: str, size: int, mmproj: tuple[str, int] | None,
+                     ctx: int, tools: bool, thinking: bool, facts: dict) -> dict:
+    """A language model uploaded from the owner's computer (0.62.0): like make_entry's, with its files under
+    llm/upload/<id>/ and no source to download them from again."""
+    if not ID_RE.match(model_id):
+        raise HFError("The name for apps may use a-z, 0-9, dots, dashes and underscores (up to 63).")
+    base = f"llm/upload/{model_id}"
+    main = upload_file_name(file_name)
+    files = [{"dest": f"{base}/{main}", "size": int(size)}]
+    if mmproj:
+        mm = upload_file_name(mmproj[0])
+        if mm == main:
+            mm = f"mmproj-{mm}"
+        files.append({"dest": f"{base}/{mm}", "size": int(mmproj[1]), "role": "mmproj"})
+    caps = ["chat"] + (["vision"] if mmproj else []) + (["tools"] if tools else []) + (["thinking"] if thinking else [])
+    entry = {
+        "id": model_id,
+        "name": (name or model_id).strip()[:80],
+        "description": f"Uploaded from your computer: {file_name[:120]}.",
+        "default": False,
+        "source": {"site": "upload", "file": file_name[:200], "added": dt.date.today().isoformat()},
+        "files": files,
+        "server": {"ctx": int(ctx), "parallel": 2, "kv_unified": True, "cache_type": "q8_0", "gpu_layers": "all",
+                   "flash_attn": "on", "cache_ram_mib": 2048, "extra": []},
+        "context_per_request": int(ctx),
+        "capabilities": caps,
+        "aliases": [],
+        "quantization": quant_label(re.sub(r"(?i)\.gguf$", "", file_name)),
+    }
+    params = facts.get("parameters")
+    if isinstance(params, int) and params > 0:
+        entry["parameter_size"] = f"{params / 1e9:.1f}B"
+    if facts.get("architecture"):
+        entry["architecture"] = str(facts["architecture"])      # picks the family's sampling (catalog.py)
+    if thinking:
+        entry["thinking"] = {"default": False, "efforts": [], "default_effort": None}
+    return entry

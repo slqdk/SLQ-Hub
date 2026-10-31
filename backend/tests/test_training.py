@@ -539,3 +539,53 @@ def test_sdxl_samples_are_made_as_the_hub_makes_that_models_pictures(app, monkey
     older.pop("sample_prefix"), older.pop("sample_negative")
     cfg = t.config(older)["config"]["process"][0]
     assert cfg["sample"]["neg"] == R.SDXL_NEGATIVE and cfg["sample"]["prompts"][0].startswith("mirx, ")
+
+
+async def test_a_klein_base_can_be_uploaded_instead_of_downloaded(signed_in, app, fakes, monkeypatch):
+    """0.62.0 (Søren: "jeg skal gerne kunne træne lora på dem jeg uploader"): the gated 9B base file uploaded from
+    the computer, into Hugging Face's cache where the download would have put it - then a training starts without
+    HF_TOKEN, fetching only what is not gated."""
+    from .mocks import safetensors_bytes
+    from .test_uploads import upload
+    monkeypatch.setattr(R, "POLL_S", 0.01)
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    hub = app.state.hub
+    t = hub.extras["training"]
+    base_file = safetensors_bytes({"w": {"dtype": "BF16", "shape": [2], "data_offsets": [0, 4]}}, pad=3000)
+    fakes.hf["repos"] = {
+        "black-forest-labs/FLUX.2-klein-base-9B": {"sha": "9b9b9b", "gated": "auto", "token": "hf_ok", "tree": [
+            {"type": "file", "path": "flux-2-klein-base-9b.safetensors", "size": len(base_file)}]},
+        "ai-toolkit/flux2_vae": KLEIN_REPOS["ai-toolkit/flux2_vae"],
+        "Qwen/Qwen3-8B": {"sha": "8b8b8b", "tree": [{"type": "file", "path": "model.safetensors", "size": 1500}]}}
+    r = await signed_in.get("/hub/api/training/bases/flux2-klein-9b/files")
+    assert r.status_code == 200, r.text
+    files = r.json()["files"]
+    assert [(f["repo"], f["path"], f["here"]) for f in files] == [
+        ("black-forest-labs/FLUX.2-klein-base-9B", "flux-2-klein-base-9b.safetensors", False),
+        ("ai-toolkit/flux2_vae", "ae.safetensors", False), ("Qwen/Qwen3-8B", "model.safetensors", False)]
+    assert files[0]["gated"] is True and files[0]["size"] == len(base_file)
+    assert (await signed_in.get("/hub/api/training/bases/sdxl/files")).status_code == 404
+    wrong = await upload(signed_in, "flux-2-klein-base-9b.safetensors", base_file[:-10])
+    r = await signed_in.post("/hub/api/training/bases/flux2-klein-9b/files", json={
+        "upload": wrong["id"], "repo": "black-forest-labs/FLUX.2-klein-base-9B",
+        "path": "flux-2-klein-base-9b.safetensors"}, headers=ORIGIN)
+    assert r.status_code == 400 and "right file" in r.json()["detail"]
+    good = await upload(signed_in, "flux-2-klein-base-9b.safetensors", base_file, modified=2)
+    r = await signed_in.post("/hub/api/training/bases/flux2-klein-9b/files", json={
+        "upload": good["id"], "repo": "Qwen/Qwen3-4B", "path": "x"}, headers=ORIGIN)
+    assert r.status_code == 404                                    # not a file this base's training reads
+    r = await signed_in.post("/hub/api/training/bases/flux2-klein-9b/files", json={
+        "upload": good["id"], "repo": "black-forest-labs/FLUX.2-klein-base-9B",
+        "path": "flux-2-klein-base-9b.safetensors"}, headers=ORIGIN)
+    assert r.status_code == 200 and r.json()["here"] is True, r.text
+    cache = hub.env.models_dir / "hf" / "hub" / "models--black-forest-labs--FLUX.2-klein-base-9B"
+    assert (cache / "snapshots/9b9b9b/flux-2-klein-base-9b.safetensors").read_bytes() == base_file
+    assert (cache / "refs" / "main").read_text() == "9b9b9b"
+
+    rid = t.create("Rikke 9B", "rkxv", "person", 500, base="flux2-klein-9b")["id"]
+    t.add_images(rid, [(f"p{i}.jpg", photo()) for i in range(5)])
+    t.set_captions(rid, {f"p{i}.jpg": "a woman in a garden" for i in range(5)})
+    fakes.hf["downloaded"] = []
+    assert (await signed_in.post(f"/hub/api/training/runs/{rid}/start", headers=ORIGIN)).status_code == 200
+    await wait_for(lambda: t._load(rid)["state"] == "done")
+    assert sorted(fakes.hf["downloaded"]) == ["Qwen/Qwen3-8B/model.safetensors", "ai-toolkit/flux2_vae/ae.safetensors"]

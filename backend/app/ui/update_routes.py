@@ -70,6 +70,10 @@ def busy_reasons(hub) -> list[str]:
     libraries = hub.extras.get("libraries")
     if libraries is not None and getattr(libraries, "current", None):          # on the CPU it never queues
         why.append(f"a library is reading {libraries.current.get('filename') or 'a document'}")
+    uploads = hub.extras.get("uploads")
+    if uploads is not None:                                        # 0.62.0: a model file coming from the computer
+        for name in uploads.busy():
+            why.append(f"{name} is being uploaded")
     downloads = hub.extras.get("downloads")
     if downloads is not None:
         snap = downloads.snapshot()

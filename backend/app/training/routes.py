@@ -199,6 +199,31 @@ async def free_space(rid: str, request: Request):
         _fail(exc)
 
 
+@router.get("/bases/{base}/files")
+async def base_files(base: str, request: Request):
+    """The files a klein base's training reads, and which are here (0.62.0: they can be uploaded instead)."""
+    try:
+        return {"files": await _t(request).base_files(base)}
+    except TrainingError as exc:
+        _fail(exc)
+
+
+class BaseFileIn(BaseModel):
+    upload: str                          # a finished upload (app/uploads.py)
+    repo: str
+    path: str
+
+
+@router.post("/bases/{base}/files")
+async def put_base_file(base: str, body: BaseFileIn, request: Request):
+    """An uploaded file as one of a klein base's training files, where the download would have put it."""
+    t = _t(request)
+    try:
+        return await t.place_base_file(base, body.repo, body.path, get_hub(request).extras["uploads"], body.upload)
+    except TrainingError as exc:
+        _fail(exc)
+
+
 @router.get("/runs/{rid}/file")
 async def file(rid: str, path: str, request: Request):
     try:

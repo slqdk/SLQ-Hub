@@ -15,6 +15,7 @@ from . import auth
 from .config import Env, load_env
 from .downloads import Downloads
 from .gate import Gate
+from .uploads import Uploads
 from .state import Hub, Transports, build_hub
 
 log = logging.getLogger("hub")
@@ -50,6 +51,8 @@ def create_app(env: Env | None = None, transports: Transports | None = None, sta
     from . import usage
     usage.settle_moved_chats()                   # chats moved into a project before 0.33.1 bring their usage along
     hub.extras["downloads"] = Downloads(hub.catalog, transport=hub.transports.web)
+    hub.extras["uploads"] = Uploads(env.models_dir)          # 0.62.0: model files from the owner's computer
+    hub.extras["uploads"].cleanup()
     _install_features(hub)
 
     @asynccontextmanager
@@ -71,11 +74,13 @@ def create_app(env: Env | None = None, transports: Transports | None = None, sta
                   openapi_url=None)
     app.state.hub = hub
 
-    from .ui import auth_routes, help_routes, people_routes, system_routes, update_routes, usage_routes
+    from .ui import (auth_routes, help_routes, people_routes, system_routes, update_routes, upload_routes,
+                     usage_routes)
     app.include_router(auth_routes.router)
     app.include_router(update_routes.router)
     app.include_router(help_routes.router)
     app.include_router(people_routes.router)
+    app.include_router(upload_routes.router)          # before system_routes' /hub/api/models/{model_id} routes
     app.include_router(system_routes.router)
     app.include_router(usage_routes.router)
     for router in hub.extras.get("routers", []):

@@ -75,7 +75,8 @@ def gated_help(repo: str, token: bool, status: int | None = None) -> str:
     if not token:
         return (f"{repo} is gated on Hugging Face: sign in there, accept its licence on {page}, create a read token "
                 "(Settings -> Access Tokens), put HF_TOKEN=... in /srv/slq-hub/.env and restart the Hub "
-                "(update.sh compose up -d).")
+                "(update.sh compose up -d). Or upload its files from your computer: Base model files, on the "
+                "training's page.")
     if status == 401:
         return (f"Hugging Face did not take the HF_TOKEN for {repo} - is it a valid read token, and has its account "
                 f"accepted the licence on {page}? Fix it in /srv/slq-hub/.env and restart the Hub (update.sh compose "
@@ -726,33 +727,93 @@ class Training:
     def cache_dir(self, repo: str) -> Path:
         return Path(self.hub.env.models_dir) / "hf" / "hub" / f"models--{repo.replace('/', '--')}"
 
+    def _hf_client(self) -> httpx.AsyncClient:
+        return httpx.AsyncClient(timeout=httpx.Timeout(120, connect=30), follow_redirects=True,
+                                 transport=self.hub.transports.web)
+
+    @staticmethod
+    async def _listing(c: httpx.AsyncClient, repo: str, only: tuple[str, ...] | None,
+                       pattern: re.Pattern | None) -> tuple[str, list[dict], dict]:
+        """(the commit, the files ai-toolkit reads of a repository with their sizes, the repository's info) - from
+        Hugging Face's API, which lists a gated repository's files to anyone."""
+        from ..hf import HF, _headers, _tree
+        token = bool(os.environ.get("HF_TOKEN"))
+        info = await c.get(f"{HF}/api/models/{repo}", headers=_headers())
+        if info.status_code in (401, 403):
+            raise TrainingError(gated_help(repo, token, info.status_code), 403)
+        if info.status_code >= 400:
+            raise TrainingError(f"Hugging Face answered {info.status_code} for {repo}.", 502)
+        meta = info.json() or {}
+        sha = re.sub(r"[^0-9a-f]", "", str(meta.get("sha") or ""))[:40] or "hub"
+        files = [x for x in await _tree(c, repo) if x.get("type") == "file" and not re.search(
+            r"\.(gguf|onnx|png|jpe?g|gif|webp|mp4|md)$|^\.", x.get("path", ""), re.I)]
+        if pattern is not None:                         # SDXL base: its config files, not its weights
+            files = [x for x in files if pattern.search(str(x.get("path") or ""))]
+        if only is not None:
+            files = [x for x in files if x.get("path") in only]
+            missing = set(only) - {x.get("path") for x in files}
+            if missing:
+                raise TrainingError(f"Hugging Face has no {', '.join(sorted(missing))} in {repo} - the trainer "
+                                    "expects it there (has ai-toolkit changed?).", 502)
+        files = [x for x in files if ".." not in Path(str(x["path"])).parts and not str(x["path"]).startswith("/")]
+        return sha, files, meta
+
+    async def base_files(self, base: str) -> list[dict]:
+        """The files a klein base's training reads (0.62.0), as Hugging Face lists them now, and whether each is
+        here - to upload them from the computer instead of downloading them (the 9B base is gated)."""
+        if base not in KLEIN:
+            raise TrainingError("Only FLUX.2 klein's base model files are uploaded here.", 404)
+        out = []
+        async with self._hf_client() as c:
+            for repo, only, pattern in self.downloads({"base": base}):
+                sha, files, meta = await self._listing(c, repo, only, pattern)
+                snap = self.cache_dir(repo) / "snapshots" / sha
+                for f in files:
+                    p, size = snap / str(f["path"]), int(f.get("size") or 0)
+                    out.append({"repo": repo, "path": str(f["path"]), "size": size, "sha": sha,
+                                "gated": bool(meta.get("gated")),
+                                "here": p.is_file() and (not size or p.stat().st_size == size)})
+        return out
+
+    async def place_base_file(self, base: str, repo: str, path: str, uploads, uid: str) -> dict:
+        """An uploaded file into Hugging Face's cache where the download would have put it (0.62.0): exactly the
+        size Hugging Face gives for it, and a .safetensors must read as one."""
+        from ..images.loras import LoraError, read_header
+        from ..uploads import UploadError
+        if any(r["state"] == "preparing" for r in self.list()):
+            raise TrainingError("A training is fetching its base model now - upload when it is done.", 409)
+        f = next((x for x in await self.base_files(base) if x["repo"] == repo and x["path"] == path), None)
+        if f is None:
+            raise TrainingError(f"{KLEIN[base]['label']}'s training does not read {repo}/{path}.", 404)
+        if f["here"]:
+            raise TrainingError(f"{Path(path).name} is here already.", 409)
+        try:
+            m = uploads.done(uid)
+            if f["size"] and m["size"] != f["size"]:
+                raise UploadError(f"{m['name']} is {m['size']:,} bytes; {Path(path).name} on Hugging Face is "
+                                  f"{f['size']:,}. Is it the right file?")
+            if path.endswith(".safetensors"):
+                await asyncio.to_thread(read_header, uploads.part(uid))
+            snap = self.cache_dir(repo) / "snapshots" / f["sha"]
+            dest = snap / path
+            dest.with_name(dest.name + ".part").unlink(missing_ok=True)      # a download begun before
+            uploads.take(uid, dest)
+        except (UploadError, LoraError) as exc:
+            raise TrainingError(str(exc), getattr(exc, "status", 400))
+        (self.cache_dir(repo) / "refs").mkdir(parents=True, exist_ok=True)
+        (self.cache_dir(repo) / "refs" / "main").write_text(f["sha"])
+        return {**f, "here": True}
+
     async def fetch(self, repo: str, rid: str | None = None, only: tuple[str, ...] | None = None,
                     pattern: re.Pattern | None = None) -> None:
         """A Hugging Face repository (or `only` these files of it) into models/hf in the cache's own layout
         (refs/main and snapshots/<commit>), which the trainer's libraries read with HF_HUB_OFFLINE. Files there at
         their size are kept; a partial download goes on where it stopped. HF_TOKEN (the VM's .env) for a gated
         repository."""
-        from ..hf import HF, _headers, _tree
+        from ..hf import HF, _headers
         token = bool(os.environ.get("HF_TOKEN"))
-        async with httpx.AsyncClient(timeout=httpx.Timeout(120, connect=30), follow_redirects=True,
-                                     transport=self.hub.transports.web) as c:
-            info = await c.get(f"{HF}/api/models/{repo}", headers=_headers())
-            if info.status_code in (401, 403):
-                raise TrainingError(gated_help(repo, token, info.status_code), 403)
-            if info.status_code >= 400:
-                raise TrainingError(f"Hugging Face answered {info.status_code} for {repo}.", 502)
-            meta = info.json() or {}
-            sha = re.sub(r"[^0-9a-f]", "", str(meta.get("sha") or ""))[:40] or "hub"
-            files = [x for x in await _tree(c, repo) if x.get("type") == "file" and not re.search(
-                r"\.(gguf|onnx|png|jpe?g|gif|webp|mp4|md)$|^\.", x.get("path", ""), re.I)]
-            if pattern is not None:                         # SDXL base: its config files, not its weights
-                files = [x for x in files if pattern.search(str(x.get("path") or ""))]
-            if only is not None:
-                files = [x for x in files if x.get("path") in only]
-                missing = set(only) - {x.get("path") for x in files}
-                if missing:
-                    raise TrainingError(f"Hugging Face has no {', '.join(sorted(missing))} in {repo} - the trainer "
-                                        "expects it there (has ai-toolkit changed?).", 502)
+        async with self._hf_client() as c:
+            sha, files, meta = await self._listing(c, repo, only, pattern)
             base = self.cache_dir(repo)
             snap = base / "snapshots" / sha
             total = sum(int(x.get("size") or 0) for x in files)

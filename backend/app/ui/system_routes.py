@@ -179,6 +179,8 @@ async def models(request: Request):
         for e in hub.catalog.entries(group):
             row = {**e, "installed": hub.catalog.installed(e), "downloads": by_model.get(e["id"], []),
                    "loaded": group == "llm" and hub.loaded_model() == e["id"]}
+            if not row["installed"]:                 # which files are here (0.62.0: the others can be uploaded)
+                row["files"] = [{**f, "here": hub.catalog.path(f).is_file()} for f in e.get("files", [])]
             if row["installed"] and not e.get("custom"):  # what Delete files would give back (0.27.0)
                 row["freeable"] = sum(_size_of(hub.catalog.path(f)) for f in own_files(e, users))
             if group == "llm":                       # what one chat may use now, and what the model was trained for
@@ -488,16 +490,22 @@ async def remove_model(model_id: str, request: Request, files: bool = True):
     if hub.settings.get("models", "fallback_alias") == model_id:
         hub.settings.update("models", {"fallback_alias": ""})
     if files:
-        root = (hub.env.models_dir / ("llm/hf" if group == "llm" else "comfy/checkpoints/hub")).resolve()
+        # an added model's own folders: llm/hf (from Hugging Face), llm/upload (from the computer, 0.62.0),
+        # comfy/checkpoints/hub (picture models from a link or the computer)
+        roots = [(hub.env.models_dir / r).resolve() for r in (("llm/hf", "llm/upload") if group == "llm"
+                                                              else ("comfy/checkpoints/hub",))]
         for f in entry.get("files", []):
             p = hub.catalog.path(f)
+            root = next((r for r in roots if p.resolve().is_relative_to(r)), None)
+            if root is None:
+                continue
             for q in (p, p.with_name(p.name + ".part")):
                 try:
-                    if q.resolve().is_relative_to(root) and q.is_file():
+                    if q.is_file():
                         q.unlink()
                 except OSError:
                     pass
-            d = p.parent                                   # empty folders up to llm/hf (or checkpoints/hub)
+            d = p.parent                                   # empty folders up to the root
             while d.resolve() != root and d.resolve().is_relative_to(root):
                 try:
                     d.rmdir()
@@ -513,6 +521,8 @@ async def download(model_id: str, request: Request):
         added = get_hub(request).extras["downloads"].enqueue(model_id)
     except KeyError:
         raise HTTPException(404, "No such model in the catalog.")
+    except ValueError as exc:                     # a file uploaded from the computer has nowhere to come from
+        raise HTTPException(400, str(exc))
     return {"queued": added}
 
 

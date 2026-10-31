@@ -8,7 +8,9 @@ export class ApiError extends Error {
   }
 }
 
-type Opts = { method?: string; body?: unknown; form?: FormData; signal?: AbortSignal; query?: Record<string, unknown> };
+type Opts = { method?: string; body?: unknown; form?: FormData; signal?: AbortSignal; query?: Record<string, unknown>;
+  /** Raw bytes (a piece of a file being uploaded, 0.62.0). */
+  raw?: Blob };
 
 // The Hub's version as this page first heard it (every answer to the UI carries X-Hub-Version). An answer with
 // another one means the Hub was updated after the page loaded: the page runs the old code until it is reloaded -
@@ -36,7 +38,10 @@ export async function api<T = unknown>(path: string, opts: Opts = {}): Promise<T
   const init: RequestInit = { method: opts.method ?? (opts.body !== undefined || opts.form ? "POST" : "GET"),
     credentials: "same-origin", signal: opts.signal, headers: {} };
   if (opts.form) init.body = opts.form;
-  else if (opts.body !== undefined) {
+  else if (opts.raw) {
+    init.body = opts.raw;
+    (init.headers as Record<string, string>)["Content-Type"] = "application/octet-stream";
+  } else if (opts.body !== undefined) {
     init.body = JSON.stringify(opts.body);
     (init.headers as Record<string, string>)["Content-Type"] = "application/json";
   }
@@ -277,7 +282,9 @@ export interface TrainingBase { id: string; label: string; family: string; lora_
 
 export interface ModelEntry { id: string; name: string; name_card?: string; description?: string; default?: boolean; installed: boolean;
   loaded?: boolean; downloads: DownloadState[]; capabilities?: string[]; kind?: string;
-  files: { repo?: string; path?: string; url?: string; dest: string; size?: number; role?: string }[];
+  files: { repo?: string; path?: string; url?: string; dest: string; size?: number; role?: string;
+    /** Not installed yet: whether this file is here (0.62.0 - the others can be uploaded). */
+    here?: boolean }[];
   server?: Record<string, unknown>; thinking?: { efforts?: string[]; default_effort?: string; default?: boolean };
   context_per_request?: number;
   /** Language models: what one chat may use now (Settings or the card), and what the model was trained for. */
@@ -290,8 +297,8 @@ export interface ModelEntry { id: string; name: string; name_card?: string; desc
   /** Sampling per mode (instruct = without thinking): the card's, the family's, or set in Settings (sampling_own). */
   sampling?: Partial<Record<"instruct" | "thinking", Sampling>>; sampling_card?: Partial<Record<"instruct" | "thinking", Sampling>>;
   sampling_own?: boolean; thinking_mode?: "on" | "off";
-  source?: { repo?: string; url: string; file?: string; added?: string; site?: "huggingface" | "civitai"; nsfw?: boolean;
-    base?: string; version_id?: number } }
+  source?: { repo?: string; url?: string; file?: string; added?: string; site?: "huggingface" | "civitai" | "upload";
+    nsfw?: boolean; base?: string; version_id?: number } }
 
 export interface Sampling { temperature?: number; top_p?: number; top_k?: number; min_p?: number; presence_penalty?: number;
   repeat_penalty?: number }

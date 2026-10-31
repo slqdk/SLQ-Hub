@@ -96,3 +96,108 @@ def _skip(f, vtype: int) -> bool:
                 f.seek(n, 1)
             return True
     return False
+
+
+# ---------------------------------------------------------------- the whole header (0.62.0: files uploaded)
+
+_TEXT_MAX = 256 * 1024                    # a chat template is a few KB; nothing longer is kept
+
+
+class _Short(Exception):
+    """The file ends before its header does: an upload that is still arriving."""
+
+
+def _read(f, n: int) -> bytes:
+    b = f.read(n)
+    if len(b) < n:
+        raise _Short()
+    return b
+
+
+def _value(f, vtype: int):
+    """One value; arrays are skipped (the tokenizer's lists are long) - None for them."""
+    if vtype in _SCALAR:
+        raw = _read(f, _SCALAR[vtype])
+        fmt = {0: "<B", 1: "<b", 2: "<H", 3: "<h", 4: "<I", 5: "<i", 6: "<f", 7: "<?", 10: "<Q", 11: "<q",
+               12: "<d"}[vtype]
+        return struct.unpack(fmt, raw)[0]
+    if vtype == _STRING:
+        (n,) = struct.unpack("<Q", _read(f, 8))
+        if n > _TEXT_MAX:
+            f.seek(n, 1)
+            return None
+        return _read(f, n).decode("utf-8", "replace")
+    if vtype == _ARRAY:
+        (etype,) = struct.unpack("<I", _read(f, 4))
+        (count,) = struct.unpack("<Q", _read(f, 8))
+        if etype in _SCALAR:
+            f.seek(_SCALAR[etype] * count, 1)
+        elif etype == _STRING:
+            for _ in range(count):
+                (n,) = struct.unpack("<Q", _read(f, 8))
+                f.seek(n, 1)
+        else:
+            raise ValueError("nested arrays")
+        return None
+    raise ValueError(f"unknown value type {vtype}")
+
+
+def describe(path: Path) -> dict | None:
+    """What a GGUF file is - for a model uploaded from the owner's computer, where no Hugging Face page says it:
+    its architecture ("clip" for a vision projector), general.name, general.type, the context it was trained for,
+    its chat template, and its parameters, summed from its tensors. None when it is not a GGUF the Hub can read;
+    {"partial": True} when the file stops before its metadata does (an upload still arriving). `parameters` is
+    missing when only the tensor list is cut off."""
+    out: dict = {}
+    try:
+        size = path.stat().st_size
+        with open(path, "rb") as f:
+            if _read(f, 4) != b"GGUF":
+                return None
+            (version,) = struct.unpack("<I", _read(f, 4))
+            if version < 2:
+                return None
+            tensors, kvs = struct.unpack("<QQ", _read(f, 16))
+            if tensors > 1_000_000 or kvs > 100_000:
+                return None
+            meta: dict = {}
+            for _ in range(kvs):
+                (n,) = struct.unpack("<Q", _read(f, 8))
+                if n > 4096:
+                    return None
+                key = _read(f, n).decode("utf-8", "replace")
+                (vtype,) = struct.unpack("<I", _read(f, 4))
+                v = _value(f, vtype)
+                if v is not None:
+                    meta[key] = v
+                if f.tell() > size:
+                    raise _Short()
+            arch = str(meta.get("general.architecture") or "")
+            ctx = meta.get(f"{arch}.context_length")
+            out = {"architecture": arch or None, "name": meta.get("general.name"), "type": meta.get("general.type"),
+                   "size_label": meta.get("general.size_label"),
+                   "context_length": int(ctx) if isinstance(ctx, int) and ctx > 0 else None,
+                   "chat_template": meta.get("tokenizer.chat_template")}
+            total = 0
+            for _ in range(tensors):                     # name, dimensions, type, offset
+                (n,) = struct.unpack("<Q", _read(f, 8))
+                f.seek(n, 1)
+                (dims,) = struct.unpack("<I", _read(f, 4))
+                if dims > 8:
+                    raise ValueError("not a tensor")
+                count = 1
+                for d in struct.unpack(f"<{dims}Q", _read(f, 8 * dims)):
+                    count *= d
+                total += count
+                _read(f, 12)
+            out["parameters"] = total
+            return out
+    except _Short:
+        return out or {"partial": True}
+    except (OSError, struct.error, ValueError, UnicodeDecodeError):
+        return out or None
+
+
+def is_projector(facts: dict | None) -> bool:
+    """A vision projector (mmproj) for a language model, not a model itself."""
+    return bool(facts) and (facts.get("architecture") == "clip" or str(facts.get("type") or "").lower() == "mmproj")

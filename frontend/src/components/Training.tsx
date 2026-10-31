@@ -7,6 +7,7 @@ import { api, type TrainingBase, type TrainingDetail, type TrainingOverview, typ
 import { bytes, seconds } from "../lib/format";
 import { useApp } from "../state";
 import { ConfirmButton, Lamp, type LampState, Modal } from "./ui";
+import { TrainingBaseFiles } from "./ModelUpload";
 
 const ACTIVE = ["captioning", "preparing", "queued", "training"];
 const KINDS: Record<string, { label: string; hint: string }> = {
@@ -103,7 +104,8 @@ function BaseHint({ base, hfToken, copy }: { base?: TrainingBase; hfToken?: bool
       on <a href={base.gated} target="_blank" rel="noreferrer">its page</a>{hfToken
         ? " with the account of the Hub's HF_TOKEN."
         : ", then put a read token as HF_TOKEN in /srv/slq-hub/.env on the VM and restart the Hub " +
-          "(update.sh compose up -d). No HF_TOKEN is set now."}</small>}
+          "(update.sh compose up -d). No HF_TOKEN is set now - or upload the base model's files from this " +
+          "computer, on the training's page."}</small>}
   </>;
 }
 
@@ -113,6 +115,8 @@ export function TrainingSection({ onAdded }: { onAdded: () => void }) {
   const [open, setOpen] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [copying, setCopying] = useState<TrainingRun | null>(null);
+  // 0.62.0: a klein base's files from this computer - the editor closes meanwhile (one modal at a time)
+  const [baseFiles, setBaseFiles] = useState<{ base: TrainingBase; rid: string } | null>(null);
   const load = useCallback(() => api<TrainingOverview>("/hub/api/training")
     .then((d) => { setData(d); setFailed(false); }, () => setFailed(true)), []);
   useEffect(() => { load(); }, [load]);
@@ -159,7 +163,10 @@ export function TrainingSection({ onAdded }: { onAdded: () => void }) {
       {creating && <NewTraining data={data} onClose={() => setCreating(false)}
         onMade={(id) => { setCreating(false); load(); setOpen(id); }} />}
       {open && <TrainingEditor key={open} rid={open} data={data} onClose={() => { setOpen(null); load(); }}
-        onAdded={onAdded} onDuplicate={(run) => { setOpen(null); setCopying(run); }} />}
+        onAdded={onAdded} onDuplicate={(run) => { setOpen(null); setCopying(run); }}
+        onBaseFiles={(base) => { setBaseFiles({ base, rid: open }); setOpen(null); }} />}
+      {baseFiles && <TrainingBaseFiles base={baseFiles.base.id} label={baseFiles.base.label}
+        onClose={() => { setOpen(baseFiles.rid); setBaseFiles(null); }} />}
       {copying && <DuplicateTraining run={copying} bases={data.bases} hfToken={data.hf_token}
         onClose={() => { setOpen(copying.id); setCopying(null); }}
         onMade={(id) => { setCopying(null); load(); setOpen(id); }} />}
@@ -377,8 +384,9 @@ function DuplicateTraining({ run, bases, hfToken, onClose, onMade }: { run: Trai
   );
 }
 
-function TrainingEditor({ rid, data, onClose, onAdded, onDuplicate }: { rid: string; data: TrainingOverview;
-  onClose: () => void; onAdded: () => void; onDuplicate: (run: TrainingRun) => void }) {
+function TrainingEditor({ rid, data, onClose, onAdded, onDuplicate, onBaseFiles }: { rid: string;
+  data: TrainingOverview; onClose: () => void; onAdded: () => void; onDuplicate: (run: TrainingRun) => void;
+  onBaseFiles: (base: TrainingBase) => void }) {
   const { toast } = useApp();
   const [run, setRun] = useState<TrainingDetail | null>(null);
   const [error, setError] = useState("");
@@ -621,7 +629,9 @@ function TrainingEditor({ rid, data, onClose, onAdded, onDuplicate }: { rid: str
                     : `${run.steps} steps.${base?.download_gb ? ` The first time on ${base.label}, about `
                       + `${base.download_gb} GB of model files are downloaded first${base.gated && !data.hf_token
                         ? " - it is gated on Hugging Face, which needs HF_TOKEN on the VM (not set now)" : ""}.`
-                      : ""}`}</span>
+                      : ""}`}
+            {base?.download_gb && <> <button type="button" className="link-btn" onClick={() => onBaseFiles(base)}>
+              Base model files</button></>}</span>
           {run.resume_step != null && (
             <ConfirmButton className="btn primary" disabled={!ready || !data.service || !!busy}
               confirmText={`The card is busy until step ${run.steps} - continue?`}

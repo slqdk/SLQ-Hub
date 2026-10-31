@@ -87,6 +87,9 @@ class Downloads:
                 dest = f["dest"]
                 if self.catalog.path(f).is_file():
                     continue
+                if not f.get("repo") and not f.get("url"):          # uploaded from the computer (0.62.0)
+                    raise ValueError(f"{Path(dest).name} was uploaded from a computer and cannot be downloaded: "
+                                     "upload it again (Upload).")
                 if any(q[1]["dest"] == dest for q in self.queue) or \
                         self.state.get(dest, {}).get("status") == "downloading":
                     continue

@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.62.0 - 2026-10-31
+
+- **Upload models from your computer.** Settings -> Models has Upload for
+  language models (a .gguf, with its vision projector) and image models (an
+  SDXL checkpoint - Pony, Illustrious and the models built on them). A model
+  in the Hub's list that is not downloaded has Upload beside Download, for
+  its files (klein 9B without a Hugging Face token, say).
+- Files go in 32 MiB pieces, so a 20 GB model also passes through
+  hub.slq.dk, and a lost connection or a closed page loses little: choose the
+  same file again and it goes on where it stopped. What a file is shows as
+  soon as its start has arrived, so a wrong file is caught at once.
+- **Train LoRAs on what you upload.** An uploaded SDXL model is listed under
+  "Train on". A klein training's base model files can be uploaded instead of
+  downloaded: Base model files, on the training.
+
 ## 0.61.0 - 2026-10-31
 
 - **Train LoRAs on FLUX.2 klein 9B.** "Train on" offers klein 9B beside 4B.

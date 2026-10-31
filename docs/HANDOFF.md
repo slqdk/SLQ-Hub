@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.61.0, 2026-10-31)
+## State (0.62.0, 2026-10-31)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -669,6 +669,38 @@ changed for it: an SDXL run keeps its checkpoint's quality tags and negative pro
 `sdxl_t2i` joins them (Pony: score tags and no negative), as its pictures in a chat get them. Runs made before have
 neither and keep SDXL_NEGATIVE, so a Continue does not change a run's samples halfway; a new RealVisXL run's samples
 use its preset's negative now. NOT run on the card: anything of 9B (item 84), a Pony training.
+0.62.0, Søren: "Kan du lave så jeg selv kan uploade modeller fra min pc?" - asked which (all three: SDXL picture
+models, .gguf language models, a listed model's own files), then "og jeg skal gerne kunne træne lora på dem jeg
+uploader". `app/uploads.py`: an upload is `models/.uploads/<id>.part` + `.json` (name, size, the file's date);
+`POST /hub/api/model-uploads` gives back the unfinished one of the same name, size and date (resume), `PUT
+/hub/api/model-uploads/{id}?offset=` writes one piece only where the copy ends (409 otherwise, with the right offset; past
+the end or over 128 MiB: refused whole), what arrives before a broken connection is kept, `take` renames it into
+place (same disk), `give_back` undoes that when the catalog refuses the entry, three days untouched: deleted. The
+browser (`lib/upload.ts`) sends 32 MiB pieces and retries a 409, no answer or a 5xx (the proxy while the Hub
+restarts) for up to 30 tries with a growing pause, resyncing with GET. `inspect` reads the file's own header from
+what has arrived: `gguf.describe` (new: reads all metadata, skipping the tokenizer's long lists - the old reader
+gave up past 4,096 strings, before the chat template - and sums the tensors' shapes for the parameters; "clip" or
+general.type "mmproj" is a vision projector), or the safetensors header with `sources.classify` (a LoRA says so).
+Routes in `ui/upload_routes.py` (owner only; not in MEMBER_ROUTES): `/hub/api/models/local` (language model: files in
+`llm/upload/<id>/`, `hf.make_local_entry`, source site "upload"; Remove now also deletes under llm/upload),
+`/hub/api/models/images/local` (`sources.make_local_entry`, family sdxl - so `Training.sdxl_checkpoints` lists it as
+a base), `POST /hub/api/models/{id}/files` (a listed model's missing file: size within 3% of the catalog's - some are
+rounded - a .safetensors header or GGUF magic, SHA-256 when the entry has one; refused while that file downloads).
+`Downloads.enqueue` refuses an uploaded model's file (nothing to fetch it from). The model list marks each missing
+file `here`. Training: `GET/POST /hub/api/training/bases/{base}/files` lists a klein base's files from Hugging
+Face's API (the commit and exact sizes; it lists gated repos without a token) and places an upload in the HF cache
+snapshot where `fetch` would have put it (exact size, refs/main written); `fetch` skips files that are there, and
+its gated check fires only for missing ones, so a 9B training starts without HF_TOKEN once the base file is
+uploaded. The updater's busy check names an upload that got a piece in the last two minutes. UI: Upload buttons in
+Language and Image models, Upload beside Download on listed models (alone for an uploaded model), "Uploaded" tag,
+`components/ModelUpload.tsx` (UploadField, the dialogs), `components/SdxlFields.tsx` (moved out of SettingsView),
+"Base model files" on a klein training (its own dialog; the editor closes meanwhile). Clicked through on the dev
+server in Chromium: a 70 MB GGUF in three pieces with its projector (facts after the second piece, added, listed as
+Uploaded), a LoRA refused in the image dialog, an SDXL checkpoint added, klein 9B's files dialog, a training's base
+files. NOT tried on the VM: a 5-30 GB file through hub.slq.dk (Nginx Proxy Manager with `proxy_request_buffering off`
+from INSTALL.md step 4; 32 MiB per request is far under its 3200m limit, but its timeouts were not looked at), the
+speed on the LAN, resuming after a real Hub restart, and the disk while a big file is both in `.uploads` and
+checked (a rename, so no second copy).
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
 host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU

@@ -120,6 +120,8 @@ export const SECTIONS: HelpSection[] = [
             + "its own in its settings.",
           "While it thinks, Stop thinking beside the thinking makes it go on at once with what it has.",
           "The owner sets the order of the models, and the model for new chats, under Settings, Models.",
+          "The owner adds models there too: from Hugging Face, from a link (picture models), or uploaded from the "
+            + "computer (Upload) - a .gguf language model or an SDXL checkpoint.",
         ],
         tips: ["One step at Extra thinks at most as long as Settings, Assistant allows (8,000 tokens to begin with), at "
           + "Think half as long; then it stops thinking and acts."],
@@ -426,8 +428,11 @@ export const SECTIONS: HelpSection[] = [
           "The training page's Which step? and Make it better buttons, and the ? at Steps and Rank, explain how to "
           + "choose and what to change.",
           "The first training on a model downloads its files: about 16 GB for klein 4B, 35 GB for klein 9B. klein 9B "
-          + "is gated on Hugging Face: accept its licence there and set HF_TOKEN on the VM first. A LoRA works only "
-          + "with the model size it was trained on.",
+          + "is gated on Hugging Face: accept its licence there and set HF_TOKEN on the VM first - or upload its base "
+          + "model files from the computer (Base model files, on the training). A LoRA works only with the model size "
+          + "it was trained on.",
+          "An SDXL model you upload (Settings, Models, Image models, Upload) can be trained on too: it is listed under "
+          + "Train on.",
           "Only you can train or use LoRAs."],
         owner: true,
       },

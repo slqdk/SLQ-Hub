@@ -374,6 +374,19 @@ def clean_settings(raw: dict | None) -> dict:
             "negative": str(raw.get("negative", base["negative"]))[:2000].strip()}
 
 
+def make_local_entry(model_id: str, name: str, settings: dict, file_name: str, size: int) -> dict:
+    """A catalog entry (family sdxl) for a checkpoint uploaded from the owner's computer (0.62.0) - no source to
+    download it from again."""
+    if not ID_RE.match(model_id):
+        raise SourceError("The name for apps may use a-z, 0-9, dots, dashes and underscores (up to 63).")
+    kind = PRESETS[settings["preset"]]["label"]
+    return {"id": model_id, "name": (name or model_id).strip()[:80],
+            "description": f"{kind} checkpoint uploaded from your computer ({file_name[:120]}).", "default": False,
+            "family": "sdxl", "abilities": ["generate"],
+            "source": {"site": "upload", "file": file_name[:200], "added": dt.date.today().isoformat()},
+            "files": [{"dest": f"comfy/checkpoints/hub/{model_id}.safetensors", "size": int(size)}], "sdxl": settings}
+
+
 def make_entry(res: dict, model_id: str, name: str, settings: dict) -> dict:
     """A catalog entry (family sdxl) for the chosen file or version."""
     opt = next((o for o in res["options"] if o["key"] == res.get("pick")), None)

@@ -386,6 +386,26 @@ library reading with the helpers. The list says what it would give back
 (`freeable`); with nothing to give, the button is off. A model the owner
 added goes with Remove, as before.
 
+**Uploads (0.62.0).** Settings → Models → Upload takes a model from the
+owner's computer: a .gguf language model (with its vision projector), an
+SDXL checkpoint, or the missing files of a model in the Hub's list (a gated
+one such as klein 9B, or one already on the computer); a klein training's
+base model files likewise (Base model files, on the training). The browser
+sends a file in 32 MiB pieces (`app/uploads.py`, `PUT
+/hub/api/model-uploads/{id}?offset=`), so one request stays under the proxy's body
+limit and a lost connection, a closed page or a restart costs one piece:
+choosing the same file again (name, size, date) goes on where the Hub's copy
+ends. The upload lies in `models/.uploads`, on the models disk, and is moved
+into place with a rename; one nobody took is deleted after three days. What
+a file is, is read from its own header as soon as that has arrived
+(`inspect`: the GGUF's architecture, size, context and chat template; the
+safetensors' SDXL check of a link's file), so a wrong file is said after the
+first piece. A listed model's file must match its size within 3% (some sizes
+are rounded in the catalog) and its SHA-256 when the catalog has one; a
+training base's file Hugging Face's size exactly. An uploaded model has no
+source to download from again: a lost file is uploaded again. The updater
+waits for an upload that is coming in.
+
 Searching by name (Add from Hugging Face): the Hub asks
 `/api/models?search=<longest word>&filter=gguf&sort=downloads` and keeps the
 repositories whose id contains every word of the query; owner/name or a link
