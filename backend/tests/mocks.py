@@ -944,8 +944,10 @@ def make_trainer(state: dict) -> FastAPI:
             return JSONResponse({"error": "down"}, status_code=503)
         if state.get("busy_looks"):               # a job from before a restart, stopping
             state["busy_looks"] -= 1
-            return {"ok": True, "busy": True, "job": state.get("busy_job"), "toolkit": True, "ref": "test"}
-        return {"ok": True, "busy": False, "job": None, "toolkit": True, "ref": "test"}
+            return {"ok": True, "busy": True, "job": state.get("busy_job"), "toolkit": True, "ref": "test",
+                    "klein_te": state.get("klein_te", True)}
+        return {"ok": True, "busy": False, "job": None, "toolkit": True, "ref": "test",
+                "klein_te": state.get("klein_te", True)}
 
     @app.post("/jobs")
     async def job(request: Request):

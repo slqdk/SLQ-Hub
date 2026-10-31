@@ -1817,6 +1817,11 @@ files afterwards.
     Non-Commercial licence, gated on Hugging Face: HF_TOKEN) as its larger
     sibling, with the 8-bit files of ComfyUI's template and 4B's graph. Each
     size is a family of its own, because a LoRA fits only one size.
+    **FLUX.2 [klein] 9B uncensored** (0.63.0) is 9B with ponpoke's
+    abliterated Qwen3-8B as its text encoder (F16, gated too): the same
+    family, model and VAE files, so the graph takes each model's own files
+    from its catalog entry rather than its family's. The encoder lets any
+    prompt through; what klein never learned comes from a LoRA.
   - **ERNIE-Image and ERNIE-Image Turbo** (Baidu, 8B, Apache 2.0) are
     optional too: photorealistic, generation only (an edit with ERNIE chosen
     goes to Qwen-Image or FLUX.2 klein). Files from `Comfy-Org/ERNIE-Image`:
@@ -1888,7 +1893,12 @@ files afterwards.
     quantising, used on the 4-step model - or klein 9B (0.61.0): its 18 GB
     transformer does not fit 24 GB in bf16, so it and its text encoder are
     loaded in 8 bit (quanto's qfloat8, ai-toolkit's default for it), and its
-    gated base is fetched with HF_TOKEN. Every 250 steps a checkpoint and
+    gated base is fetched with HF_TOKEN - or 9B uncensored (0.63.0): the
+    same base with the picture model's uncensored text encoder, named in
+    the config's te_name_or_path, which the trainer image patches ai-toolkit
+    to read (klein takes its encoder from a class attribute); its 16.4 GB
+    file is one hard-linked file for the picture model and the training.
+    Every 250 steps a checkpoint and
     three sample pictures are saved; the admin chooses one by its pictures
     and it becomes a LoRA (source "trained"). Duplicate copies a run's
     pictures and captions into a v2 (a new trigger word replaces the old one

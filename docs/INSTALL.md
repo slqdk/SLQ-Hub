@@ -429,6 +429,7 @@ All commands run in the VM from `/opt/slq-hub`:
 | More picture models | Settings → Models → Add image model (an SDXL checkpoint on Civitai or Hugging Face; Civitai files for signed-in users need `CIVITAI_TOKEN` in `.env`) |
 | A model from your computer | Settings → Models → Upload (a .gguf language model or an SDXL checkpoint), Upload on a listed model that is not downloaded (its files), or Base model files on a klein training. Sent in 32 MiB pieces, so the proxy's body limit does not apply and an interrupted upload goes on when the same file is chosen again |
 | FLUX.2 klein 9B (the picture model, and LoRA training on it) | Gated on Hugging Face: sign in there, accept the licence on huggingface.co/black-forest-labs/FLUX.2-klein-9b-fp8 (the picture model) and huggingface.co/black-forest-labs/FLUX.2-klein-base-9B (training), create a read token and put it in `.env` as `HF_TOKEN=...`, then `update.sh compose up -d` |
+| FLUX.2 klein 9B uncensored (the picture model, and training on it) | As klein 9B, and accept the licence on huggingface.co/ponpoke/flux2-klein-9b-uncensored-text-encoder with the same account (granted at once) |
 
 Settings that belong to the machine (ports, proxy IP, LAN networks, image
 versions) are in `/srv/slq-hub/.env`. After editing it, run:

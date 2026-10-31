@@ -5,7 +5,8 @@ time. This service only runs what it is sent and says how far it got. Python's s
 nothing to ai-toolkit's own environment.
 
     GET  /health           {"ok", "busy", "job": the one running, "toolkit": its folder exists, "ref": the ai-toolkit
-                            commit it was built at}
+                            commit it was built at, "klein_te": its FLUX.2 klein takes the text encoder from the
+                            config's te_name_or_path (patch_aitk.py, 0.63.0)}
     POST /jobs             {"id", "config": {...ai-toolkit's config as JSON...}, "dir": the run's folder} - start
     GET  /jobs/<id>        {"state": running|stopping|done|failed|cancelled, "step", "total", "loss", "elapsed_s",
                             "eta_s", "log": the last lines, "error"}
@@ -35,6 +36,9 @@ TOOLKIT = Path(os.environ.get("AI_TOOLKIT", "/opt/ai-toolkit"))
 ROOT = Path(os.environ.get("TRAINER_ROOT", "/training")).resolve()       # runs' folders must lie under it
 REF = (Path("/opt/ai-toolkit.ref").read_text().strip() if Path("/opt/ai-toolkit.ref").is_file()
        else os.environ.get("AI_TOOLKIT_REF", ""))           # the commit the image was built at
+# What patch_aitk.py (run when the image is built) changes, and the mark it leaves there.
+KLEIN_FILE = "extensions_built_in/diffusion_models/flux2/flux2_klein_model.py"
+KLEIN_MARK = "SLQ Hub (patch_aitk.py)"
 BAR = re.compile(r"(\d+)/(\d+) \[(\d+(?::\d+){1,2})<(\d+(?::\d+){1,2}|\?)")
 LOSS = re.compile(r"loss[:=]\s*([0-9.]+(?:e[-+]?\d+)?)", re.I)
 ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
@@ -65,6 +69,15 @@ def toolkit_env() -> dict:
 
 def busy() -> bool:
     return any(j["state"] in ("running", "stopping") for j in jobs.values())
+
+
+def klein_te() -> bool:
+    """Whether this image's ai-toolkit takes FLUX.2 klein's text encoder from the config (patch_aitk.py): the Hub
+    trains "FLUX.2 klein 9B uncensored" only then - an image built before would use Qwen3-8B without a word."""
+    try:
+        return KLEIN_MARK in (TOOLKIT / KLEIN_FILE).read_text()
+    except OSError:
+        return False
 
 
 def _follow(job: dict) -> None:
@@ -177,7 +190,7 @@ class Handler(BaseHTTPRequestHandler):
             with lock:
                 job = next((j["id"] for j in jobs.values() if j["state"] in ("running", "stopping")), None)
             return self._send(200, {"ok": True, "busy": job is not None, "job": job,
-                                    "toolkit": (TOOLKIT / "run.py").is_file(), "ref": REF})
+                                    "toolkit": (TOOLKIT / "run.py").is_file(), "ref": REF, "klein_te": klein_te()})
         m = re.fullmatch(r"/jobs/([a-z0-9-]+)", self.path)
         if m:
             with lock:

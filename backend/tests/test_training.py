@@ -213,7 +213,8 @@ async def test_a_lora_is_trained_on_an_sdxl_checkpoint(signed_in, app, fakes, mo
     monkeypatch.setattr(t, "sdxl_checkpoints", lambda: [{"id": "realvisxl-v5-0", "name": "RealVisXL V5.0",
                                                          "path": "hub/realvisxl-v5-0.safetensors"}])
     over = (await signed_in.get("/hub/api/training")).json()
-    assert [b["id"] for b in over["bases"]] == ["flux2-klein-4b", "flux2-klein-9b", "sdxl:realvisxl-v5-0"]
+    assert [b["id"] for b in over["bases"]] == ["flux2-klein-4b", "flux2-klein-9b", "flux2-klein-9b-uncensored",
+                                                "sdxl:realvisxl-v5-0"]
     for bad in ("sdxl:gone", "sd15"):
         r = await signed_in.post("/hub/api/training/runs", json={"name": "X", "trigger": "rkxv", "base": bad},
                                  headers=ORIGIN)
@@ -444,6 +445,62 @@ def test_the_trainer_stops_a_job(traind):
     assert not mod.busy()
 
 
+def test_the_trainer_image_lets_klein_take_the_configs_text_encoder(traind):
+    """0.63.0: patch_aitk.py, run when the trainer image is built, changes ai-toolkit's Flux2KleinModel.load_te to
+    load the config's te_name_or_path when it names one, the class's own Qwen3 otherwise - and says which in the log.
+    Its OLD is ai-toolkit's load_te at AI_TOOLKIT_REF word for word (checked against b69b983 when written); another
+    ai-toolkit is left as it is (the build goes on - a failed one would stop the whole update). /health says whether
+    the image has the patch (klein_te)."""
+    from types import SimpleNamespace
+    mod, _ = traind
+    spec = importlib.util.spec_from_file_location("patch_aitk_test", TRAINER / "patch_aitk.py")
+    pa = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(pa)
+    assert (pa.MARK, pa.FILE) == (mod.KLEIN_MARK, mod.KLEIN_FILE)
+    toolkit = mod.TOOLKIT
+    f = toolkit / pa.FILE
+    f.parent.mkdir(parents=True)
+    f.write_text('class Flux2KleinModel:\n    flux2_klein_te_path: str = None\n\n' + pa.OLD
+                 + '\n\nclass Flux2Klein9BModel(Flux2KleinModel):\n    flux2_klein_te_path: str = "Qwen/Qwen3-8B"\n')
+    assert mod.klein_te() is False and pa.patched(toolkit) is False
+    assert pa.patch(toolkit) == "patched" and pa.patch(toolkit) == "already"     # a second run changes nothing
+    assert mod.klein_te() is True
+
+    calls = []
+
+    class Qwen3TextEncoder:
+        @staticmethod
+        def load(path, subfolder=None, **kw):
+            calls.append(("te", path, subfolder))
+            return "te"
+
+    class Qwen2Tokenizer:
+        @staticmethod
+        def from_pretrained(path):
+            calls.append(("tokenizer", path))
+            return "tok"
+    ns = {"Qwen3TextEncoder": Qwen3TextEncoder, "Qwen2Tokenizer": Qwen2Tokenizer, "flush": lambda: None}
+    exec(compile(f.read_text(), str(f), "exec"), ns)
+    m = ns["Flux2Klein9BModel"]()
+    m.torch_dtype, m.component_load_kwargs = "bf16", lambda role: {}
+    m.print_and_status_update = lambda text: calls.append(("log", text))
+    m.model_config = SimpleNamespace(te_name_or_path="ponpoke/flux2-klein-9b-uncensored-text-encoder")
+    assert m.load_te() == ("te", "tok")
+    assert calls == [("log", "Loading Qwen3 from ponpoke/flux2-klein-9b-uncensored-text-encoder"),
+                     ("te", "ponpoke/flux2-klein-9b-uncensored-text-encoder", ""),
+                     ("tokenizer", "ponpoke/flux2-klein-9b-uncensored-text-encoder")]
+    calls.clear()
+    m.model_config = SimpleNamespace(te_name_or_path=None)                       # 4B, 9B: as before
+    m.load_te()
+    assert calls[1:] == [("te", "Qwen/Qwen3-8B", ""), ("tokenizer", "Qwen/Qwen3-8B")]
+
+    changed = "class Flux2KleinModel:\n    def load_te(self):\n        return None\n"            # another ai-toolkit
+    f.write_text(changed)
+    assert pa.patch(toolkit) == "skipped" and f.read_text() == changed and mod.klein_te() is False
+    f.unlink()
+    assert pa.patch(toolkit) == "skipped" and mod.klein_te() is False
+
+
 async def test_a_lora_is_trained_on_klein_9b(signed_in, app, fakes, monkeypatch):
     """0.61.0: FLUX.2 klein 9B as the base. Gated on Hugging Face: without HF_TOKEN a start stops before anything is
     fetched, with the steps to take; with a token its account has not accepted the licence for, Hugging Face's 403 is
@@ -456,7 +513,7 @@ async def test_a_lora_is_trained_on_klein_9b(signed_in, app, fakes, monkeypatch)
     over = (await signed_in.get("/hub/api/training")).json()
     nine = next(b for b in over["bases"] if b["id"] == "flux2-klein-9b")
     assert nine["family"] == "flux2-klein-9b" and nine["lora_for"] == "FLUX.2 [klein] 9B" and nine["ready"] is False
-    assert nine["gated"] == "https://huggingface.co/black-forest-labs/FLUX.2-klein-base-9B" and over["hf_token"] is False
+    assert nine["gated"] == ["https://huggingface.co/black-forest-labs/FLUX.2-klein-base-9B"] and over["hf_token"] is False
     assert "gated" not in over["bases"][0] and over["bases"][0]["download_gb"] == 16
     run = (await signed_in.post("/hub/api/training/runs", json={"name": "Rikke 9B", "trigger": "rkxv", "kind": "person",
                                                                 "steps": 500, "base": "flux2-klein-9b"},
@@ -589,3 +646,118 @@ async def test_a_klein_base_can_be_uploaded_instead_of_downloaded(signed_in, app
     assert (await signed_in.post(f"/hub/api/training/runs/{rid}/start", headers=ORIGIN)).status_code == 200
     await wait_for(lambda: t._load(rid)["state"] == "done")
     assert sorted(fakes.hf["downloaded"]) == ["Qwen/Qwen3-8B/model.safetensors", "ai-toolkit/flux2_vae/ae.safetensors"]
+
+
+async def test_klein_9b_uncensored_trains_with_its_own_text_encoder(signed_in, app, fakes, monkeypatch):
+    """0.63.0 (Søren: ponpoke/flux2-klein-9b-uncensored-text-encoder "in my hub"): klein 9B's base trained with
+    ponpoke's text encoder, the one FLUX.2 [klein] 9B uncensored makes its pictures with. The config names it in
+    te_name_or_path, which only the trainer's patched ai-toolkit reads - an older trainer is refused rather than left
+    to train with Qwen3-8B. Of its repository only what from_pretrained reads is fetched (no GGUF, no other
+    precision), and its 16.4 GB model file is the picture model's own, linked into Hugging Face's cache (one file on
+    disk) - so it needs no token either. Delete files on the picture model then frees what is its alone."""
+    monkeypatch.setattr(R, "POLL_S", 0.01)
+    monkeypatch.setenv("HF_TOKEN", "hf_ok")
+    hub = app.state.hub
+    t = hub.extras["training"]
+    pon = "ponpoke/flux2-klein-9b-uncensored-text-encoder"
+    fakes.hf["repos"] = {
+        "black-forest-labs/FLUX.2-klein-base-9B": {"sha": "9b9b9b", "gated": "auto", "token": "hf_ok", "tree": [
+            {"type": "file", "path": "flux-2-klein-base-9b.safetensors", "size": 4000}]},
+        "ai-toolkit/flux2_vae": KLEIN_REPOS["ai-toolkit/flux2_vae"],
+        pon: {"sha": "a5a5a5", "gated": "auto", "token": "hf_ok", "tree": [
+            {"type": "file", "path": "model.safetensors", "size": 3000},
+            {"type": "file", "path": "config.json", "size": 30}, {"type": "file", "path": "tokenizer.json", "size": 20},
+            {"type": "file", "path": "chat_template.jinja", "size": 10},
+            {"type": "file", "path": "flux2-klein-9b-uncensored-q8_0.gguf", "size": 2000},
+            {"type": "file", "path": "model_bf16.safetensors", "size": 3000},       # added to the repo some day
+            {"type": "file", "path": "README.md", "size": 10}]}}
+    # the picture model is downloaded: its text encoder is ponpoke's model.safetensors
+    pic = hub.catalog.get("comfy", "flux2-klein-9b-uncensored")
+    for f in pic["files"]:
+        p = hub.env.models_dir / f["dest"]
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(b"t" * 3000 if f["repo"] == pon else b"fake")
+    te = hub.env.models_dir / "comfy/text_encoders/qwen_3_8b_uncensored_f16.safetensors"
+
+    over = (await signed_in.get("/hub/api/training")).json()
+    unc = next(b for b in over["bases"] if b["id"] == "flux2-klein-9b-uncensored")
+    assert unc["family"] == "flux2-klein-9b" and unc["lora_for"] == "FLUX.2 [klein] 9B uncensored" and unc["ready"]
+    assert unc["gated"] == ["https://huggingface.co/black-forest-labs/FLUX.2-klein-base-9B",
+                            f"https://huggingface.co/{pon}"] and "uncensored text encoder" in unc["note"]
+    files = (await signed_in.get("/hub/api/training/bases/flux2-klein-9b-uncensored/files")).json()["files"]
+    assert [(f["path"], f["here"]) for f in files if f["repo"] == pon] == [
+        ("model.safetensors", True), ("config.json", False), ("tokenizer.json", False),
+        ("chat_template.jinja", False)]             # the picture model's copy counts; no GGUF, bf16 copy or README
+
+    rid = t.create("Mira 9B", "mrxv", "person", 500, base="flux2-klein-9b-uncensored")["id"]
+    assert t.detail(rid)["base_label"] == "FLUX.2 klein 9B uncensored"
+    t.add_images(rid, [(f"p{i}.jpg", photo()) for i in range(5)])
+    t.set_captions(rid, {f"p{i}.jpg": "a woman in a garden" for i in range(5)})
+    fakes.trainer["klein_te"] = False                           # a trainer image from before 0.63.0
+    r = await signed_in.post(f"/hub/api/training/runs/{rid}/start", headers=ORIGIN)
+    assert r.status_code == 503 and "older than this Hub" in r.json()["detail"]
+    fakes.trainer["klein_te"] = True
+
+    fakes.hf["downloaded"] = []
+    fakes.trainer["hold"] = True
+    assert (await signed_in.post(f"/hub/api/training/runs/{rid}/start", headers=ORIGIN)).status_code == 200
+    await wait_for(lambda: t._load(rid)["state"] == "training" and rid in fakes.trainer["jobs"])
+    cfg = fakes.trainer["jobs"][rid]["config"]["config"]["process"][0]
+    assert cfg["model"] == {"name_or_path": "black-forest-labs/FLUX.2-klein-base-9B", "arch": "flux2_klein_9b",
+                            "quantize": True, "qtype": "qfloat8", "quantize_te": True, "qtype_te": "qfloat8",
+                            "low_vram": False, "te_name_or_path": pon}
+    snap = hub.env.models_dir / "hf/hub/models--ponpoke--flux2-klein-9b-uncensored-text-encoder/snapshots/a5a5a5"
+    assert (snap / "model.safetensors").stat().st_ino == te.stat().st_ino            # one file, two names
+    assert sorted(fakes.hf["downloaded"]) == [
+        "ai-toolkit/flux2_vae/ae.safetensors", "black-forest-labs/FLUX.2-klein-base-9B/flux-2-klein-base-9b.safetensors",
+        f"{pon}/chat_template.jinja", f"{pon}/config.json", f"{pon}/tokenizer.json"]
+    assert not list(snap.glob("*.gguf"))
+    fakes.trainer["hold"] = False
+    await wait_for(lambda: t._load(rid)["state"] == "done")
+    lora = (await signed_in.post(f"/hub/api/training/runs/{rid}/use", json={}, headers=ORIGIN)).json()
+    assert lora["base"] == "flux2-klein-9b" and "FLUX.2 klein 9B uncensored" in lora["note"]
+
+    # Settings -> Models: the picture model's encoder frees nothing while the training's copy shares it - but it is
+    # still the model's own file, so Delete files is there, and says what it really gave back
+    models = (await signed_in.get("/hub/api/models")).json()
+    row = next(m for m in models["comfy"] if m["id"] == "flux2-klein-9b-uncensored")
+    assert row["freeable"] == 4 + 4 and row["own_files"] == 3   # the model and VAE files ("fake"), not the encoder
+    r = await signed_in.delete("/hub/api/models/flux2-klein-9b-uncensored/files", headers=ORIGIN)
+    assert r.status_code == 200 and r.json()["freed"] == 8 and not te.exists()
+    assert (snap / "model.safetensors").read_bytes() == b"t" * 3000 and (snap / "model.safetensors").stat().st_nlink == 1
+
+
+async def test_a_picture_models_copy_that_cannot_be_linked_can_still_be_uploaded(signed_in, app, fakes, monkeypatch):
+    """0.63.0: Base model files counts the picture model's copy of 9B uncensored's encoder as here. When the link
+    fails all the same (the cache on another file system, a file the Hub may not link), the training would have to
+    fetch it - so an upload is still taken rather than refused as "here already"."""
+    from .mocks import safetensors_bytes
+    from .test_uploads import upload
+    hub = app.state.hub
+    pon = "ponpoke/flux2-klein-9b-uncensored-text-encoder"
+    te_file = safetensors_bytes({"w": {"dtype": "F16", "shape": [2], "data_offsets": [0, 4]}}, pad=2000)
+    fakes.hf["repos"] = {
+        "black-forest-labs/FLUX.2-klein-base-9B": {"sha": "9b9b9b", "gated": "auto", "token": "hf_ok", "tree": [
+            {"type": "file", "path": "flux-2-klein-base-9b.safetensors", "size": 4000}]},
+        "ai-toolkit/flux2_vae": KLEIN_REPOS["ai-toolkit/flux2_vae"],
+        pon: {"sha": "a5a5a5", "gated": "auto", "token": "hf_ok", "tree": [
+            {"type": "file", "path": "model.safetensors", "size": len(te_file)}]}}
+    te = hub.env.models_dir / "comfy/text_encoders/qwen_3_8b_uncensored_f16.safetensors"
+    te.parent.mkdir(parents=True, exist_ok=True)
+    te.write_bytes(te_file)
+    files = (await signed_in.get("/hub/api/training/bases/flux2-klein-9b-uncensored/files")).json()["files"]
+    assert next(f for f in files if f["repo"] == pon)["here"] is True
+
+    def no_link(*a, **kw):
+        raise OSError(18, "Invalid cross-device link")
+    monkeypatch.setattr(R.os, "link", no_link)
+    t = hub.extras["training"]
+    assert t._link_picture_copy(pon, "model.safetensors", len(te_file), t.cache_dir(pon) / "x") is False
+    up = await upload(signed_in, "model.safetensors", te_file)
+    r = await signed_in.post("/hub/api/training/bases/flux2-klein-9b-uncensored/files",
+                             json={"upload": up["id"], "repo": pon, "path": "model.safetensors"}, headers=ORIGIN)
+    assert r.status_code == 200, r.text
+    assert (t.cache_dir(pon) / "snapshots/a5a5a5/model.safetensors").read_bytes() == te_file
+    r = await signed_in.post("/hub/api/training/bases/flux2-klein-9b-uncensored/files",
+                             json={"upload": up["id"], "repo": pon, "path": "model.safetensors"}, headers=ORIGIN)
+    assert r.status_code == 409                                   # now it is in the cache itself

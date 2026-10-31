@@ -359,11 +359,16 @@ async def test_a_persons_answers_count_for_her_and_only_the_owner_sees_the_page(
 
 async def test_the_card_idle_and_loading_have_rows_of_their_own(signed_in, app, fakes):
     hub = app.state.hub
+    meter = hub.extras["energy"]
+    # The meter's clock stands still: the idle time it would add while the test runs is no part of what is tested.
+    # In a whole run a garbage collection of ~0.3 s could fall inside it, and at the fake card's 280 W that was
+    # 2.014-2.024 Wh (0.63.0's tests moved one there, every time).
+    meter.clock = lambda: meter.last_t
     hub.extras["energy"].on_idle(7200.0)                                          # 2 Wh while nobody used it
     t = await hub.scheduler.acquire("system", "preload", "llm:qwen3.8-27b", "background", label="preload")
     await t.release()
     rows = {x["who"]: x for x in (await signed_in.get("/hub/api/usage", params={"period": "all"})).json()["rows"]}
-    idle = rows["idle"]                              # (and the moment since the last look, read for the page)
+    idle = rows["idle"]
     assert idle["label"] == "The card, idle" and 2.0 <= idle["energy_wh"] < 2.01 and 0.006 <= idle["cost"] < 0.00603
     assert rows["system"]["label"] == "Loading models" and rows["system"]["jobs"] == 1
 

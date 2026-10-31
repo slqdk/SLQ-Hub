@@ -412,9 +412,9 @@ export const SECTIONS: HelpSection[] = [
       {
         id: "lora-training",
         title: "Train a LoRA on your own pictures",
-        what: "Settings, Models, LoRAs, Train a LoRA teaches FLUX.2 klein 4B or 9B - or one of your SDXL models, such "
-          + "as RealVisXL or Pony - a thing, a person or a style from 15-40 of your pictures, here on the card. It "
-          + "needs the trainer turned on (COMPOSE_PROFILES=training on the VM).",
+        what: "Settings, Models, LoRAs, Train a LoRA teaches FLUX.2 klein 4B, 9B or 9B uncensored - or one of your "
+          + "SDXL models, such as RealVisXL or Pony - a thing, a person or a style from 15-40 of your pictures, here "
+          + "on the card. It needs the trainer turned on (COMPOSE_PROFILES=training on the VM).",
         examples: [
           { text: "New training: CX9020 controller, trigger word cx9020x, 25 photos of it" },
           { text: "Then: tick the CX9020 LoRA in a chat's picture menu, and ask for cx9020x in a control cabinet" },
@@ -431,6 +431,10 @@ export const SECTIONS: HelpSection[] = [
           + "is gated on Hugging Face: accept its licence there and set HF_TOKEN on the VM first - or upload its base "
           + "model files from the computer (Base model files, on the training). A LoRA works only with the model size "
           + "it was trained on.",
+          "klein 9B uncensored trains the same model with ponpoke's uncensored text encoder, the one FLUX.2 [klein] 9B "
+          + "uncensored makes its pictures with (its 16.4 GB file is shared, not downloaded twice). The encoder only "
+          + "lets a prompt through - what klein never learned, it learns from a LoRA. Its LoRAs fit both klein 9B "
+          + "picture models.",
           "An SDXL model you upload (Settings, Models, Image models, Upload) can be trained on too: it is listed under "
           + "Train on.",
           "Only you can train or use LoRAs."],

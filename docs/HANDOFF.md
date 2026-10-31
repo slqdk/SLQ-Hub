@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.62.0, 2026-10-31)
+## State (0.63.0, 2026-10-31)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -701,6 +701,53 @@ files. NOT tried on the VM: a 5-30 GB file through hub.slq.dk (Nginx Proxy Manag
 from INSTALL.md step 4; 32 MiB per request is far under its 3200m limit, but its timeouts were not looked at), the
 speed on the LAN, resuming after a real Hub restart, and the disk while a big file is both in `.uploads` and
 checked (a rename, so no second copy).
+0.63.0, Søren: "How can i get https://huggingface.co/ponpoke/flux2-klein-9b-uncensored-text-encoder or
+https://huggingface.co/darknight9121/FLUX.2-klein-base-9B-bucket-uncensored in my hub?" Neither could be added: an
+added picture model can only be SDXL, and klein 9B's text encoder was fixed per family. What they are, read through
+Hugging Face's API (2026-10-31): ponpoke's is Qwen3-8B abliterated (its card: refusal directions of layers 14-24
+projected out of o_proj and down_proj, no fine-tuning; cosine similarity to the official encoder's output 0.97 for
+harmless prompts, 0.91 for extreme ones), gated "auto", flux-non-commercial-v2.1: `model.safetensors` 16,381,516,808
+bytes F16, config.json, tokenizer.json and tokenizer_config.json (393 bytes - saved by transformers 5), chat_template
+.jinja, and GGUFs (F16, Q8_0, Q6_K, Q4_K_M). Its own card says the encoder only passes prompts on: what the DiT never
+learned "will likely collapse or result in noise" - a LoRA is the way. darknight's is BFL's klein base 9B in its
+diffusers layout plus the single file (18,157,185,200 bytes: BFL's plus `{"format":"pt"}` metadata - re-saved; whether
+the weights changed cannot be seen, BFL's file is gated) and a `text_encoder/model.safetensors` of exactly ponpoke's
+size, F16, 399 tensors in Hugging Face's names with `format: pt` - almost certainly ponpoke's file (its hash cannot be
+compared: Hugging Face hides a gated repo's LFS ids). Not gated on Hugging Face, though its card (BFL's, copied) asks
+for the licence. So the Hub uses ponpoke's, the original, for both: (1) catalog `flux2-klein-9b-uncensored` (family
+flux2-klein-9b): klein 9B's fp8 model and the VAE (shared files - `file_users` keeps them for the other), and the
+encoder as `comfy/text_encoders/qwen_3_8b_uncensored_f16.safetensors`. `workflows.klein_files(entry)` takes the
+loaders' names from the entry's files (unet/clip/vae by folder), so the graph follows the model chosen, not its
+family. Read in ComfyUI v0.42.3 (sd.py, text_encoders/flux.py, hunyuan_video.py): Hugging Face's key names with
+q_norm and a 4096-wide post_attention_layernorm are TEModel.QWEN3_8B, CLIPLoader type flux2 makes it klein_te
+qwen3_8b with `dtype_llama` = the file's own dtype - so it runs in fp16 (Comfy-Org's qwen_3_8b is bf16). (2) training
+base `flux2-klein-9b-uncensored` in `runs.KLEIN`: the same base file, `te_repo` ponpoke's, `te_config` puts
+`te_name_or_path` in the model config. ai-toolkit (b69b983) takes klein's encoder from a class attribute only, so the
+trainer image patches `Flux2KleinModel.load_te` when it is built (`services/trainer/patch_aitk.py`: the block must be
+there word for word - another AI_TOOLKIT_REF is left alone with a warning rather than failing the build, which would
+stop the whole update; the log then says "Loading Qwen3 from <repo>"); `/health` has `klein_te`, and
+`start` refuses this base on a trainer without it rather than let it train with Qwen3-8B. Read in ai-toolkit and
+transformers 5.5.3 (ai-toolkit's pin): `Qwen3TextEncoder.load(repo)` registers no ComfyUI weights, so a repo id goes
+to from_pretrained as Qwen/Qwen3-8B does; v5's Qwen2Tokenizer builds itself from tokenizer.json alone
+(`convert_to_native_format`), and the encoding uses the chat template (chat_template.jinja). Of the repo only
+`te_files` is fetched (model weights in one file or shards, root JSON and .txt files, the chat template): no GGUF,
+and no other precision ponpoke may add later. The 16.4 GB file is one file on disk for both: `Training.fetch` links
+a picture model's copy (same repo and path, exactly Hugging Face's size) into the HF snapshot before its gated
+check, and `Downloads._download` links a training's copy into comfy/ (hard links of the resolved file - Linux would
+link a symlink itself, and Hugging Face's own cache layout is snapshot symlinks to blobs/; same file system:
+/srv/slq-hub/models is one bind mount; a failed link falls back to downloading). `base_files` counts a picture
+model's copy as here; `place_base_file` refuses an upload only when the cache itself has the file, so a link that
+fails still leaves the upload. `_size_of` counts a file linked elsewhere as nothing, for "freeable" and for what
+Delete files says it freed; the row's `own_files` decides whether Delete files is there (freeable 0 used to mean
+"all shared"). Through the link the trainer, which mounts models/hf read-write, can now write into a file ComfyUI
+reads - safetensors are data, and ai-toolkit does not write its inputs. bases' `gated` is a list now (9B
+uncensored: BFL's base and ponpoke's), plus a `note`. An independent review found the Delete files, freed, symlink
+and upload cases above (fixed, with tests) and nothing blocking. Once downloaded, people's chats can choose the
+uncensored model too, as they can Chroma (no content filter) - picture models are not the owner's alone as LoRAs
+are; Søren was told, nothing restricts it. A test that had passed for months failed in whole runs
+from here on (test_usage: the card's idle energy 2.014-2.024 Wh against < 2.01): a ~0.3 s garbage collection fell
+inside it - a gcprobe plugin found gen-2 collections of 0.28 s in that file - so it freezes the meter's clock now.
+NOT tried on the card (item 84): any of it.
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
 host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU
@@ -1434,6 +1481,17 @@ the host if the VM ever stops by itself.
       weights and the fp8mixed text encoder on RDNA3 (ComfyUI should dequantise them; if not, BFL's bf16
       `flux-2-klein-9b.safetensors`, 18.2 GB in black-forest-labs/FLUX.2-klein-9B, and Comfy-Org's
       `qwen_3_8b.safetensors`, 16.4 GB, are the fallback).
+    - **klein 9B uncensored (0.63.0)** - none of it has run. The picture model: accept the licence on
+      huggingface.co/ponpoke/flux2-klein-9b-uncensored-text-encoder with the HF_TOKEN's account (granted at once),
+      download it (16.4 GB more when klein 9B is there). Its encoder is F16 and 16.4 GB: with the 9.4 GB model it
+      does not fit the card at once, so ComfyUI has to move the encoder off before it samples - watch the first
+      picture's time against klein 9B's, ComfyUI's log, and the VM's RAM (`free -g`). Black or noise-only pictures
+      for ordinary prompts would mean fp16 overflow in Qwen3-8B (ComfyUI runs the file in its own dtype): then a bf16
+      copy of the file would be the fix, not a setting. ponpoke's Q8_0 GGUF (8.7 GB) would need the ComfyUI-GGUF
+      nodes, which the image does not have. Training: after the update, the trainer's /health should say
+      `"klein_te": true` (`sudo bash update.sh compose exec trainer curl -s http://127.0.0.1:7300/health`); a run's log should say
+      "Loading Qwen3 from ponpoke/flux2-klein-9b-uncensored-text-encoder", and its model.safetensors should be a link
+      to the picture model's (`stat -c %h` gives 2) - no second 16.4 GB download.
 80. **Not pursued (Søren, 2026-10-28)** - kept here in case it is taken up again; if it stays unused, remove
     the `windows` service, `.30` from `SANDBOX_IPS`, `windows/*` from `FOLDERS` and INSTALL.md section 12.
     **0.39.0's Windows container on VM 222**: `COMPOSE_PROFILES=windows` in

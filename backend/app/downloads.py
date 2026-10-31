@@ -128,9 +128,47 @@ class Downloads:
                 st["error"] = str(exc)[:300]
         self._cancel.clear()
 
+    def _training_copy(self, f: dict) -> Path | None:
+        """The same file of the same Hugging Face repository, fetched already for a LoRA training into Hugging Face's
+        cache (models/hf, app/training/runs.py) - at exactly the catalog's size, which only exact sizes match.
+        FLUX.2 [klein] 9B uncensored's text encoder is 16.4 GB for its pictures and for its training (0.63.0)."""
+        repo, path, size = str(f.get("repo") or ""), str(f.get("path") or ""), int(f.get("size") or 0)
+        if not repo or not path or not size or ".." in Path(path).parts or path.startswith("/"):
+            return None
+        snaps = self.catalog.path({"dest": f"hf/hub/models--{repo.replace('/', '--')}/snapshots"})
+        try:
+            for snap in sorted(snaps.iterdir()) if snaps.is_dir() else []:
+                p = snap / path
+                if p.is_file() and p.stat().st_size == size:
+                    return p
+        except OSError:
+            pass
+        return None
+
+    def _link(self, f: dict, dest: Path, st: dict) -> bool:
+        """A hard link to the training's copy instead of a second download (one file on disk for both). False when
+        there is none, or the two folders are on different file systems."""
+        src = self._training_copy(f)
+        if src is None:
+            return False
+        tmp = dest.with_name(dest.name + ".link")
+        try:
+            tmp.unlink(missing_ok=True)
+            os.link(src.resolve(strict=True), tmp)     # the data itself: Linux links a symlink, not its target
+            os.replace(tmp, dest)
+        except OSError:
+            tmp.unlink(missing_ok=True)
+            return False
+        dest.with_name(dest.name + ".part").unlink(missing_ok=True)       # a download begun before
+        st["done"] = st["total"] = int(f["size"])
+        return True
+
     async def _download(self, entry_id: str, f: dict, st: dict) -> None:
         dest: Path = self.catalog.path(f)
         dest.parent.mkdir(parents=True, exist_ok=True)
+        if self._link(f, dest, st):
+            st["error"] = None
+            return
         part = dest.with_name(dest.name + ".part")
         url, headers, site = _source(f)
         st["status"] = "downloading"

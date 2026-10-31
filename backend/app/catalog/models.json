@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "notes": "Model catalog. File paths are verified against Hugging Face (2026-10-21) - except mel-band-roformer-vocals and seed-vc (0.18.0): their paths come from the projects' own code and their sizes are estimates; the video models' (0.19.0) paths come from ComfyUI's official templates and were checked on Hugging Face's pages (2026-10-24), sizes as the pages round them; flux2-klein-9b's (0.61.0) were listed through Hugging Face's API with their exact sizes (2026-10-31; its model file is gated, so its header was not read). 'dest' is relative to the models root (/srv/slq-hub/models on the VM, /models in the containers). Sizes are decimal bytes, used for progress only.",
+  "notes": "Model catalog. File paths are verified against Hugging Face (2026-10-21) - except mel-band-roformer-vocals and seed-vc (0.18.0): their paths come from the projects' own code and their sizes are estimates; the video models' (0.19.0) paths come from ComfyUI's official templates and were checked on Hugging Face's pages (2026-10-24), sizes as the pages round them; flux2-klein-9b's (0.61.0) were listed through Hugging Face's API with their exact sizes (2026-10-31; its model file is gated, so its header was not read). flux2-klein-9b-uncensored's text encoder (0.63.0) too, its header read through darknight9121/FLUX.2-klein-base-9B-bucket-uncensored's ungated copy of the same size (F16, 399 Qwen3-8B tensors in Hugging Face's names, which ComfyUI v0.42.3 reads as klein 9B's encoder). 'dest' is relative to the models root (/srv/slq-hub/models on the VM, /models in the containers). Sizes are decimal bytes, used for progress only.",
   "llm": [
     {
       "id": "qwen3.8-27b",
@@ -151,6 +151,19 @@
       "files": [
         {"repo": "black-forest-labs/FLUX.2-klein-9b-fp8", "path": "flux-2-klein-9b-fp8.safetensors", "dest": "comfy/diffusion_models/flux-2-klein-9b-fp8.safetensors", "size": 9433061528},
         {"repo": "Comfy-Org/Flux-2-Klein-9B", "path": "split_files/text_encoders/qwen_3_8b_fp8mixed.safetensors", "dest": "comfy/text_encoders/qwen_3_8b_fp8mixed.safetensors", "size": 8664848742},
+        {"repo": "Comfy-Org/flux2-dev", "path": "split_files/vae/flux2-vae.safetensors", "dest": "comfy/vae/flux2-vae.safetensors", "size": 340000000}
+      ]
+    },
+    {
+      "id": "flux2-klein-9b-uncensored",
+      "name": "FLUX.2 [klein] 9B uncensored",
+      "description": "klein 9B with ponpoke's uncensored text encoder (Qwen3-8B with its refusals abliterated, F16, 16.4 GB): prompts reach the model as written. It still draws only what klein learned - for the rest, train a LoRA on klein 9B uncensored. Shares klein 9B's model and VAE; klein 9B LoRAs fit. FLUX Non-Commercial licence; both repositories are gated on Hugging Face: accept them at huggingface.co/black-forest-labs/FLUX.2-klein-9b-fp8 and huggingface.co/ponpoke/flux2-klein-9b-uncensored-text-encoder and set HF_TOKEN in .env.",
+      "default": false,
+      "family": "flux2-klein-9b",
+      "abilities": ["generate", "edit"],
+      "files": [
+        {"repo": "black-forest-labs/FLUX.2-klein-9b-fp8", "path": "flux-2-klein-9b-fp8.safetensors", "dest": "comfy/diffusion_models/flux-2-klein-9b-fp8.safetensors", "size": 9433061528},
+        {"repo": "ponpoke/flux2-klein-9b-uncensored-text-encoder", "path": "model.safetensors", "dest": "comfy/text_encoders/qwen_3_8b_uncensored_f16.safetensors", "size": 16381516808},
         {"repo": "Comfy-Org/flux2-dev", "path": "split_files/vae/flux2-vae.safetensors", "dest": "comfy/vae/flux2-vae.safetensors", "size": 340000000}
       ]
     },

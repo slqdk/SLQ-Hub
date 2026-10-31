@@ -164,11 +164,13 @@ function ModelsTab({ s }: { s: S }) {
     toast(`Deleted ${m.name}'s files: ${bytes(r.freed)} free again`
       + (r.kept.length ? ` (kept ${r.kept.length} that other models use)` : ""), "run");
   });
-  const deleteButton = (m: ModelEntry) => !m.installed || m.custom ? null : m.freeable === 0 ? (
+  // own_files (0.63.0): a file linked to a LoRA training's copy frees nothing, but is still its own to delete
+  const deleteButton = (m: ModelEntry) => !m.installed || m.custom ? null : m.own_files === 0 ? (
     <button className="btn quiet small" disabled title="Its files are used by another downloaded model">Delete files</button>
   ) : (
     <ConfirmButton className="btn quiet small" disabled={!!busy || m.loaded}
-      confirmText={`Delete its files${m.freeable ? ` (${bytes(m.freeable)})` : ""}? Download gets them back.`}
+      confirmText={`Delete its files${m.freeable ? ` (${bytes(m.freeable)})`
+        : " - no space comes free: a LoRA training's copy shares them"}? Download gets them back.`}
       onConfirm={() => deleteFiles(m)}>Delete files</ConfirmButton>);
   // The owner's order (0.17.0): the chat's model choices, people's chats and the phone page list them so.
   const move = (group: "llm" | "comfy", items: ModelEntry[], i: number, by: -1 | 1) => act(`move-${group}`, async () => {

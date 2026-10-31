@@ -241,8 +241,8 @@ class ImagePipeline:
                     results.append({**item, "seed": sd, "model": model, **extra,
                                     **({"prompt_used": used} if used else {})})
                 continue
-            if fam in W.KLEIN_FILES:                        # FLUX.2 klein 4B or 9B: one graph, its own files
-                graph = W.klein_t2i(prompt, width, height, sd, steps=steps or 4, files=W.KLEIN_FILES[fam])
+            if fam in W.KLEIN_FILES:                        # FLUX.2 klein 4B or 9B: one graph, the model's files
+                graph = W.klein_t2i(prompt, width, height, sd, steps=steps or 4, files=W.klein_files(entry))
             elif fam == "z-image":
                 graph = W.zimage_t2i(prompt, width, height, sd, steps=steps or int(s.get("turbo_steps", 8)))
             elif fam == "chroma":
@@ -283,14 +283,15 @@ class ImagePipeline:
             model = "qwen-image-2.1-turbo"
         if not self.available(model):
             raise ImageError(f"the image model {model} is not downloaded (Settings -> Models)")
-        fam = family(self.entry(model))
+        entry = self.entry(model) or {}
+        fam = family(entry)
         lora_nodes, prompt, extra = self._loras(loras, fam, prompt)
         results = []
         for i in range(max(1, min(int(count), 4))):
             names = await self._upload_inputs(images)
             sd = (int(seed) + i) if seed is not None else random.randint(1, 2**31 - 1)
             if fam in W.KLEIN_FILES:
-                graph = W.klein_edit(prompt, names, sd, steps=steps or 4, files=W.KLEIN_FILES[fam])
+                graph = W.klein_edit(prompt, names, sd, steps=steps or 4, files=W.klein_files(entry))
             else:
                 graph = W.qwen_edit(prompt, names, sd, steps=steps or int(s.get("steps", 25)),
                                     cfg=float(s.get("cfg", 1.0)), turbo=model.endswith("turbo"))

@@ -182,7 +182,11 @@ async def models(request: Request):
             if not row["installed"]:                 # which files are here (0.62.0: the others can be uploaded)
                 row["files"] = [{**f, "here": hub.catalog.path(f).is_file()} for f in e.get("files", [])]
             if row["installed"] and not e.get("custom"):  # what Delete files would give back (0.27.0)
-                row["freeable"] = sum(_size_of(hub.catalog.path(f)) for f in own_files(e, users))
+                own = own_files(e, users)
+                row["freeable"] = sum(_size_of(hub.catalog.path(f)) for f in own)
+                # whether it has files of its own to delete at all (0.63.0): one linked to a training's copy
+                # frees nothing, but goes - freeable 0 alone no longer means "all shared"
+                row["own_files"] = len(own)
             if group == "llm":                       # what one chat may use now, and what the model was trained for
                 row["context_per_chat"] = hub.catalog.context_per_request(e["id"])
                 row["context_native"] = hub.catalog.native_context(e)
@@ -395,8 +399,11 @@ def own_files(entry: dict, users: dict[str, set[str]]) -> list[dict]:
 
 
 def _size_of(p) -> int:
+    """What deleting the file gives back: nothing while another name links the same data (0.63.0: a picture model's
+    file that a LoRA training's copy in Hugging Face's cache shares - app/downloads.py)."""
     try:
-        return p.stat().st_size if p.is_file() else 0
+        st = p.stat()
+        return st.st_size if p.is_file() and st.st_nlink <= 1 else 0
     except OSError:
         return 0
 
@@ -459,7 +466,7 @@ async def delete_model_files(model_id: str, request: Request):
         for q in (p, p.with_name(p.name + ".part")):
             try:
                 if q.resolve().is_relative_to(root) and q.is_file():
-                    size = q.stat().st_size
+                    size = _size_of(q)                  # a file a training's copy links frees nothing (0.63.0)
                     q.unlink()
                     freed += size
                     deleted.append(str(q.relative_to(hub.env.models_dir)))

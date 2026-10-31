@@ -41,7 +41,8 @@ class RunIn(BaseModel):
     kind: str = "thing"
     steps: int = 1500
     rank: int = 16
-    base: str | None = None          # "flux2-klein-4b", "flux2-klein-9b" (0.61.0) or "sdxl:<an SDXL model's id>"
+    base: str | None = None          # "flux2-klein-4b", "flux2-klein-9b" (0.61.0), "flux2-klein-9b-uncensored"
+                                     # (0.63.0) or "sdxl:<an SDXL model's id>"
 
 
 @router.post("/runs")

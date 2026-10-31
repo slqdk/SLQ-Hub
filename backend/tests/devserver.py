@@ -513,6 +513,11 @@ HF_DEMO["repos"]["black-forest-labs/FLUX.2-klein-base-9B"] = {"sha": "9b0c1d", "
 HF_DEMO["repos"]["Qwen/Qwen3-8B"] = {"sha": "8c9d0e", "tree": [
     _hf_file(f"model-0000{i}-of-00005.safetensors", gb) for i, gb in ((1, 4.0), (2, 3.99), (3, 3.96), (4, 3.19),
                                                                      (5, 1.24))] + [_hf_file("config.json", 0.000001)]}
+# klein 9B uncensored (0.63.0): ponpoke's text encoder - its GGUF files are not fetched
+HF_DEMO["repos"]["ponpoke/flux2-klein-9b-uncensored-text-encoder"] = {"sha": "5e6f7a", "tree": [
+    _hf_file("model.safetensors", 15.26), _hf_file("config.json", 0.000002), _hf_file("tokenizer.json", 0.0107),
+    _hf_file("tokenizer_config.json", 0.0000004), _hf_file("chat_template.jinja", 0.000004),
+    _hf_file("flux2-klein-9b-uncensored-q8_0.gguf", 8.11)]}
 HF_DEMO["repos"]["ornith-ai/Ornith-1.5-9B-GGUF"] = {
     "tree": [_hf_file(f"Ornith-1.5-9B-{q}.gguf", gb) for q, gb in
              (("Q4_K_M", 5.38), ("Q5_K_M", 6.18), ("Q6_K", 7.04), ("Q8_0", 9.12), ("BF16", 17.14))]

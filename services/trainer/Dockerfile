@@ -58,6 +58,10 @@ RUN cd /opt/ai-toolkit \
     && pip install -r requirements.txt -c /opt/torch-constraints.txt \
     && python -c "import torch; print('torch', torch.__version__, 'hip', torch.version.hip)"
 
+# FLUX.2 klein's text encoder from the config's te_name_or_path (0.63.0, "FLUX.2 klein 9B uncensored"): a patch to the
+# pinned ai-toolkit. Another AI_TOOLKIT_REF whose lines differ is left alone with a warning (/health: klein_te false).
+COPY patch_aitk.py /opt/traind/patch_aitk.py
+RUN python /opt/traind/patch_aitk.py /opt/ai-toolkit
 COPY traind.py /opt/traind/traind.py
 # As uid 1000, like the Hub: what ai-toolkit writes into a run's folder (checkpoints, samples, its latent cache) the
 # Hub can read and delete. ai-toolkit's own folder is its: it may write into it.

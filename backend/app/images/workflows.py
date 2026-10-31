@@ -34,6 +34,21 @@ KLEIN = {"unet": "flux-2-klein-4b.safetensors", "clip": "qwen_3_4b.safetensors",
 KLEIN_9B = {"unet": "flux-2-klein-9b-fp8.safetensors", "clip": "qwen_3_8b_fp8mixed.safetensors",
             "vae": "flux2-vae.safetensors"}
 KLEIN_FILES = {"flux2-klein": KLEIN, "flux2-klein-9b": KLEIN_9B}       # by catalog family
+# The loaders' folders under the models root, as the catalog's "dest" names them.
+KLEIN_FOLDERS = {"unet": "comfy/diffusion_models/", "clip": "comfy/text_encoders/", "vae": "comfy/vae/"}
+
+
+def klein_files(entry: dict) -> dict:
+    """A klein picture model's files, from its catalog entry (0.63.0): FLUX.2 [klein] 9B uncensored is klein 9B with
+    another text encoder, so the files belong to the model, not its family. The name a loader takes is the file's path
+    under its ComfyUI folder; what an entry does not list comes from its family's set."""
+    files = dict(KLEIN_FILES.get(str(entry.get("family") or ""), KLEIN))
+    for f in entry.get("files") or []:
+        dest = str(f.get("dest") or "")
+        for key, folder in KLEIN_FOLDERS.items():
+            if dest.startswith(folder) and dest.endswith(".safetensors") and ".." not in dest.split("/"):
+                files[key] = dest[len(folder):]
+    return files
 
 
 def snap(v: int, step: int = 32, lo: int = 256, hi: int = 2048) -> int:
@@ -128,7 +143,7 @@ def _klein_base(files: dict) -> dict:
 
 def klein_t2i(prompt: str, width: int, height: int, seed: int, steps: int = 4, prefix: str = "hub",
               files: dict = KLEIN) -> dict:
-    """FLUX.2 klein, 4B or 9B (`files`: KLEIN or KLEIN_9B)."""
+    """FLUX.2 klein, 4B or 9B (`files`: the model's own, klein_files)."""
     w, h = snap(width, 16), snap(height, 16)
     g = _klein_base(files)
     g["5"] = {"class_type": "CLIPTextEncode", "inputs": {"clip": ["3", 0], "text": prompt}}

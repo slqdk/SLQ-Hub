@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.63.0 - 2026-10-31
+
+- **FLUX.2 [klein] 9B uncensored** (Settings -> Models -> Image models):
+  klein 9B with ponpoke's uncensored text encoder, so prompts reach the
+  model as they are written. It uses klein 9B's model and VAE (downloaded
+  once for both) and klein 9B's LoRAs. The encoder only passes the prompt
+  on: what klein never learned still needs a LoRA.
+- **Train on "FLUX.2 klein 9B uncensored"**: klein 9B's base, with the
+  captions read by the same uncensored encoder as its pictures. Its 16.4 GB
+  file is shared with the picture model, not downloaded twice. The trainer
+  is rebuilt with the update.
+- Both are gated on Hugging Face (FLUX Non-Commercial licence): accept
+  the licence on ponpoke's page too, with the account of HF_TOKEN.
+
 ## 0.62.0 - 2026-10-31
 
 - **Upload models from your computer.** Settings -> Models has Upload for

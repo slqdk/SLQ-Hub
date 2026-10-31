@@ -346,15 +346,20 @@ export function TrainingBaseFiles({ base, label, onClose }: { base: string; labe
   const load = useCallback(() => api<{ files: BaseFile[] }>(`/hub/api/training/bases/${base}/files`)
     .then((r) => setFiles(r.files), (e) => setError((e as Error).message)), [base]);
   useEffect(() => { load(); }, [load]);
-  const gated = files?.find((f) => f.gated && !f.here);
+  // the missing gated files and their repositories (0.63.0: 9B uncensored's come from two)
+  const gated = files?.filter((f) => f.gated && !f.here) ?? [];
+  const repos = [...new Set(gated.map((f) => f.repo))];
+  const one = gated.length === 1;
   return (
     <Modal wide title={`${label}: base model files`} onClose={onClose}
       footer={<button className="btn" onClick={onClose}>Close</button>}>
       <p className="muted small" style={{ margin: 0 }}>What a training on {label} reads. Missing files are downloaded
-        when it starts{gated ? " - the gated one only with HF_TOKEN set" : ""}; or upload any of them from this
-        computer instead, exactly as Hugging Face has them.{gated && <> {baseName(gated.path)} is on <a
-          href={`https://huggingface.co/${gated.repo}`} target="_blank" rel="noreferrer">its Hugging Face page</a>:
-          signed in there with its licence accepted, a browser can download it.</>}</p>
+        when it starts{gated.length ? ` - the gated one${one ? "" : "s"} only with HF_TOKEN set` : ""}; or upload any
+        of them from this computer instead, exactly as Hugging Face has them.{repos.length > 0 && <>
+          {" "}{one ? `${baseName(gated[0].path)} is` : "They are"} on {repos.map((r, i) => <span key={r}>
+            {i > 0 && " and "}<a href={`https://huggingface.co/${r}`} target="_blank" rel="noreferrer">{r}</a></span>)}:
+          signed in there with {repos.length > 1 ? "the licences" : "its licence"} accepted, a browser can download
+          {one ? " it" : " them"}.</>}</p>
       {error && <div className="callout fault">{error}</div>}
       {!files && !error && <div className="faint">Asking Hugging Face what it needs</div>}
       {files && <div className="list">

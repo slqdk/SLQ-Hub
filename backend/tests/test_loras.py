@@ -280,3 +280,51 @@ async def test_klein_9b_draws_and_edits_with_its_own_files_and_loras(signed_in, 
     assert _node(g, "LoraLoaderModelOnly")[0]["inputs"]["lora_name"] == f"hub/{lora['id']}.safetensors"
     families = (await signed_in.get("/hub/api/loras")).json()["families"]
     assert families["flux2-klein"] == "FLUX.2 klein 4B" and families["flux2-klein-9b"] == "FLUX.2 klein 9B"
+
+
+async def test_klein_9b_uncensored_is_klein_9b_with_its_own_text_encoder(signed_in, app, fakes):
+    """0.63.0 (Søren: "How can i get https://huggingface.co/ponpoke/flux2-klein-9b-uncensored-text-encoder ... in my
+    hub?"): FLUX.2 [klein] 9B uncensored is klein 9B's model and VAE with ponpoke's text encoder - the graph takes the
+    files of the model chosen, not of its family - and klein 9B's LoRAs fit it, as they fit klein 9B."""
+    from .mocks import _png
+    hub = app.state.hub
+    pipe = hub.extras["images"]
+    entry = hub.catalog.get("comfy", "flux2-klein-9b-uncensored")
+    nine = hub.catalog.get("comfy", "flux2-klein-9b")
+    assert entry["family"] == "flux2-klein-9b" and entry["abilities"] == ["generate", "edit"]
+    te = next(f for f in entry["files"] if f["dest"].startswith("comfy/text_encoders/"))
+    assert (te["repo"], te["path"], te["size"]) == ("ponpoke/flux2-klein-9b-uncensored-text-encoder",
+                                                    "model.safetensors", 16381516808)
+    shared = {f["dest"] for f in entry["files"]} & {f["dest"] for f in nine["files"]}
+    assert shared == {"comfy/diffusion_models/flux-2-klein-9b-fp8.safetensors", "comfy/vae/flux2-vae.safetensors"}
+    assert W.klein_files(hub.catalog.get("comfy", "flux2-klein-4b")) == W.KLEIN          # 4B and 9B as before
+    assert W.klein_files(nine) == W.KLEIN_9B
+
+    _install(hub, "flux2-klein-9b-uncensored")                  # alone: klein 9B's own encoder is not here
+    assert not hub.catalog.installed(nine)
+    head = {"diffusion_model.single_blocks.23.linear1.lora_A.weight":
+            {"dtype": "F16", "shape": [16, 4096], "data_offsets": [0, 0]}}
+    raw = json.dumps(head).encode()
+    lora = (await signed_in.post("/hub/api/loras", files={"file": ("mira9.safetensors", struct.pack("<Q", len(raw)) + raw,
+                                                                    "application/octet-stream")},
+                                 data={"trigger": "mrxv"}, headers=ORIGIN)).json()
+    assert lora["base"] == "flux2-klein-9b" and [m["id"] for m in lora["fits"]] == ["flux2-klein-9b-uncensored"]
+    items = await pipe.generate("a fox", 1024, 1024, model="flux2-klein-9b-uncensored", loras=[lora["id"]])
+    g = fakes.comfy["prompts"][-1]
+    assert _node(g, "CLIPLoader")[0]["inputs"] == {"clip_name": "qwen_3_8b_uncensored_f16.safetensors",
+                                                   "type": "flux2", "device": "default"}
+    assert _node(g, "UNETLoader")[0]["inputs"]["unet_name"] == "flux-2-klein-9b-fp8.safetensors"
+    assert _node(g, "VAELoader")[0]["inputs"]["vae_name"] == "flux2-vae.safetensors"
+    assert _node(g, "LoraLoaderModelOnly")[0]["inputs"]["lora_name"] == f"hub/{lora['id']}.safetensors"
+    assert items[0]["model"] == "flux2-klein-9b-uncensored" and "lora_notes" not in items[0]
+    await pipe.edit("make it red", [_png((8, 8))], model="flux2-klein-9b-uncensored")
+    g = fakes.comfy["prompts"][-1]
+    assert _node(g, "ReferenceLatent") and \
+        _node(g, "CLIPLoader")[0]["inputs"]["clip_name"] == "qwen_3_8b_uncensored_f16.safetensors"
+
+    _install(hub, "flux2-klein-9b")                             # both: each draws with its own encoder
+    lora = (await signed_in.get("/hub/api/loras")).json()
+    fits = next(x for x in lora["loras"] if x["base"] == "flux2-klein-9b")["fits"]
+    assert sorted(m["id"] for m in fits) == ["flux2-klein-9b", "flux2-klein-9b-uncensored"]
+    await pipe.generate("a fox", 1024, 1024, model="flux2-klein-9b")
+    assert _node(fakes.comfy["prompts"][-1], "CLIPLoader")[0]["inputs"]["clip_name"] == "qwen_3_8b_fp8mixed.safetensors"

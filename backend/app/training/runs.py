@@ -14,12 +14,13 @@ The steps, each started by the admin:
    or failed;
 4. a checkpoint - chosen by its sample pictures - becomes a LoRA (app/images/loras.py, source "trained").
 
-The bases are FLUX.2 klein 4B and 9B (KLEIN), or one of the Hub's SDXL checkpoints. A klein LoRA is trained on the
-undistilled base (black-forest-labs/FLUX.2-klein-base-4B or -9B) and used on the 4-step model in ComfyUI (BFL's and
-Hugging Face's guides). What ai-toolkit reads for it (checked in its source at the commit the trainer image pins,
-AI_TOOLKIT_REF - flux2_klein_model.py): the base's single file (not its diffusers folders), the VAE from
+The bases are FLUX.2 klein 4B, 9B and 9B uncensored (KLEIN), or one of the Hub's SDXL checkpoints. A klein LoRA is
+trained on the undistilled base (black-forest-labs/FLUX.2-klein-base-4B or -9B) and used on the 4-step model in ComfyUI
+(BFL's and Hugging Face's guides). What ai-toolkit reads for it (checked in its source at the commit the trainer image
+pins, AI_TOOLKIT_REF - flux2_klein_model.py): the base's single file (not its diffusers folders), the VAE from
 ai-toolkit/flux2_vae (ae.safetensors) and the text encoder from the Qwen3 repository the model class names (a class
-attribute, not a config key). 4B in bf16 fits in 24 GB when the captions' text embeddings are cached and the text
+attribute, not a config key - unless the trainer's patch lets te_name_or_path name another, 0.63.0). 4B in bf16 fits
+in 24 GB when the captions' text embeddings are cached and the text
 encoder leaves the card (cache_text_embeddings), so its config needs no quantisation - the least sure part on AMD.
 9B (0.61.0) cannot: its transformer alone is 18 GB in bf16, see KLEIN.
 """
@@ -53,16 +54,36 @@ log = logging.getLogger("hub.training")
 # weights, multiplied in bf16 (optimum-quanto 0.2.4's qbytes_mm dequantises; no fp8 maths, which RDNA3 lacks) - about
 # 9 + 8 GB once both are loaded (ai-toolkit then parks the transformer in RAM while it encodes the captions), then
 # about 9 GB plus the training. Estimates; fp8 storage has NOT run on this card before (the HANDOFF says what to watch).
+# 9B uncensored (0.63.0, Søren - ponpoke/flux2-klein-9b-uncensored-text-encoder): the same base with ponpoke's
+# abliterated Qwen3-8B as the text encoder, as FLUX.2 [klein] 9B uncensored's pictures have it - the captions are encoded
+# as its prompts are. ai-toolkit takes klein's text encoder from the class attribute; the trainer image patches it to
+# take the config's te_name_or_path first (services/trainer/patch_aitk.py, "klein_te" in its /health). The repository
+# is a whole Hugging Face model (config.json, model.safetensors in F16, tokenizer.json saved by transformers 5), which
+# from_pretrained reads as it reads Qwen/Qwen3-8B; its GGUF files are not fetched. Its one 16.4 GB file is the picture
+# model's text encoder too: linked, not fetched twice (Training.fetch, app/downloads.py). `gated`: the repositories a
+# training needs an accepted licence (and HF_TOKEN) for.
 KLEIN = {
     "flux2-klein-4b": {"model": "flux2-klein-4b", "family": "flux2-klein", "label": "FLUX.2 klein 4B",
                        "repo": "black-forest-labs/FLUX.2-klein-base-4B", "file": "flux-2-klein-base-4b.safetensors",
                        "arch": "flux2_klein_4b", "te_repo": "Qwen/Qwen3-4B", "qtype": None,
-                       "lora_for": "FLUX.2 [klein] 4B", "download_gb": 16, "licence": "Apache 2.0", "gated": False},
+                       "lora_for": "FLUX.2 [klein] 4B", "download_gb": 16, "licence": "Apache 2.0", "gated": ()},
     "flux2-klein-9b": {"model": "flux2-klein-9b", "family": "flux2-klein-9b", "label": "FLUX.2 klein 9B",
                        "repo": "black-forest-labs/FLUX.2-klein-base-9B", "file": "flux-2-klein-base-9b.safetensors",
                        "arch": "flux2_klein_9b", "te_repo": "Qwen/Qwen3-8B", "qtype": "qfloat8",
                        "lora_for": "FLUX.2 [klein] 9B", "download_gb": 35, "licence": "FLUX Non-Commercial",
-                       "gated": True},
+                       "gated": ("black-forest-labs/FLUX.2-klein-base-9B",)},
+    "flux2-klein-9b-uncensored": {
+        "model": "flux2-klein-9b-uncensored", "family": "flux2-klein-9b", "label": "FLUX.2 klein 9B uncensored",
+        "repo": "black-forest-labs/FLUX.2-klein-base-9B", "file": "flux-2-klein-base-9b.safetensors",
+        "arch": "flux2_klein_9b", "te_repo": "ponpoke/flux2-klein-9b-uncensored-text-encoder", "te_config": True,
+        # what from_pretrained reads of it: the weights (one file or shards), the JSON files, the chat template - not
+        # a file added to the repository later (another precision would be 16 GB more for every training)
+        "te_files": re.compile(r"^(model(-\d+-of-\d+)?\.safetensors|[^/]+\.json|[^/]+\.txt|chat_template\.jinja)$"),
+        "qtype": "qfloat8", "lora_for": "FLUX.2 [klein] 9B uncensored", "download_gb": 35,
+        "licence": "FLUX Non-Commercial",
+        "gated": ("black-forest-labs/FLUX.2-klein-base-9B", "ponpoke/flux2-klein-9b-uncensored-text-encoder"),
+        "note": "Its captions are read by ponpoke's uncensored text encoder, as FLUX.2 [klein] 9B uncensored reads "
+                "prompts. Teach it what klein never learned - the encoder alone only lets the prompt through."},
 }
 BASE = KLEIN["flux2-klein-4b"]          # the default base
 VAE_REPO, VAE_FILE = "ai-toolkit/flux2_vae", "ae.safetensors"
@@ -248,7 +269,10 @@ class Training:
                   # its picture model is downloaded (the catalog entry has the base's id), so the LoRA can be used
                   "ready": bool((e := cat.get("comfy", k["model"])) and cat.installed(e)),
                   "download_gb": k["download_gb"], "licence": k["licence"],
-                  **({"gated": f"https://huggingface.co/{k['repo']}"} if k["gated"] else {})} for k in KLEIN.values()]
+                  **({"note": k["note"]} if k.get("note") else {}),
+                  # the pages to accept the licences on (0.63.0: a list - 9B uncensored has two)
+                  **({"gated": [f"https://huggingface.co/{r}" for r in k["gated"]]} if k["gated"] else {})}
+                 for k in KLEIN.values()]
         return klein + [{"id": f"sdxl:{c['id']}", "label": f"{c['name']} (SDXL)", "family": "sdxl"}
                         for c in self.sdxl_checkpoints()]
 
@@ -280,7 +304,7 @@ class Training:
             return {"base": "sdxl", "checkpoint": ck["id"], "checkpoint_name": ck["name"], "checkpoint_path": ck["path"],
                     "sample_prefix": str(ck.get("prefix") or ""),
                     **({"sample_negative": str(ck["negative"])} if ck.get("negative") is not None else {})}
-        raise TrainingError("Train on FLUX.2 klein 4B or 9B, or on one of your SDXL models.")
+        raise TrainingError("Train on FLUX.2 klein 4B, 9B or 9B uncensored, or on one of your SDXL models.")
 
     def create(self, name: str, trigger: str, kind: str = "thing", steps: int = 1500, rank: int = 16,
                base: str | None = None) -> dict:
@@ -562,7 +586,10 @@ class Training:
                       "optimizer": "adamw", "lr": lr, "timestep_type": "weighted", "dtype": "bf16",
                       "cache_text_embeddings": True,
                       "content_or_style": {"person": "content", "thing": "content"}.get(run["kind"], "style")},
-            "model": {"name_or_path": k["repo"], "arch": k["arch"], **self._quantise(k), "low_vram": False},
+            "model": {"name_or_path": k["repo"], "arch": k["arch"], **self._quantise(k), "low_vram": False,
+                      # another text encoder than the model class's own (9B uncensored, 0.63.0): read by the trainer's
+                      # patched ai-toolkit only - start() checks that it has the patch
+                      **({"te_name_or_path": k["te_repo"]} if k.get("te_config") else {})},
             "sample": {"sampler": "flowmatch", "sample_every": SAVE_EVERY, "width": 1024, "height": 1024,
                        "prompts": [p.format(t=t) for p in SAMPLES[run["kind"]]], "neg": "", "seed": 42,
                        "walk_seed": True, "guidance_scale": 4, "sample_steps": 25}}]},
@@ -604,7 +631,8 @@ class Training:
         if run.get("base") == "sdxl":
             return [(SDXL_CONFIG_REPO, None, SDXL_CONFIG_FILES)]
         k = self.klein(run)
-        return [(k["repo"], (k["file"],), None), (VAE_REPO, (VAE_FILE,), None), (k["te_repo"], None, None)]
+        return [(k["repo"], (k["file"],), None), (VAE_REPO, (VAE_FILE,), None),
+                (k["te_repo"], None, k.get("te_files"))]
 
     async def start(self, rid: str, resume: bool = False) -> dict:
         """Train from the start (the output folder is emptied), or with resume go on from the newest checkpoint - a
@@ -628,6 +656,12 @@ class Training:
                                 "and run update.sh.", 503)
         if not health.get("toolkit"):
             raise TrainingError("The trainer has no ai-toolkit - rebuild it (update.sh).", 503)
+        if run.get("base") != "sdxl" and self.klein(run).get("te_config") and not health.get("klein_te"):
+            # an older trainer image would train with Qwen3-8B without a word: the LoRA would not match its pictures
+            raise TrainingError(f"The trainer cannot use {self.klein(run)['label']}'s text encoder: it is older than "
+                                "this Hub (rebuild it: sudo bash update.sh --force), or its ai-toolkit is not the "
+                                "pinned one (AI_TOOLKIT_REF in .env) and did not take the patch - the trainer's build "
+                                "log says so.", 503)
         if step is not None:
             out = self._dir(rid) / "output" / rid
             final, numbered = out / f"{rid}.safetensors", out / f"{rid}_{step:09d}.safetensors"
@@ -770,9 +804,11 @@ class Training:
                 snap = self.cache_dir(repo) / "snapshots" / sha
                 for f in files:
                     p, size = snap / str(f["path"]), int(f.get("size") or 0)
+                    # a picture model's copy counts: the training links it when it starts (0.63.0)
                     out.append({"repo": repo, "path": str(f["path"]), "size": size, "sha": sha,
                                 "gated": bool(meta.get("gated")),
-                                "here": p.is_file() and (not size or p.stat().st_size == size)})
+                                "here": (p.is_file() and (not size or p.stat().st_size == size))
+                                or bool(self._picture_copies(repo, str(f["path"]), size))})
         return out
 
     async def place_base_file(self, base: str, repo: str, path: str, uploads, uid: str) -> dict:
@@ -785,7 +821,9 @@ class Training:
         f = next((x for x in await self.base_files(base) if x["repo"] == repo and x["path"] == path), None)
         if f is None:
             raise TrainingError(f"{KLEIN[base]['label']}'s training does not read {repo}/{path}.", 404)
-        if f["here"]:
+        cached = self.cache_dir(repo) / "snapshots" / f["sha"] / path
+        # in the cache itself: "here" also counts a picture model's copy, which a link may yet fail to bring (0.63.0)
+        if cached.is_file() and (not f["size"] or cached.stat().st_size == f["size"]):
             raise TrainingError(f"{Path(path).name} is here already.", 409)
         try:
             m = uploads.done(uid)
@@ -804,6 +842,40 @@ class Training:
         (self.cache_dir(repo) / "refs" / "main").write_text(f["sha"])
         return {**f, "here": True}
 
+    def _picture_copies(self, repo: str, path: str, size: int) -> list[Path]:
+        """The same file of the same repository, downloaded already for a model in Settings -> Models (0.63.0: 9B
+        uncensored's 16.4 GB text encoder) - at exactly Hugging Face's size."""
+        from ..catalog import GROUPS
+        if not size:
+            return []
+        cat, out = self.hub.catalog, []
+        for e in (e for g in GROUPS for e in cat.entries(g)):
+            for f in e.get("files") or []:
+                if f.get("repo") == repo and f.get("path") == path:
+                    try:
+                        p = cat.path(f)
+                        if p.is_file() and p.stat().st_size == size and p not in out:
+                            out.append(p)
+                    except OSError:
+                        continue
+        return out
+
+    def _link_picture_copy(self, repo: str, path: str, size: int, dest: Path) -> bool:
+        """A picture model's copy linked into the cache instead of fetched again: one file on disk for both. False
+        when there is none, or the folders are on different file systems."""
+        for src in self._picture_copies(repo, path, size):
+            tmp = dest.with_name(dest.name + ".link")
+            try:
+                tmp.unlink(missing_ok=True)
+                os.link(src.resolve(strict=True), tmp)   # the data itself: Linux links a symlink, not its target
+                os.replace(tmp, dest)
+            except OSError:
+                tmp.unlink(missing_ok=True)
+                continue
+            dest.with_name(dest.name + ".part").unlink(missing_ok=True)        # a download begun before
+            return True
+        return False
+
     async def fetch(self, repo: str, rid: str | None = None, only: tuple[str, ...] | None = None,
                     pattern: re.Pattern | None = None) -> None:
         """A Hugging Face repository (or `only` these files of it) into models/hf in the cache's own layout
@@ -817,12 +889,18 @@ class Training:
             base = self.cache_dir(repo)
             snap = base / "snapshots" / sha
             total = sum(int(x.get("size") or 0) for x in files)
+
+            def here(f: dict) -> bool:
+                p, size = snap / str(f["path"]), int(f.get("size") or 0)
+                return p.is_file() and (not size or p.stat().st_size == size)
+            # what a picture model has downloaded already is linked first - it needs no token (0.63.0)
+            for f in files:
+                if not here(f):
+                    (snap / str(f["path"])).parent.mkdir(parents=True, exist_ok=True)
+                    self._link_picture_copy(repo, str(f["path"]), int(f.get("size") or 0), snap / str(f["path"]))
             # A gated repository (FLUX.2 klein 9B's) lists its files to anyone but serves them only to a signed-in
             # user who accepted its licence: said before anything is fetched - and not when all is here already.
-            if meta.get("gated") and not token and any(
-                    not (snap / str(f["path"])).is_file()
-                    or (int(f.get("size") or 0) and (snap / str(f["path"])).stat().st_size != int(f["size"]))
-                    for f in files):
+            if meta.get("gated") and not token and not all(here(f) for f in files):
                 raise TrainingError(gated_help(repo, token), 403)
             done = 0
             for f in files:
@@ -831,7 +909,7 @@ class Training:
                     continue
                 dest = snap / path
                 size = int(f.get("size") or 0)
-                if dest.is_file() and (not size or dest.stat().st_size == size):
+                if here(f):
                     done += size
                     continue
                 dest.parent.mkdir(parents=True, exist_ok=True)

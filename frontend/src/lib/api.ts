@@ -276,7 +276,11 @@ export interface TrainingOverview { service: { ok: boolean; busy: boolean; toolk
   /** HF_TOKEN is set on the VM (0.61.0): klein 9B is gated on Hugging Face. */
   hf_token?: boolean }
 export interface TrainingBase { id: string; label: string; family: string; lora_for?: string; download_gb?: number;
-  licence?: string; gated?: string;
+  licence?: string;
+  /** The Hugging Face pages whose licences its training needs accepted (0.63.0: a list - 9B uncensored has two). */
+  gated?: string[];
+  /** What else to know about it (9B uncensored: its text encoder). */
+  note?: string;
   /** Its picture model (lora_for) is downloaded, so the LoRA can be used. */
   ready?: boolean }
 
@@ -291,6 +295,8 @@ export interface ModelEntry { id: string; name: string; name_card?: string; desc
   context_per_chat?: number; context_native?: number | null; parameter_size?: string;
   /** A downloaded model from the Hub's own list: the bytes Delete files gives back (files no other model uses). */
   freeable?: number; quantization?: string; aliases?: string[]; requires?: string[];
+  /** How many of its files no other downloaded model uses (0.63.0: freeable is 0 for files a training links too). */
+  own_files?: number;
   custom?: boolean; family?: string; abilities?: string[]; sdxl?: SdxlSettings; architecture?: string;
   /** Sound models: where they run (the card through ComfyUI, or the CPU speech service) and what they speak. */
   engine?: "comfy" | "speech"; languages?: string[];
