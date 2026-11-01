@@ -68,7 +68,7 @@ export function App() {
       main = <SkillsView onNewChat={(text, skills) => { setDraft(text, skills); navigate("/"); }} />;
       break;
     case "settings":
-      main = <SettingsView tab={route.tab} />;
+      main = <SettingsView tab={route.tab} sub={route.sub} />;
       break;
     case "help":
       main = <HelpView section={route.section} />;

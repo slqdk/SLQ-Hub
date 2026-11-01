@@ -101,7 +101,7 @@ export function QueueModal({ onClose }: { onClose: () => void }) {
   return (
     <Modal title="The GPU queue" onClose={onClose} footer={
       <>
-        {!member && <button className="btn" onClick={() => { onClose(); navigate("/settings/models"); }}>Models</button>}
+        {!member && <button className="btn" onClick={() => { onClose(); navigate("/settings/models/language"); }}>Models</button>}
         <button className="btn primary" onClick={onClose}>Close</button>
       </>}>
       <p className="muted" style={{ margin: 0 }}>

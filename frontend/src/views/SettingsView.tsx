@@ -53,7 +53,7 @@ function useSettings() {
   return { data, save, reload: load };
 }
 
-export function SettingsView({ tab }: { tab: string }) {
+export function SettingsView({ tab, sub }: { tab: string; sub?: string }) {
   const { setSidebarOpen } = useApp();
   const current = TABS.some((t) => t.id === tab) ? tab : "models";
   const s = useSettings();
@@ -66,7 +66,7 @@ export function SettingsView({ tab }: { tab: string }) {
       <div className="scroll">
         <div className="page">
           <Tabs tabs={TABS} value={current} onChange={(tab) => navigate({ name: "settings", tab }, true)} />
-          {current === "models" && <ModelsTab s={s} />}
+          {current === "models" && <ModelsTab s={s} part={sub} />}
           {current === "queue" && <QueueTab s={s} />}
           {current === "people" && <PeopleTab />}
           {current === "usage" && <UsageTab s={s} />}
@@ -189,8 +189,36 @@ function DownloadSignIns({ s }: { s: S }) {
   );
 }
 
-function ModelsTab({ s }: { s: S }) {
+// Models in parts (0.65.0, Søren: "Can you make sub menus for the models section? It is a pretty long section now"):
+// each part has its own address (/settings/models/images), and the one last opened comes back.
+const MODEL_PARTS = [
+  { id: "language", label: "Language" }, { id: "images", label: "Images" }, { id: "loras", label: "LoRAs" },
+  { id: "sound", label: "Sound" }, { id: "video", label: "Video" }, { id: "libraries", label: "Libraries" },
+  { id: "sign-ins", label: "Sign-ins" },
+] as const;
+type ModelPart = typeof MODEL_PARTS[number]["id"];
+const PART_KEY = "hub.settings.models.part";
+
+function rememberedPart(): string {
+  try {
+    return localStorage.getItem(PART_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function ModelsTab({ s, part: asked }: { s: S; part?: string }) {
   const { models, refreshModels, toast, queue, modelNames } = useApp();
+  // Sound and Video only when the catalog has such models
+  const parts = MODEL_PARTS.filter((p) => (p.id !== "sound" || !!models?.audio?.length)
+    && (p.id !== "video" || !!models?.video?.length));
+  const want = asked || rememberedPart();
+  const part: ModelPart = (parts.find((p) => p.id === want) ?? parts[0]).id;
+  useEffect(() => {
+    try {
+      localStorage.setItem(PART_KEY, part);
+    } catch { /* a private window: the address still says it */ }
+  }, [part]);
   const [busy, setBusy] = useState<string | null>(null);
   const [advanced, setAdvanced] = useState<ModelEntry | null>(null);
   const downloading = !!models && [...models.llm, ...models.aux, ...models.comfy, ...(models.audio ?? []),
@@ -249,24 +277,33 @@ function ModelsTab({ s }: { s: S }) {
   const renameButton = (m: ModelEntry) => <button className="btn quiet small" onClick={() => setRenaming(m)}>Rename</button>;
   if (!models) return <div className="faint">Loading</div>;
   const installedLlms = models.llm.filter((m) => m.installed);
+  // a part with a download going on says so on its pill
+  const groups: Partial<Record<ModelPart, ModelEntry[]>> = { language: models.llm, images: models.comfy,
+    sound: models.audio ?? [], video: models.video ?? [], libraries: models.aux };
+  const fetching = (id: ModelPart) => (groups[id] ?? []).some((m) => m.downloads.some((d) =>
+    d.status === "downloading" || d.status === "queued"));
 
   return (
     <div>
+      <Tabs sub tabs={parts.map((p) => ({ id: p.id, label: <>{p.label}{fetching(p.id)
+        && <Lamp state="act" size="sm" pulse title="Downloading" />}</> }))}
+        value={part} onChange={(id) => navigate({ name: "settings", tab: "models", sub: id }, true)} />
       <div className="callout row wrap" style={{ marginBottom: 20 }}>
         <Lamp state={plateState(queue).lamp} pulse={plateState(queue).lamp === "run"} />
         <span className="grow">On the card now: <b>{residencyName(queue?.current, modelNames)}</b></span>
         <button className="btn small" disabled={busy === "unload" || !queue?.current} onClick={unload}>Free the GPU</button>
       </div>
-      <SectionForm s={s} section="models" title="Defaults" fields={[
+      {part === "language" && <SectionForm s={s} section="models" title="Defaults" fields={[
         { key: "default", label: "Model for chats", type: "select",
           options: installedLlms.length ? installedLlms.map((m) => ({ value: m.id, label: m.name })) : [{ value: String(s.data?.settings.models?.default ?? ""), label: "No model downloaded" }] },
         { key: "fallback_alias", label: "Unknown model names from apps go to", type: "select",
           options: [{ value: "", label: "Refuse them" }, ...models.llm.map((m) => ({ value: m.id, label: m.name }))],
           help: "An app asking for llama3 or gpt-4o gets this model instead of an error." },
         { key: "preload", label: "Load the chat model when the Hub starts", type: "bool" },
-      ]} />
-      <DownloadSignIns s={s} />
-      <ModelGroup title="Language models" items={models.llm} busy={busy} onDownload={download} onCancel={cancel}
+      ]} />}
+      {part === "sign-ins" && <DownloadSignIns s={s} />}
+      {part === "language" && <ModelGroup title="Language models" items={models.llm} busy={busy} onDownload={download}
+        onCancel={cancel}
         onUpload={setUploadingFiles} onMove={(i, by) => move("llm", models.llm, i, by)}
         note="In this order in the chat's model choices. Move them with the arrows."
         action={<span className="row" style={{ gap: 6 }}>
@@ -280,11 +317,12 @@ function ModelsTab({ s }: { s: S }) {
           {m.custom && <ConfirmButton className="btn quiet small" confirmText="Remove it and its files?"
             disabled={!!busy || m.loaded} onConfirm={() => remove(m)}>Remove</ConfirmButton>}
           {deleteButton(m)}
-        </>} />
-      <ModelGroup title="Helpers for libraries" items={models.aux} busy={busy} onDownload={download} onCancel={cancel}
-        onUpload={setUploadingFiles}
-        note="Run on the CPU (the image embedder can use the GPU, see Assistant, Libraries)." extra={deleteButton} />
-      <ModelGroup title="Image models (ComfyUI)" items={models.comfy} busy={busy} onDownload={download} onCancel={cancel}
+        </>} />}
+      {part === "libraries" && <ModelGroup title="Helpers for libraries" items={models.aux} busy={busy}
+        onDownload={download} onCancel={cancel} onUpload={setUploadingFiles}
+        note="Run on the CPU (the image embedder can use the GPU, see Assistant, Libraries)." extra={deleteButton} />}
+      {part === "images" && <ModelGroup title="Image models (ComfyUI)" items={models.comfy} busy={busy}
+        onDownload={download} onCancel={cancel}
         onUpload={setUploadingFiles} onMove={(i, by) => move("comfy", models.comfy, i, by)}
         action={models.sdxl && <span className="row" style={{ gap: 6 }}>
           <button className="btn small" onClick={() => setUploadingImage(true)}><Upload size={14} /> Upload</button>
@@ -295,13 +333,14 @@ function ModelsTab({ s }: { s: S }) {
           {m.custom && <ConfirmButton className="btn quiet small" confirmText="Remove it and its file?" disabled={!!busy}
             onConfirm={() => remove(m)}>Remove</ConfirmButton>}
           {deleteButton(m)}
-        </>} />
-      <LorasSection />
-      {!!models.audio?.length && <ModelGroup title="Sound, music and speech" items={models.audio} busy={busy}
+        </>} />}
+      {part === "loras" && <LorasSection />}
+      {part === "sound" && !!models.audio?.length && <ModelGroup title="Sound, music and speech" items={models.audio}
+        busy={busy}
         onDownload={download} onCancel={cancel} onUpload={setUploadingFiles}
         note="Speech runs on the CPU, so the chat model stays loaded; music, sound effects, stems and other voices run on the card through ComfyUI. Once one is downloaded, ask for it in any chat - with a sound file attached for a remake, stems or another voice."
         extra={(m) => <><span className="tag">{m.engine === "speech" ? "CPU" : "GPU"}</span>{deleteButton(m)}</>} />}
-      {!!models.video?.length && <ModelGroup title="Video models" items={models.video} busy={busy}
+      {part === "video" && !!models.video?.length && <ModelGroup title="Video models" items={models.video} busy={busy}
         onDownload={download} onCancel={cancel} onUpload={setUploadingFiles}
         note="Run on the card through ComfyUI and take minutes per clip. Once one is downloaded, ask for a video in any chat - from a description, or with a picture attached to start from. Choose which one is used in Assistant, Video."
         extra={(m) => <><span className="tag">GPU</span>{deleteButton(m)}</>} />}

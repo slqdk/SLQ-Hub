@@ -724,6 +724,15 @@ a.menu-item { color: inherit; text-decoration: none; }
 }
 @media (hover: hover) { .tab:hover { color: var(--ink); } }
 .tab[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--act); background: color-mix(in srgb, var(--act) 10%, transparent); }
+/* A tab's parts (0.65.0, Settings -> Models): pills under the tabs that wrap, so a phone shows all of them */
+.tabs.sub { flex-wrap: wrap; gap: 6px; box-shadow: none; overflow: visible; margin: -6px 0 18px; }
+.tabs.sub .tab {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 14px; padding: 5px 12px;
+  border: 1px solid var(--rule); border-radius: 999px; background: var(--sheet);
+}
+.tabs.sub .tab[aria-selected="true"] { border-color: var(--act); color: var(--ink);
+  background: color-mix(in srgb, var(--act) 14%, var(--sheet)); }
 
 /* lists and tables in settings */
 .list { border: 1px solid var(--rule); border-radius: 8px; background: var(--sheet); }

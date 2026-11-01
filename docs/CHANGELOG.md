@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.65.0 - 2026-11-01
+
+- **Settings -> Models in parts**: Language, Images, LoRAs, Sound, Video,
+  Libraries and Sign-ins, as buttons under the tabs, so the page is no
+  longer one long list. Each part has its own address
+  (/settings/models/images), the part you opened last comes back, and a
+  part with a download going on shows a light on its button. Help's "Open
+  Settings" goes straight to the part that has what is missing.
+
 ## 0.64.0 - 2026-10-31
 
 - **Sign-ins for downloads in Settings -> Models**: paste the Hugging Face

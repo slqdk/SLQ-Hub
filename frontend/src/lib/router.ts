@@ -8,7 +8,7 @@ export type Route =
   | { name: "project-new-chat"; id: number }
   | { name: "libraries"; id?: number }
   | { name: "skills" }
-  | { name: "settings"; tab: string }
+  | { name: "settings"; tab: string; sub?: string }      // sub (0.65.0): a part of a tab - Models' Images, LoRAs ...
   | { name: "help"; section?: string };
 
 export function parse(path: string): Route {
@@ -21,8 +21,8 @@ export function parse(path: string): Route {
   m = path.match(/^\/libraries(?:\/(\d+))?\/?$/);
   if (m) return { name: "libraries", id: m[1] ? Number(m[1]) : undefined };
   if (/^\/(settings\/)?skills\/?$/.test(path)) return { name: "skills" };    // skills were under Settings before 0.23.0
-  m = path.match(/^\/settings(?:\/([\w-]+))?\/?$/);
-  if (m) return { name: "settings", tab: m[1] ?? "models" };
+  m = path.match(/^\/settings(?:\/([\w-]+))?(?:\/([\w-]+))?\/?$/);
+  if (m) return { name: "settings", tab: m[1] ?? "models", sub: m[2] };
   m = path.match(/^\/help(?:\/([\w-]+))?\/?$/);
   if (m) return { name: "help", section: m[1] };
   return { name: "home" };
@@ -36,7 +36,7 @@ export function href(r: Route): string {
     case "project-new-chat": return `/p/${r.id}/new`;
     case "libraries": return r.id ? `/libraries/${r.id}` : "/libraries";
     case "skills": return "/skills";
-    case "settings": return `/settings/${r.tab}`;
+    case "settings": return `/settings/${r.tab}${r.sub ? `/${r.sub}` : ""}`;
     case "help": return r.section ? `/help/${r.section}` : "/help";
   }
 }

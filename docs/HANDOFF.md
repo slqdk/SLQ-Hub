@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.64.0, 2026-10-31)
+## State (0.65.0, 2026-11-01)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -761,6 +761,16 @@ in a real reply here (no token in this sandbox; a different shape only loses the
 UI: "Sign-ins for downloads" under Defaults in Settings -> Models (SectionForm got `onSaved` and children), the
 status under it; the gated-download, training and upload hints point there. tools/models.py (the installer) still
 reads HF_TOKEN only. NOT tried on the VM: a real token saved in the UI and a gated download with it.
+0.65.0, Søren: "Can you make sub menus for the models section? It is a pretty long section now". Settings -> Models
+is in parts (`MODEL_PARTS` in SettingsView: language - Defaults and the language models -, images, loras - LoRAs and
+Train a LoRA -, sound, video, libraries, sign-ins); Sound and Video only when the catalog has such models. The route
+`{ name: "settings", tab, sub }` (`/settings/models/images`); without a part, the one last opened (localStorage
+`hub.settings.models.part`, read in try/catch) or Language; an unknown one is Language. `Tabs` got `sub` (pills that
+wrap - all of them show on a phone - `.tabs.sub` in styles.css) and ReactNode labels: a part whose models have a
+download queued or running shows a lamp. Help's NEEDS name the part (`tab: "models/images"`), the queue's Models
+button opens Language. The modals stay at the tab's end, so they open from any part. Clicked through on the dev
+server at phone width in Chromium (dark and light): the parts, the address, a reload keeping the part, an unknown
+part, the lamp on Images while a download goes on (the models list answered with one).
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
 host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU

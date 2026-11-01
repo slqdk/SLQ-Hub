@@ -118,8 +118,10 @@ export function SwitchRow({ checked, onChange, title, children, disabled }: { ch
 }
 
 /** A tab strip; on a phone it scrolls sideways, so the chosen tab is scrolled into view. */
-export function Tabs<T extends string>({ tabs, value, onChange }: { tabs: { id: T; label: string }[]; value: T;
-  onChange: (v: T) => void }) {
+/** sub (0.65.0): a tab's own parts under the tabs (Settings -> Models: Language, Images, LoRAs ...) - smaller, and
+ *  they wrap rather than scroll, so on a phone all of them show. */
+export function Tabs<T extends string>({ tabs, value, onChange, sub }: { tabs: { id: T; label: ReactNode }[];
+  value: T; onChange: (v: T) => void; sub?: boolean }) {
   const strip = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const el = strip.current;
@@ -131,7 +133,7 @@ export function Tabs<T extends string>({ tabs, value, onChange }: { tabs: { id: 
     else if (r.right > c.right) el.scrollLeft += r.right - c.right + 8;
   }, [value]);
   return (
-    <div className="tabs" role="tablist" ref={strip}>
+    <div className={sub ? "tabs sub" : "tabs"} role="tablist" ref={strip}>
       {tabs.map((t) => (
         <button key={t.id} className="tab" role="tab" aria-selected={t.id === value} onClick={() => onChange(t.id)}>
           {t.label}

@@ -407,6 +407,11 @@ training base's file Hugging Face's size exactly. An uploaded model has no
 source to download from again: a lost file is uploaded again. The updater
 waits for an upload that is coming in.
 
+**Settings → Models in parts (0.65.0)**: Language (the defaults and the
+language models), Images, LoRAs (with Train a LoRA), Sound, Video, Libraries
+and Sign-ins - pills under the tabs, each at its own address
+(`/settings/models/<part>`), the last one opened coming back.
+
 **Sign-ins for downloads (0.64.0).** The Hugging Face read token (gated
 models: klein 9B, its uncensored encoder) and the Civitai API key are
 settings (`tokens`), set in Settings → Models like the cloud API key in

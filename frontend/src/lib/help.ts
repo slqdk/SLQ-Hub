@@ -51,27 +51,28 @@ export interface HelpSection {
   items: HelpItem[];
 }
 
-/** What is missing and where the owner gets it (a person is told to ask the owner). */
+/** What is missing and where the owner gets it (a person is told to ask the owner). tab: Settings' tab, with its part
+ *  after a slash (0.65.0: "models/images"). */
 export const NEEDS: Record<Need, { missing: string; get: string; tab?: string }> = {
   "code": { missing: "Code is not allowed in your chats", get: "The owner can allow it under Settings, People." },
   "windows": { missing: "The sandbox cannot run Windows programs",
     get: "Its image needs Wine and the Windows packs; update.sh builds it. Settings, System shows the sandbox.", tab: "system" },
   "browser": { missing: "The sandbox has no browser",
     get: "Its image needs Chromium (Playwright); update.sh builds it. Settings, System shows the sandbox.", tab: "system" },
-  "libraries": { missing: "Needs the embedding model", get: "Download Qwen3 Embedding under Settings, Models, Helpers for libraries; then make a library.", tab: "models" },
+  "libraries": { missing: "Needs the embedding model", get: "Download Qwen3 Embedding under Settings, Models, Helpers for libraries; then make a library.", tab: "models/libraries" },
   "mcp": { missing: "No MCP server is connected", get: "Add one under Settings, MCP servers.", tab: "mcp" },
   "handover": { missing: "No model is chosen to take over", get: "Choose one under Settings, Assistant: When the model gets stuck, hand over to.", tab: "agent" },
-  "images.generate": { missing: "Needs a picture model", get: "Download one under Settings, Models, Image models (Qwen-Image 2.1, FLUX.2 [klein], ERNIE-Image, Z-Image, Chroma).", tab: "models" },
-  "images.edit": { missing: "Needs a model that edits", get: "Download Qwen-Image 2.1 or FLUX.2 [klein] 4B or 9B under Settings, Models, Image models.", tab: "models" },
-  "images.cutout": { missing: "Needs Qwen-Image 2.1", get: "Download it under Settings, Models, Image models.", tab: "models" },
-  "sound.speech": { missing: "Needs a voice model", get: "Download Røst v3 Turbo (Danish) or Chatterbox Multilingual V3 under Settings, Models, Sound, music and speech.", tab: "models" },
-  "sound.music": { missing: "Needs a music model", get: "Download ACE-Step 1.5 under Settings, Models, Sound, music and speech.", tab: "models" },
-  "sound.sound": { missing: "Needs a sound effects model", get: "Download Stable Audio 3 Medium under Settings, Models, Sound, music and speech.", tab: "models" },
-  "sound.voice": { missing: "Needs Seed-VC", get: "Download Seed-VC (and Mel-Band RoFormer vocals, for songs) under Settings, Models, Sound, music and speech.", tab: "models" },
-  "sound.separate": { missing: "Needs Mel-Band RoFormer vocals", get: "Download it under Settings, Models, Sound, music and speech.", tab: "models" },
-  "video.t2v": { missing: "Needs a video model", get: "Download Wan 2.2 5B Turbo (fast), Wan 2.2 5B or Wan 2.2 14B text to video under Settings, Models, Video models.", tab: "models" },
-  "video.i2v": { missing: "Needs a video model for pictures", get: "Download Wan 2.2 5B Turbo (fast), Wan 2.2 5B or Wan 2.2 14B picture to video under Settings, Models, Video models.", tab: "models" },
-  "video.flf2v": { missing: "Needs Wan 2.2 14B picture to video", get: "Download it under Settings, Models, Video models.", tab: "models" },
+  "images.generate": { missing: "Needs a picture model", get: "Download one under Settings, Models, Image models (Qwen-Image 2.1, FLUX.2 [klein], ERNIE-Image, Z-Image, Chroma).", tab: "models/images" },
+  "images.edit": { missing: "Needs a model that edits", get: "Download Qwen-Image 2.1 or FLUX.2 [klein] 4B or 9B under Settings, Models, Image models.", tab: "models/images" },
+  "images.cutout": { missing: "Needs Qwen-Image 2.1", get: "Download it under Settings, Models, Image models.", tab: "models/images" },
+  "sound.speech": { missing: "Needs a voice model", get: "Download Røst v3 Turbo (Danish) or Chatterbox Multilingual V3 under Settings, Models, Sound, music and speech.", tab: "models/sound" },
+  "sound.music": { missing: "Needs a music model", get: "Download ACE-Step 1.5 under Settings, Models, Sound, music and speech.", tab: "models/sound" },
+  "sound.sound": { missing: "Needs a sound effects model", get: "Download Stable Audio 3 Medium under Settings, Models, Sound, music and speech.", tab: "models/sound" },
+  "sound.voice": { missing: "Needs Seed-VC", get: "Download Seed-VC (and Mel-Band RoFormer vocals, for songs) under Settings, Models, Sound, music and speech.", tab: "models/sound" },
+  "sound.separate": { missing: "Needs Mel-Band RoFormer vocals", get: "Download it under Settings, Models, Sound, music and speech.", tab: "models/sound" },
+  "video.t2v": { missing: "Needs a video model", get: "Download Wan 2.2 5B Turbo (fast), Wan 2.2 5B or Wan 2.2 14B text to video under Settings, Models, Video models.", tab: "models/video" },
+  "video.i2v": { missing: "Needs a video model for pictures", get: "Download Wan 2.2 5B Turbo (fast), Wan 2.2 5B or Wan 2.2 14B picture to video under Settings, Models, Video models.", tab: "models/video" },
+  "video.flf2v": { missing: "Needs Wan 2.2 14B picture to video", get: "Download it under Settings, Models, Video models.", tab: "models/video" },
 };
 
 export function has(caps: HelpCaps, need: Need): boolean {
