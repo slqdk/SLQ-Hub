@@ -12,6 +12,7 @@ messages step by step, so a reload or a crash loses nothing that was done.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import re
@@ -196,7 +197,10 @@ class Engine:
         self.epoch = 0
         self.seen: dict[str, tuple[int, bool, int]] = {}   # look-up -> (epoch, it worked, tries)
         self.repeats = 0
-        self.same_steps: dict[str, int] = {}
+        # an identical step -> (how often it came back with the same results, those results); what each call last
+        # gave back, so a call refused as a repeat counts as giving that again (0.66.0)
+        self.same_steps: dict[str, tuple[int, str]] = {}
+        self.last_results: dict[str, str] = {}
         self.must_answer = ""
         # Hand-over (a loop, three failed calls, or the escalate tool): first to the stronger local model,
         # then - in projects that allow it - to the cloud. A note goes with the next answer.
@@ -371,13 +375,16 @@ class Engine:
             if persist and blocks:
                 await persist("assistant", blocks)
             final = res.get("content") or final
+            same = ""
             if calls:
                 same = json.dumps([res.get("content") or "", [[c["name"], c.get("arguments") or ""] for c in calls]],
                                   ensure_ascii=False)
-                self.same_steps[same] = self.same_steps.get(same, 0) + 1
-                if self.same_steps[same] >= LOOP_SAME_STEPS:
+                # How often this very step came before with nothing new coming back (0.66.0): the same command run
+                # again after a fix, with another error, is progress - chat 251 was stopped at its third fix.
+                times = self.same_steps.get(same, (0, ""))[0] + 1
+                if times >= LOOP_SAME_STEPS:
                     names = ", ".join(dict.fromkeys(c["name"] for c in calls))
-                    self._stuck(f"the same step ({names}) {self.same_steps[same]} times", loop=True)
+                    self._stuck(f"the same step ({names}) {times} times", loop=True)
             if not calls:
                 if self.run.inbox and not self.depth and step < max_steps:
                     continue                      # the user wrote meanwhile: answer that too, in this turn
@@ -401,6 +408,7 @@ class Engine:
                 return final
             images: list[dict] = []
             cut = res.get("finish_reason") == "length"
+            got: list[str] = []
             for c in calls:
                 try:
                     result = await self._execute(c, by_name, cut=cut)
@@ -409,12 +417,17 @@ class Engine:
                         await persist("tool", [{"type": "tool_result", "tool_call_id": c["id"], "name": c["name"],
                                                 "text": STOPPED, "images": [], "is_error": True}])
                     raise
+                got.append(self._came_back(c, result))
                 messages.append({"role": "tool", "tool_call_id": c["id"], "content": result.text})
                 images += result.images
                 if persist:
                     await persist("tool", [{"type": "tool_result", "tool_call_id": c["id"], "name": c["name"],
                                             "text": result.text, "images": result.images,
                                             "is_error": result.is_error, "display": result.display}])
+            if same:                                  # the same results again: one more time round; else from 1
+                sig = json.dumps(got, ensure_ascii=False)
+                count, before = self.same_steps.get(same, (0, ""))
+                self.same_steps[same] = (count + 1 if count and before == sig else 1, sig)
             parts = [p for p in (C._image(i) for i in images) if p] if vision(self.model) or self.cloud else []
             if parts:
                 messages.append({"role": "user", "content": [{"type": "text", "text": "(Images returned by the "
@@ -881,6 +894,16 @@ class Engine:
             chats.save_prompt(self.run.id, self.depth, self._step, self.model["id"], reason, system, self._tool_names)
         except Exception:  # noqa: BLE001 - a record for later, never a reason to fail the turn
             log.exception("could not store the prompt")
+
+    def _came_back(self, call: dict, result: ToolResult) -> str:
+        """What a call gave back, for the loop guard: its text without the seconds a command took (they change from
+        one identical run to the next). A call refused as a repeat gave back nothing new - what it gave last time."""
+        key = call["name"] + (call.get("arguments") or "")
+        if result.text == REPEATED.format(name=call["name"]):
+            return self.last_results.get(key, "")
+        text = re.sub(r"^(exit code [^\n,]*), [\d.]+ s", r"\1", result.text)
+        self.last_results[key] = f"{int(result.is_error)}{hashlib.sha1(text.encode('utf-8', 'replace')).hexdigest()}"
+        return self.last_results[key]
 
     def _stuck(self, reason: str, loop: bool) -> None:
         """Hand the turn over if someone can take it; otherwise a loop ends in an answer without tools."""

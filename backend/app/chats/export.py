@@ -379,8 +379,10 @@ def _settings(hub) -> dict:
 
 
 def _queue_around(runs: list[dict]) -> list[dict]:
-    """The queue's finished jobs while the chat's runs went on (the queue keeps
-    monotonic times; they are turned into clock times here)."""
+    """The queue's finished jobs while the chat's runs went on - and the ones that held the card when a run came:
+    a job queued before the run that ended after it started (0.66.0: chat 243 waited 5 h 49 min behind a LoRA
+    training its export did not show). jobs_log keeps clock times since 0.66.0 (state._log_job); rows from before
+    are in monotonic seconds and are not found."""
     spans = []
     for r in runs:
         try:
@@ -391,20 +393,19 @@ def _queue_around(runs: list[dict]) -> list[dict]:
         spans.append((start, end))
     if not spans:
         return []
-    offset = time.time() - time.monotonic()
-    lo, hi = min(s for s, _ in spans) - offset, max(e for _, e in spans) - offset
+    lo, hi = min(s for s, _ in spans), max(e for _, e in spans)
     with db.connect() as con:
-        rows = con.execute("SELECT * FROM jobs_log WHERE enqueued_at BETWEEN ? AND ? ORDER BY enqueued_at LIMIT 500",
-                           (lo, hi)).fetchall()
+        rows = con.execute("SELECT * FROM jobs_log WHERE (enqueued_at BETWEEN ? AND ?) OR (enqueued_at < ? AND "
+                           "ended_at >= ?) ORDER BY enqueued_at LIMIT 500", (lo, hi, lo, lo)).fetchall()
     out = []
     for r in rows:
         d = dict(r)
-        enq = d["enqueued_at"] + offset
-        if not any(s <= enq <= e for s, e in spans):
+        enq, ended = d["enqueued_at"], d.get("ended_at")
+        if not any(s <= enq <= e or (enq < s and ended is not None and ended >= s) for s, e in spans):
             continue
         for k in ("enqueued_at", "started_at", "ended_at"):
             if d.get(k) is not None:
-                d[k] = datetime.fromtimestamp(d[k] + offset, timezone.utc).isoformat(timespec="seconds")
+                d[k] = datetime.fromtimestamp(d[k], timezone.utc).isoformat(timespec="seconds")
         if d.get("started_at") and d.get("enqueued_at"):
             d["waited_s"] = round(r["started_at"] - r["enqueued_at"], 2)
         if d.get("ended_at") and r["started_at"] is not None:

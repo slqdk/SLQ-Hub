@@ -297,6 +297,51 @@ async def test_a_skill_made_with_the_assistant_is_checked_and_added_from_its_car
     assert (await signed_in.get("/hub/api/skills/drafts/0123456789abcdef")).status_code == 404
 
 
+async def test_a_skill_with_a_script_is_packed_without_its_test_output_notes_and_caches(signed_in, app, fakes):
+    """0.66.0, chat 243: the model gave include the skill's own files, by their path in the skill (assets/...), and
+    was refused five times; the skill it got took its NOTES.md, Python's cache and 18 test STL files along, and
+    nobody looked. A file of the skill's own is in it anyway; one from elsewhere is copied to assets/; notes and
+    caches are left out; loose test output is named, with what to do about it."""
+    c = await new_chat(signed_in, settings={"skills": ["hub/skill-creator"]})
+    folder = chat_dir(app, c["id"])
+    skill = folder / "skills" / "stl-creator"
+    (skill / "assets").mkdir(parents=True)
+    (skill / "scripts" / "__pycache__").mkdir(parents=True)
+    (skill / "SKILL.md").write_text(SKILL.replace("name: julefrokost-invitation", "name: stl-creator"))
+    (skill / "assets" / "parameters.md").write_text("Sizes in mm.")
+    (skill / "scripts" / "make.py").write_text("print('made')\n")
+    (skill / "scripts" / "__pycache__" / "make.cpython-312.pyc").write_bytes(b"\0" * 64)
+    (skill / "NOTES.md").write_text("tried three ways")
+    for n in ("test_min.stl", "test_max.stl"):
+        (skill / n).write_bytes(b"solid\n" * 10)
+    (folder / ".hub" / "attachments").mkdir(parents=True)
+    (folder / ".hub" / "attachments" / "logo.png").write_bytes(b"\x89PNG....")
+    fakes.llama["replies"] = [
+        {"tool_calls": [{"name": "skill_propose", "arguments": {"path": "skills/stl-creator",
+                                                                "include": ["missing.xlsx"]}}]},
+        {"tool_calls": [{"name": "skill_propose", "arguments": {
+            "path": "skills/stl-creator", "include": ["assets/parameters.md", ".hub/attachments/logo.png"]}}]},
+        {"content": "Press Add skill on the card."}, {"content": "Skill"}]
+    run = await finish(app, await say(signed_in, c["id"], "Make a skill that makes STL files"))
+    assert run.status == "done", run.events[-1]
+    results = [e["data"] for e in run.events if e["type"] == "tool_result"]
+    assert not results[0]["ok"] and "No file missing.xlsx to include" in results[0]["text"]
+    assert "from the working folder, from its top" in results[0]["text"]
+    ok = results[1]
+    assert ok["ok"], ok["text"]
+    assert ok["display"]["skill"]["files"] == ["assets/logo.png", "assets/parameters.md", "scripts/make.py",
+                                               "test_max.stl", "test_min.stl"]
+    assert (skill / "assets" / "logo.png").read_bytes() == b"\x89PNG...."
+    assert "is ready (6 files" in ok["text"]
+    assert "In it: SKILL.md, assets/logo.png, assets/parameters.md, scripts/make.py" in ok["text"]
+    assert "Left out: NOTES.md, scripts/__pycache__/make.cpython-312.pyc" in ok["text"]
+    assert "Check: 2 files lie loose at the top of the skill (test_max.stl, test_min.stl)" in ok["text"]
+    assert "rm in skills/stl-creator/" in ok["text"]
+    z = zipfile.ZipFile(io.BytesIO((await signed_in.get(
+        f"/hub/api/skills/drafts/{ok['display']['skill']['draft']}/zip")).content))
+    assert not [n for n in z.namelist() if "NOTES" in n or "__pycache__" in n]
+
+
 # ---------------------------------------------------------------- people
 
 def test_a_skill_can_name_its_category(tmp_path):

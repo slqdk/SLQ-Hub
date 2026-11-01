@@ -101,6 +101,14 @@ COPY pageshot.py /opt/execd/pageshot.py
 RUN printf '#!/bin/sh\nexec /opt/pageshot/bin/python -I /opt/execd/pageshot.py "$@"\n' > /usr/local/bin/pageshot \
     && chmod 755 /usr/local/bin/pageshot
 
+# 3D models to print (0.66.0): manifold3d builds solids that are always closed (extrude an outline, revolve a
+# profile, add and cut parts), trimesh saves them as STL or 3MF and checks them (watertight, volume, size), shapely
+# draws the 2D outlines. A skill builds its model with these instead of writing an STL by hand - chat 243's
+# hand-written ones were not solids. Into the agent's /opt/py as the sandbox user, so pip there stays its own; a
+# layer of its own, so the ones above are not built again.
+RUN runuser -u sandbox -- /opt/py/bin/pip install trimesh manifold3d shapely \
+    && runuser -u sandbox -- /opt/py/bin/python -c "import manifold3d, trimesh, shapely; print('3d ok')"
+
 COPY execd.py confine.py /opt/execd/
 
 USER sandbox

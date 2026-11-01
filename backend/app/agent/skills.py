@@ -180,6 +180,16 @@ def ref_of(owner: int | None, name: str, builtin: bool = False) -> str:
     return f"hub/{name}" if builtin else f"@{owner}/{name}" if owner is not None else name
 
 
+# Never part of a skill the assistant hands over (0.66.0): Python's caches, and NOTES.md at the skill's top - the
+# assistant's own notes of the work (the Hub reminds it to keep them), which chat 243's model wrote there.
+JUNK_DIRS = {"__pycache__", ".pytest_cache", "node_modules"}
+
+
+def _not_skill(rel: Path) -> bool:
+    return (any(part in JUNK_DIRS for part in rel.parts) or rel.suffix in (".pyc", ".pyo")
+            or rel.as_posix() == "NOTES.md")
+
+
 class Skills:
     def __init__(self, root: Path, builtin: Path = BUILTIN):
         self.root = root
@@ -570,8 +580,10 @@ class Skills:
         if not (folder / "SKILL.md").is_file():
             raise ValueError(f"no SKILL.md in {folder.name}/ - the skill's folder holds SKILL.md and its files")
         meta, problems = check_skill_md((folder / "SKILL.md").read_text(encoding="utf-8", errors="replace"))
-        files = [p for p in folder.rglob("*") if p.is_file() and not p.is_symlink()
+        found = [p for p in folder.rglob("*") if p.is_file() and not p.is_symlink()
                  and not any(part.startswith(".") for part in p.relative_to(folder).parts)]
+        files = [p for p in found if not _not_skill(p.relative_to(folder))]
+        left_out = sorted(p.relative_to(folder).as_posix() for p in found if _not_skill(p.relative_to(folder)))
         size = sum(p.stat().st_size for p in files)
         if len(files) > MAX_FILES:
             problems.append(f"{len(files)} files; at most {MAX_FILES}")
@@ -591,7 +603,7 @@ class Skills:
         person = self._person(who)
         info = {"id": did, "person": person, "name": name, "created": time.time(), "added": None}
         (d / "draft.json").write_text(json.dumps(info))
-        return self.draft(who, did)
+        return {**self.draft(who, did), "left_out": left_out}
 
     def _draft_info(self, who: dict | None, did: str) -> tuple[Path, dict]:
         if not re.match(r"^[0-9a-f]{16}$", did or ""):

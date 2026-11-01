@@ -103,6 +103,34 @@ async def test_the_bundle_has_everything_but_secrets(signed_in, app, fakes):
     assert b"sk-secret-123456" not in everything
 
 
+async def test_the_queue_log_is_in_clock_time_and_shows_what_held_the_card(signed_in, app, fakes):
+    """0.66.0, chat 243: its queue log showed the install day's self-test (jobs_log kept monotonic seconds, which
+    start again with the VM) and not the LoRA training the turn had waited 5 h 49 min behind."""
+    import time
+    from datetime import datetime
+
+    from app import db
+    now = time.time()
+    with db.connect() as con:
+        for owner, enq, start, end in (("training", now - 6 * 3600, now - 6 * 3600 + 5, now - 1),   # held the card
+                                       ("yesterday", now - 86400, now - 86400 + 1, now - 86400 + 60),
+                                       ("before-0.66", 3000.0, 3001.0, 3100.0)):                # monotonic seconds
+            con.execute("INSERT INTO jobs_log (owner, kind, need, priority, label, enqueued_at, started_at, ended_at,"
+                        " state) VALUES (?,?,?,?,?,?,?,?,?)", (owner, "train", "gpu", "background", owner, enq, start,
+                                                                 end, "done"))
+    fakes.llama["replies"] = [{"content": "Hej."}, {"content": "Hej"}]
+    c = await new_chat(signed_in)
+    await finish(app, await say(signed_in, c["id"], "Hej"))
+    z = zipfile.ZipFile(io.BytesIO((await signed_in.get(f"/hub/api/chats/{c['id']}/export")).content))
+    jobs = json.loads(z.read("logs/queue.json"))
+    owners = [j["owner"] for j in jobs]
+    assert "training" in owners and "yesterday" not in owners and "before-0.66" not in owners
+    turn = next(j for j in jobs if j["owner"] == "web" and j["kind"] == "agent")
+    assert abs(datetime.fromisoformat(turn["enqueued_at"]).timestamp() - now) < 60          # clock time, not uptime
+    training = next(j for j in jobs if j["owner"] == "training")
+    assert training["waited_s"] == 5.0 and round(training["ran_s"]) == 6 * 3600 - 6
+
+
 async def test_the_bundle_has_the_files_the_turns_made(signed_in, app, fakes, monkeypatch):
     """A song, a mix, a script that failed: what the card under each answer listed, as the folder has it now -
     once each, the newest turn first, and said so when one is gone or too big."""

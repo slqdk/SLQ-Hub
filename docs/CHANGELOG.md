@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.66.0 - 2026-11-01
+
+- **Skills that make files work better** (chats 243 and 251: a skill to make
+  STL files for a 3D printer). The skill maker now has the assistant use a
+  library made for the format instead of writing the file by hand, put the
+  code in the skill's `scripts/` and tell the next chat the exact command to
+  run - and check the result with something other than the script that
+  made it (for a 3D model: closed, its size, that it fits the printer, and
+  pictures of two or three sides).
+- **3D models in the sandbox**: manifold3d, trimesh and shapely. Solids made
+  with manifold3d come out closed (watertight), and trimesh checks them
+  before they are handed over.
+- **A skill gets only what belongs in it**: the assistant's notes and
+  Python's cache are left out, the assistant is told what went into the
+  skill and which loose files look like test output. `include` takes a file
+  already in the skill without an error (chat 243 was refused five times).
+- **Fix and run again is not a loop**: the assistant was stopped when it
+  ran the same command three times, even when each run gave a new error
+  after a fix. Now only the same step with the same results counts.
+- **The troubleshooting export's queue log** shows the jobs of the chat's
+  own time, and the job that held the card when it waited (chat 243's
+  showed another day's jobs, not the LoRA training it waited behind).
+
 ## 0.65.0 - 2026-11-01
 
 - **Settings -> Models in parts**: Language, Images, LoRAs, Sound, Video,

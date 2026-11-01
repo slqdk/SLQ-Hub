@@ -73,12 +73,24 @@ async def skill_propose(ctx: ToolContext, args: dict) -> ToolResult:
         return ToolResult(f"No folder {rel or '(none given)'}: write the skill's SKILL.md and files under "
                           "skills/<name>/ first, then give that folder as path.", is_error=True)
     for inc in args.get("include") or []:                    # files kept as they are: into assets/
-        try:
-            src = ctx.workdir.resolve(str(inc))
-        except ValueError as exc:
-            return ToolResult(str(exc), is_error=True)
-        if not src.is_file():
-            return ToolResult(f"No file {inc} to include.", is_error=True)
+        inc = str(inc).strip()
+        src = None
+        # From the working folder's top, as the description says - or, as chat 243's model gave it five times
+        # (0.66.0), from the skill's own folder: a file there is in the skill already.
+        for candidate in (inc, f"{rel}/{inc}"):
+            try:
+                p = ctx.workdir.resolve(candidate)
+            except ValueError:
+                continue
+            if p.is_file():
+                src = p
+                break
+        if src is None:
+            return ToolResult(f"No file {inc} to include. include takes files from the working folder, from its top "
+                              f"(an attachment: .hub/attachments/<name>); the files you wrote in {rel}/ are in the "
+                              "skill without it - leave include out for them.", is_error=True)
+        if src.resolve().is_relative_to(folder.resolve()):
+            continue
         ctx.workdir.write(ctx.workdir.rel(folder / "assets" / src.name), src.read_bytes(), "agent", "hub",
                           f"put {src.name} in the skill")
     store = ctx.hub.extras["skills"]
@@ -91,7 +103,27 @@ async def skill_propose(ctx: ToolContext, args: dict) -> ToolResult:
     note = f" Adding it replaces the user's skill {d['name']}." if d["replaces"] else ""
     return ToolResult(f"The skill {d['name']} is ready ({count} file{'s' if count != 1 else ''}, {d['size']:,} bytes). "
                       f"The user sees it in a card with an Add skill button; it is not added until they press it."
-                      f"{note}", display={"skill": card})
+                      f"{note}{_packed(rel, d)}", display={"skill": card})
+
+
+def _packed(rel: str, d: dict) -> str:
+    """What went into the skill, for the model to check (0.66.0): chat 243's skill took 18 test STL files, the
+    model's NOTES.md and Python's cache along - 26 files and 2.2 MB, and nobody looked. Notes and caches are left out
+    by the store; loose files at the top that are not Markdown are named, with what to do."""
+    files = d["files"]
+    shown = ", ".join(["SKILL.md", *files[:25]]) + (f" and {len(files) - 25} more" if len(files) > 25 else "")
+    out = f"\nIn it: {shown}."
+    if d.get("left_out"):
+        out += f" Left out: {', '.join(d['left_out'][:10])} (notes and caches are not part of a skill)."
+    loose = [f for f in files if "/" not in f and not f.lower().endswith((".md", ".txt"))
+             and not f.upper().startswith(("LICENSE", "README"))]
+    if loose:
+        out += (f"\nCheck: {len(loose)} file{'s lie' if len(loose) != 1 else ' lies'} loose at the top of the skill "
+                f"({', '.join(loose[:8])}{' ...' if len(loose) > 8 else ''}). A skill keeps its files in references/, "
+                f"assets/ and scripts/. If they are test output, delete them (rm in {rel}/) and call skill_propose "
+                "again - the user should not get them; if the skill needs one, move it to assets/ and say in "
+                "SKILL.md what it is for.")
+    return out
 
 
 async def memory(ctx: ToolContext, args: dict) -> ToolResult:
@@ -189,8 +221,10 @@ register(Tool("skill_propose", "Hand the user a skill you wrote, for them to add
               "skill; it says what to fix if something is wrong.",
               obj({"path": {"type": "string", "description": "The skill's folder, e.g. skills/invoice-checker"},
                    "include": {"type": "array", "items": {"type": "string"},
-                               "description": "Files in the working folder to put in the skill's assets/ as they are "
-                                              "(a template, a spreadsheet)"}}, ["path"]),
+                               "description": "Files from elsewhere in the working folder (an attachment: "
+                                              ".hub/attachments/<name>) to put in the skill's assets/ as they are - "
+                                              "a template, a spreadsheet. Not for files already in the skill's "
+                                              "folder: those are in it anyway"}}, ["path"]),
               skill_propose, group="knowledge", in_subagent=False))
 register(Tool("memory", "Your persistent memory across chats: Markdown files under /memories (about the user "
               "and their preferences) and /memories/project (this project). Check it when earlier context "

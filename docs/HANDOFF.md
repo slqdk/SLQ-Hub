@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.65.0, 2026-11-01)
+## State (0.66.0, 2026-11-01)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -771,6 +771,34 @@ download queued or running shows a lamp. Help's NEEDS name the part (`tab: "mode
 button opens Language. The modals stay at the tab's end, so they open from any part. Clicked through on the dev
 server at phone width in Chromium (dark and light): the parts, the address, a reload keeping the part, an unknown
 part, the lamp on Images while a download goes on (the models list answered with one).
+0.66.0, Søren (chat 243's export, with chat 251's inside it): "i wanted to try to get my app to make a STL file from
+looking at a link and at a picture.. I does not really work... can you debug this workflow ?" - a skill made with
+hub/skill-creator by Qwen3.5 9B Uncensored (HauhauCS Aggressive, BF16, thinking off, 38-40 tokens/s), then used in
+chat 251. Read from the exports: (1) the turn waited 5 h 49 min in the queue - a LoRA training held the card - and
+the export's queue log showed the install day's self-test instead, because jobs_log kept the scheduler's monotonic
+seconds (they start again with the VM) and the export turned them into clock times with the current boot's offset; `state._log_job` writes clock times now,
+`export._queue_around` takes the jobs queued during the runs and those queued before that ended after a run started
+(rows from before 0.66.0 are monotonic, under a billion, and never match). (2) skill_propose's `include` was given the
+skill's own files by their path inside the skill (`assets/...`) and refused five times, then the same call three
+times stopped the turn; a file in the skill's folder is in the skill anyway now, a path is tried from the working
+folder's top and then from the skill's folder, and the error says which. (3) The skill took NOTES.md, scripts'
+`__pycache__` and 18 test STLs along (26 files, 2.2 MB): the store leaves notes and caches out (`_not_skill`), and
+skill_propose's result lists what is in it and names loose non-Markdown files at the top with what to do. (4) The STL
+code wrote triangles by hand (holes, wrong normals) and SKILL.md never said to run the script: chat 251's model
+wrote new code, fixed it twice, and at the third run of the same `python ...` was stopped by the same-step guard
+though each run gave a new error - the guard compares what came back now (`Engine._came_back`: a sha1 per result, the
+"exit code N, X s" seconds taken out; a REPEATED refusal counts as the result it stands for). (5) skill-creator's
+SKILL.md has "Skills that make a file with code" (library per format, `scripts/` with arguments, the exact command
+in SKILL.md, check with something else - for a solid trimesh's watertight/size/bed and a matplotlib render looked at
+with view_image -, test output to `out/`). The sandbox image gets trimesh, manifold3d and shapely (pip in /opt/py as
+the sandbox user, an import check in the build). Proven here only, in a venv: a revolved, hollowed solid with
+manifold3d - 2048 triangles, watertight, 76.2 cm3, 124x124x45 mm - saved and reloaded with trimesh, rendered with
+matplotlib's Poly3DCollection; the same again under Python 3.12 (the image's) with the wheels pip picks today
+(manifold3d 3.5.4, trimesh 5.2.0, shapely 2.2.0). The model he tried was asked of a real product's design (a Kreaværket candle
+holder); nothing here copies it, the test shapes are generic. Søren was advised to make such skills with Qwen3.8 27B
+(30-33 tokens/s here against the 9B's 38-40, chat 243's largest request 39K of the 27B's 65K, thinking on) and to
+delete stl-creator and make it again after the update. The refit test's budget went to 15,200 tokens (bash's
+description is longer). NOT run on the VM: item 85.
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
 host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU
@@ -1515,6 +1543,21 @@ the host if the VM ever stops by itself.
       `"klein_te": true` (`sudo bash update.sh compose exec trainer curl -s http://127.0.0.1:7300/health`); a run's log should say
       "Loading Qwen3 from ponpoke/flux2-klein-9b-uncensored-text-encoder", and its model.safetensors should be a link
       to the picture model's (`stat -c %h` gives 2) - no second 16.4 GB download.
+85. **Skills that make files (0.66.0)** - none of it has run on the VM:
+    - **The sandbox image**: update.sh rebuilds it with trimesh, manifold3d and shapely from PyPI (wheels for
+      x86-64 Linux - not built against the VM's image here); the build prints "3d ok" after an import check, and a
+      failed build undoes the update. Check: `sudo bash update.sh compose exec sandbox /opt/py/bin/python -c "import
+      manifold3d, trimesh; print(manifold3d.__version__, trimesh.__version__)"`.
+    - **A skill made again with Qwen3.8 27B** ("Make a skill that makes STL files ..."): does the script land in
+      `scripts/` with arguments, does it check with trimesh and look at a render, does skill_propose's "In it:" list
+      only the skill, and does a new chat with the skill run the script with arguments instead of writing new code?
+      The export shows each.
+    - **The loop guard**: a model that repeats a step whose output changes every time (a timestamp, a random name)
+      is no longer stopped by the same-step guard - only the REPEATED refusals and the step limit bound it. Not seen
+      yet; an export of such a turn would tell whether the guard needs to look at more than the hash.
+    - **The queue log after a reboot**: an export of a chat after the VM restarted should show only that chat's
+      jobs and the one that held the card. The rows logged before 0.66.0 stay in jobs_log, in monotonic seconds,
+      and are never shown.
 80. **Not pursued (Søren, 2026-10-28)** - kept here in case it is taken up again; if it stays unused, remove
     the `windows` service, `.30` from `SANDBOX_IPS`, `windows/*` from `FOLDERS` and INSTALL.md section 12.
     **0.39.0's Windows container on VM 222**: `COMPOSE_PROFILES=windows` in

@@ -586,8 +586,13 @@ result with nothing changed in the chat. Each turn keeps an epoch that every
 other tool call advances. A read-only call repeated with
 the same arguments in the same epoch is refused with a result that says so; a
 failed one may be retried once. After three refusals, or the same step (text
-and calls) three times, the next request goes without tools and with a note
-to answer from what it has; any tool calls in that answer are dropped. The
+and calls) three times with the same results, the next request goes without
+tools and with a note to answer from what it has; any tool calls in that
+answer are dropped. The results count since 0.66.0: chat 251 ran its script,
+fixed the error and ran it again - the same `bash` call with a new error each
+time - and was stopped as if it repeated itself. A step counts again only when
+what came back is the same as the last time (a hash of each result, without
+the seconds a command took). The
 event `loop` and a `loop` step record it, and the answer carries a `notice`
 block (shown in the chat, never sent to a model). When someone can take
 over (below), the turn is handed over instead of forced to answer; a
@@ -1668,8 +1673,12 @@ rows a sheet - and PowerPoint - slides, tables, notes - as text), write
 material, assets kept as they are, scripts only where code helps), in the
 user's language, try it once, then call `skill_propose`. That checks the
 folder (the format's rules and the limits; the model gets the problems and
-fixes them), copies the files named in `include` (attachments) into
-`assets/`, and keeps the skill as a draft for two weeks
+fixes them), copies the files named in `include` (from elsewhere in the
+working folder, such as attachments) into `assets/` - a file already in the
+skill's folder is in it anyway -, leaves out notes and caches (`NOTES.md`,
+`__pycache__`, `.pyc`), tells the model what it packed and names loose files
+at the skill's top that look like test output, and keeps the skill as a draft
+for two weeks
 (`data/skills/.drafts/<id>/`). The chat shows a card: name, description,
 files, Show SKILL.md, .zip, and **Add skill** ("Add skill (replaces the old
 one)" when one of that name exists), which makes it one of the user's skills;
@@ -1679,6 +1688,23 @@ skill chosen; the model copies it from `.hub/skills/` to `skills/<name>/`,
 changes it and proposes it under the same name. In a project the working
 folder is the project's, so the skill's files become project files (synced,
 with revisions) until deleted.
+
+**Skills that make a file with code** (0.66.0, chats 243 and 251: a skill to
+make STL files for a 3D printer from a link and a picture). The 9B model wrote
+the triangles by hand - faces missing, normals wrong - and the next chat with
+the skill wrote new code instead of running the skill's script. So the skill
+maker says: use a library made for the format (openpyxl, python-docx,
+Pillow/matplotlib; for solids manifold3d, whose results are always closed, and
+trimesh to save and check), put the code in `scripts/` with its parameters as
+arguments, and have SKILL.md give the exact command
+(`python .hub/skills/<name>/scripts/make.py ...`) and say to run it, not
+rewrite it. The result is checked with something other than the script that
+made it (a solid: closed, its size, that it fits the printer - and two or
+three sides drawn with matplotlib and looked at with `view_image`); test
+output goes to `out/`, never into the skill. The sandbox has manifold3d,
+trimesh and shapely since 0.66.0. An example the user gives is the case to
+test with, not the skill: the skill makes the kind of thing, and a picture has
+no scale, so it asks for sizes.
 
 **The Skills page** (`/skills`; a person's app has it in its sidebar too):
 Yours (a Shared switch, Use - a new chat with the skill chosen -, Improve with
@@ -2745,8 +2771,11 @@ tokens, errors), the live event log of runs still in memory (streamed pieces
 joined), what the model would be sent next (system prompt, history after
 condensing, tools, the request body), the settings that shape a turn (never a
 key or token: cloud gives only whether a key is set, MCP only names and
-status), the queue's jobs during the runs (its monotonic times turned into
-clock times), the tail of llama-server's log, the chat's pictures and
+status), the queue's jobs during the runs and the jobs that held the card when
+a run came (0.66.0: jobs_log keeps clock times; it kept the queue's monotonic
+seconds before, which start again with the VM, so chat 243's export showed
+the install day's self-test and not the LoRA training its turn waited 5 h 49
+min behind), the tail of llama-server's log, the chat's pictures and
 attachments, and (0.13.5) the files its turns made or changed, as the folder
 has them now - a song, a mix, a script that failed - newest turn first, up to
 60 MB in all. The phone page exports its chats as JSON from the device.

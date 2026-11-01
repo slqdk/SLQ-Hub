@@ -82,6 +82,7 @@ OFFLINE_NOTE = ("(This command ran without the network - no connections, no DNS:
                 "before it goes online. If it needs the internet - pip install, npm, a dotnet build that restores NuGet "
                 "packages, git clone, curl - run it again with internet: true, and the user is asked.)")
 BASH_TEXT = ("Run a bash command in the sandbox (Ubuntu with Python 3 + numpy/pandas/matplotlib/pillow/opencv, "
+             "manifold3d/trimesh/shapely for 3D models (STL), "
              "Node.js, the .NET 10 SDK (C#), git, curl, ImageMagick, ffmpeg, Tesseract OCR, poppler). It starts in "
              "the working folder, "
              "has internet access but no access to the local network, and runs as an unprivileged user. Each call "

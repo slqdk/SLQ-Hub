@@ -1015,6 +1015,44 @@ async def test_the_same_step_three_times_ends_in_an_answer(signed_in, app, fakes
     assert texts(run).endswith("Done echoing.")
 
 
+async def test_the_same_command_with_new_results_is_progress_not_a_loop(signed_in, app, fakes):
+    """0.66.0 (chat 251): the model ran its script, fixed the error, ran it again - the same command each time, a
+    new error each time - and was stopped at the third run as if it repeated itself, leaving a broken file. The same
+    step counts as a repeat only when what comes back is the same too; the seconds a command took do not count."""
+    runs = iter([f"line {n}: TypeError" for n in (203, 92, 168)] + ["written"])
+
+    def sandbox(body):
+        out = next(runs)
+        return {"exit_code": 0 if out == "written" else 1, "stdout": "", "stderr": out, "timed_out": False,
+                "duration_ms": 50, "truncated": False}
+    fakes.sandbox["handler"] = sandbox
+    steps = []
+
+    def responder(body):
+        if "short title" in last_user(body):
+            return {"content": "Script"}
+        steps.append(bool(body.get("tools")))
+        if len(steps) <= 4:
+            return {"tool_calls": [{"name": "bash", "arguments": {"command": "python make.py"}}]}
+        return {"content": "The file is written."}
+    fakes.llama["responder"] = responder
+    c = await new_chat(signed_in)
+    run = await finish(app, await say(signed_in, c["id"], "make it"))
+    assert steps == [True, True, True, True, True]                     # never made to answer without tools
+    assert not any(s["type"] == "loop" for s in chats.runs_for_chat(c["id"])[0]["steps"])
+    assert texts(run).endswith("The file is written.")
+
+    # the same result again - only the seconds differ - is still a loop
+    durations = iter([40, 160, 260, 360])
+    fakes.sandbox["handler"] = lambda body: {"exit_code": 1, "stdout": "", "stderr": "line 7: TypeError",
+                                             "timed_out": False, "duration_ms": next(durations), "truncated": False}
+    steps.clear()
+    c = await new_chat(signed_in)
+    run = await finish(app, await say(signed_in, c["id"], "make it"))
+    assert steps == [True, True, True, False]
+    assert {"type": "loop", "reason": "the same step (bash) 3 times", "depth": 0} in chats.runs_for_chat(c["id"])[0]["steps"]
+
+
 async def test_the_same_look_up_after_a_change_runs_again(signed_in, app, fakes):
     fakes.llama["replies"] = [
         {"tool_calls": [{"name": "write_file", "arguments": {"path": "a.txt", "content": "one\n"}}]},
@@ -1111,16 +1149,17 @@ async def test_dense_text_is_fitted_by_the_real_token_count(signed_in, app, fake
 async def test_a_request_the_model_server_refuses_as_too_long_is_fitted_again(signed_in, app, fakes, monkeypatch):
     """Three hex dumps arrive in one step: the last step measured plain text, so the estimate says the next request
     fits. The model server refuses it with its real size; that size sets the ratio and the request is shortened.
-    (14,800: the estimate of the second request - the base prompt and three dumps - must fit three quarters of it;
-    0.35.0's working rule took it over 14,000's, 0.43.0's ask_user over 14,400's.)"""
+    (15,200: the estimate of the second request - the base prompt and three dumps - must fit three quarters of it;
+    0.35.0's working rule took it over 14,000's, 0.43.0's ask_user over 14,400's, 0.66.0's 3D libraries in bash's
+    description over 14,800's.)"""
     hub = app.state.hub
-    monkeypatch.setattr(hub.catalog, "context_per_request", lambda model_id: 14800)
+    monkeypatch.setattr(hub.catalog, "context_per_request", lambda model_id: 15200)
     c = await new_chat(signed_in)
     wd = hub.extras["agent"].workdir(chats.get_chat(c["id"]))
     for i in range(3):
         wd.write(f"hex{i}.txt", f"HEX {i}\n" + "0f a3 " * 800 + "\n", author="test", origin="test", message="hex")
     sizes: list = []
-    fakes.llama["responder"] = counting(14800, [
+    fakes.llama["responder"] = counting(15200, [
         {"content": "Reading the three dumps.",
          "tool_calls": [{"name": "read_file", "arguments": {"path": f"hex{i}.txt"}} for i in range(3)]},
         {"content": "The dumps differ at byte 4."}], sizes, hex_cost=3.0)

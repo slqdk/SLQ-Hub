@@ -16,6 +16,11 @@ From the user's message, be clear about three things: what the skill should make
 requests, and what a good result looks like (the answer, a file, a format). If one of them is missing and you
 cannot tell from the material, ask one short question before you start. Otherwise start.
 
+An example the user gives (a link, a picture) shows what the skill should handle - it is not the skill. Unless the
+user wants a skill for that one thing, make it work for any such request, and put the example in `## Example`, not
+into the defaults and rules. When the result needs facts the source may not give (a picture has no scale), the
+skill says what to ask for or what to assume.
+
 ## 2. Read all the material
 
 Read every file the user gave, completely: `read_file` reads PDF (pages with offset/limit - go through long ones in
@@ -75,8 +80,9 @@ read references/error-codes.md." Keep the facts exact: numbers, names and units 
 
 Write in the language the user writes in, unless they ask for another. The name stays in English.
 
-To keep a file as it is (an Excel template, a logo), do not rewrite it: name it in `include` when you call
-`skill_propose` (step 6); it goes into `assets/`.
+To keep a file the user gave as it is (an Excel template, a logo in `.hub/attachments/`), do not rewrite it: name
+it in `include` when you call `skill_propose` (step 6), with its path from the working folder's top; it goes into
+`assets/`. Files you wrote in the skill's folder are in the skill already - no `include` for them.
 
 **Fixed questions.** When the skill always needs the same few choices from the user (how many, which style, which
 colour), put them in a `questions` block in `SKILL.md`. When the skill is chosen, the chat shows them as a card
@@ -101,12 +107,38 @@ Follow your own `SKILL.md` once on a realistic request (one the user gave, or on
 the result in a few lines. If it went wrong because the instructions were unclear or something was missing, fix
 the files first.
 
+## Skills that make a file with code
+
+When the skill's result is a file made by code - a 3D model to print, a spreadsheet, a picture, a document - the
+code is the part that breaks. Make it work the way the user will use it:
+
+- **A library for the format, never the format by hand.** Excel: openpyxl. Word: python-docx. Pictures and
+  charts: Pillow, matplotlib. 3D models (STL, 3MF): manifold3d to build the solid (extrude a 2D outline, revolve a
+  profile, add and cut parts - what it makes is always closed) and trimesh to save and check it. The sandbox
+  has them all. A hand-written STL is a list of triangles that slicers reject when one is wrong.
+- **The script is the skill's, and the skill runs it.** Put it in `scripts/` with arguments for what changes
+  (sizes, counts, the output file - and it writes where it is told) and `--help`; it prints what it wrote. In
+  `SKILL.md`, say exactly how to run it: a chosen skill's files are in `.hub/skills/<name>/` of the working folder
+  (the Skills part of the instructions names the folder), so `python .hub/skills/<name>/scripts/make.py --out
+  result.stl ...` - and that the assistant runs it rather than writing a new one. Without that line the next chat
+  writes its own, untested.
+- **Check the result with something other than the script.** Open the file again with the library and check what
+  matters: a 3D model is watertight, its size in mm is the size asked for and it fits the printer; a spreadsheet
+  has the sheets, columns and numbers asked for. When the result is something to look at, draw a picture of it
+  (a 3D model from two or three sides with matplotlib), look at it with `view_image` and compare it with the
+  user's picture. A test that only finds the file, or counts what is in it, proves nothing - say in `SKILL.md` how
+  to check, so each use checks too.
+- **Test output stays out of the skill.** Write it to `out/` in the working folder, not into `skills/<name>/`. The
+  skill's folder holds only what the skill needs: no test files, no notes of your work, no caches.
+
 ## 6. Hand it over
 
-Call `skill_propose` with `path: "skills/<name>"` (and `include` for files kept as they are). It checks the folder;
-if it says something is wrong, fix it and call it again. Then tell the user, in a sentence or two, what the skill
-does and that **Add skill** on the card adds it to their skills - after that they pick it in a chat with the Skills
-button or by typing `/` and its name, and can share it with the family on the Skills page.
+Call `skill_propose` with `path: "skills/<name>"` (and `include` for files from elsewhere kept as they are). It
+checks the folder and lists what it packed; if it says something is wrong, or test output is in the list, fix it
+and call it again. Only when it said the skill is ready: tell the user, in a sentence or two, what the skill does
+and that **Add skill** on the card adds it to their skills - after that they pick it in a chat with the Skills
+button or by typing `/` and its name, and can share it with the family on the Skills page. If it is not ready,
+there is no card: say what is wrong instead.
 
 ## Improving a skill the user has
 

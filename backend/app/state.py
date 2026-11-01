@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass, field
 
 import httpx
@@ -60,12 +61,18 @@ class Hub:
 
 
 def _log_job(job: Job) -> None:
+    """A finished job into jobs_log, at clock times (0.66.0). The queue keeps monotonic seconds, which start again
+    when the VM does: logged as they were, a chat's export put jobs from other days into its queue log (chat 243's
+    showed the install day's self-test at 08:15 the same morning). Rows from before are in monotonic seconds -
+    under a billion - and no clock-time window finds them."""
+    wall = time.time() - time.monotonic()
+    at = [None if t is None else t + wall for t in (job.enqueued_at, job.started_at, job.ended_at)]
     try:
         with db.connect() as con:
             con.execute("INSERT INTO jobs_log (owner, kind, need, priority, label, enqueued_at, started_at,"
                         " ended_at, state, error, energy_wh) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                         (job.owner, job.kind, job.need, PRIORITY_NAME.get(job.priority, "?"), job.label[:200],
-                         job.enqueued_at, job.started_at, job.ended_at, job.state, (job.error or "")[:500] or None,
+                         *at, job.state, (job.error or "")[:500] or None,
                          round(job.energy_j / 3600, 4) if job.started_at is not None else None))
     except Exception:  # never let statistics break the queue
         log.exception("could not log job")
