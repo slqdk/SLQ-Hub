@@ -26,7 +26,7 @@ def _tokens_forget_the_hub():
 
 def _install_fake_models(models_dir: Path, ids: set[str]) -> None:
     cat = json.loads(CATALOG.read_text())
-    for group in ("llm", "aux", "comfy", "audio", "video"):
+    for group in ("llm", "aux", "comfy", "audio", "video", "model3d"):
         for e in cat[group]:
             if e["id"] in ids:
                 for f in e["files"]:

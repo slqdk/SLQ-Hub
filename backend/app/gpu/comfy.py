@@ -33,8 +33,9 @@ ProgressFn = Callable[[int, int, str | None], Awaitable[None] | None]
 
 QUIET_S = 300                   # a ComfyUI that answers nothing for this long while a job runs is given up on
 LOST = ("ComfyUI no longer has the job: it restarted, or the job was taken out of its queue, while the job ran")
-LOADERS = {"LoadImage": "image", "LoadImageMask": "image", "LoadAudio": "audio"}   # node -> its file input
-OUTPUT_KINDS = ("images", "audio")          # what saving nodes put in a job's history
+LOADERS = {"LoadImage": "image", "LoadImageMask": "image", "LoadAudio": "audio",   # node -> its file input
+           "LoadVideo": "file"}
+OUTPUT_KINDS = ("images", "audio", "3d")    # what saving nodes put in a job's history
 
 
 def input_images(graph: dict) -> list[str]:
@@ -196,6 +197,51 @@ class Comfy:
             return files, texts
         except BaseException:
             # Stopped, failed or given up on: whatever ComfyUI still does with the job, it stops doing.
+            if queued.get("id"):
+                await asyncio.shield(self.cancel(queued["id"]))
+            raise
+        finally:
+            if not keep:
+                await asyncio.shield(self.forget(graph, prompt_id or queued.get("id"), hist))
+
+    async def run_any(self, graph: dict, on_progress: ProgressFn | None = None, timeout: float = 3600,
+                      keep: bool = True) -> tuple[list[dict], dict[str, list[str]]]:
+        """Queue any workflow (0.67.0: the Workflows page, picture to 3D) and return every file its nodes saved:
+        [{"kind": "image" | "video" | "audio" | "3d", "name", "data", "node"}], with the text outputs by node id.
+        Previews (ComfyUI's temp folder) count only when nothing was saved - many workflows end in a preview."""
+        client_id = uuid.uuid4().hex
+        prompt_id: str | None = None
+        hist: dict | None = None
+        queued: dict = {}
+        try:
+            if self.use_ws:
+                prompt_id = await self._run_ws(graph, client_id, on_progress, timeout, queued)
+            else:
+                prompt_id = queued["id"] = await self.queue(graph, client_id)
+                await self._poll(prompt_id, timeout)
+            hist = await self.history(prompt_id)
+            status = hist.get("status") or {}
+            if status.get("status_str") == "error":
+                raise ComfyError("ComfyUI reported an error: " + _status_message(status))
+            found: list[tuple[str, str, dict]] = []
+            texts: dict[str, list[str]] = {}
+            for node_id, out in (hist.get("outputs") or {}).items():
+                if isinstance(out.get("text"), list):
+                    texts[str(node_id)] = [str(t) for t in out["text"]]
+                animated = any(bool(a) for a in out.get("animated") or [])
+                for key in ("images", "audio", "3d", "video", "gifs"):
+                    for item in out.get(key) or []:
+                        if not isinstance(item, dict) or not item.get("filename"):
+                            continue
+                        kind = {"images": "video" if animated else "image", "gifs": "video"}.get(key, key)
+                        found.append((str(node_id), kind, item))
+            saved = [f for f in found if (f[2].get("type") or "output") == "output"]
+            items = []
+            for node_id, kind, item in saved or [f for f in found if f[2].get("type") == "temp"]:
+                data = await self.view(item["filename"], item.get("subfolder", ""), item.get("type") or "output")
+                items.append({"kind": kind, "name": item["filename"], "data": data, "node": node_id})
+            return items, texts
+        except BaseException:
             if queued.get("id"):
                 await asyncio.shield(self.cancel(queued["id"]))
             raise

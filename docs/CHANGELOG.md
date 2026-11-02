@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.67.0 - 2026-11-02
+
+- **3D models to print from a picture** (Settings -> Models -> 3D:
+  TRELLIS.2, about 8 GB). Attach a picture of a thing and ask for a 3D
+  model, with how big it should be. The assistant gets an STL in
+  millimetres, standing on the bed and ready for the slicer, the GLB as
+  made, and a picture of it from the front, the side and above - with its
+  size, whether it is closed (watertight), its volume and how many separate
+  parts it has. ComfyUI makes it one closed solid first. Shape only, no
+  colours.
+- **Your own ComfyUI workflows** (Settings -> Models -> Workflows): upload
+  the .json a site shares, ComfyUI's API format, or a picture ComfyUI saved
+  with its workflow inside. The Hub reads it the way ComfyUI's own editor
+  does, says what it needs - nodes this ComfyUI lacks (custom nodes are
+  refused with their names: the Hub runs only ComfyUI's own), model files
+  that are missing, with Download files for those the workflow links to -
+  and lets you choose what the assistant may set: the picture, the prompt,
+  the seed, the size, and anything else with Show all. Then ask for it in a
+  chat. Only you can use them; they run through the queue like every
+  picture.
+- Help has a section for both.
+
 ## 0.66.0 - 2026-11-01
 
 - **Skills that make files work better** (chats 243 and 251: a skill to make

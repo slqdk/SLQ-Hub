@@ -246,6 +246,21 @@ export interface Lora { id: string; name: string; base: string; base_label: stri
   fits: { id: string; name: string }[] }
 export interface LoraList { loras: Lora[]; families: Record<string, string> }
 
+/** The owner's ComfyUI workflows (0.67.0, Settings -> Models -> Workflows). */
+export type WorkflowInputKind = "image" | "audio" | "video" | "text" | "seed" | "number" | "boolean" | "choice";
+export interface WorkflowInput { key: string; node: string; input: string; kind: WorkflowInputKind; title: string;
+  default: unknown; on: boolean; label: string; description: string; min?: number; max?: number; step?: number;
+  integer?: boolean; options?: (string | number)[] }
+export interface WorkflowMissing { node: string; class_type: string; input: string; file: string; folder: string | null;
+  url: string | null; dest: string | null; can_download: boolean; download: DownloadState | null }
+export interface Workflow { id: string; name: string; description: string; created: number; updated: number;
+  source: { file: string; format: "editor" | "api" }; inputs: WorkflowInput[];
+  /** null: ComfyUI did not answer, so what it needs is not known now */
+  ready: boolean | null; unknown: string[]; missing: WorkflowMissing[];
+  wrong: { node: string; class_type: string; input: string; value: unknown; choices: string[] }[];
+  outputs: { node: string; class_type: string; title: string }[] }
+export interface WorkflowList { workflows: Workflow[]; comfy: boolean }
+
 /** LoRA training (0.50.0): a run, as the list and the editor see it. */
 export type TrainingState = "draft" | "captioning" | "preparing" | "queued" | "training" | "done" | "failed" | "cancelled";
 export interface TrainingProgress { what: "captions" | "download" | "queue" | "training" | "stopping"; done?: number;
@@ -327,7 +342,7 @@ export interface HFLookup { repo: string; url: string; choices: HFChoice[];
     tools?: boolean | null; thinking?: boolean | null };
   suggested: { id: string; name: string }; freeDisk: number; vram: number }
 export interface ModelsData { llm: ModelEntry[]; aux: ModelEntry[]; comfy: ModelEntry[]; audio?: ModelEntry[];
-  video?: ModelEntry[]; current: string | null;
+  video?: ModelEntry[]; /** 3D models from a picture (0.67.0) */ model3d?: ModelEntry[]; current: string | null;
   defaults: { default: string; fallback_alias: string; preload: boolean }; sdxl?: SdxlChoices }
 
 export interface ApiKey { id: number; name: string; prefix: string; priority: string; allowed_ips: string;

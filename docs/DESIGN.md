@@ -680,6 +680,8 @@ message's time with the conversation.
 | `view_image`, `image_transform`, `image_ocr` | Look at an image; crop, resize, rotate, convert and compress (Pillow); Tesseract OCR (dan+eng). |
 | `image_generate`, `image_edit`, `image_remove_background` | ComfyUI through the queue (the lease switches residency). |
 | `speech_generate`, `music_generate`, `sound_generate` | Audio files in the working folder (0.13.0, section 8): speech on the CPU (the speech service), music and sound effects in ComfyUI through the queue. Offered when a model for them is downloaded. |
+| `model3d_generate` | A 3D model to print from one picture (0.67.0, §8 "3D models from a picture"): TRELLIS.2 in ComfyUI through the queue; an STL in millimetres, the GLB, and a picture of it from three sides. Offered when TRELLIS.2 is downloaded. Not in subagents. |
+| `workflow_run` | One of the owner's ComfyUI workflows (0.67.0, §8 "Workflows") with the inputs the owner opened to it, through the queue; its pictures, video, sound and 3D files land in the working folder. Only in the owner's chats, when there is a workflow. Not in subagents. |
 | `skill` | Reads one of the chosen skills: its SKILL.md, or one of its other files (`skill(name, file)`; PDF, Word, Excel and PowerPoint as text, pictures shown). Offered when the chat has skills. |
 | `skill_propose` | The skill the assistant made in the working folder: checked against the format, kept as a draft and shown as a card with Add skill (0.23.0, §6 "Skills"). Not in subagents. |
 | `memory` | One tool with commands: view, create, str_replace, insert, delete, rename. Global memory (`/memories`) plus per-project memory (`/memories/project`). |
@@ -2411,6 +2413,97 @@ sound, with ComfyUI's own nodes only (the image is unchanged):
   rate the Hub reports, no prompt in the file. The Hub's own client ran one
   with websocket progress and left nothing behind in ComfyUI. Not checked:
   anything with the real weights.
+
+### 3D models from a picture (0.67.0)
+
+- **What.** One picture of a thing in, a model to print out: `model3d_generate`
+  (`app/agent/tools/model3d.py`) saves `<name>.stl` (millimetres, Z up, centred
+  on the bed with its lowest point at 0), `<name>.glb` (as made: glTF, Y up)
+  and `<name>-views.png` (front, side, above at an angle). The tool's result
+  gives the size, the triangles, whether it is closed (watertight), its volume
+  and how many separate parts, and tells the assistant to look at the views
+  before it says how it turned out. A picture has no scale: `size_mm` along
+  the longest side (or height, width, depth), 100 mm when not given - the
+  result says so and to ask.
+- **The model.** TRELLIS.2 (Microsoft, 4B, MIT) in ComfyUI's own nodes
+  (0.42.3), catalog group `model3d` (Settings → Models → 3D), from
+  `Comfy-Org/TRELLIS.2`: the int8 "convrot" model (5.3 GB), its DINOv3 image
+  encoder (1.2 GB; Meta's DINOv3 Licence - no military or weapons use), the
+  shape VAE (1.1 GB) and BiRefNet (`Comfy-Org/BiRefNet`, 0.4 GB, MIT) to cut
+  the subject out. Hunyuan3D 2.x is in ComfyUI too, but Tencent's licence
+  does not apply in the EU, so it is not in the catalog.
+- **The graph** (`app/model3d/pipeline.py`) is the shape path of ComfyUI's
+  official template `3d_pixal3d_trellis2_image_to_model` with TRELLIS.2
+  chosen: the cut-out squared with pad_factor 1.0 (Trellis2Conditioning's
+  tooltip), the structure pass (12 steps, cfg 7.5 rescaled 0.7, cfg 1 after
+  66.7 %, shift 5), the shape and its finer pass (20 and 12 steps, rescaled
+  0.5, cfg 1 after 76.9 %) at 1024 (detail standard) or 1536 voxels (high),
+  then RemeshMesh "solid" (one closed solid: double shells and small holes
+  gone) and DecimateMesh to 300,000 triangles, SaveGLB. No texture: printing
+  needs the shape. Through the scheduler like every ComfyUI job.
+- **After** (`app/model3d/mesh.py`, trimesh in the Hub since 0.67.0): ComfyUI
+  turns TRELLIS.2's Z-up output into glTF's Y up; the Hub turns it back
+  (x, y, z) → (x, −z, y), scales, centres, saves binary STL, counts parts
+  (numpy union by shared vertices) and draws the views itself - a depth
+  buffer over every pixel's centre, triangles tested in groups by the size
+  of their box, shaded like clay from both sides.
+- **Checked here**: the graph accepted by ComfyUI 0.42.3's `/prompt`
+  (validation passes; with stand-in files it stops at loading them); the
+  tail - a GLB loaded, RemeshMesh "solid", DecimateMesh, SaveGLB - ran on
+  ComfyUI on the CPU and came back through the Hub's own client as a closed
+  mesh. Not checked: TRELLIS.2 itself on the card (time, memory at 1024 and
+  1536, which way up its output really comes, the shapes).
+
+### Workflows (0.67.0)
+
+- **What.** The owner's own ComfyUI workflows (Settings → Models →
+  Workflows, `app/workflows/`), run by the assistant with `workflow_run`.
+  Upload the editor's JSON (as sites share them), the API format (also
+  `{"prompt": ...}`), or a PNG/WebP ComfyUI saved (its "prompt", else its
+  "workflow"). Stored in `data/workflows/<id>.json`: the graph in API format,
+  the file it came from, where its model files come from, and its inputs.
+  The owner's alone, like LoRAs: the routes refuse people, and the tool is
+  only in turns without a device.
+- **The editor's format to the API format** (`convert.py`): a port of what
+  ComfyUI's own editor (frontend 1.55) does when it queues - subgraphs
+  opened into "outer:inner" ids (a subgraph node's own values for the inputs
+  that feed widgets inside, in the older files' order, or by inner widget
+  with "proxyWidgets"), bypassed nodes passed through by type, muted ones and
+  notes left out, reroutes followed, primitive nodes' values put in, dynamic
+  combos' chosen options with their own widgets ("format.codec"), a seed's
+  control and an upload button's value skipped, `widgetType` for inputs of
+  several types, list values wrapped as `{"__value__": ...}`, missing widget
+  values from their defaults. Widget values are matched to inputs with
+  ComfyUI's own node list (`/object_info`). Checked against the real editor
+  run headless on ComfyUI 0.42.3's 304 local templates: 246 identical, 7
+  differ only where it does not matter (a 3D viewer's camera, ids the editor
+  renumbers, nodes inside a bypassed subgraph that nothing uses), 50 need
+  custom or paid nodes and are refused with their names. Ten of them are the
+  tests' cases (`tests/fixtures/workflows.json.gz`). A file is checked for shape
+  first; more than 5,000 nodes once subgraphs are opened is refused (a few
+  KB of nested subgraphs can make millions).
+- **What it needs and offers** (`inspect.py`): node kinds this ComfyUI lacks
+  (refused at upload - the Hub runs only ComfyUI's own nodes: no custom
+  nodes, no ComfyUI-Manager, no internet for ComfyUI); model files not on the
+  disk (a COMBO value with a model extension that ComfyUI does not list),
+  with their folder and a Hugging Face link when the editor's file names one
+  (`properties.models`, as the templates have it) - Download files puts them
+  in `models/comfy/<folder>/` through the same download queue as the models
+  (`Downloads.enqueue_files`, under the name `workflow:<id>`); not where a
+  catalog model's file goes unless it is the same file. What the assistant
+  may set, on by default: pictures, sound and video (inputs with an upload
+  button), the prompt and the negative (text a text encoder reads - or that
+  reaches one through switches, a prompt-writing model's prompt), seeds, and
+  width/height/length/seconds. The rest the owner opens with Show all.
+- **Running** (`runner.py`): the call's values into the graph - text, numbers
+  held to the node's limits and steps (integers stay integers: seeds go to
+  2^64), choices among the node's, pictures/sound/video uploaded to ComfyUI's
+  input folder (and deleted after); a seed not given is random, unless its
+  author fixed it in the editor. Through the scheduler (`comfy`), then
+  `Comfy.run_any` returns every file the nodes saved - pictures, video
+  (animated), sound, 3D - with previews only when nothing was saved (many
+  templates end in a preview). Saved under `workflows/` in the working
+  folder; pictures are shown, video and sound play under the answer.
 
 ---
 

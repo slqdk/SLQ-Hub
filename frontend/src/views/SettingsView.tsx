@@ -12,6 +12,7 @@ import { QueueModal, plateState } from "../components/Queue";
 import { ConfirmButton, Empty, Lamp, Modal, Switch, SwitchRow, Tabs, copyText, useInterval, type LampState } from "../components/ui";
 import { TestsTab } from "../components/TestsTab";
 import { LorasSection } from "../components/Loras";
+import { WorkflowsSection } from "../components/Workflows";
 import { UploadImageModel, UploadLanguageModel, UploadModelFiles } from "../components/ModelUpload";
 import { presetSettings, SdxlFields } from "../components/SdxlFields";
 import { forgetSettings } from "./ChatView";
@@ -193,7 +194,8 @@ function DownloadSignIns({ s }: { s: S }) {
 // each part has its own address (/settings/models/images), and the one last opened comes back.
 const MODEL_PARTS = [
   { id: "language", label: "Language" }, { id: "images", label: "Images" }, { id: "loras", label: "LoRAs" },
-  { id: "sound", label: "Sound" }, { id: "video", label: "Video" }, { id: "libraries", label: "Libraries" },
+  { id: "sound", label: "Sound" }, { id: "video", label: "Video" }, { id: "3d", label: "3D" },
+  { id: "workflows", label: "Workflows" }, { id: "libraries", label: "Libraries" },
   { id: "sign-ins", label: "Sign-ins" },
 ] as const;
 type ModelPart = typeof MODEL_PARTS[number]["id"];
@@ -209,9 +211,9 @@ function rememberedPart(): string {
 
 function ModelsTab({ s, part: asked }: { s: S; part?: string }) {
   const { models, refreshModels, toast, queue, modelNames } = useApp();
-  // Sound and Video only when the catalog has such models
+  // Sound, Video and 3D only when the catalog has such models
   const parts = MODEL_PARTS.filter((p) => (p.id !== "sound" || !!models?.audio?.length)
-    && (p.id !== "video" || !!models?.video?.length));
+    && (p.id !== "video" || !!models?.video?.length) && (p.id !== "3d" || !!models?.model3d?.length));
   const want = asked || rememberedPart();
   const part: ModelPart = (parts.find((p) => p.id === want) ?? parts[0]).id;
   useEffect(() => {
@@ -222,7 +224,7 @@ function ModelsTab({ s, part: asked }: { s: S; part?: string }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [advanced, setAdvanced] = useState<ModelEntry | null>(null);
   const downloading = !!models && [...models.llm, ...models.aux, ...models.comfy, ...(models.audio ?? []),
-    ...(models.video ?? [])]
+    ...(models.video ?? []), ...(models.model3d ?? [])]
     .some((m) => m.downloads.some((d) => d.status === "downloading" || d.status === "queued"));
   useInterval(refreshModels, downloading ? 2000 : 15000);
 
@@ -279,7 +281,7 @@ function ModelsTab({ s, part: asked }: { s: S; part?: string }) {
   const installedLlms = models.llm.filter((m) => m.installed);
   // a part with a download going on says so on its pill
   const groups: Partial<Record<ModelPart, ModelEntry[]>> = { language: models.llm, images: models.comfy,
-    sound: models.audio ?? [], video: models.video ?? [], libraries: models.aux };
+    sound: models.audio ?? [], video: models.video ?? [], "3d": models.model3d ?? [], libraries: models.aux };
   const fetching = (id: ModelPart) => (groups[id] ?? []).some((m) => m.downloads.some((d) =>
     d.status === "downloading" || d.status === "queued"));
 
@@ -344,6 +346,11 @@ function ModelsTab({ s, part: asked }: { s: S; part?: string }) {
         onDownload={download} onCancel={cancel} onUpload={setUploadingFiles}
         note="Run on the card through ComfyUI and take minutes per clip. Once one is downloaded, ask for a video in any chat - from a description, or with a picture attached to start from. Choose which one is used in Assistant, Video."
         extra={(m) => <><span className="tag">GPU</span>{deleteButton(m)}</>} />}
+      {part === "3d" && !!models.model3d?.length && <ModelGroup title="3D models" items={models.model3d} busy={busy}
+        onDownload={download} onCancel={cancel} onUpload={setUploadingFiles}
+        note="A 3D model to print from one picture of a thing: runs on the card through ComfyUI and takes minutes. The Hub saves an STL in millimetres (Z up, on the bed), the GLB as made, and a picture of it from three sides. Once one is downloaded, attach a picture in any chat and ask for a 3D model - say how big it should be."
+        extra={(m) => <><span className="tag">GPU</span>{deleteButton(m)}</>} />}
+      {part === "workflows" && <WorkflowsSection />}
       {advanced && <ModelSettings model={advanced} thinkingInChats={(s.data?.settings.agent?.level_chats ?? "quick") !== "quick"}
         onClose={() => setAdvanced(null)} onSaved={() => { setAdvanced(null); refreshModels(); }} />}
       {addingHF && <AddFromHF onClose={() => setAddingHF(false)} onAdded={() => { setAddingHF(false); refreshModels(); }} />}

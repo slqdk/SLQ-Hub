@@ -19,6 +19,8 @@ MODULES = [
     "app.training.feature",
     "app.audio.feature",
     "app.video.feature",
+    "app.model3d.feature",
+    "app.workflows.feature",
     "app.rag.feature",
     "app.evals.feature",
 ]

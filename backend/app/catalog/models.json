@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "notes": "Model catalog. File paths are verified against Hugging Face (2026-10-21) - except mel-band-roformer-vocals and seed-vc (0.18.0): their paths come from the projects' own code and their sizes are estimates; the video models' (0.19.0) paths come from ComfyUI's official templates and were checked on Hugging Face's pages (2026-10-24), sizes as the pages round them; flux2-klein-9b's (0.61.0) were listed through Hugging Face's API with their exact sizes (2026-10-31; its model file is gated, so its header was not read). flux2-klein-9b-uncensored's text encoder (0.63.0) too, its header read through darknight9121/FLUX.2-klein-base-9B-bucket-uncensored's ungated copy of the same size (F16, 399 Qwen3-8B tensors in Hugging Face's names, which ComfyUI v0.42.3 reads as klein 9B's encoder). 'dest' is relative to the models root (/srv/slq-hub/models on the VM, /models in the containers). Sizes are decimal bytes, used for progress only.",
+  "notes": "Model catalog. File paths are verified against Hugging Face (2026-10-21) - except mel-band-roformer-vocals and seed-vc (0.18.0): their paths come from the projects' own code and their sizes are estimates; the video models' (0.19.0) paths come from ComfyUI's official templates and were checked on Hugging Face's pages (2026-10-24), sizes as the pages round them; flux2-klein-9b's (0.61.0) were listed through Hugging Face's API with their exact sizes (2026-10-31; its model file is gated, so its header was not read). flux2-klein-9b-uncensored's text encoder (0.63.0) too, its header read through darknight9121/FLUX.2-klein-base-9B-bucket-uncensored's ungated copy of the same size (F16, 399 Qwen3-8B tensors in Hugging Face's names, which ComfyUI v0.42.3 reads as klein 9B's encoder). trellis2's (0.67.0) were listed through Hugging Face's API with their exact sizes (2026-11-02), the files of ComfyUI's official TRELLIS.2 template (3d_pixal3d_trellis2_image_to_model) - the TRELLIS.2 repository's own DINOv3 file instead of Pixal3D's, which adds an upsampler TRELLIS.2 does not use. 'dest' is relative to the models root (/srv/slq-hub/models on the VM, /models in the containers). Sizes are decimal bytes, used for progress only.",
   "llm": [
     {
       "id": "qwen3.8-27b",
@@ -434,6 +434,53 @@
         {"repo": "Comfy-Org/Wan_2.2_ComfyUI_Repackaged", "path": "split_files/loras/wan2.2_t2v_lightx2v_4steps_lora_v1.1_low_noise.safetensors", "dest": "comfy/loras/wan2.2_t2v_lightx2v_4steps_lora_v1.1_low_noise.safetensors", "size": 1230000000, "role": "lora_low"},
         {"repo": "Comfy-Org/Wan_2.1_ComfyUI_repackaged", "path": "split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors", "dest": "comfy/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors", "size": 6735906897, "role": "text_encoder"},
         {"repo": "Comfy-Org/Wan_2.2_ComfyUI_Repackaged", "path": "split_files/vae/wan_2.1_vae.safetensors", "dest": "comfy/vae/wan_2.1_vae.safetensors", "size": 253815318, "role": "vae"}
+      ]
+    }
+  ],
+  "model3d": [
+    {
+      "id": "trellis2",
+      "name": "TRELLIS.2 (picture to 3D)",
+      "description": "A 3D model from one picture, for printing: Microsoft's TRELLIS.2 (4B, MIT) in ComfyUI's own nodes, shape only. The subject is cut out first (BiRefNet, MIT) and read with DINOv3 (Meta's DINOv3 Licence: no military or weapons use); ComfyUI then makes it one closed solid. The Hub saves an STL in millimetres and a GLB. Not tried on this card yet.",
+      "default": false,
+      "engine": "comfy",
+      "family": "trellis2",
+      "settings": {
+        "resolution": {
+          "standard": 1024,
+          "high": 1536
+        },
+        "faces": 300000
+      },
+      "files": [
+        {
+          "repo": "Comfy-Org/TRELLIS.2",
+          "path": "diffusion_models/trellis_2_int8_convrot.safetensors",
+          "dest": "comfy/diffusion_models/trellis_2_int8_convrot.safetensors",
+          "size": 5253048192,
+          "role": "unet"
+        },
+        {
+          "repo": "Comfy-Org/TRELLIS.2",
+          "path": "clip_vision/dino_v3_vit_l.safetensors",
+          "dest": "comfy/clip_vision/dino_v3_vit_l.safetensors",
+          "size": 1212559776,
+          "role": "encoder"
+        },
+        {
+          "repo": "Comfy-Org/TRELLIS.2",
+          "path": "vae/trellis_2_shape_vae_bf16.safetensors",
+          "dest": "comfy/vae/trellis_2_shape_vae_bf16.safetensors",
+          "size": 1095844024,
+          "role": "shape_vae"
+        },
+        {
+          "repo": "Comfy-Org/BiRefNet",
+          "path": "background_removal/birefnet.safetensors",
+          "dest": "comfy/background_removal/birefnet.safetensors",
+          "size": 444473596,
+          "role": "background"
+        }
       ]
     }
   ]

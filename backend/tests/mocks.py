@@ -3,6 +3,7 @@ ComfyUI, the sandbox and SearXNG - plus a transport that routes requests to
 them by host name."""
 from __future__ import annotations
 
+import copy
 import json
 import re
 import time
@@ -455,6 +456,8 @@ def make_comfy(state: dict) -> FastAPI:
     async def object_info():
         if state.get("object_info_down"):                     # too busy to list its nodes
             return JSONResponse({"error": "busy"}, status_code=503)
+        if state.get("object_info") is not None:              # a real node list (0.67.0: workflows)
+            return state["object_info"]
         names = ["UNETLoader", "QwenImage21Cache", "CLIPLoader", "VAELoader", "TextEncodeQwenImage21",
                  "EmptyLatentImage", "KSampler", "VAEDecode", "SaveImage", "SaveImageAdvanced", "LoadImage",
                  "KSamplerSelect", "RandomNoise", "CFGGuider", "SamplerCustomAdvanced", "ManualSigmas",
@@ -466,7 +469,12 @@ def make_comfy(state: dict) -> FastAPI:
                  "VAEEncodeAudio", "AudioMerge", "SLQAceStepReference", "SLQAceStepEncode", "SLQSeparateVocals",
                  "SLQSeedVC", "SLQBeatCheck", "ModelSamplingSD3", "Wan22ImageToVideoLatent", "WanImageToVideo",
                  "WanFirstLastFrameToVideo", "EmptyHunyuanLatentVideo", "KSamplerAdvanced", "LoraLoaderModelOnly", "LoraLoader",
-                 "CreateVideo", "SaveVideo", "TrimAudioDuration", "AudioConcat", "VAEDecodeTiled"]
+                 "CreateVideo", "SaveVideo", "TrimAudioDuration", "AudioConcat", "VAEDecodeTiled",
+                 # picture to 3D (0.67.0)
+                 "LoadBackgroundRemovalModel", "RemoveBackground", "ImageCropToMask", "CLIPVisionLoader",
+                 "Trellis2Conditioning", "CFGOverride", "RescaleCFG", "EmptyTrellis2LatentStructure",
+                 "VaeDecodeStructureTrellis2", "Trellis2ShapeStage", "Trellis2UpsampleStage", "VaeDecodeShapeTrellis",
+                 "RemeshMesh", "DecimateMesh", "SaveGLB"]
         names = [n for n in names if n not in state.get("missing_nodes", ())]
         return {n: {"input": {}, "output": []} for n in names}
 
@@ -545,6 +553,11 @@ def make_comfy(state: dict) -> FastAPI:
             outputs = {} if state.get("no_video") else \
                 {node: {"images": [{"filename": name, "subfolder": sub, "type": "output"}], "animated": [True]}
                  for node, sub, name in videos}
+        elif any(n.get("class_type") == "SaveGLB" for n in graph.values()):     # a 3D model (0.67.0)
+            outputs = {node_id: {"3d": [{"filename": f"hub_{pid}_.glb", "subfolder": "3d", "type": "output"}]}
+                       for node_id, n in graph.items() if n.get("class_type") == "SaveGLB"}
+        elif state.get("outputs") is not None:                # what a workflow's nodes saved, as given
+            outputs = copy.deepcopy(state["outputs"])
         else:
             outputs = {"9": {"images": [{"filename": f"{pid}.png", "subfolder": "", "type": "output"}]}}
         for node_id, node in graph.items():                   # PreviewAny shows the text it was given
@@ -575,6 +588,8 @@ def make_comfy(state: dict) -> FastAPI:
                             media_type="audio/mpeg")
         if filename.endswith(".mp4"):
             return Response(state.get("video_bytes") or fake_mp4(), media_type="video/mp4")
+        if filename.endswith(".glb"):
+            return Response(state.get("glb_bytes") or b"glTF", media_type="model/gltf-binary")
         return Response(state.get("picture_bytes") or PNG_1x1, media_type="image/png")
 
     return app
@@ -856,6 +871,16 @@ def make_hf(state: dict) -> FastAPI:
             return JSONResponse({"error": "no"}, status_code=404)
         return {"_id": "x", "id": f"{owner}/{name}", "gguf": r.get("gguf") or {}, "gated": r.get("gated") or False,
                 **({"sha": r["sha"]} if r.get("sha") else {})}
+
+    @app.head("/{owner}/{name}/resolve/main/{path:path}")
+    async def resolve_head(owner: str, name: str, path: str):
+        """A file's size without it (0.67.0: a workflow's files): Hugging Face answers a large file's link with a
+        redirect that carries x-linked-size."""
+        f = next((x for x in (repo_of(owner, name) or {}).get("tree", []) if x.get("path") == path), None)
+        if f is None:
+            return PlainTextResponse("", status_code=404)
+        return Response(status_code=302, headers={"x-linked-size": str(int(f.get("size") or 0)),
+                                                  "location": f"https://cdn-lfs.test/{path}"})
 
     @app.get("/{owner}/{name}/resolve/main/{path:path}")
     async def resolve(owner: str, name: str, path: str, request: Request):

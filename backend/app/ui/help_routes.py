@@ -66,4 +66,6 @@ async def capabilities(hub, user) -> dict:
                    "cutout": bool(images and images.available("qwen-image-2.1"))},
         "sound": {a: bool(audio and audio.available(a)) for a in SOUND},
         "video": {a: bool(video and video.available(a)) for a in VIDEO},
+        "model3d": bool(hub.extras.get("model3d") and hub.extras["model3d"].available()),
+        "workflows": 0 if member or hub.extras.get("workflows") is None else len(hub.extras["workflows"].list()),
     }

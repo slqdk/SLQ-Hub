@@ -696,6 +696,8 @@ def main() -> None:
     ap.add_argument("--lan-host", default="", help="the Hub's LAN address, for the Apps page")
     ap.add_argument("--sandbox", default="", help="a real sandbox daemon (http://IP:7000, token tok) that mounts "
                                                   "this Hub's data/workspace as /workspace")
+    ap.add_argument("--object-info", default="", help="a real ComfyUI's /object_info saved as JSON, for the fake "
+                                                      "ComfyUI to answer with (Settings -> Models -> Workflows)")
     a = ap.parse_args()
     base = Path(a.data or tempfile.mkdtemp(prefix="hub-dev-"))
     data, models = base / "data", base / "models"
@@ -733,6 +735,8 @@ def main() -> None:
              # Settings -> Cloud: OpenAI-compatible, base URL http://cloud.test/v1, any key (0.37.0)
              "cloud": {"responder": lambda body: {"content": "The cloud model took it over and finished the work "
                                                              "(a fake answer from cloud.test)."}}}
+    if a.object_info:
+        fakes["comfy"]["object_info"] = json.loads(Path(a.object_info).read_text(encoding="utf-8"))
     router = HostRouter({"supervisor": make_supervisor(fakes["sup"]), "llm": make_llama(fakes["llama"]),
                          "comfy": make_comfy(fakes["comfy"]), "sandbox:7000": make_sandbox(fakes["sandbox"]),
                          "searxng": make_searxng(), "mcp.test": make_mcp_http(fakes["mcp"]),

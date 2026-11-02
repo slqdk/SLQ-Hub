@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.66.0, 2026-11-01)
+## State (0.67.0, 2026-11-02)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -799,6 +799,31 @@ holder); nothing here copies it, the test shapes are generic. Søren was advised
 (30-33 tokens/s here against the 9B's 38-40, chat 243's largest request 39K of the 27B's 65K, thinking on) and to
 delete stl-creator and make it again after the update. The refit test's budget went to 15,200 tokens (bash's
 description is longer). NOT run on the VM: item 85.
+0.67.0, Søren (after he asked how downloaded ComfyUI workflows would give him more options, and was told what
+ComfyUI 0.42.3 already ships): "can we do both ? so i can test it ?" - a hand-picked feature (a 3D model from a
+picture, for his STL wish) and a Workflows page. **Measured first**: ComfyUI v0.42.3 (the Hub's) was run here on
+the CPU (torch 2.15 cpu, Python 3.12) for its real /object_info (681 nodes), and its own frontend 1.55.18 was run
+headless (Playwright) as the oracle: `app.loadGraphData` + `app.graphToPrompt` on the 304 local templates of
+comfyui-workflow-templates-json 0.1.119 (618 in all; 314 are Comfy's paid API templates). The Python converter
+(app/workflows/convert.py) gives 246 identical, 7 differing only in a 3D viewer's camera, ids the editor renumbers
+(a migration on load) and nodes inside a bypassed subgraph that nothing uses; 50 need custom or paid nodes. Every
+converted template was posted to that ComfyUI's /prompt: all rejected only for missing model and example files,
+except one whose own link is broken (the editor sends the same). The TRELLIS.2 graph passes /prompt validation;
+its tail (Load3DAdvanced -> Get3DComponents -> RemeshMesh solid -> DecimateMesh -> SaveGLB) ran on the CPU and came
+back through the Hub's own Comfy.run_any as a 3d output, a closed mesh after mesh.for_print. Licences, from
+Hugging Face's API: TRELLIS.2 MIT, Pixal3D MIT, MoGe MIT, BiRefNet MIT, DINOv3 Meta's DINOv3 Licence (no
+military/weapons use, worldwide); Hunyuan3D 2.0/2.1's licence does not apply in the EU (not in the catalog; its
+templates can still be uploaded - Søren was told). An independent review found six must-fix problems, all fixed
+with tests: nested subgraphs that opened into 262,144 nodes from 4.6 KB (now refused above 5,000, and an upload is
+read in a thread), damaged files that gave 500s (shapes checked first), PrimitiveInt values and other non-seeds
+randomized as seeds (only seed/noise_seed or what feeds one; a seed its author fixed stays), text keyed "prompt"
+that was a math expression (the prompt is what reaches a text encoder, through switches), the page saying a
+downloaded file was missing (a file on the disk counts), and node titles from the file going uncapped into the
+tool's description (one line, 60 characters); and minor ones (integers through floats, the size check, a workflow
+link taking a catalog model's file path, a token for fixed-revision links, the store re-read each turn). trimesh
+5.2.0 is new in the Hub's image (requirements.txt). The UI was clicked through on the dev server in Chromium,
+desktop dark and phone light: the 3D part, an upload with its missing file and inputs, Show all, a refused custom
+node. NOT run on the VM: item 86.
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
 host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU
@@ -1558,6 +1583,20 @@ the host if the VM ever stops by itself.
     - **The queue log after a reboot**: an export of a chat after the VM restarted should show only that chat's
       jobs and the one that held the card. The rows logged before 0.66.0 stay in jobs_log, in monotonic seconds,
       and are never shown.
+86. **3D models and workflows (0.67.0)** - none of it has run on the VM:
+    - **The Hub's image** gets trimesh 5.2.0 (pure Python) with update.sh; a failed build undoes the update.
+    - **TRELLIS.2 on the card**: download it (Settings -> Models -> 3D, about 8 GB), then a chat: a photo of one
+      thing on a plain background, "make a 3D model of this, 8 cm tall". Watch the time, the card's memory at
+      detail standard (1024) and high (1536) - Trellis2UpsampleStage's tooltip says higher needs more - and
+      ComfyUI's log for the int8 "convrot" weights (the same kind as Qwen-Image 2.1's). Which way up the STL comes
+      (ComfyUI says it turns TRELLIS.2's Z up into glTF's Y up; the Hub turns it back): the views show it, a slicer
+      too. RemeshMesh "solid" at 768 is untried on the card (here it ran at 128 on the CPU).
+    - **A workflow on the card**: upload one of ComfyUI's own templates that needs only a small model, e.g.
+      utility-gan_upscaler.json (Real-ESRGAN, from github.com/Comfy-Org/workflow_templates, or ComfyUI's template
+      browser through the SSH tunnel), Download files, then "use the upscaler on this video" in a chat. The
+      converter's cases are ComfyUI 0.42.3's own templates; files from other sites (Civitai, OpenArt) are
+      untried - an export is the way to see what went wrong. When COMFYUI_REF changes, the editor's format may
+      too: tools/workflow_oracle/ (convert.js, compare.py) is how the converter was checked - run it again.
 80. **Not pursued (Søren, 2026-10-28)** - kept here in case it is taken up again; if it stays unused, remove
     the `windows` service, `.30` from `SANDBOX_IPS`, `windows/*` from `FOLDERS` and INSTALL.md section 12.
     **0.39.0's Windows container on VM 222**: `COMPOSE_PROFILES=windows` in

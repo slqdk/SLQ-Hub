@@ -17,12 +17,14 @@ export interface HelpCaps {
   images: { generate: boolean; edit: boolean; cutout: boolean };
   sound: { speech: boolean; music: boolean; sound: boolean; voice: boolean; separate: boolean };
   video: { t2v: boolean; i2v: boolean; flf2v: boolean };
+  model3d: boolean;           // 0.67.0: TRELLIS.2 downloaded
+  workflows: number;          // the owner's ComfyUI workflows (0 in a person's chats)
 }
 
 export type Need = "code" | "windows" | "browser" | "libraries" | "mcp" | "handover"
   | "images.generate" | "images.edit" | "images.cutout"
   | "sound.speech" | "sound.music" | "sound.sound" | "sound.voice" | "sound.separate"
-  | "video.t2v" | "video.i2v" | "video.flf2v";
+  | "video.t2v" | "video.i2v" | "video.flf2v" | "model3d" | "workflows";
 
 export interface Example {
   text: string;
@@ -73,6 +75,8 @@ export const NEEDS: Record<Need, { missing: string; get: string; tab?: string }>
   "video.t2v": { missing: "Needs a video model", get: "Download Wan 2.2 5B Turbo (fast), Wan 2.2 5B or Wan 2.2 14B text to video under Settings, Models, Video models.", tab: "models/video" },
   "video.i2v": { missing: "Needs a video model for pictures", get: "Download Wan 2.2 5B Turbo (fast), Wan 2.2 5B or Wan 2.2 14B picture to video under Settings, Models, Video models.", tab: "models/video" },
   "video.flf2v": { missing: "Needs Wan 2.2 14B picture to video", get: "Download it under Settings, Models, Video models.", tab: "models/video" },
+  "model3d": { missing: "Needs TRELLIS.2", get: "Download TRELLIS.2 (picture to 3D) under Settings, Models, 3D.", tab: "models/3d" },
+  "workflows": { missing: "No workflow is added", get: "Add a ComfyUI workflow under Settings, Models, Workflows.", tab: "models/workflows" },
 };
 
 export function has(caps: HelpCaps, need: Need): boolean {
@@ -666,6 +670,42 @@ export const SECTIONS: HelpSection[] = [
           { text: "Make the sound of waves and put it under the lighthouse video" },
         ],
         needs: ["code"],
+      },
+    ],
+  },
+  {
+    id: "more",
+    title: "3D models and workflows",
+    intro: "A 3D model to print from a picture, and the ComfyUI workflows the owner adds - an upscaler, ControlNet, "
+      + "inpainting. Both run on the graphics card and take minutes.",
+    items: [
+      {
+        id: "model3d",
+        tools: ["model3d_generate"],
+        title: "A 3D model to print",
+        what: "From one picture of a thing: an STL in millimetres, standing on the bed, ready for the slicer - and a "
+          + "picture of it from three sides to check first. Say how big it should be: a picture has no scale.",
+        examples: [
+          { text: "Make a 3D model of this for my printer, 8 cm tall", attach: "a picture" },
+          { text: "Make a picture of a small dragon figurine on a white background, then a 3D model of it, 6 cm long" },
+        ],
+        tips: ["One thing on a plain background works best; the background is cut away.",
+          "What the picture does not show - the back - is guessed. Check the views before printing."],
+        needs: ["model3d"],
+      },
+      {
+        id: "workflows",
+        tools: ["workflow_run"],
+        owner: true,
+        title: "Your own ComfyUI workflows",
+        what: "Workflows added under Settings, Models, Workflows, run by name with what you give them - a picture, a "
+          + "prompt, a size. Their pictures, videos and sound are saved in the chat.",
+        examples: [
+          { text: "Use the upscaler workflow on this picture", attach: "a picture" },
+          { text: "Run the ControlNet workflow with this pose: a knight in armour, oil painting", attach: "a picture" },
+        ],
+        tips: ["Settings says what each workflow needs and lets you choose what the assistant may set."],
+        needs: ["workflows"],
       },
     ],
   },

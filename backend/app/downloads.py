@@ -48,7 +48,9 @@ def _source(f: dict) -> tuple[str, dict, str]:
         civitai = host == "civitai.com" or host.endswith(".civitai.com")
         if civitai and tokens.civitai():
             headers["Authorization"] = f"Bearer {tokens.civitai()}"
-        return f["url"], headers, "Civitai" if civitai else host
+        if host == "huggingface.co" and tokens.hf():          # a link to a fixed revision (a workflow's, 0.67.0)
+            headers["Authorization"] = f"Bearer {tokens.hf()}"
+        return f["url"], headers, "Civitai" if civitai else "Hugging Face" if host == "huggingface.co" else host
     if tokens.hf():
         headers["Authorization"] = f"Bearer {tokens.hf()}"
     return f"https://huggingface.co/{f['repo']}/resolve/main/{f['path']}?download=true", headers, "Hugging Face"
@@ -97,6 +99,26 @@ class Downloads:
                 self.state[dest] = {"model": e["id"], "dest": dest, "status": "queued", "done": 0,
                                     "total": f.get("size") or 0, "rate": 0, "error": None}
                 added.append(dest)
+        if added and (self._task is None or self._task.done()):
+            self._task = asyncio.get_running_loop().create_task(self._run())
+        return added
+
+    def enqueue_files(self, owner: str, files: list[dict]) -> list[str]:
+        """Files that belong to no catalog model (0.67.0: a workflow's missing models), under the name `owner`
+        ("workflow:<id>") - each {"dest", "repo" and "path" or "url", "size"}. Cancel takes the same name."""
+        added = []
+        self._cancel.discard(owner)
+        for f in files:
+            dest = f["dest"]
+            if self.catalog.path(f).is_file():
+                continue
+            if any(q[1]["dest"] == dest for q in self.queue) or \
+                    self.state.get(dest, {}).get("status") == "downloading":
+                continue
+            self.queue.append((owner, f))
+            self.state[dest] = {"model": owner, "dest": dest, "status": "queued", "done": 0,
+                                "total": f.get("size") or 0, "rate": 0, "error": None}
+            added.append(dest)
         if added and (self._task is None or self._task.done()):
             self._task = asyncio.get_running_loop().create_task(self._run())
         return added
@@ -186,7 +208,8 @@ class Downloads:
                         if r.status_code in (401, 403) and site == "Civitai":
                             raise RuntimeError(CIVITAI_LOGIN)
                         if r.status_code in (401, 403) and site == "Hugging Face":
-                            raise RuntimeError(hf_login(f["repo"], r.status_code))
+                            repo = f.get("repo") or "/".join(urlparse(f.get("url") or "").path.split("/")[1:3])
+                            raise RuntimeError(hf_login(repo, r.status_code))
                         if r.status_code >= 400:
                             raise RuntimeError(f"{site} answered {r.status_code}")
                         if have and r.status_code != 206:

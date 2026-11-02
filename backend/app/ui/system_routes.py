@@ -263,7 +263,7 @@ async def hf_lookup(repo: str, request: Request):
 
 
 SECTIONS = {"llm": "Language models", "aux": "Helpers for libraries", "comfy": "Image models (ComfyUI)",
-            "audio": "Sound, music and speech", "video": "Video models"}
+            "audio": "Sound, music and speech", "video": "Video models", "model3d": "3D models"}
 
 
 def _in_hub(hub, q: str) -> list[dict]:
@@ -478,8 +478,8 @@ def in_use(hub, entry: dict, group: str) -> str:
     for section, key, where in chosen:
         if st.get(section, key) == mid:
             return f"It is chosen under {where}. Choose another model there first."
-    if group in ("comfy", "audio", "video") and any(j["need"] == "comfy" for j in snap["running"]):
-        return "The card is making a picture, a sound or a video now. Wait for it to finish."
+    if group in ("comfy", "audio", "video", "model3d") and any(j["need"] == "comfy" for j in snap["running"]):
+        return "The card is making a picture, a sound, a video or a 3D model now. Wait for it to finish."
     libraries = hub.extras.get("libraries")
     if group == "aux" and libraries is not None and getattr(libraries, "current", None):
         return "A library is reading a document with the helpers now. Wait for it to finish."
