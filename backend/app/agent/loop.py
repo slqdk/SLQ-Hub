@@ -1180,6 +1180,8 @@ class Agent:
             if not subagent else []
         video_pipe = self.hub.extras.get("video")
         video = bool(video_pipe and video_pipe.available()) and not subagent
+        pipe3d = self.hub.extras.get("model3d")
+        model3d = bool(pipe3d and pipe3d.available()) and not subagent
         if device is not None:                   # a person's chat: their name, no memory, code if allowed
             return system_prompt(user=device.name, model_name=Catalog.label(entry),
                                  folder_text=device_folder_text(wd.sandbox_path, device.code, device.left),
@@ -1187,7 +1189,7 @@ class Agent:
                                  images_available=bool(images and images.available()), handover_to=handover_to,
                                  subagent=subagent, taken_over_from=taken_over_from, memory=False,
                                  code=device.code, dropped=device.dropped, sound=sound, video=video,
-                                 internet_asks=internet.asking(self.hub.settings))
+                                 internet_asks=internet.asking(self.hub.settings), model3d=model3d)
         from .tools import webapp as webapp_tool
         from .tools import windows as windows_tool
         mem = self.hub.extras["memory"].index(project["id"] if project else None)
@@ -1207,7 +1209,7 @@ class Agent:
                              cloud_chosen=cloud_chosen,
                              taken_over_from=taken_over_from, sound=sound, video=video,
                              internet_asks=internet.asking(self.hub.settings), windows=windows_tool.ready(self.hub),
-                             web=webapp_tool.ready(self.hub))
+                             web=webapp_tool.ready(self.hub), model3d=model3d)
 
     def build_messages(self, chat: dict, project: dict | None, wd: projects.Workdir, entry: dict, run: Run,
                        handover_to: str = "", taken_over_from: str = "", cloud_model: str = "",

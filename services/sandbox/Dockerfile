@@ -102,12 +102,24 @@ RUN printf '#!/bin/sh\nexec /opt/pageshot/bin/python -I /opt/execd/pageshot.py "
     && chmod 755 /usr/local/bin/pageshot
 
 # 3D models to print (0.66.0): manifold3d builds solids that are always closed (extrude an outline, revolve a
-# profile, add and cut parts), trimesh saves them as STL or 3MF and checks them (watertight, volume, size), shapely
-# draws the 2D outlines. A skill builds its model with these instead of writing an STL by hand - chat 243's
-# hand-written ones were not solids. Into the agent's /opt/py as the sandbox user, so pip there stays its own; a
-# layer of its own, so the ones above are not built again.
-RUN runuser -u sandbox -- /opt/py/bin/pip install trimesh manifold3d shapely \
-    && runuser -u sandbox -- /opt/py/bin/python -c "import manifold3d, trimesh, shapely; print('3d ok')"
+# profile, add and cut parts), trimesh reads and writes the other 3D formats, shapely draws the 2D outlines. A skill
+# builds its model with these instead of writing an STL by hand - chat 243's hand-written ones were not solids.
+# Into the agent's /opt/py as the sandbox user, so pip there stays its own; a layer of its own, so the ones above are
+# not built again. Pinned since 0.67.1: the versions hub3d's recipe (below) was checked against; networkx lets
+# trimesh read 3MF files.
+RUN runuser -u sandbox -- /opt/py/bin/pip install manifold3d==3.5.4 trimesh==5.2.0 shapely==2.2.0 networkx==3.6.1 \
+    && runuser -u sandbox -- /opt/py/bin/python -c "import manifold3d, trimesh, shapely, networkx; print('3d ok')"
+
+# hub3d (0.67.1, chat 255): saves, checks and draws 3D models, and prints manifold3d's API with worked examples
+# (`hub3d recipe`), so a model builds with the library instead of guessing at it. On /opt/py's path through a .pth
+# file and read-only for the sandbox user; the command runs isolated (-I), so a file in the working folder named
+# like a module is not imported instead. The self-test runs the recipe's examples: a recipe that no longer matches
+# the library stops the build.
+COPY hub3d.py /opt/hub3d/hub3d.py
+RUN echo /opt/hub3d > "$(/opt/py/bin/python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')/hub3d.pth" \
+    && printf '#!/bin/sh\nexec /opt/py/bin/python -I -m hub3d "$@"\n' > /usr/local/bin/hub3d \
+    && chmod 755 /usr/local/bin/hub3d \
+    && cd /tmp && runuser -u sandbox -- /usr/local/bin/hub3d selftest
 
 COPY execd.py confine.py /opt/execd/
 

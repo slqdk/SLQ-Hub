@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.67.0, 2026-11-02)
+## State (0.67.1, 2026-11-02)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -824,6 +824,30 @@ link taking a catalog model's file path, a token for fixed-revision links, the s
 5.2.0 is new in the Hub's image (requirements.txt). The UI was clicked through on the dev server in Chromium,
 desktop dark and phone light: the 3D part, an upload with its missing file and inputs, Show all, a refused custom
 node. NOT run on the VM: item 86.
+0.67.1, Søren (chat 255's export: "i tried to use the new skill for stl creating... it does now really work that
+well.."). **What the export showed**: the chat used the old stl-creator skill (chat 243's, made before 0.66.0's
+guidance; its text says "like the candle holder example") with a Qwen3.8 27B fine-tune ("...-heretic-uncensor").
+The message was a MakerWorld link (model 3338545) and a photo of a commercial product (Kreaværket's "Spiral" candle
+holder - recognised by the model from the photo; it never fetched the page). Turn 1 (32 model steps, 18 minutes):
+generate_spiral_stl.py written 14 times, manifold3d's API guessed (17 errors over both turns: `Cylinder`, `.union`,
+`.to_stl`, `Mesh.from_stl`, `.intersect`, a module-level `batch_boolean`, `transform` with a 4x4, `backside`,
+`run_index` ...), bash's 120 s limit hit by a Python STL writer, and "validated" said of a file checked only by its
+header, face count and box - Bambu Studio: "The file does not contain any geometry data." Turn 2 (58 steps, 42
+minutes, escalated to Qwen3.8 Standard after the same write_file three times, prompts up to 88K, still running at
+the export): the STL in made/ is 13,680 triangles, 152x152x162.5 mm, with 13 edges shared by four to eight
+triangles - not a solid. **Fixed, generically** (nothing here copies that design; the recipe's examples are a pen
+cup and a name plate): `services/sandbox/hub3d.py` (DESIGN §6 "Skills", "hub3d"): `hub3d recipe` (the API as
+manifold3d 3.5.4 has it - each name and argument checked against the library here, under Python 3.12 with the
+pinned wheels - plus two whole programs that `hub3d selftest` runs in the image's build), `hub3d.save` (own binary
+STL and 3MF writers, read back, strict), the check (counted, as a slicer reads the file), `hub3d.views` (the Hub's
+renderer, a parity test), `hub3d.solid`, `hub3d.load` (STL, 3MF with components and `p:path`, others through
+trimesh); a "3D models to print" section in the system prompt (a link to MakerWorld, Printables or Thingiverse:
+point the user to the designer's own file on that page; building: `hub3d recipe` first, save, views); bash's
+description names hub3d; skill-creator's code section uses hub3d and says a skill makes things of a kind; Help has
+"A 3D part to measure"; the 3D wheels are pinned, networkx added. Chat 255's STL through `hub3d check`: "13 edges
+belong to more than two triangles ... NOT READY". The dense-text test's budget went to 14,900 tokens (the system
+prompt is longer). Søren was told to delete stl-creator and make it again with the skill maker after the update,
+to get that design's file from its MakerWorld page, and to test with his own designs. NOT run on the VM: item 87.
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
 host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU
@@ -1597,6 +1621,20 @@ the host if the VM ever stops by itself.
       converter's cases are ComfyUI 0.42.3's own templates; files from other sites (Civitai, OpenArt) are
       untried - an export is the way to see what went wrong. When COMFYUI_REF changes, the editor's format may
       too: tools/workflow_oracle/ (convert.js, compare.py) is how the converter was checked - run it again.
+87. **hub3d (0.67.1)** - none of it has run on the VM:
+    - **The sandbox image**: update.sh rebuilds it from the 3D layer on (pinned wheels: manifold3d 3.5.4, trimesh
+      5.2.0, shapely 2.2.0, networkx 3.6.1), then copies hub3d and runs `hub3d selftest` as the sandbox user - it
+      prints "hub3d selftest: ok (manifold3d 3.5.4, trimesh 5.2.0, numpy ...)"; a failure stops the build and the
+      update is undone. Proven here only in a Python 3.12 venv with the same wheels (and the newest numpy, as /opt/py
+      has whatever pip picked when its first layer was built - not pinned). Check: `sudo bash update.sh compose exec
+      sandbox hub3d selftest`, and `hub3d recipe | head`.
+    - **The assistant with it**: a new chat with Qwen3.8 27B (no skill chosen): "Make an STL of a box with a lid for
+      my A1 mini, 80 x 60 x 40 mm inside, 2 mm walls". The export should show `hub3d recipe` read first, no guessed
+      names, hub3d.save's READY, views looked at - and how many steps. Then a MakerWorld link alone: does it point
+      to the page's file instead of building one?
+    - **3MF from Bambu Studio**: `hub3d check` on a real project file (plates, painted parts, modifiers) - the
+      reader was tried only on files made here to the spec, with components in 3D/Objects/.
+    - **People's chats with code**: hub3d runs under Landlock (it reads /opt and /usr, writes only the folder).
 80. **Not pursued (Søren, 2026-10-28)** - kept here in case it is taken up again; if it stays unused, remove
     the `windows` service, `.30` from `SANDBOX_IPS`, `windows/*` from `FOLDERS` and INSTALL.md section 12.
     **0.39.0's Windows container on VM 222**: `COMPOSE_PROFILES=windows` in

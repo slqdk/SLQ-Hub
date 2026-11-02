@@ -1127,15 +1127,17 @@ def counting(ctx: int, replies: list[dict], sizes: list, **cost):
 
 async def test_dense_text_is_fitted_by_the_real_token_count(signed_in, app, fakes, monkeypatch):
     """Chat 74: every character of its hex dumps cost more tokens than the estimate says (62,286 real for 45,004
-    estimated), so it was never condensed and ran out of room. The last step's real count scales the estimate."""
+    estimated), so it was never condensed and ran out of room. The last step's real count scales the estimate.
+    (14,900: the last of its eleven requests must fit - 14,600 since 0.43.0's ask_user schema; 0.67.1's 3D section
+    of the system prompt took it over that.)"""
     hub = app.state.hub
-    monkeypatch.setattr(hub.catalog, "context_per_request", lambda model_id: 14600)     # (0.43.0: ask_user's schema)
+    monkeypatch.setattr(hub.catalog, "context_per_request", lambda model_id: 14900)
     c = await new_chat(signed_in)
     wd = hub.extras["agent"].workdir(chats.get_chat(c["id"]))
     for i in range(10):
         wd.write(f"dump{i}.txt", f"dump {i}\n" + "0f a3 " * 1000 + "\n", author="test", origin="test", message="dump")
     sizes: list = []
-    fakes.llama["responder"] = counting(14600, [
+    fakes.llama["responder"] = counting(14900, [
         *({"content": f"Dump {i} read.", "tool_calls": [{"name": "read_file", "arguments": {"path": f"dump{i}.txt"}}]}
           for i in range(10)), {"content": "All read."}], sizes, dense=1.6)
     run = await finish(app, await say(signed_in, c["id"], "Read every dump"))

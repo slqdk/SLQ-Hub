@@ -676,9 +676,23 @@ export const SECTIONS: HelpSection[] = [
   {
     id: "more",
     title: "3D models and workflows",
-    intro: "A 3D model to print from a picture, and the ComfyUI workflows the owner adds - an upscaler, ControlNet, "
-      + "inpainting. Both run on the graphics card and take minutes.",
+    intro: "A 3D model to print, built to measure or made from a picture, and the ComfyUI workflows the owner adds - "
+      + "an upscaler, ControlNet, inpainting. Models from a picture and workflows run on the graphics card and take "
+      + "minutes.",
     items: [
+      {
+        id: "print3d",
+        title: "A 3D part to measure",
+        what: "A box, a bracket, a holder, a sign with your name: the assistant builds it in code as a closed solid in "
+          + "millimetres, checks it and shows it from three sides before you print. Say the sizes and the printer.",
+        examples: [
+          { text: "Make an STL of a box with a lid for my printer: 80 x 60 x 40 mm inside, 2 mm walls" },
+          { text: "Make a stand that holds my phone at 65 degrees, as an STL" },
+        ],
+        tips: ["For a model you found on MakerWorld, Printables or Thingiverse, download the designer's own file there "
+          + "- attach it here to have it scaled, split or checked."],
+        needs: ["code"],
+      },
       {
         id: "model3d",
         tools: ["model3d_generate"],

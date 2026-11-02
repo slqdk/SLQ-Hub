@@ -113,9 +113,11 @@ When the skill's result is a file made by code - a 3D model to print, a spreadsh
 code is the part that breaks. Make it work the way the user will use it:
 
 - **A library for the format, never the format by hand.** Excel: openpyxl. Word: python-docx. Pictures and
-  charts: Pillow, matplotlib. 3D models (STL, 3MF): manifold3d to build the solid (extrude a 2D outline, revolve a
-  profile, add and cut parts - what it makes is always closed) and trimesh to save and check it. The sandbox
-  has them all. A hand-written STL is a list of triangles that slicers reject when one is wrong.
+  charts: Pillow, matplotlib. 3D models (STL, 3MF): manifold3d builds the solid (extrude a 2D outline, revolve a
+  profile, add and cut parts - what it makes is always closed) and hub3d saves, checks and draws it; run
+  `hub3d recipe` for manifold3d's API with worked examples before writing the script, and put the calls the
+  script needs in the skill rather than the recipe. The sandbox has them all. A hand-written STL is a list of
+  triangles that slicers reject when one is wrong.
 - **The script is the skill's, and the skill runs it.** Put it in `scripts/` with arguments for what changes
   (sizes, counts, the output file - and it writes where it is told) and `--help`; it prints what it wrote. In
   `SKILL.md`, say exactly how to run it: a chosen skill's files are in `.hub/skills/<name>/` of the working folder
@@ -123,11 +125,14 @@ code is the part that breaks. Make it work the way the user will use it:
   result.stl ...` - and that the assistant runs it rather than writing a new one. Without that line the next chat
   writes its own, untested.
 - **Check the result with something other than the script.** Open the file again with the library and check what
-  matters: a 3D model is watertight, its size in mm is the size asked for and it fits the printer; a spreadsheet
-  has the sheets, columns and numbers asked for. When the result is something to look at, draw a picture of it
-  (a 3D model from two or three sides with matplotlib), look at it with `view_image` and compare it with the
-  user's picture. A test that only finds the file, or counts what is in it, proves nothing - say in `SKILL.md` how
-  to check, so each use checks too.
+  matters: a 3D model is a closed solid, its size in mm is the size asked for and it fits the printer
+  (`hub3d check model.stl --bed 180` says all three); a spreadsheet has the sheets, columns and numbers asked for.
+  When the result is something to look at, draw a picture of it (a 3D model: `hub3d views model.stl views.png`),
+  look at it with `view_image` and compare it with the user's picture. A test that only finds the file, or counts
+  what is in it, proves nothing - say in `SKILL.md` how to check, so each use checks too.
+- **A skill makes things of a kind, not one thing.** Its examples and its script work for any thing of that kind
+  (any box with a lid, any vase from a profile), with the sizes as arguments - not the object of the chat it was
+  made in, which the next use does not want.
 - **Test output stays out of the skill.** Write it to `out/` in the working folder, not into `skills/<name>/`. The
   skill's folder holds only what the skill needs: no test files, no notes of your work, no caches.
 

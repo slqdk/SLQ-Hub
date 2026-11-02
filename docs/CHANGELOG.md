@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.67.1 - 2026-11-02
+
+- **3D models built in code work** (chat 255: an STL took the assistant an
+  hour of guessing over two answers and came out broken - 13 edges where
+  surfaces crossed). The sandbox has `hub3d` now. `hub3d recipe` shows the assistant
+  manifold3d's real commands with two worked examples (they run when the
+  sandbox is built, so they cannot go out of date). `hub3d.save` writes the
+  STL or 3MF itself and checks it: a closed solid, its size, volume and
+  parts, whether it fits the printer's bed - and refuses to write a model
+  that is not closed. `hub3d.views` draws it from the front, the side and
+  above for the assistant to look at before it says it is done. `hub3d
+  check` and `hub3d views` do the same for any STL or 3MF, also one you
+  attach (3MF files from Bambu Studio and PrusaSlicer included).
+- **A link to a model on MakerWorld, Printables or Thingiverse**: the
+  assistant points you to the designer's own file on that page - better
+  than a remake, and its licence says what you may do with it - and offers
+  to scale, split or convert it once you attach it.
+- The skill maker has 3D skills use hub3d, and make things of a kind - any
+  box, any vase, sizes as arguments - not the one thing of the chat they
+  were made in. **A skill made before this** (such as an STL skill from
+  chat 243) keeps its old instructions: delete it and make it again.
+- Help has "A 3D part to measure".
+- The sandbox's 3D libraries are pinned (manifold3d 3.5.4, trimesh 5.2.0,
+  shapely 2.2.0), with networkx so trimesh reads 3MF files too.
+
 ## 0.67.0 - 2026-11-02
 
 - **3D models to print from a picture** (Settings -> Models -> 3D:

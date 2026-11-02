@@ -1708,6 +1708,45 @@ trimesh and shapely since 0.66.0. An example the user gives is the case to
 test with, not the skill: the skill makes the kind of thing, and a picture has
 no scale, so it asks for sizes.
 
+**hub3d** (0.67.1, chat 255: an STL "for this product" from a MakerWorld
+link took the old skill an hour over two turns - the model never opened the page,
+guessed at manifold3d's API (Cylinder, union, to_stl, from_stl, a 4x4
+transform), wrote STL files by hand - Bambu Studio found no geometry in one
+- and handed over a mesh with 13 edges shared by four to eight triangles). The
+sandbox's `services/sandbox/hub3d.py`, in `/opt/hub3d` on `/opt/py`'s path,
+and `hub3d` in bash (`python -I -m hub3d`: no module from the working folder
+taken instead):
+- `hub3d recipe`: manifold3d 3.5's API as the library has it (names, argument
+  names, what does not exist), round-enough circles, FDM rules of thumb, and
+  two whole programs (a twisted, swelling pen cup; raised letters from
+  matplotlib's TextPath). The image's build runs them (`hub3d selftest`), so a
+  recipe that no longer matches the pinned library stops the build.
+- `hub3d.save(model, path, bed=)`: a Manifold, a trimesh mesh, (vertices,
+  faces), a file or a list of these, as binary STL or 3MF (core spec, mm)
+  written by hub3d, read back and checked; with `strict` (the default) a model
+  that is not a closed solid is not written (NotPrintable says why). An empty
+  Manifold - booleans give one without an error - is refused by name.
+- The check counts, as a slicer reads the file (corners as 32-bit floats,
+  equal ones joined): edges in one triangle (holes), in more than two
+  (surfaces that meet), run the same way by both triangles (some face in),
+  the volume and its sign, parts (shared corners), sealed cavities (a shell
+  turned in inside another), the bed (with "fits turned 90 degrees"), units
+  that look like metres. 3MF is read by hub3d too: build items, components in
+  other model files (`p:path`, as Bambu Studio and PrusaSlicer save them) and
+  their transforms.
+- `hub3d.views`: the Hub's own three-view drawing (app/model3d/mesh.py's
+  code, kept the same by a test), to look at with `view_image`.
+- `hub3d.solid(vertices, faces)`: own triangles as a Manifold, turned round
+  when all of them face in, otherwise NotPrintable with what is open.
+
+The system prompt has a short "3D models to print" section when code runs:
+a link to a model on a 3D-print site means the designer's own file is on
+that page (point the user to it - better than a remake, and its licence
+says what they may do), and building one means `hub3d recipe` first,
+hub3d.save, then the views; model3d_generate for a shape from a photo when
+TRELLIS.2 is downloaded. The 3D libraries are pinned in the image (the
+recipe's versions), with networkx for trimesh's 3MF reader.
+
 **The Skills page** (`/skills`; a person's app has it in its sidebar too):
 Yours (a Shared switch, Use - a new chat with the skill chosen -, Improve with
 the assistant, Edit SKILL.md, Download .zip, Delete), Shared by the family

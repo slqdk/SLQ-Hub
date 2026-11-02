@@ -153,6 +153,29 @@ a first to a last picture, as an MP4 in the working folder that the user plays u
 GPU and takes minutes, so make one, let the user see it, and ask before making more. The video has no sound."""
 
 
+# 0.67.1 (chat 255): "an STL of this product" with a MakerWorld link - the model never opened the page, guessed at
+# manifold3d's API for an hour, wrote STL files by hand and called a broken one validated. The sandbox has hub3d for
+# it now (services/sandbox/hub3d.py); this says which way to go.
+PRINT3D_LINK = """
+
+# 3D models to print
+- A link to a model on a 3D-print site (MakerWorld, Printables, Thingiverse ...): the designer's print-ready file \
+is on that page. Point the user to it - it beats a remake, and its licence says what they may do with it - and offer \
+to change it (scale, split, convert) once they attach it."""
+PRINT3D_CODE = """
+- To build one: Python with manifold3d - run `hub3d recipe` in bash first (the API and worked examples: do not guess \
+it). hub3d.save checks the solid as it writes it; look at hub3d.views with view_image before you say it is done."""
+PRINT3D_PHOTO = """
+- A shape from a photo of a thing: model3d_generate."""
+
+
+def print3d_text(code: bool, photo: bool) -> str:
+    """The system prompt's 3D section: '' when there is nothing to make models with."""
+    if not code and not photo:
+        return ""
+    return PRINT3D_LINK + (PRINT3D_CODE if code else "") + (PRINT3D_PHOTO if photo else "")
+
+
 def sound_text(abilities: list[str]) -> str:
     """The system prompt's sound section for the downloaded sound models ('' when there are none)."""
     tools = [t for a in ("speech", "music", "sound", "voice", "separate") if a in abilities for t in SOUND_TOOLS[a]]
@@ -234,7 +257,7 @@ def system_prompt(*, user: str, model_name: str, folder_text: str, sandbox_path:
                   cloud_model: str = "", taken_over_from: str = "", memory: bool = True, code: bool = True,
                   cloud_chosen: bool = False,
                   dropped: int = 0, sound: list[str] | None = None, internet_asks: bool = False,
-                  windows: bool = False, video: bool = False, web: bool = False) -> str:
+                  windows: bool = False, video: bool = False, web: bool = False, model3d: bool = False) -> str:
     now = datetime.now(ZoneInfo(tz) if tz else local_tz())
     csharp = CSHARP.format(windows=CSHARP_SCREEN if windows else CSHARP_NO_SCREEN)
     tools_line = ((TOOLS_LINE_ASKS if internet_asks else TOOLS_LINE).format(sandbox_path=sandbox_path) + csharp
@@ -251,6 +274,8 @@ def system_prompt(*, user: str, model_name: str, folder_text: str, sandbox_path:
     text += sound_text(sound or [])
     if video:
         text += VIDEO
+    if not subagent:
+        text += print3d_text(code, model3d)
     if memory:
         mem = ("Memory files:\n" + "\n".join(f"- {p}: {d}" for p, d in memory_index)) if memory_index else \
             "There are no memory files yet."
