@@ -3,7 +3,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { api, type AuthStatus, type ChatListItem, type ModelsData, type Project, type QueueSnapshot } from "./lib/api";
 
-export type Toast = { id: number; text: string; kind: "info" | "fault" | "run" };
+export type Toast = { id: number; text: string; kind: "info" | "fault" | "run";
+  action?: { label: string; run: () => void } };       // a button in the toast (0.69.0: Undo an archive)
 export type Theme = "auto" | "light" | "dark";
 
 interface AppState {
@@ -17,7 +18,7 @@ interface AppState {
   projects: Project[];
   chats: ChatListItem[];
   refreshLists: () => Promise<void>;
-  toast: (text: string, kind?: Toast["kind"]) => void;
+  toast: (text: string, kind?: Toast["kind"], action?: Toast["action"]) => void;
   toasts: Toast[];
   dismiss: (id: number) => void;
   theme: Theme;
@@ -89,10 +90,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const toast = useCallback((text: string, kind: Toast["kind"] = "info") => {
+  const toast = useCallback((text: string, kind: Toast["kind"] = "info", action?: Toast["action"]) => {
     const id = ++toastId.current;
-    setToasts((t) => [...t.slice(-3), { id, text, kind }]);
-    window.setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), kind === "fault" ? 9000 : 4500);
+    setToasts((t) => [...t.slice(-3), { id, text, kind, action }]);
+    window.setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), kind === "fault" || action ? 9000 : 4500);
   }, []);
   const dismiss = useCallback((id: number) => setToasts((t) => t.filter((x) => x.id !== id)), []);
 

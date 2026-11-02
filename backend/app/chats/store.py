@@ -60,7 +60,9 @@ def get_chat(chat_id: int) -> dict | None:
     return _chat(r) if r else None
 
 
-def list_chats(project_id: int | None = None, q: str = "", limit: int = 200, all_projects: bool = False) -> list[dict]:
+def list_chats(project_id: int | None = None, q: str = "", limit: int = 200, all_projects: bool = False,
+               archived: bool | None = False) -> list[dict]:
+    """archived (0.69.0): False the chats in the lists, True the archived ones, None both (a search)."""
     # a project's chats come with what each used of the card (its runs' energy and cost, 0.24.0) - and, for the
     # project's overview (0.34.0), its answers, tokens and the time its turns took
     runs = "FROM runs r WHERE r.chat_id=c.id"
@@ -73,9 +75,12 @@ def list_chats(project_id: int | None = None, q: str = "", limit: int = 200, all
              f", (SELECT SUM((julianday(r.ended_at) - julianday(r.started_at)) * 86400) {runs}"
              f" AND r.ended_at IS NOT NULL) seconds"
              if project_id is not None and not all_projects else "")
-    sql = ("SELECT c.id, c.project_id, c.title, c.updated_at, c.created_at, p.name project_name" + spent +
-           " FROM chats c LEFT JOIN projects p ON p.id=c.project_id WHERE c.archived=0 AND c.test_run IS NULL")
+    sql = ("SELECT c.id, c.project_id, c.title, c.updated_at, c.created_at, c.archived, p.name project_name" + spent +
+           " FROM chats c LEFT JOIN projects p ON p.id=c.project_id WHERE c.test_run IS NULL")
     params: list = []
+    if archived is not None:
+        sql += " AND c.archived=?"
+        params.append(1 if archived else 0)
     if not all_projects:
         if project_id is None:
             sql += " AND c.project_id IS NULL"
@@ -124,6 +129,22 @@ def runs_overview(chat_ids: list[int]) -> dict[int, dict]:
                     last["review"] = marks["review"]
             out[cid] = {"models": models, "last": last}
     return out
+
+
+def set_archived(chat_id: int, archived: bool) -> dict | None:
+    """Out of the chat lists, or back (0.69.0) - kept as it is, its place by its last activity unchanged."""
+    with db.connect() as con:
+        con.execute("UPDATE chats SET archived=? WHERE id=?", (1 if archived else 0, chat_id))
+    return get_chat(chat_id)
+
+
+def continued_chats() -> list[int]:
+    """The chats in the lists that a newer chat continues ("Continue in a new chat"), newest first: what archiving
+    them tidies (0.69.0 - chains of six in Søren's list)."""
+    with db.connect() as con:
+        return [r[0] for r in con.execute(
+            "SELECT c.id FROM chats c WHERE c.archived=0 AND c.test_run IS NULL AND EXISTS (SELECT 1 FROM chats n "
+            "WHERE json_extract(n.settings, '$.continued_from')=c.id) ORDER BY c.updated_at DESC").fetchall()]
 
 
 def update_chat(chat_id: int, title: str | None = None, settings: dict | None = None,

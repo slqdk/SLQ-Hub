@@ -1,7 +1,9 @@
 // The cabinet-grey rail: new chat, search, projects, recent chats, and the GPU plate.
 import { useEffect, useMemo, useState } from "react";
-import { BookOpen, CircleHelp, FolderClosed, MessageSquarePlus, Plus, Search, Settings, Sparkles, X } from "lucide-react";
+import { Archive, ArchiveRestore, BookOpen, CircleHelp, FolderClosed, MessageSquarePlus, Plus, Search, Settings, Sparkles,
+  X } from "lucide-react";
 import { api, folderFromName, type ChatListItem } from "../lib/api";
+import { archiveWithUndo, unarchive } from "../lib/archive";
 import { dateGroup } from "../lib/format";
 import { linkProps, navigate, type Route } from "../lib/router";
 import { useApp } from "../state";
@@ -24,8 +26,8 @@ export function Sidebar({ route }: { route: Route }) {
     const ctl = new AbortController();
     const t = window.setTimeout(async () => {
       try {
-        setFound(await api<ChatListItem[]>("/hub/api/chats", { query: { all: true, q: q.trim(), limit: 60 },
-          signal: ctl.signal }));
+        setFound(await api<ChatListItem[]>("/hub/api/chats", { query: { all: true, q: q.trim(), limit: 60,
+          with_archived: true }, signal: ctl.signal }));          // archived chats are found too (0.69.0)
       } catch {
         /* typing on */
       }
@@ -38,6 +40,15 @@ export function Sidebar({ route }: { route: Route }) {
 
   const close = () => setSidebarOpen(false);
   const current = route.name === "chat" ? route.id : null;
+  // 0.69.0: archive from the list (an Undo in the toast); a found archived chat is unarchived from it
+  const toggleArchive = async (c: ChatListItem) => {
+    if (c.archived) {
+      if (await unarchive(c.id, refreshLists, toast)) setFound((f) => f?.map((x) => (x.id === c.id ? { ...x, archived: 0 } : x)) ?? null);
+      return;
+    }
+    await archiveWithUndo(c.id, c.title, refreshLists, toast);
+    setFound((f) => f?.map((x) => (x.id === c.id ? { ...x, archived: 1 } : x)) ?? null);
+  };
   const list = found ?? chats;
   const shown = showAll || found ? list : list.slice(0, 40);
   const groups = useMemo(() => {
@@ -78,6 +89,8 @@ export function Sidebar({ route }: { route: Route }) {
             <div className="side-group side-places">
               <a className="side-item" {...linkProps("/skills")} onClickCapture={close}
                 aria-current={route.name === "skills" ? "page" : undefined}><Sparkles size={15} /> Skills</a>
+              <a className="side-item" {...linkProps({ name: "archived" })} onClickCapture={close}
+                aria-current={route.name === "archived" ? "page" : undefined}><Archive size={15} /> Archived</a>
             </div>
           )}
           {!found && (
@@ -102,11 +115,18 @@ export function Sidebar({ route }: { route: Route }) {
             <div className="side-group" key={g.label}>
               <div className="side-group-head">{found ? "Found" : g.label}</div>
               {g.items.map((c) => (
-                <a key={c.id} className="side-item" {...linkProps({ name: "chat", id: c.id })} onClickCapture={close}
-                  aria-current={current === c.id ? "page" : undefined} title={c.project_name ? `${c.title} (${c.project_name})` : c.title}>
-                  <span className="ellipsis">{c.title}</span>
-                  {c.running && <Lamp state="run" size="sm" pulse title="Working" />}
-                </a>
+                <div key={c.id} className="side-row">
+                  <a className="side-item" {...linkProps({ name: "chat", id: c.id })} onClickCapture={close}
+                    aria-current={current === c.id ? "page" : undefined} title={c.project_name ? `${c.title} (${c.project_name})` : c.title}>
+                    <span className="ellipsis">{c.title}</span>
+                    {!!c.archived && <span className="tag">archived</span>}
+                    {c.running && <Lamp state="run" size="sm" pulse title="Working" />}
+                  </a>
+                  <button className="icon-btn small side-row-act" onClick={() => toggleArchive(c)}
+                    title={c.archived ? "Unarchive: back in the list" : "Archive: out of the list, kept under Archived"}
+                    aria-label={c.archived ? `Unarchive ${c.title}` : `Archive ${c.title}`}>
+                    {c.archived ? <ArchiveRestore size={14} /> : <Archive size={14} />}</button>
+                </div>
               ))}
             </div>
           ))}

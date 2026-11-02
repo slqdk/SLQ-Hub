@@ -14,6 +14,7 @@ import { LibrariesView } from "./views/LibrariesView";
 import { Login } from "./views/Login";
 import { ProjectView } from "./views/ProjectView";
 import { SettingsView } from "./views/SettingsView";
+import { ArchivedView } from "./views/ArchivedView";
 import { SkillsView } from "./views/SkillsView";
 
 export type PanelState =
@@ -66,6 +67,9 @@ export function App() {
       break;
     case "skills":
       main = <SkillsView onNewChat={(text, skills) => { setDraft(text, skills); navigate("/"); }} />;
+      break;
+    case "archived":
+      main = <ArchivedView />;
       break;
     case "settings":
       main = <SettingsView tab={route.tab} sub={route.sub} />;

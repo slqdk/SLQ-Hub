@@ -171,9 +171,10 @@ export interface ChatSettings { model: string | null; thinking: boolean | null; 
   image_lora_strength?: Record<string, number> }   // 0.54.0: their strength in this chat
 export interface Chat { id: number; project_id: number | null; title: string; settings: ChatSettings; summary?: string;
   summary_upto?: number;
-  created_at: string; updated_at: string; test_run?: string | null }
+  created_at: string; updated_at: string; test_run?: string | null;
+  archived?: number }                                    // 0.69.0: out of the chat lists (1), kept as it is
 export interface ChatListItem { id: number; project_id: number | null; title: string; updated_at: string;
-  created_at: string; project_name: string | null; running: boolean;
+  created_at: string; project_name: string | null; running: boolean; archived?: number;
   energy_wh?: number | null; cost?: number | null;        // a project's chats: what each used of the card (0.24.0)
   // and for the project's overview (0.34.0): answers, tokens, the time its turns took, the models that worked (ids;
   // a cloud model by its name) and how the last turn ended

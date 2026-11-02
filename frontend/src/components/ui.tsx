@@ -161,6 +161,8 @@ export function Toasts() {
         <div key={t.id} className="toast" role={t.kind === "fault" ? "alert" : "status"}>
           <Lamp state={t.kind === "fault" ? "fault" : t.kind === "run" ? "run" : "off"} />
           <div className="grow">{t.text}</div>
+          {t.action && <button className="btn small" onClick={() => { dismiss(t.id); t.action!.run(); }}>
+            {t.action.label}</button>}
           <button className="icon-btn small" style={{ color: "inherit" }} onClick={() => dismiss(t.id)}
             aria-label="Dismiss"><X size={14} /></button>
         </div>

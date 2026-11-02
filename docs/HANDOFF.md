@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.68.0, 2026-11-02)
+## State (0.69.0, 2026-11-02)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -864,6 +864,18 @@ gated "auto", FLUX Non-Commercial) in family flux2-klein-9b with `settings: {ste
 byte for byte what it was); image_generate's result asks the assistant to look at arms, hands and legs and say so
 (`images.BODIES`); klein's prompt hint asks for plain poses and hands. Søren's chats were not seen: which model,
 size, LoRA and prompt gave his three arms is not known. NOT run on the card: item 88.
+0.69.0, Søren (with a screenshot of his sidebar: chains like "Ret PL-liste fra NOTES" (2) to (6), several
+"New chat"): "i need an archive chat function... So it remains somewhere hidden, and i can pull it up if i want.. so
+they dont float around in the chats list all the time on the left." The `chats.archived` column was in the first
+schema and `list_chats` already filtered on it; nothing set it. Archive and Unarchive (PATCH `archived`, the place in
+the list kept), the Archived page, archived chats in the sidebar's search, a chat worked in again unarchived,
+Continue in a new chat archiving the old chat, and archiving the continued chains in one go (DESIGN §6 "Archived
+chats"). Tests: tests/test_archive.py (4: the lists, the project's page, the search with and without, opened as it
+was, back with a title change in the same PATCH; a message brings it back; Continue archives the old one; the chains -
+not the newest, not one alone, not one working). In Chromium against the dev server (desktop dark, phone light): the
+box on hover, the toast and its Undo, the menu's Archive and Unarchive, the tag, the search's "archived" marks, the
+page with the chain offer, Unarchive there, the phone's sidebar (the boxes always shown) and page; no console errors.
+NOT seen on the VM: how the sidebar feels with his few hundred chats (the list still loads 300).
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
 host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU

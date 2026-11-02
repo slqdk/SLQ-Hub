@@ -1,6 +1,7 @@
 // A chat: history, the live turn, and the composer.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
-import { Cloud, Copy, Download, FileText, FolderInput, FolderOpen, Menu, MessageSquarePlus, MoreHorizontal, NotebookPen, Pencil, RotateCcw, ShieldCheck, Sparkles, Trash2 } from "lucide-react";
+import { Archive, ArchiveRestore, Cloud, Copy, Download, FileText, FolderInput, FolderOpen, Menu, MessageSquarePlus, MoreHorizontal, NotebookPen, Pencil, RotateCcw, ShieldCheck, Sparkles, Trash2 } from "lucide-react";
+import { archiveWithUndo, unarchive } from "../lib/archive";
 import { api, mediaUrl, type ArtifactRef, type Block, type ChatData, type ChatSettings, type Library, type Message, type ModelEntry, type ProducedFile, type RunEvent, type RunRecord, type Settings, type Lora, type LoraList, type Skill, type Upload, type AnswersBlock, answeredIn } from "../lib/api";
 import { clearDraftSkills, peekDraftSkills, setDraft as setMessageDraft } from "../lib/draft";
 import { levelOf } from "../lib/effort";
@@ -80,6 +81,16 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
     esRef.current?.close();
     esRef.current = null;
   }, []);
+
+  // 0.69.0: archived from the list or the Archived page while this chat is open - its tag follows
+  useEffect(() => {
+    const on = (e: Event) => {
+      const { id, archived } = (e as CustomEvent<{ id: number; archived: boolean }>).detail;
+      if (id === chatId) setData((d) => (d ? { ...d, chat: { ...d.chat, archived: archived ? 1 : 0 } } : d));
+    };
+    window.addEventListener("hub:archived", on);
+    return () => window.removeEventListener("hub:archived", on);
+  }, [chatId]);
 
   const load = useCallback(async () => {
     if (!chatId) return null;
@@ -282,7 +293,9 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
         return true;
       }
       const message = r.message;
-      setData((d) => (d ? { ...d, messages: [...d.messages, message] } : d));
+      const wasArchived = !!data?.chat.archived;      // a new message puts it back in the list (0.69.0)
+      setData((d) => (d ? { ...d, messages: [...d.messages, message], chat: { ...d.chat, archived: 0 } } : d));
+      if (wasArchived) refreshLists();
       attach(r.run_id);
       return true;
     } catch (e) {
@@ -347,9 +360,12 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
   const handover = async () => {
     if (!chatId) return;
     try {
-      const r = await api<{ chat: ChatData["chat"]; run_id: string }>(`/hub/api/chats/${chatId}/handover`, { body: {} });
+      const r = await api<{ chat: ChatData["chat"]; run_id: string; archived?: number }>(`/hub/api/chats/${chatId}/handover`, { body: {} });
       refreshLists();
       navigate({ name: "chat", id: r.chat.id });
+      const old = chatId;                               // 0.69.0: the chat it continues is archived
+      if (r.archived) toast("The chat it continues is archived - its first message links to it.", "info", {
+        label: "Keep it in the list", run: () => { unarchive(old, refreshLists, toast); } });
     } catch (e) {
       toast((e as Error).message, "fault");
     }
@@ -420,6 +436,8 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
         {project && <a className="tag" {...linkProps({ name: "project", id: project.id })}>{project.name}</a>}
         {data?.chat.test_run && <a className="tag" {...linkProps({ name: "settings", tab: "tests" })}
           title="A test case's chat: not in the chat list, deleted with its run">Test</a>}
+        {!!data?.chat.archived && <a className="tag" {...linkProps({ name: "archived" })}
+          title="Out of the chat list, kept under Archived. A new message puts it back, or Unarchive in the ⋯ menu">Archived</a>}
         <span className="grow" />
         {folder && <button className="btn quiet small" onClick={() => showFiles()}>
           <FolderOpen size={15} /> Files</button>}
@@ -443,6 +461,11 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
                 {data && !project && !data.chat.test_run && <button className="menu-item" disabled={running}
                   onClick={() => { close(); setShowMove(true); }}>
                   <FolderInput size={15} /><span>Move to a project<small>Its files go into the project, and it works there from now on</small></span></button>}
+                {data && !data.chat.test_run && (data.chat.archived
+                  ? <button className="menu-item" onClick={() => { close(); unarchive(chatId, refreshLists, toast); }}>
+                    <ArchiveRestore size={15} /><span>Unarchive<small>Back in the chat list</small></span></button>
+                  : <button className="menu-item" onClick={() => { close(); archiveWithUndo(chatId, data.chat.title, refreshLists, toast); }}>
+                    <Archive size={15} /><span>Archive<small>Out of the chat list, kept under Archived</small></span></button>)}
                 <div className="menu-sep" />
                 <button className="menu-item" onClick={() => { close(); download(`/hub/api/chats/${chatId}/export?format=md`); }}>
                   <FileText size={15} /> Export as Markdown</button>

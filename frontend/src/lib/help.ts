@@ -217,7 +217,22 @@ export const SECTIONS: HelpSection[] = [
             + "if something is wrong or missing.",
           "Continue in a new chat (the ⋯ menu, or the hint under a long chat's last answer): the assistant writes "
             + "notes from this chat, and a new chat starts from them, with the same files and settings. The old chat "
-            + "stays as it is, and the new one can still look things up in it.",
+            + "is archived as it is - the new one links to it and can still look things up in it.",
+        ],
+        owner: true,
+      },
+      {
+        id: "archive",
+        title: "Archive chats",
+        what: "Chats you are done with leave the list without being deleted: they wait under Archived, at the top of "
+          + "the menu, as they were.",
+        how: [
+          "Point at a chat in the list and click the box beside it - or Archive in the chat's ⋯ menu. The note that "
+            + "says so has an Undo.",
+          "Archived, at the top of the menu: open an archived chat to read it or go on with it - a new message puts "
+            + "it back in the list - or Unarchive it there. The search in the list finds archived chats too.",
+          "Chats that a newer chat continues (Continue in a new chat) are archived by themselves. Older ones still in "
+            + "the list: Archived offers to archive them all at once.",
         ],
         owner: true,
       },

@@ -1386,7 +1386,29 @@ when writing them was stopped. Retry under the notes writes them again; a
 message sent meanwhile is answered after them; options from the browser
 cannot start a handover. The old chat stays as it was; the new one links
 back to it and searches it with chat_history. Not in people's chats (their
-chats live on their devices).
+chats live on their devices). Since 0.69.0 the old chat is archived when the
+new one starts.
+
+**Archived chats** (0.69.0, Søren: "i need an archive chat function... So it
+remains somewhere hidden, and i can pull it up if i want.. so they dont
+float around in the chats list"). The `archived` column of `chats` was in
+the schema from the start and every list already left such chats out;
+nothing set it. Now `PATCH /hub/api/chats/{id}` takes `archived`
+(`store.set_archived`: `updated_at` untouched, so an unarchived chat is
+back at its place by its last activity), `GET /chats?archived=true` lists
+them and `with_archived=true` lists both - the sidebar's search, each row
+with `archived`. A chat worked in again (a message, retry, Continue - the
+routes' `_start`) is unarchived; Continue in a new chat archives the chat
+it continues (`archived` in its answer, the toast's "Keep it in the list"
+undoes it); `GET /chats/continued` and `POST /chats/continued/archive`
+archive the chats a newer chat continues (`continued_from` of another chat
+points at them) - not one that is working or moving. The UI: a box beside
+each chat in the sidebar (on hover; always where nothing hovers) and
+Archive/Unarchive in the chat's ⋯ menu, a toast with Undo (toasts take an
+action since 0.69.0), an "Archived" tag in an archived chat's top bar, and
+`/archived` (the sidebar's Archived): the list with Unarchive, a filter
+above eight, and the offer to archive the continued chains. The owner's
+chats only: a person's chats live on their device.
 
 **NOTES.md** (0.31.0). 0.29.0 asked the model in its prompt to keep what it
 finds in a notes file in long work; chat 126's model (the TURBO 735-882)

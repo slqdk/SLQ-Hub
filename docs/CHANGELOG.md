@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.69.0 - 2026-11-02
+
+- **Archive chats.** Point at a chat in the list and click the box beside it
+  (on a phone or tablet it is always there), or Archive in the chat's ⋯ menu:
+  it leaves the list without being deleted, and the note that says so has an
+  Undo. **Archived**, at the top of the menu, lists them - open one to read
+  it or go on with it (a new message puts it back in the list), or Unarchive
+  it. The search in the list finds archived chats too, marked "archived".
+- **Continue in a new chat archives the chat it continues** - the new chat
+  links back to it. Chains already in the list ("Ret PL-liste fra NOTES"
+  (2), (3) ...): Archived offers to archive them all at once.
+
 ## 0.68.0 - 2026-11-02
 
 - **Fewer broken bodies from FLUX.2 klein** (an extra arm, a missing hand).

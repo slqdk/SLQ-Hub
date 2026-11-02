@@ -48,14 +48,35 @@ def _run_info(run) -> dict | None:
 
 @router.get("/chats")
 async def list_chats(request: Request, project_id: int | None = None, q: str = "", all: bool = False,
-                     limit: int = 200):
-    rows = store.list_chats(project_id, q.strip(), max(1, min(limit, 1000)), all_projects=all)
+                     limit: int = 200, archived: bool = False, with_archived: bool = False):
+    """archived (0.69.0): the archived chats instead; with_archived: both (the sidebar's search), each row saying
+    which."""
+    rows = store.list_chats(project_id, q.strip(), max(1, min(limit, 1000)), all_projects=all,
+                            archived=None if with_archived else archived)
     agent = _agent(request)
     more = store.runs_overview([r["id"] for r in rows]) if project_id is not None and not all else {}
     for r in rows:
         r["running"] = agent.runs.active_for_chat(r["id"]) is not None
         r.update(more.get(r["id"], {}))
     return rows
+
+
+@router.get("/chats/continued")
+async def continued_chats():
+    """How many chats in the lists a newer chat continues (0.69.0): the Archived page offers to archive them."""
+    return {"count": len(store.continued_chats())}
+
+
+@router.post("/chats/continued/archive")
+async def archive_continued(request: Request):
+    """Archive every chat in the lists that a newer chat continues - not one that is working or moving."""
+    agent = _agent(request)
+    done = 0
+    for cid in store.continued_chats():
+        if agent.runs.active_for_chat(cid) is None and cid not in agent.moving:
+            store.set_archived(cid, True)
+            done += 1
+    return {"archived": done}
 
 
 class ChatCreate(BaseModel):
@@ -121,11 +142,16 @@ async def take_back(chat_id: int, tool: str | None = None):
 class ChatPatch(BaseModel):
     title: str | None = None
     settings: dict | None = None
+    archived: bool | None = None         # 0.69.0: out of the chat lists (or back), its place in them kept
 
 
 @router.patch("/chats/{chat_id}")
 async def patch_chat(chat_id: int, body: ChatPatch):
     _chat_or_404(chat_id)
+    if body.archived is not None:
+        chat = store.set_archived(chat_id, body.archived)
+        if body.title is None and body.settings is None:
+            return chat
     return store.update_chat(chat_id, title=body.title, settings=body.settings)
 
 
@@ -193,9 +219,12 @@ class MessageIn(BaseModel):
 def _start(request: Request, chat_id: int, options: dict) -> str:
     options = {k: v for k, v in (options or {}).items() if k != "handover_from"}     # only the handover route's
     try:
-        return _agent(request).start(chat_id, options).id
+        run_id = _agent(request).start(chat_id, options).id
     except RuntimeError as exc:
         raise HTTPException(409, str(exc))
+    if (store.get_chat(chat_id) or {}).get("archived"):  # 0.69.0: a chat worked in again is back in the lists
+        store.set_archived(chat_id, False)
+    return run_id
 
 
 def _not_moving(request: Request, chat_id: int) -> None:
@@ -403,7 +432,8 @@ async def handover(chat_id: int, request: Request):
             raise HTTPException(507, f"Could not copy the chat's files: {exc}")
     store.add_message(new["id"], "user", [{"type": "handover", "chat_id": chat_id, "title": old["title"]}])
     run = agent.start(new["id"], {"handover_from": chat_id})
-    return {"chat": store.get_chat(new["id"]), "run_id": run.id}
+    store.set_archived(chat_id, True)                    # 0.69.0: the new chat goes on with it; the old one, archived,
+    return {"chat": store.get_chat(new["id"]), "run_id": run.id, "archived": chat_id}    # stays a click away
 
 
 class MoveIn(BaseModel):

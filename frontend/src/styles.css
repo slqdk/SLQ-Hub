@@ -313,6 +313,12 @@ a.btn { text-decoration: none; }
 .side-item .ellipsis { flex: 1; }
 .side-item svg { flex: none; color: var(--ink-2); }
 .side-item .lamp { margin-left: auto; }
+/* a chat in the list with its archive button (0.69.0): shown on hover or focus; always where nothing hovers */
+.side-row { display: flex; align-items: center; gap: 2px; }
+.side-row .side-item { flex: 1; min-width: 0; }
+.side-row .side-row-act { flex: none; color: var(--ink-3); opacity: 0; }
+.side-row:hover .side-row-act, .side-row:focus-within .side-row-act { opacity: 1; }
+@media (hover: none) { .side-row .side-row-act { opacity: 0.75; } }
 .side-sub { padding-left: 14px; }
 .side-more { color: var(--ink-3); font-size: 13.5px; }
 .side-foot { padding: 10px 10px calc(10px + env(safe-area-inset-bottom, 0px)); border-top: 1px solid var(--rule); display: flex; flex-direction: column; gap: 8px; }
