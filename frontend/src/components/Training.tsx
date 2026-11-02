@@ -99,7 +99,7 @@ function BaseHint({ base, hfToken, copy }: { base?: TrainingBase; hfToken?: bool
   return <>
     <small>Trained on {base.label}'s base model; its LoRA is used with {base.lora_for} in your chats - in new pictures
       and in changes to a picture{base.ready ? "." : `. Download ${base.lora_for} under Image models to use it.`}
-      {" "}It works only with that size{nine ? " (both klein 9B picture models)" : ""}.</small>
+      {" "}It works only with that size{nine ? " (every klein 9B picture model, base included)" : ""}.</small>
     {base.note && <small>{base.note}</small>}
     {nine && <small>Bigger than 4B and slower to train: the trainer keeps it in 8 bit to fit the card. The first
       start downloads about {base.download_gb ?? 35} GB. {base.licence} licence.</small>}

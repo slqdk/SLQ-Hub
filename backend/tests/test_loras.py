@@ -268,7 +268,7 @@ async def test_klein_9b_draws_and_edits_with_its_own_files_and_loras(signed_in, 
     assert _node(g, "CLIPLoader")[0]["inputs"] == {"clip_name": "qwen_3_8b_fp8mixed.safetensors", "type": "flux2",
                                                    "device": "default"}
     assert _node(g, "VAELoader")[0]["inputs"]["vae_name"] == "flux2-vae.safetensors"
-    assert _node(g, "Flux2Scheduler")[0]["inputs"]["steps"] == 4
+    assert _node(g, "Flux2Scheduler")[0]["inputs"]["steps"] == 8                   # 0.68.0: Settings -> Images
     assert [n["inputs"]["lora_name"] for n in _node(g, "LoraLoaderModelOnly")] == [f"hub/{lora['id']}.safetensors"]
     assert _node(g, "CLIPTextEncode")[0]["inputs"]["text"] == "rkxv, a fox"
     assert items[0]["model"] == "flux2-klein-9b" and "FLUX.2 klein 4B models" in items[0]["lora_notes"][0]
@@ -276,6 +276,7 @@ async def test_klein_9b_draws_and_edits_with_its_own_files_and_loras(signed_in, 
     items = await pipe.edit("make it red", [_png((8, 8))], model="flux2-klein-9b", loras=[lora["id"]])
     g = fakes.comfy["prompts"][-1]
     assert items[0]["model"] == "flux2-klein-9b" and _node(g, "ReferenceLatent")
+    assert _node(g, "Flux2Scheduler")[0]["inputs"]["steps"] == 4                   # a change keeps klein's own 4
     assert _node(g, "UNETLoader")[0]["inputs"]["unet_name"] == "flux-2-klein-9b-fp8.safetensors"
     assert _node(g, "LoraLoaderModelOnly")[0]["inputs"]["lora_name"] == f"hub/{lora['id']}.safetensors"
     families = (await signed_in.get("/hub/api/loras")).json()["families"]
@@ -328,3 +329,80 @@ async def test_klein_9b_uncensored_is_klein_9b_with_its_own_text_encoder(signed_
     assert sorted(m["id"] for m in fits) == ["flux2-klein-9b", "flux2-klein-9b-uncensored"]
     await pipe.generate("a fox", 1024, 1024, model="flux2-klein-9b")
     assert _node(fakes.comfy["prompts"][-1], "CLIPLoader")[0]["inputs"]["clip_name"] == "qwen_3_8b_fp8mixed.safetensors"
+
+
+async def test_klein_9b_base_draws_with_cfg_and_a_negative_and_the_steps_are_a_setting(signed_in, app, fakes):
+    """0.68.0 (Søren: klein 9B "often ... makes 3 arms, or a hand is missing"): klein's new pictures take 8 steps by
+    default (Settings -> Images klein_steps; changes keep 4), and klein 9B base is the undistilled model as ComfyUI's
+    own klein 9B text-to-image template runs it - 20 steps, CFG 5, a negative prompt - with klein 9B's text encoder,
+    VAE and LoRAs."""
+    from app.images.pipeline import klein_sampling, prompt_hint
+    from .mocks import _png
+    hub = app.state.hub
+    pipe = hub.extras["images"]
+    base = hub.catalog.get("comfy", "flux2-klein-9b-base")
+    nine = hub.catalog.get("comfy", "flux2-klein-9b")
+    assert base["family"] == "flux2-klein-9b" and base["abilities"] == ["generate", "edit"]
+    model = next(f for f in base["files"] if f["dest"].startswith("comfy/diffusion_models/"))
+    assert (model["repo"], model["path"], model["size"]) == ("black-forest-labs/FLUX.2-klein-base-9b-fp8",
+                                                             "flux-2-klein-base-9b-fp8.safetensors", 9567278472)
+    assert {f["dest"] for f in base["files"]} - {f["dest"] for f in nine["files"]} == {model["dest"]}
+    assert klein_sampling(base, {}) == (20, 5.0) and klein_sampling(nine, {}) == (8, 1.0)
+    assert klein_sampling(nine, {"klein_steps": 6}) == (6, 1.0) and klein_sampling(nine, {"klein_steps": 999}) == (50, 1.0)
+    assert klein_sampling(nine, {"klein_steps": "many"}) == (8, 1.0)
+    assert "20 steps" in prompt_hint(base) and "negative says what to avoid" in prompt_hint(base)
+    assert "what their hands do" in prompt_hint(nine)
+
+    _install(hub, "flux2-klein-9b-base")
+    head = {"diffusion_model.single_blocks.23.linear1.lora_A.weight":
+            {"dtype": "F16", "shape": [16, 4096], "data_offsets": [0, 0]}}
+    raw = json.dumps(head).encode()
+    lora = (await signed_in.post("/hub/api/loras", files={"file": ("rikke9.safetensors", struct.pack("<Q", len(raw)) + raw,
+                                                                    "application/octet-stream")},
+                                 data={"trigger": "rkxv"}, headers=ORIGIN)).json()
+    assert lora["base"] == "flux2-klein-9b" and [m["id"] for m in lora["fits"]] == ["flux2-klein-9b-base"]
+    items = await pipe.generate("a fox", 1024, 1024, model="flux2-klein-9b-base", negative="blurry", loras=[lora["id"]])
+    g = fakes.comfy["prompts"][-1]
+    assert _node(g, "UNETLoader")[0]["inputs"]["unet_name"] == "flux-2-klein-base-9b-fp8.safetensors"
+    assert _node(g, "CLIPLoader")[0]["inputs"]["clip_name"] == "qwen_3_8b_fp8mixed.safetensors"
+    assert _node(g, "Flux2Scheduler")[0]["inputs"]["steps"] == 20 and _node(g, "CFGGuider")[0]["inputs"]["cfg"] == 5.0
+    assert not _node(g, "ConditioningZeroOut")
+    assert sorted(n["inputs"]["text"] for n in _node(g, "CLIPTextEncode")) == ["blurry", "rkxv, a fox"]
+    assert g[_node_id(g, "CFGGuider")]["inputs"]["negative"] == ["6", 0] and g["6"]["inputs"]["text"] == "blurry"
+    assert _node(g, "LoraLoaderModelOnly")[0]["inputs"]["lora_name"] == f"hub/{lora['id']}.safetensors"
+    assert items[0]["model"] == "flux2-klein-9b-base"
+
+    await pipe.generate("a fox", 1024, 1024, model="flux2-klein-9b-base")
+    assert fakes.comfy["prompts"][-1]["6"]["inputs"]["text"] == ""                  # the template's empty negative
+    await pipe.edit("make it red", [_png((8, 8))], model="flux2-klein-9b-base")
+    g = fakes.comfy["prompts"][-1]
+    assert _node(g, "Flux2Scheduler")[0]["inputs"]["steps"] == 20 and _node(g, "CFGGuider")[0]["inputs"]["cfg"] == 5.0
+    assert g["6"]["class_type"] == "CLIPTextEncode" and g["6"]["inputs"]["text"] == ""
+    assert len(_node(g, "ReferenceLatent")) == 2                                    # the negative gets the picture too
+
+    _install(hub, "flux2-klein-9b")
+    hub.settings.update("images", {"klein_steps": 6})
+    await pipe.generate("a fox", 1024, 1024, model="flux2-klein-9b")
+    g = fakes.comfy["prompts"][-1]
+    assert _node(g, "Flux2Scheduler")[0]["inputs"]["steps"] == 6 and _node(g, "CFGGuider")[0]["inputs"]["cfg"] == 1.0
+    assert _node(g, "ConditioningZeroOut")                                          # distilled: no negative, as ever
+    # the distilled graph at CFG 1 is the one it always was
+    assert W.klein_t2i("a fox", 1024, 1024, 1, cfg=1.0, negative="ignored") == W.klein_t2i("a fox", 1024, 1024, 1)
+
+
+def _node_id(g: dict, cls: str) -> str:
+    return next(k for k, v in g.items() if v["class_type"] == cls)
+
+
+async def test_the_assistant_looks_at_the_bodies_it_drew(signed_in, app, fakes):
+    """0.68.0: the result of image_generate tells the assistant, who sees the pictures, to look at people's arms,
+    hands and legs and say so when one is wrong, rather than hand a broken body over as it is."""
+    hub = app.state.hub
+    _install(hub, "flux2-klein-9b")
+    fakes.llama["replies"] = [{"tool_calls": [{"name": "image_generate", "arguments": {"prompt": "a man waving"}}]},
+                              {"content": "Here he is."}, {"content": "Waving"}]
+    c = await new_chat(signed_in)
+    await finish(app, await say(signed_in, c["id"], "Draw a man waving"))
+    result = next(m for m in fakes.llama["requests"][1]["messages"] if m["role"] == "tool")
+    text = result["content"] if isinstance(result["content"], str) else json.dumps(result["content"])
+    assert "look at the people in them: arms, hands and legs" in text and "another seed" in text

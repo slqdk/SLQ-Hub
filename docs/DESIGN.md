@@ -1908,6 +1908,22 @@ files afterwards.
     family, model and VAE files, so the graph takes each model's own files
     from its catalog entry rather than its family's. The encoder lets any
     prompt through; what klein never learned comes from a LoRA.
+    **Steps and klein 9B base** (0.68.0, Søren: klein 9B "often ... makes
+    3 arms, or a hand is missing"). The distilled models are made for 4
+    steps; extra limbs at 4 are widely reported, fewer at 6-8 (r/Stable-
+    Diffusion, Jan 2026). New pictures take Settings → Images
+    `klein_steps` (8 by default), changes keep 4 (an edit keeps the
+    reference's bodies). ComfyUI's own klein 9B *text-to-image* template
+    (`image_flux2_text_to_image_9b.json`, templates 0.1.119) runs the
+    undistilled base model - 20 steps, CFG 5, an empty CLIPTextEncode as
+    the negative - while the Hub had taken the edit template's distilled
+    settings for both. **FLUX.2 [klein] 9B base** is that model
+    (`black-forest-labs/FLUX.2-klein-base-9b-fp8`, 9.6 GB, gated) in the
+    same family - klein 9B's encoder, VAE and LoRAs, which are trained on
+    the base model anyway - with its sampling in the catalog entry's
+    `settings` (`pipeline.klein_sampling`); at CFG 5 each step runs the
+    model twice, so 40 passes against 4-8. Not measured on the card: how
+    many broken bodies each setting gives.
   - **ERNIE-Image and ERNIE-Image Turbo** (Baidu, 8B, Apache 2.0) are
     optional too: photorealistic, generation only (an edit with ERNIE chosen
     goes to Qwen-Image or FLUX.2 klein). Files from `Comfy-Org/ERNIE-Image`:

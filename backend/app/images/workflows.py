@@ -30,7 +30,9 @@ QWEN_TURBO_SIGMAS = "1.0, 0.978453, 0.95418, 0.926626, 0.89508, 0.845148, 0.7045
 KLEIN = {"unet": "flux-2-klein-4b.safetensors", "clip": "qwen_3_4b.safetensors", "vae": "flux2-vae.safetensors"}
 # FLUX.2 klein 9B (0.61.0): the same graph with its own files - the 8-bit ones of ComfyUI's official template
 # (image_flux2_klein_image_edit_9b_distilled.json: BFL's fp8 model, Qwen3-8B fp8mixed, cfg 1, 4 steps), with the
-# FLUX.2 VAE that 4B and ERNIE share (the template's small decoder is only quicker).
+# FLUX.2 VAE that 4B and ERNIE share (the template's small decoder is only quicker). klein 9B base (0.68.0): the
+# undistilled model as ComfyUI's own klein 9B text-to-image template has it (image_flux2_text_to_image_9b.json:
+# 20 steps, CFG 5, an empty CLIPTextEncode as the negative; its edit template the same with ReferenceLatents).
 KLEIN_9B = {"unet": "flux-2-klein-9b-fp8.safetensors", "clip": "qwen_3_8b_fp8mixed.safetensors",
             "vae": "flux2-vae.safetensors"}
 KLEIN_FILES = {"flux2-klein": KLEIN, "flux2-klein-9b": KLEIN_9B}       # by catalog family
@@ -141,18 +143,27 @@ def _klein_base(files: dict) -> dict:
     }
 
 
+def _klein_negative(g: dict, cfg: float, negative: str | None) -> None:
+    """Node 6, the negative: nothing at CFG 1 (the distilled models never use it), the negative prompt - empty by
+    default - for the base model's CFG."""
+    if float(cfg) == 1.0:
+        g["6"] = {"class_type": "ConditioningZeroOut", "inputs": {"conditioning": ["5", 0]}}
+    else:
+        g["6"] = {"class_type": "CLIPTextEncode", "inputs": {"clip": ["3", 0], "text": (negative or "").strip()}}
+
+
 def klein_t2i(prompt: str, width: int, height: int, seed: int, steps: int = 4, prefix: str = "hub",
-              files: dict = KLEIN) -> dict:
-    """FLUX.2 klein, 4B or 9B (`files`: the model's own, klein_files)."""
+              files: dict = KLEIN, cfg: float = 1.0, negative: str | None = None) -> dict:
+    """FLUX.2 klein, 4B or 9B (`files`: the model's own, klein_files); `cfg` above 1 for klein 9B base."""
     w, h = snap(width, 16), snap(height, 16)
     g = _klein_base(files)
     g["5"] = {"class_type": "CLIPTextEncode", "inputs": {"clip": ["3", 0], "text": prompt}}
-    g["6"] = {"class_type": "ConditioningZeroOut", "inputs": {"conditioning": ["5", 0]}}
+    _klein_negative(g, cfg, negative)
     g["7"] = {"class_type": "EmptyFlux2LatentImage", "inputs": {"width": w, "height": h, "batch_size": 1}}
     g["10"] = {"class_type": "RandomNoise", "inputs": {"noise_seed": seed}}
     g["11"] = {"class_type": "KSamplerSelect", "inputs": {"sampler_name": "euler"}}
     g["12"] = {"class_type": "CFGGuider", "inputs": {"model": ["1", 0], "positive": ["5", 0], "negative": ["6", 0],
-                                                     "cfg": 1.0}}
+                                                     "cfg": float(cfg)}}
     g["13"] = {"class_type": "Flux2Scheduler", "inputs": {"steps": int(steps), "width": w, "height": h}}
     g["14"] = {"class_type": "SamplerCustomAdvanced",
                "inputs": {"noise": ["10", 0], "guider": ["12", 0], "sampler": ["11", 0], "sigmas": ["13", 0],
@@ -163,12 +174,12 @@ def klein_t2i(prompt: str, width: int, height: int, seed: int, steps: int = 4, p
 
 
 def klein_edit(prompt: str, image_names: list[str], seed: int, steps: int = 4, prefix: str = "hub",
-               files: dict = KLEIN) -> dict:
+               files: dict = KLEIN, cfg: float = 1.0, negative: str | None = None) -> dict:
     if not image_names:
         raise ValueError("an edit needs at least one image")
     g = _klein_base(files)
     g["5"] = {"class_type": "CLIPTextEncode", "inputs": {"clip": ["3", 0], "text": prompt}}
-    g["6"] = {"class_type": "ConditioningZeroOut", "inputs": {"conditioning": ["5", 0]}}
+    _klein_negative(g, cfg, negative)
     pos, neg = ["5", 0], ["6", 0]
     first_scaled = None
     for i, name in enumerate(image_names[:6], start=1):
@@ -188,7 +199,8 @@ def klein_edit(prompt: str, image_names: list[str], seed: int, steps: int = 4, p
                                                                 "batch_size": 1}}
     g["10"] = {"class_type": "RandomNoise", "inputs": {"noise_seed": seed}}
     g["11"] = {"class_type": "KSamplerSelect", "inputs": {"sampler_name": "euler"}}
-    g["12"] = {"class_type": "CFGGuider", "inputs": {"model": ["1", 0], "positive": pos, "negative": neg, "cfg": 1.0}}
+    g["12"] = {"class_type": "CFGGuider", "inputs": {"model": ["1", 0], "positive": pos, "negative": neg,
+                                                     "cfg": float(cfg)}}
     g["13"] = {"class_type": "Flux2Scheduler", "inputs": {"steps": int(steps), "width": ["15", 0], "height": ["15", 1]}}
     g["14"] = {"class_type": "SamplerCustomAdvanced",
                "inputs": {"noise": ["10", 0], "guider": ["12", 0], "sampler": ["11", 0], "sigmas": ["13", 0],

@@ -131,7 +131,7 @@
     {
       "id": "flux2-klein-4b",
       "name": "FLUX.2 [klein] 4B",
-      "description": "Optional fast model (4 steps, Apache 2.0): generation and multi-reference editing.",
+      "description": "Optional fast model (Apache 2.0): generation and multi-reference editing, in a few steps (Settings, Images).",
       "default": false,
       "family": "flux2-klein",
       "abilities": ["generate", "edit"],
@@ -144,7 +144,7 @@
     {
       "id": "flux2-klein-9b",
       "name": "FLUX.2 [klein] 9B",
-      "description": "The larger klein (4 steps): generation and multi-reference editing, and LoRAs trained on klein 9B. 8-bit files as in ComfyUI's template. FLUX Non-Commercial licence and gated on Hugging Face: accept it at huggingface.co/black-forest-labs/FLUX.2-klein-9b-fp8 and add your Hugging Face token under Sign-ins for downloads before downloading.",
+      "description": "The larger klein, fast (a few steps - Settings, Images): generation and multi-reference editing, and LoRAs trained on klein 9B. 8-bit files as in ComfyUI's template. FLUX Non-Commercial licence and gated on Hugging Face: accept it at huggingface.co/black-forest-labs/FLUX.2-klein-9b-fp8 and add your Hugging Face token under Sign-ins for downloads before downloading.",
       "default": false,
       "family": "flux2-klein-9b",
       "abilities": ["generate", "edit"],
@@ -164,6 +164,20 @@
       "files": [
         {"repo": "black-forest-labs/FLUX.2-klein-9b-fp8", "path": "flux-2-klein-9b-fp8.safetensors", "dest": "comfy/diffusion_models/flux-2-klein-9b-fp8.safetensors", "size": 9433061528},
         {"repo": "ponpoke/flux2-klein-9b-uncensored-text-encoder", "path": "model.safetensors", "dest": "comfy/text_encoders/qwen_3_8b_uncensored_f16.safetensors", "size": 16381516808},
+        {"repo": "Comfy-Org/flux2-dev", "path": "split_files/vae/flux2-vae.safetensors", "dest": "comfy/vae/flux2-vae.safetensors", "size": 340000000}
+      ]
+    },
+    {
+      "id": "flux2-klein-9b-base",
+      "name": "FLUX.2 [klein] 9B base",
+      "description": "klein 9B before its distillation into a few steps, run as ComfyUI's own klein 9B text-to-image template runs it: 20 steps with CFG 5 - about ten times the work of klein 9B, for fewer broken bodies (an extra arm, a missing hand) and more varied pictures; a negative prompt works. The LoRAs you train on klein 9B are trained on this model, and fit. Shares klein 9B's text encoder and VAE. FLUX Non-Commercial licence and gated on Hugging Face: accept it at huggingface.co/black-forest-labs/FLUX.2-klein-base-9b-fp8 and add your Hugging Face token under Sign-ins for downloads.",
+      "default": false,
+      "family": "flux2-klein-9b",
+      "abilities": ["generate", "edit"],
+      "settings": {"steps": 20, "cfg": 5.0},
+      "files": [
+        {"repo": "black-forest-labs/FLUX.2-klein-base-9b-fp8", "path": "flux-2-klein-base-9b-fp8.safetensors", "dest": "comfy/diffusion_models/flux-2-klein-base-9b-fp8.safetensors", "size": 9567278472},
+        {"repo": "Comfy-Org/Flux-2-Klein-9B", "path": "split_files/text_encoders/qwen_3_8b_fp8mixed.safetensors", "dest": "comfy/text_encoders/qwen_3_8b_fp8mixed.safetensors", "size": 8664848742},
         {"repo": "Comfy-Org/flux2-dev", "path": "split_files/vae/flux2-vae.safetensors", "dest": "comfy/vae/flux2-vae.safetensors", "size": 340000000}
       ]
     },

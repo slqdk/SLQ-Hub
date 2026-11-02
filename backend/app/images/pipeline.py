@@ -46,8 +46,10 @@ def abilities(entry: dict | None) -> list[str]:
 HINTS = {
     "qwen-image": "Detailed English prompt (other languages work): subject, style, composition, lighting, exact text "
                   "in quotes. Good at text in images; fast=true uses its 8-step turbo.",
-    "flux2-klein": "Fast (4 steps). Detailed natural-language prompt.",
-    "flux2-klein-9b": "Fast (4 steps). Detailed natural-language prompt.",
+    "flux2-klein": "Fast (a few steps). Detailed natural-language prompt; for people, say plainly how they stand or "
+                   "sit and what their hands do.",
+    "flux2-klein-9b": "Fast (a few steps). Detailed natural-language prompt; for people, say plainly how they stand or "
+                      "sit and what their hands do.",
     "ernie-image": "Photorealistic. Its own prompt enhancer expands the prompt, so a short clear description is enough.",
     "z-image": "Fast (8 steps), photorealistic. Detailed natural-language prompt in English or Chinese, exact text in "
                "quotes. No negative prompt.",
@@ -64,10 +66,30 @@ SDXL_HINTS = {
 }
 
 
+# klein 9B base (0.68.0): the family's LoRAs and files, its own sampling (catalog "settings").
+KLEIN_BASE_HINT = ("klein 9B undistilled: slower (20 steps), fewer broken bodies and more varied pictures than the fast "
+                   "klein. Detailed natural-language prompt; negative says what to avoid.")
+
+
+def klein_sampling(entry: dict, settings: dict) -> tuple[int, float]:
+    """(steps, cfg) of a klein model's new pictures: the base model's own (catalog "settings": 20 and CFG 5), the
+    distilled ones' Settings -> Images "klein_steps" (8 by default since 0.68.0, 4 before) at CFG 1."""
+    own = entry.get("settings") or {}
+    if own.get("cfg"):
+        return int(own.get("steps") or 20), float(own["cfg"])
+    try:
+        steps = int(settings.get("klein_steps") or 8)
+    except (TypeError, ValueError):
+        steps = 8
+    return max(1, min(50, steps)), 1.0
+
+
 def prompt_hint(entry: dict) -> str:
     if family(entry) == "sdxl":
         preset = str((entry.get("sdxl") or {}).get("preset") or "sdxl")
         return SDXL_HINTS.get(preset, SDXL_HINTS["sdxl"]) + " negative is added to the model's own negative prompt."
+    if family(entry) in ("flux2-klein", "flux2-klein-9b") and (entry.get("settings") or {}).get("cfg"):
+        return KLEIN_BASE_HINT
     return HINTS.get(family(entry), "")
 
 
@@ -242,7 +264,9 @@ class ImagePipeline:
                                     **({"prompt_used": used} if used else {})})
                 continue
             if fam in W.KLEIN_FILES:                        # FLUX.2 klein 4B or 9B: one graph, the model's files
-                graph = W.klein_t2i(prompt, width, height, sd, steps=steps or 4, files=W.klein_files(entry))
+                k_steps, k_cfg = klein_sampling(entry, s)
+                graph = W.klein_t2i(prompt, width, height, sd, steps=steps or k_steps, files=W.klein_files(entry),
+                                    cfg=k_cfg, negative=negative)
             elif fam == "z-image":
                 graph = W.zimage_t2i(prompt, width, height, sd, steps=steps or int(s.get("turbo_steps", 8)))
             elif fam == "chroma":
@@ -290,8 +314,10 @@ class ImagePipeline:
         for i in range(max(1, min(int(count), 4))):
             names = await self._upload_inputs(images)
             sd = (int(seed) + i) if seed is not None else random.randint(1, 2**31 - 1)
-            if fam in W.KLEIN_FILES:
-                graph = W.klein_edit(prompt, names, sd, steps=steps or 4, files=W.klein_files(entry))
+            if fam in W.KLEIN_FILES:                        # a change: 4 steps as ever, the base model its own
+                own = entry.get("settings") or {}
+                graph = W.klein_edit(prompt, names, sd, steps=steps or int(own.get("steps") or 4),
+                                     files=W.klein_files(entry), cfg=float(own.get("cfg") or 1.0))
             else:
                 graph = W.qwen_edit(prompt, names, sd, steps=steps or int(s.get("steps", 25)),
                                     cfg=float(s.get("cfg", 1.0)), turbo=model.endswith("turbo"))

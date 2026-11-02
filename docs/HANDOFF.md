@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.67.1, 2026-11-02)
+## State (0.68.0, 2026-11-02)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -848,6 +848,22 @@ description names hub3d; skill-creator's code section uses hub3d and says a skil
 belong to more than two triangles ... NOT READY". The dense-text test's budget went to 14,900 tokens (the system
 prompt is longer). Søren was told to delete stl-creator and make it again with the skill maker after the update,
 to get that design's file from its MakerWorld page, and to test with his own designs. NOT run on the VM: item 87.
+0.68.0, Søren: "Often when i use the flux2 klein 9b in text to image, it makes 3 arms, or a hans is missing... What
+can be the reason?" - and, asked for an export, "is there something you can do without getting a export from a chat
+?". **Measured in the code and templates, not on the card**: the Hub's klein text-to-image graph was ComfyUI's
+*edit* template's distilled settings (BFL's fp8 9B, Qwen3-8B fp8mixed, euler, CFG 1, Flux2Scheduler 4 steps, the
+size the assistant asks for up to 2048), while ComfyUI's own klein 9B *text-to-image* template
+(image_flux2_text_to_image_9b.json in comfyui-workflow-templates-json 0.1.119, read here) runs the undistilled base
+model: 20 steps, CFG 5, an empty CLIPTextEncode negative. Community reports (r/StableDiffusion "Flux Klein gives me
+SD3 vibes", Jan 2026; knowledge-space.pages.dev's klein pages) say the distilled model gives body horror in anything
+but simple poses at 4 steps, fewer at 6-8, and base fewer still but much slower. Changed: Settings -> Images
+`klein_steps` (8 by default; 2-20 in the form, 1-50 accepted) for new klein pictures, edits keep 4; catalog
+`flux2-klein-9b-base` (black-forest-labs/FLUX.2-klein-base-9b-fp8, 9,567,278,472 bytes from Hugging Face's API,
+gated "auto", FLUX Non-Commercial) in family flux2-klein-9b with `settings: {steps: 20, cfg: 5}` -
+`pipeline.klein_sampling`, `workflows._klein_negative` (CFG 1 keeps ConditioningZeroOut, so the distilled graph is
+byte for byte what it was); image_generate's result asks the assistant to look at arms, hands and legs and say so
+(`images.BODIES`); klein's prompt hint asks for plain poses and hands. Søren's chats were not seen: which model,
+size, LoRA and prompt gave his three arms is not known. NOT run on the card: item 88.
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
 host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU
@@ -1621,6 +1637,17 @@ the host if the VM ever stops by itself.
       converter's cases are ComfyUI 0.42.3's own templates; files from other sites (Civitai, OpenArt) are
       untried - an export is the way to see what went wrong. When COMFYUI_REF changes, the editor's format may
       too: tools/workflow_oracle/ (convert.js, compare.py) is how the converter was checked - run it again.
+88. **klein's steps and klein 9B base (0.68.0)** - none of it has run on the card:
+    - **8 steps against 4**: one prompt with a person in a harder pose (sitting, holding something, two people),
+      the same seed, Settings -> Images -> Steps for FLUX.2 klein at 4 and at 8 - and again with two or three more
+      seeds. Count arms and hands; note the seconds per picture (the queue log has them). If 8 is no better, put
+      the default back to 4 (config.py) and say so here.
+    - **klein 9B base**: accept its licence on its own page first (huggingface.co/black-forest-labs/
+      FLUX.2-klein-base-9b-fp8 - another repository than klein 9B's and the training's), download it (9.6 GB), then
+      the same prompts and seeds in a chat with it chosen in the picture menu. Its time per picture (40
+      model passes at 1 MP) and memory with the 8 GB text encoder; a person LoRA trained on klein 9B on it.
+    - **The look at the bodies**: does Qwen3.8 27B notice an extra arm in its own picture, and does it then offer
+      a new seed instead of calling the picture fine? An export of such a turn shows it.
 87. **hub3d (0.67.1)** - none of it has run on the VM:
     - **The sandbox image**: update.sh rebuilds it from the 3D layer on (pinned wheels: manifold3d 3.5.4, trimesh
       5.2.0, shapely 2.2.0, networkx 3.6.1), then copies hub3d and runs `hub3d selftest` as the sandbox user - it

@@ -262,7 +262,7 @@ async def image_generate(ctx: ToolContext, args: dict) -> ToolResult:
     made = _made_with(pipe, items[0])                                       # the owner's name for the model
     return ToolResult(f"Generated {len(items)} image(s) with {made['model']}{_lora_text(items[0])} ({desc}). They "
                       f"are shown to the user and below, with a line saying what made them.{_ignored(args)}{where}"
-                      f"{enhanced}",
+                      f"{enhanced}{BODIES}",
                       images=[{"sha": it["sha"], "mime": "image/png"} for it in items],
                       display={"generated": [{"sha": it["sha"], "seed": it["seed"], "path": p}
                                              for it, p in zip(items, paths + [None] * len(items))],
@@ -441,6 +441,10 @@ def _edit_dynamic(ctx: ToolContext) -> tuple[str, dict]:
 GENERATE_TEXT = ("Generate images from a text prompt with the model chosen for this chat (Settings -> Assistant -> "
                  "Images by default). Write a detailed English prompt: subject, style, composition, lighting, any "
                  "exact text in quotes. Takes 15-90 s per image.")
+# 0.68.0 (Søren: FLUX.2 klein 9B "often ... makes 3 arms, or a hand is missing"): the assistant sees each picture it
+# makes, so it looks at the bodies and says what is wrong instead of handing a broken one over as it is.
+BODIES = ("\nBefore you answer, look at the people in them: arms, hands and legs - if one is extra, missing or "
+          "grown together, say so and offer to make it again with another seed.")
 EDIT_TEXT = ("Edit images with an instruction (Qwen-Image 2.1): change, add or remove things, restyle, combine "
              "several reference images (up to 10; FLUX.2 klein uses the first 6). The output keeps the first "
              "image's proportions, so put first the picture whose scene and framing should stay: images "

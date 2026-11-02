@@ -176,6 +176,8 @@ DEFAULTS: dict = {
         "model": "qwen-image-2.1",
         "steps": 25,
         "turbo_steps": 8,
+        "klein_steps": 8,                  # FLUX.2 klein's new pictures (0.68.0): 8, not its own 4 - extra arms and
+                                           # missing hands at 4 are widely reported; changes keep 4
         "enhance_prompts": True,           # ERNIE-Image: let its own prompt enhancer expand the prompt
         "cfg": 1.0,
         "default_size": 1024,

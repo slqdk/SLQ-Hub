@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.68.0 - 2026-11-02
+
+- **Fewer broken bodies from FLUX.2 klein** (an extra arm, a missing hand).
+  klein's new pictures now take 8 steps instead of its own 4 - widely
+  reported to give fewer of these, for about twice the time. Settings ->
+  Images -> Steps for FLUX.2 klein changes it; changes to a picture keep 4.
+- **FLUX.2 [klein] 9B base** (Settings -> Models -> Images, 9.6 GB, gated
+  like klein 9B): the undistilled model, run as ComfyUI's own klein 9B
+  text-to-image template runs it - 20 steps with CFG 5, about ten times the
+  work, for fewer broken bodies and more varied pictures; a negative prompt
+  works. Your klein 9B LoRAs are trained on this model and fit it. Choose it
+  in a chat's picture menu.
+- The assistant looks at the people in every picture it makes - arms, hands,
+  legs - and says so when one is wrong, offering another seed. For klein it
+  writes plainly how people stand or sit and what their hands do.
+
 ## 0.67.1 - 2026-11-02
 
 - **3D models built in code work** (chat 255: an STL took the assistant an
