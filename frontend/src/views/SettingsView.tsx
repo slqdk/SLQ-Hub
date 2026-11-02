@@ -1493,9 +1493,9 @@ function AgentTab({ s }: { s: S }) {
         { key: "turbo_steps", label: "Steps for a fast image", type: "number", min: 2, max: 20,
           help: "The turbo models: Qwen-Image Turbo, ERNIE-Image Turbo, Z-Image Turbo." },
         { key: "klein_steps", label: "Steps for FLUX.2 klein", type: "number", min: 2, max: 20,
-          help: "New pictures with klein 4B, 9B and 9B uncensored. klein is made for 4; 8 is reported to give fewer " +
-            "extra arms and missing hands, for about twice the time. Changes to a picture keep 4. klein 9B base has " +
-            "its own 20." },
+          help: "New pictures with klein 4B, 9B and 9B uncensored. klein is made for 4 - 8 was tried here and gave no " +
+            "fewer extra arms or missing hands, in twice the time. Changes to a picture keep 4. klein 9B base has its " +
+            "own 20." },
         { key: "default_size", label: "Default size (pixels, the long side)", type: "number", min: 512, max: 2048, step: 64 },
         { key: "enhance_prompts", label: "ERNIE-Image: let its prompt enhancer expand the prompt", type: "bool",
           help: "A 3B model in the image workflow turns the prompt into a detailed description first. The chat shows what it wrote." },

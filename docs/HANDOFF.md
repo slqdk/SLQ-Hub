@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.69.0, 2026-11-02)
+## State (0.69.1, 2026-11-02)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -876,6 +876,10 @@ not the newest, not one alone, not one working). In Chromium against the dev ser
 box on hover, the toast and its Undo, the menu's Archive and Unarchive, the tag, the search's "archived" marks, the
 page with the chain offer, Unarchive there, the phone's sidebar (the boxes always shown) and page; no console errors.
 NOT seen on the VM: how the sidebar feels with his few hundred chats (the list still loads 300).
+0.69.1, Søren, after trying 0.68.0's 8 steps for klein on the card: "8 steps did not work. I put it back to 4". The
+default is 4 again (config.py, `pipeline.klein_sampling`); the setting, klein 9B base, the look at the bodies and
+the prompt hint stay. What he compared (prompts, seeds, model, LoRAs) was not seen. Left to try for the broken
+bodies: klein 9B base with the same prompt and seed; a chat without LoRAs; an export of a chat with a bad picture.
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
 host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU
@@ -1650,10 +1654,8 @@ the host if the VM ever stops by itself.
       untried - an export is the way to see what went wrong. When COMFYUI_REF changes, the editor's format may
       too: tools/workflow_oracle/ (convert.js, compare.py) is how the converter was checked - run it again.
 88. **klein's steps and klein 9B base (0.68.0)** - none of it has run on the card:
-    - **8 steps against 4**: one prompt with a person in a harder pose (sitting, holding something, two people),
-      the same seed, Settings -> Images -> Steps for FLUX.2 klein at 4 and at 8 - and again with two or three more
-      seeds. Count arms and hands; note the seconds per picture (the queue log has them). If 8 is no better, put
-      the default back to 4 (config.py) and say so here.
+    - **8 steps against 4**: tried by Søren on the card (2026-11-02): "8 steps did not work" - the default is 4 again
+      (0.69.1). Not known: whether 8 was no better or worse, and on which prompts.
     - **klein 9B base**: accept its licence on its own page first (huggingface.co/black-forest-labs/
       FLUX.2-klein-base-9b-fp8 - another repository than klein 9B's and the training's), download it (9.6 GB), then
       the same prompts and seeds in a chat with it chosen in the picture menu. Its time per picture (40

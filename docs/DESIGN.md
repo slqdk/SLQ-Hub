@@ -1934,7 +1934,8 @@ files afterwards.
     3 arms, or a hand is missing"). The distilled models are made for 4
     steps; extra limbs at 4 are widely reported, fewer at 6-8 (r/Stable-
     Diffusion, Jan 2026). New pictures take Settings → Images
-    `klein_steps` (8 by default), changes keep 4 (an edit keeps the
+    `klein_steps` (8 by default in 0.68.0; 4 again since 0.69.1 - Søren
+    tried 8 on the card: "8 steps did not work"), changes keep 4 (an edit keeps the
     reference's bodies). ComfyUI's own klein 9B *text-to-image* template
     (`image_flux2_text_to_image_9b.json`, templates 0.1.119) runs the
     undistilled base model - 20 steps, CFG 5, an empty CLIPTextEncode as

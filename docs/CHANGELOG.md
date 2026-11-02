@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.69.1 - 2026-11-02
+
+- **FLUX.2 klein is back at 4 steps** for new pictures: 0.68.0's 8 gave no
+  fewer broken bodies on this Hub's card, in twice the time. The setting
+  stays (Settings -> Images -> Steps for FLUX.2 klein); FLUX.2 [klein] 9B
+  base, the assistant's look at the bodies and the prompt hint stay too.
+
 ## 0.69.0 - 2026-11-02
 
 - **Archive chats.** Point at a chat in the list and click the box beside it

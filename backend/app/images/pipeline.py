@@ -73,14 +73,15 @@ KLEIN_BASE_HINT = ("klein 9B undistilled: slower (20 steps), fewer broken bodies
 
 def klein_sampling(entry: dict, settings: dict) -> tuple[int, float]:
     """(steps, cfg) of a klein model's new pictures: the base model's own (catalog "settings": 20 and CFG 5), the
-    distilled ones' Settings -> Images "klein_steps" (8 by default since 0.68.0, 4 before) at CFG 1."""
+    distilled ones' Settings -> Images "klein_steps" at CFG 1 - 4, klein's own (8 in 0.68.0-0.69.0, which did not
+    give fewer broken bodies on Søren's card)."""
     own = entry.get("settings") or {}
     if own.get("cfg"):
         return int(own.get("steps") or 20), float(own["cfg"])
     try:
-        steps = int(settings.get("klein_steps") or 8)
+        steps = int(settings.get("klein_steps") or 4)
     except (TypeError, ValueError):
-        steps = 8
+        steps = 4
     return max(1, min(50, steps)), 1.0
 
 

@@ -268,7 +268,7 @@ async def test_klein_9b_draws_and_edits_with_its_own_files_and_loras(signed_in, 
     assert _node(g, "CLIPLoader")[0]["inputs"] == {"clip_name": "qwen_3_8b_fp8mixed.safetensors", "type": "flux2",
                                                    "device": "default"}
     assert _node(g, "VAELoader")[0]["inputs"]["vae_name"] == "flux2-vae.safetensors"
-    assert _node(g, "Flux2Scheduler")[0]["inputs"]["steps"] == 8                   # 0.68.0: Settings -> Images
+    assert _node(g, "Flux2Scheduler")[0]["inputs"]["steps"] == 4                   # Settings -> Images (0.69.1: 4)
     assert [n["inputs"]["lora_name"] for n in _node(g, "LoraLoaderModelOnly")] == [f"hub/{lora['id']}.safetensors"]
     assert _node(g, "CLIPTextEncode")[0]["inputs"]["text"] == "rkxv, a fox"
     assert items[0]["model"] == "flux2-klein-9b" and "FLUX.2 klein 4B models" in items[0]["lora_notes"][0]
@@ -332,10 +332,10 @@ async def test_klein_9b_uncensored_is_klein_9b_with_its_own_text_encoder(signed_
 
 
 async def test_klein_9b_base_draws_with_cfg_and_a_negative_and_the_steps_are_a_setting(signed_in, app, fakes):
-    """0.68.0 (Søren: klein 9B "often ... makes 3 arms, or a hand is missing"): klein's new pictures take 8 steps by
-    default (Settings -> Images klein_steps; changes keep 4), and klein 9B base is the undistilled model as ComfyUI's
-    own klein 9B text-to-image template runs it - 20 steps, CFG 5, a negative prompt - with klein 9B's text encoder,
-    VAE and LoRAs."""
+    """0.68.0 (Søren: klein 9B "often ... makes 3 arms, or a hand is missing"): klein's steps for new pictures are a
+    setting (Settings -> Images klein_steps; 4 - 0.68.0's 8 did not help on his card, 0.69.1; changes keep 4), and
+    klein 9B base is the undistilled model as ComfyUI's own klein 9B text-to-image template runs it - 20 steps, CFG
+    5, a negative prompt - with klein 9B's text encoder, VAE and LoRAs."""
     from app.images.pipeline import klein_sampling, prompt_hint
     from .mocks import _png
     hub = app.state.hub
@@ -347,9 +347,9 @@ async def test_klein_9b_base_draws_with_cfg_and_a_negative_and_the_steps_are_a_s
     assert (model["repo"], model["path"], model["size"]) == ("black-forest-labs/FLUX.2-klein-base-9b-fp8",
                                                              "flux-2-klein-base-9b-fp8.safetensors", 9567278472)
     assert {f["dest"] for f in base["files"]} - {f["dest"] for f in nine["files"]} == {model["dest"]}
-    assert klein_sampling(base, {}) == (20, 5.0) and klein_sampling(nine, {}) == (8, 1.0)
+    assert klein_sampling(base, {}) == (20, 5.0) and klein_sampling(nine, {}) == (4, 1.0)
     assert klein_sampling(nine, {"klein_steps": 6}) == (6, 1.0) and klein_sampling(nine, {"klein_steps": 999}) == (50, 1.0)
-    assert klein_sampling(nine, {"klein_steps": "many"}) == (8, 1.0)
+    assert klein_sampling(nine, {"klein_steps": "many"}) == (4, 1.0)
     assert "20 steps" in prompt_hint(base) and "negative says what to avoid" in prompt_hint(base)
     assert "what their hands do" in prompt_hint(nine)
 
