@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.73.0 - 2026-11-03
+
+- **Movies get their sound and the final cut.** Each character gets a voice:
+  one of the speech model's own, or a clip of a real voice - 5-20 seconds of
+  one person speaking, from a recording or a video. The narrator has a voice
+  of their own too.
+- **The lines are spoken** in their characters' voices, each with a play
+  button on its shot. A line starts by itself just after the one before; set
+  its time when it should wait. A line you edit keeps its place, and one you
+  leave as it was keeps its take.
+- **Each shot's sound becomes an effect** as long as the shot, and the series
+  gets **theme music**: make versions, choose one, and it plays under every
+  episode - quieter while someone speaks.
+- **Cut it**: the film with each line at its time, speech bubbles (or
+  captions) while it is heard, the theme under it and an end card with the
+  title - then download it. The page says what made a cut out of date, and
+  "Keep as it is" now works for lines and effects too (after a new speech
+  model, say).
+- The storyboard now writes sound effects only - the theme is the music.
+
 ## 0.72.0 - 2026-11-03
 
 - **Movies**, in the menu: short films made shot by shot. A series keeps its

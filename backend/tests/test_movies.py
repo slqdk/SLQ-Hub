@@ -29,6 +29,11 @@ def colour(data: bytes) -> tuple:
         return img.convert("RGBA").getpixel((2, 2))
 
 
+def said(lines: list[dict]) -> list[dict]:
+    """Who says what (the page's lines carry their timing and take too, 0.73.0)."""
+    return [{k: ln[k] for k in ("who", "name", "text")} for ln in lines]
+
+
 def nodes(graph: dict, kind: str) -> list[dict]:
     return [n["inputs"] for n in graph.values() if n["class_type"] == kind]
 
@@ -187,8 +192,8 @@ async def test_the_storyboard_comes_from_the_chat_model_held_to_the_series(signe
     shots = e["shots"]
     assert [(sh["seconds"], sh["set"], sh["characters"]) for sh in shots] == [
         (5.0, x["kitchen"], [x["far"]]), (10.0, x["kitchen"], [x["far"], x["mor"]]), (4.0, "", [])]
-    assert shots[1]["lines"] == [{"who": x["mor"], "name": "Mor", "text": "Seriøst?"}]
-    assert shots[2]["lines"] == [{"who": "Narrator", "name": "Narrator", "text": "Og så var der ingen kage."}]
+    assert said(shots[1]["lines"]) == [{"who": x["mor"], "name": "Mor", "text": "Seriøst?"}]
+    assert said(shots[2]["lines"]) == [{"who": "Narrator", "name": "Narrator", "text": "Og så var der ingen kage."}]
     assert e["notes"] == ["Bedstemor is not in the cast: left out of a shot", "Garage is not one of the sets: a shot "
                                                                                 "has none"]
     # the group shot wants to be combined from the pictures, which are not made yet: until then a new picture
@@ -196,7 +201,10 @@ async def test_the_storyboard_comes_from_the_chat_model_held_to_the_series(signe
                                                                           ("new", "new")]
     assert shots[1]["missing"] == ["Køkken", "Far", "Mor"]
     assert e["progress"] == {"shots": 3, "seconds": 19.0, "approved": False, "keyframes": 0, "clips": 0, "kept": 0,
-                             "preview": "none"}
+                             "preview": "none", "lines": 2, "spoken": 0, "effects": 2, "effects_made": 0,
+                             "final": "none", "final_why": "", "total": 21.5,
+                             "cut_missing": ["shot 1 has no clip", "shot 2 has no clip", "shot 2 has lines not spoken",
+                                             "shot 3 has no clip", "shot 3 has lines not spoken"]}
     # the checkpoint: no keyframes before the storyboard is approved; writing it again asks first
     r = await signed_in.post(f"{API}/{sid}/episodes/{eid}/keyframes", json={}, headers=ORIGIN)
     assert r.status_code == 400 and "Approve the storyboard first" in r.text
@@ -467,7 +475,7 @@ async def test_what_the_review_found(signed_in, app, fakes):
     s = await ok(await signed_in.get(f"{API}/{sid}"))
     shots = s["episodes"][-1]["shots"]
     assert [sh["characters"] for sh in shots] == [[x["far"]], [x["far"]], []]
-    assert shots[1]["lines"] == [{"who": "Mor", "name": "Mor", "text": "Seriøst?"}]
+    assert said(shots[1]["lines"]) == [{"who": "Mor", "name": "Mor", "text": "Seriøst?"}]
     assert "Mor is not in the cast: left out of a shot" in s["episodes"][-1]["notes"]
     # shots added by hand while it writes are not replaced unasked
     s = await ok(await signed_in.post(f"{API}/{sid}/episodes", json={"title": "To", "premise": "More cake."},

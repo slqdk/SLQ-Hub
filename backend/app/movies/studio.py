@@ -21,27 +21,35 @@ The work runs in the background through the queue (owner "movies", priority norm
 cast member, set, storyboard, the keyframes and clips of an episode (a queue of its shots) and its preview. Nothing
 is half-stored: a job that stops - Stop, an error, a restart - leaves what it had finished. The files live in
 data/movies/<series>, out of the sandbox's reach; the preview is joined by ffmpeg in the sandbox in a folder of its
-own under the workspace, removed afterwards. The owner's alone, like LoRAs and training."""
+own under the workspace, removed afterwards. The owner's alone, like LoRAs and training.
+
+0.73.0 adds the sound and the cut (sound.py makes them, cut.py says what goes where): each character's voice - one of
+the speech model's or a clip of a real one - the lines spoken, an effect for each shot, the series' theme, and the
+episode cut into a film with the lines at their times, the theme under them, speech bubbles and an end card."""
 from __future__ import annotations
 
 import asyncio
 import copy
-import hashlib
 import json
 import logging
-import math
+import os
 import re
 import secrets
 import shlex
 import shutil
-import time
 from contextlib import asynccontextmanager
 from pathlib import Path
+
+from . import cut as C
+from .common import (NARRATOR, PRIORITY, MovieError, _by_id, _given, _id, _now, _number, _para, _stamp, _text,
+                     _whole)
+from .sound import SoundJobs
 
 log = logging.getLogger(__name__)
 
 ID_RE = re.compile(r"^[a-z0-9]{2,16}$")
-FILE_RE = re.compile(r"^(?:cast|sets|[a-z0-9]{2,16})/[a-z0-9][a-z0-9-]{0,80}\.(?:png|mp4)$")
+# cast/ and sets/ pictures; voices/ clips (0.73.0); music/ themes; an episode's pictures, clips, lines and cuts
+FILE_RE = re.compile(r"^(?:cast|sets|[a-z0-9]{2,16})/[a-z0-9][a-z0-9-]{0,80}\.(?:png|mp4|mp3|wav)$")
 FORMATS = {"portrait": (720, 1280), "landscape": (1280, 720), "square": (1024, 1024)}
 QUALITIES = ("fast", "full")
 METHODS = ("auto", "new", "combine")      # combine: from the set's picture and the characters' sheets
@@ -51,8 +59,9 @@ MAX_VARIANTS = 12                          # pictures kept per shot, sheet or se
 MAX_TAKES = 4                              # clips kept per shot: the current one and three before it
 MAX_REFS = 6                               # FLUX.2 klein reads six pictures in a change: the set and five characters
 SHOT_SECONDS = (1.0, 10.0)                 # what the video models make (5 s is what they learnt)
-PRIORITY = "normal"                        # chats go first, then movies, then background work
-NARRATOR = "Narrator"
+# an episode's jobs; those that work through a queue of its shots (or of its lines: "<shot>:<line>")
+EPISODE_JOBS = ("storyboard", "keyframes", "clips", "preview", "voices", "sounds", "cut")
+QUEUED_JOBS = ("keyframes", "clips", "voices", "sounds")
 
 DEFAULT_RULES = (
     "One joke per episode: a setup in the first seconds, an escalation, a punchline near the end. Family-friendly. "
@@ -101,8 +110,10 @@ For each shot:
   they hold, the framing (close-up, medium or wide shot) and the light. Concrete; no camera movement here.
 - motion: what moves in the shot and how the camera moves, in English, simple and small - the video model starts
   from the picture.
-- sound: sound effects and music cues, in English.
+- sound: the sound effects heard in the shot, in English, short and concrete (a fridge door opens, a cat meows) - no
+  music: the series' theme plays under every episode. "" when nothing is heard but the lines.
 - lines: what is said, in {language}: [{{"who": a cast name or "{narrator}", "text": ...}}] - empty when nobody speaks.
+  Short lines: each is shown in a speech bubble while it is heard, and a 5-second shot holds about ten words.
 
 Answer with JSON only: {{"shots": [{{"seconds": 5, "set": "...", "characters": ["..."], "picture": "...",
 "motion": "...", "sound": "...", "lines": [{{"who": "...", "text": "..."}}]}}]}}"""
@@ -118,43 +129,6 @@ STORYBOARD_SCHEMA = {"type": "object", "properties": {"shots": {
     "required": ["shots"]}
 
 
-class MovieError(Exception):
-    def __init__(self, message: str, status: int = 400):
-        super().__init__(message)
-        self.status = status
-
-
-def _now() -> int:
-    return int(time.time())
-
-
-def _id(prefix: str) -> str:
-    return prefix + secrets.token_hex(3)
-
-
-def _text(value, limit: int) -> str:
-    return " ".join(str(value or "").split())[:limit]
-
-
-def _para(value, limit: int) -> str:
-    """Text that keeps its line breaks (a premise, the rules)."""
-    lines = [" ".join(x.split()) for x in str(value or "").replace("\r", "").split("\n")]
-    return "\n".join(lines).strip()[:limit]
-
-
-def _stamp(*parts) -> str:
-    return hashlib.sha256(json.dumps(parts, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:16]
-
-
-def _number(value, default: float) -> float:
-    """A finite number, or the default (NaN and infinity from a hand-made request too)."""
-    try:
-        v = float(value)
-    except (TypeError, ValueError, OverflowError):
-        return default
-    return v if math.isfinite(v) else default
-
-
 def _seconds(value) -> float:
     return round(max(SHOT_SECONDS[0], min(SHOT_SECONDS[1], _number(value, 5.0))), 1)
 
@@ -163,29 +137,15 @@ def _strength(value, default: float = 1.0) -> float:
     return round(max(-10.0, min(10.0, _number(value, default))), 2)
 
 
-def _whole(value, lo: int, hi: int, default: int) -> int:
-    return int(max(lo, min(hi, _number(value, default))))
-
-
-def _given(value, what: str) -> float:
-    """A number the owner gave: refused when it is none (NaN and infinity from a hand-made request too)."""
-    v = _number(value, math.nan)
-    if math.isnan(v):
-        raise MovieError(f"{what} must be a number.")
-    return v
-
-
 # ---------------------------------------------------------------- what a result is made from
-
-def _by_id(items: list[dict], iid: str) -> dict | None:
-    return next((x for x in items if x.get("id") == iid), None)
-
 
 def env_of(series: dict, env: dict | None = None) -> dict:
     """What the look's defaults mean now - the picture model's id and whether it can combine pictures, the video
-    model's id (Studio.env, from Settings and what is downloaded); without it, as the series says."""
+    model's id, the sound models' (Studio.env, from Settings and what is downloaded); without it, as the series
+    says."""
     st = series["style"]
-    return env or {"model": st.get("model") or "", "combine": True, "video": st.get("video_model") or ""}
+    return env or {"model": st.get("model") or "", "combine": True, "video": st.get("video_model") or "",
+                   "speech": "", "sound": "", "music": ""}
 
 
 def method_of(series: dict, shot: dict) -> str:
@@ -313,13 +273,42 @@ def missing(series: dict, shot: dict) -> list[str]:
                   if c and not c.get("sheet")]
 
 
-def lines_text(series: dict, lines: list[dict]) -> list[dict]:
-    """Lines with the speaker's name (a cast member's id is kept in the series)."""
+def final_state(series: dict, episode: dict, env: dict | None = None) -> tuple[str, str]:
+    """The cut is up to date while it is made of what the episode has now - its clips, lines, effects, theme and
+    settings - each of them up to date. -> (state, why it is not)."""
+    f = episode.get("final")
+    if not f:
+        return "none", ""
+    env = env_of(series, env)
+    for n, sh in enumerate(episode["shots"]):
+        if sh.get("clip") and clip_state(series, sh, env) != "fresh":
+            return "stale", f"shot {n + 1}'s clip is from before a change"
+        if C.sfx_state(sh, env) == "stale":
+            return "stale", f"shot {n + 1}'s effect is from before a change"
+        if any(C.line_state(series, ln, env) == "stale" for ln in sh.get("lines") or []):
+            return "stale", f"a line in shot {n + 1} was spoken before a change"
+    if C.cut_settings(episode)["music"] and C.theme_state(series, env) == "stale":
+        return "stale", "the theme is from before a change"
+    if f.get("stamp") != C.cut_stamp(series, episode, env):
+        return "stale", "the episode has changed since"
+    return "fresh", ""
+
+
+def lines_view(series: dict, shot: dict, placed: dict, env: dict | None = None) -> list[dict]:
+    """A shot's lines as the page shows them: the speaker's name (a cast member's id is kept in the series), where
+    the line starts in the shot and how long it is, whether it runs past the shot's end, its take and its state."""
+    env = env_of(series, env)
     out = []
-    for ln in lines or []:
+    for i, ln in enumerate(shot.get("lines") or []):
         c = _by_id(series["cast"], ln.get("who") or "")
-        out.append({"who": ln.get("who") or "", "name": c["name"] if c else (ln.get("who") or NARRATOR),
-                    "text": ln.get("text") or ""})
+        p = placed.get((shot["id"], i)) or {}
+        audio = ln.get("audio")
+        out.append({"id": ln.get("id") or "", "who": ln.get("who") or "",
+                    "name": c["name"] if c else (ln.get("who") or NARRATOR), "text": ln.get("text") or "",
+                    "at": ln.get("at"), "start": p.get("at", 0.0), "seconds": p.get("seconds", 0.0),
+                    "over": p.get("over", 0.0),
+                    "audio": {k: audio.get(k) for k in ("file", "seconds", "voice", "made")} if audio else None,
+                    "state": C.line_state(series, ln, env), **({"error": ln["error"]} if ln.get("error") else {})})
     return out
 
 
@@ -327,27 +316,45 @@ def view(series: dict, env: dict | None = None) -> dict:
     """The series as the page shows it: each result's state (none, fresh or made before a change) and each
     episode's progress through its checkpoints."""
     s = copy.deepcopy(series)
+    env = env_of(series, env)
     for c in s["cast"]:
         c["sheet_state"] = ("none" if not c.get("sheet") else
                             "fresh" if c.get("sheet_stamp") == sheet_plan(series, c, env)["stamp"] else "stale")
+        c.setdefault("voice", "")
+        c.setdefault("expressiveness", C.DEFAULT_EXPRESSIVENESS)
     for k in s["sets"]:
         k["picture_state"] = ("none" if not k.get("picture") else
                               "fresh" if k.get("picture_stamp") == set_plan(series, k, env)["stamp"] else "stale")
-    for e in s["episodes"]:
-        fresh = kept = made = 0
-        for sh in e["shots"]:
-            sh["keyframe_state"] = keyframe_state(series, sh, env)
-            sh["clip_state"] = clip_state(series, sh, env)
-            sh["method_used"] = plan(series, sh, env)["method"]
-            sh["method_wanted"] = method_of(series, sh)
-            sh["missing"] = missing(series, sh) if sh["method_wanted"] == "combine" else []
-            sh["lines"] = lines_text(series, sh.get("lines") or [])
+    s["style"].setdefault("narrator_voice", "")
+    th = C.theme_of(series)
+    s["theme"] = {**{k: v for k, v in th.items() if k != "file_stamp"}, "state": C.theme_state(series, env)}
+    for e, orig in zip(s["episodes"], series["episodes"]):
+        tl = C.timeline(series, orig)
+        placed = {(x["shot"], x["i"]): x for x in tl["lines"]}
+        fresh = kept = made = lines = spoken = wanted = effects = 0
+        for sh, o in zip(e["shots"], orig["shots"]):
+            sh["keyframe_state"] = keyframe_state(series, o, env)
+            sh["clip_state"] = clip_state(series, o, env)
+            sh["method_used"] = plan(series, o, env)["method"]
+            sh["method_wanted"] = method_of(series, o)
+            sh["missing"] = missing(series, o) if sh["method_wanted"] == "combine" else []
+            sh["lines"] = lines_view(series, o, placed, env)
+            sh["sfx_state"] = C.sfx_state(o, env)
+            sh["seconds_used"] = C.shot_seconds(o)
             fresh += sh["keyframe_state"] == "fresh"
             made += sh["clip_state"] == "fresh"
             kept += sh["clip_state"] == "fresh" and bool((sh.get("clip") or {}).get("kept"))
+            lines += len(sh["lines"])
+            spoken += sum(ln["state"] == "fresh" for ln in sh["lines"])
+            wanted += sh["sfx_state"] != "unwanted"
+            effects += sh["sfx_state"] == "fresh"
+        e["cut"] = C.cut_settings(orig)
+        final, why = final_state(series, orig, env)
         e["progress"] = {"shots": len(e["shots"]), "seconds": round(sum(sh["seconds"] for sh in e["shots"]), 1),
                          "approved": bool(e.get("approved")), "keyframes": fresh, "clips": made, "kept": kept,
-                         "preview": preview_state(series, e, env)}
+                         "preview": preview_state(series, orig, env), "lines": lines, "spoken": spoken,
+                         "effects": wanted, "effects_made": effects, "final": final, "final_why": why,
+                         "cut_missing": C.missing_for_cut(orig), "total": tl["total"]}
     return s
 
 
@@ -395,7 +402,8 @@ def parse_storyboard(text: str, series: dict) -> tuple[list[dict], list[str]]:
         for ln in item.get("lines") or []:
             if isinstance(ln, dict) and _text(ln.get("text"), LINE_MAX):
                 who = _text(ln.get("who"), NAME_MAX)
-                lines.append({"who": cast.get(who.lower(), who or NARRATOR), "text": _text(ln.get("text"), LINE_MAX)})
+                lines.append({"id": _id("l"), "who": cast.get(who.lower(), who or NARRATOR),
+                              "text": _text(ln.get("text"), LINE_MAX)})
         shots.append(new_shot(seconds=item.get("seconds"), set=kid, characters=chars,
                               picture=item.get("picture"), motion=item.get("motion"), sound=item.get("sound"),
                               lines=lines[:MAX_LINES]))
@@ -412,7 +420,7 @@ def new_shot(**fields) -> dict:
 
 # ---------------------------------------------------------------- the studio
 
-class Studio:
+class Studio(SoundJobs):
     def __init__(self, hub):
         self.hub = hub
         self.root = Path(hub.env.data_dir) / "movies"
@@ -424,7 +432,8 @@ class Studio:
 
     def env(self, series: dict) -> dict:
         """What the series' look means now: Settings' picture model when it names none (and whether that one can
-        combine pictures), Settings' video model for a video from a picture when it names none."""
+        combine pictures), Settings' video model for a video from a picture when it names none, the speech model
+        for the lines' language and the effect and music models (sound.py)."""
         from ..images.pipeline import abilities
         from ..video.pipeline import VideoError
         pipe, video = self.hub.extras.get("images"), self.hub.extras.get("video")
@@ -436,11 +445,12 @@ class Studio:
                 vid = video.chosen("i2v", vid or None)["id"]
             except VideoError:
                 pass
-        return {"model": model, "combine": bool(pipe) and "edit" in abilities(pipe.entry(model)), "video": vid}
+        return {"model": model, "combine": bool(pipe) and "edit" in abilities(pipe.entry(model)), "video": vid,
+                **self.audio_env(series)}
 
     def sweep(self) -> None:
-        """At start-up: what a job that a restart cut off left - a preview's folder in the workspace, a file it was
-        writing."""
+        """At start-up: what a job that a restart cut off left - a preview's or a cut's folder in the workspace, a
+        file it was writing."""
         shutil.rmtree(Path(self.hub.env.workspace_dir) / "movies-tmp", ignore_errors=True)
         if self.root.is_dir():
             for p in self.root.glob("*/**/.*.tmp"):
@@ -449,6 +459,37 @@ class Studio:
 
     async def sweep_after_start(self) -> None:
         self.sweep()
+
+    # ------------------------------------------------------------ the sandbox
+    def _tmp_folder(self) -> Path:
+        """A folder of a job's own under the workspace, where the sandbox reaches it (removed by the job)."""
+        from ..projects import store as projects
+        return projects.real_dir(self.hub.env.workspace_dir, "movies-tmp", secrets.token_hex(6))
+
+    async def _sandbox(self, folder: Path, cmd: str, timeout: int, out_name: str, failed: str) -> bytes:
+        """Run a command in the sandbox in the job's folder - offline - and read the file it made: an error when it
+        failed, ran out of time or left nothing (or a link) behind."""
+        from ..agent.tools.base import ToolContext
+        from ..agent.tools.shell import SandboxError, sandbox_exec
+        from ..projects import store as projects
+        ws = self.hub.env.workspace_dir
+        wd = projects.Workdir(folder, None, ws, self.hub.env.sandbox_workspace)
+        ctx = ToolContext(hub=self.hub, run=None, chat={}, project=None, workdir=wd, ticket=None, model={})
+        try:
+            res = await sandbox_exec(ctx, cmd, wd.sandbox_path, timeout, offline=True)
+        except SandboxError as exc:
+            raise MovieError(f"{failed}: {exc}") from exc
+        err = " ".join(str(res.get("stderr") or "").split())[-300:]
+        if res.get("exit_code") != 0 or res.get("timed_out"):
+            raise MovieError(f"{failed}{': ' + err if err else ''}.")
+        try:                                       # not through a link the sandbox could have put in its place
+            with os.fdopen(wd.open_inside(out_name), "rb") as fh:
+                data = fh.read()
+        except (OSError, ValueError):
+            data = b""
+        if not data:
+            raise MovieError(f"{failed}: it left nothing.")
+        return data
 
     # ------------------------------------------------------------ storage
     def _dir(self, sid: str) -> Path:
@@ -461,6 +502,11 @@ class Studio:
             data = json.loads((self._dir(sid) / "series.json").read_text(encoding="utf-8"))
         except (OSError, ValueError):
             raise MovieError("No such series.", 404) from None
+        for e in data.get("episodes") or []:      # lines from before 0.73.0: an id from what they are, kept when saved
+            for sh in e.get("shots") or []:
+                for i, ln in enumerate(sh.get("lines") or []):
+                    if not ln.get("id"):
+                        ln["id"] = "l" + _stamp(sh.get("id"), i, ln.get("who"), ln.get("text"))[:6]
         return data
 
     def _save(self, series: dict) -> None:
@@ -510,16 +556,20 @@ class Studio:
         out: set[str] = set()
         for c in series["cast"]:
             out |= {v["file"] for v in c.get("variants") or []} | ({c["sheet"]} if c.get("sheet") else set())
+            if c.get("voice_clip"):
+                out.add(c["voice_clip"])
         for k in series["sets"]:
             out |= {v["file"] for v in k.get("variants") or []} | ({k["picture"]} if k.get("picture") else set())
+        theme = series.get("theme") or {}
+        out |= {v["file"] for v in theme.get("variants") or []} | ({theme["file"]} if theme.get("file") else set())
         for e in series["episodes"]:
-            if e.get("preview"):
-                out.add(e["preview"]["file"])
+            out |= {x["file"] for x in (e.get("preview"), e.get("final")) if x}
             for sh in e["shots"]:
                 out |= {v["file"] for v in sh.get("variants") or []}
                 if sh.get("keyframe"):
                     out.add(sh["keyframe"])
-                out |= {c["file"] for c in [sh.get("clip"), *(sh.get("takes") or [])] if c}
+                out |= {c["file"] for c in [sh.get("clip"), *(sh.get("takes") or []), sh.get("sfx")] if c}
+                out |= {ln["audio"]["file"] for ln in sh.get("lines") or [] if (ln.get("audio") or {}).get("file")}
         return out
 
     def _tidy(self, series: dict) -> None:
@@ -561,13 +611,14 @@ class Studio:
         loras = [{k: x.get(k) for k in ("id", "name", "base", "base_label", "trigger", "strength", "slider",
                                         "category")} for x in (store.list() if store else [])]
         videos = [{"id": e["id"], "name": e["name"]} for e in (video.installed("i2v") if video else [])]
+        from ..audio.pipeline import LANGUAGE_NAMES
         writer = self.writer()
         return {"models": models, "default_model": {"id": default, "name": (default_entry or {}).get("name") or default,
                                                     "family": family(default_entry)},
                 "loras": loras, "video_models": videos,
                 "default_video": video.chosen("i2v")["name"] if video and video.available("i2v") else "",
                 "writer": (writer.get("name") or writer["id"]) if writer else "", "formats": list(FORMATS),
-                "defaults": DEFAULT_STYLE}
+                "languages": list(LANGUAGE_NAMES.values()), "defaults": DEFAULT_STYLE}
 
     def create(self, name: str) -> dict:
         name = _text(name, NAME_MAX)
@@ -582,6 +633,7 @@ class Studio:
     def detail(self, sid: str) -> dict:
         series = self.load(sid)
         out = view(series, self.env(series))
+        out["audio"] = self.audio_info(series)
         out["jobs"] = {key: {**self.live.get((sid, key), {}), "queued": list(self.queues.get((sid, key), []))}
                        for (s, key), task in self.tasks.items() if s == sid and not task.done()}
         out["errors"] = {key: err for (s, key), err in self.errors.items() if s == sid}
@@ -590,7 +642,8 @@ class Studio:
     def working(self, sid: str, key: str | None = None) -> bool:
         return any(not t.done() for (s, k), t in self.tasks.items() if s == sid and (key is None or k == key))
 
-    async def update(self, sid: str, name: str | None = None, style: dict | None = None) -> dict:
+    async def update(self, sid: str, name: str | None = None, style: dict | None = None,
+                     theme: dict | None = None) -> dict:
         async with self.edit(sid) as s:
             if name is not None:
                 if not _text(name, NAME_MAX):
@@ -598,7 +651,30 @@ class Studio:
                 s["name"] = _text(name, NAME_MAX)
             if style:
                 s["style"].update(self._clean_style(style))
+                if "narrator_voice" in style:               # a voice of the speech model for the language set now
+                    s["style"]["narrator_voice"] = self._voice_name(s, style["narrator_voice"])
+            if theme:
+                s.setdefault("theme", {}).update(self._clean_theme(theme))
         return self.detail(sid)
+
+    def _voice_name(self, series: dict, value) -> str:
+        """One of the speech model's own voices ("" is its default) - any name while none is downloaded."""
+        name = _text(value, 40).lower()
+        info = self.audio_info(series)
+        names = [v["id"] for v in info["voices"]]
+        if name and names and name not in names:
+            raise MovieError(f"{info['speech']} has no voice called {name} - its voices: {', '.join(names)}.")
+        return name
+
+    @staticmethod
+    def _clean_theme(theme: dict) -> dict:
+        out: dict = {}
+        if theme.get("prompt") is not None:
+            out["prompt"] = _text(theme["prompt"], WORDS_MAX) or C.DEFAULT_THEME
+        if theme.get("seconds") is not None:
+            out["seconds"] = _whole(_given(theme["seconds"], "The theme's length"), *C.THEME_SECONDS,
+                                    C.THEME_DEFAULT_SECONDS)
+        return out
 
     def _clean_style(self, style: dict) -> dict:
         out: dict = {}
@@ -657,7 +733,8 @@ class Studio:
                 raise MovieError(f"A series has at most {MAX_CAST if kind == 'cast' else MAX_SETS} of these.")
             item = {"id": _id("c" if kind == "cast" else "k"), "name": "", "look": "", "variants": []}
             if kind == "cast":
-                item.update(lora="", strength=1.0, sheet="", sheet_stamp="")
+                item.update(lora="", strength=1.0, sheet="", sheet_stamp="", voice="",
+                            expressiveness=C.DEFAULT_EXPRESSIVENESS)
             else:
                 item.update(picture="", picture_stamp="")
             item.update(self._clean_member(s, kind, fields, item["id"]))
@@ -687,6 +764,16 @@ class Studio:
                 out["lora"] = lora
             if fields.get("strength") is not None:
                 out["strength"] = _strength(_given(fields["strength"], "The strength"), 1.0)
+            if fields.get("voice") is not None:             # the speech model's own voice, or "clip": their clip
+                if fields["voice"] == "clip":
+                    if not (_by_id(items, iid) or {}).get("voice_clip"):
+                        raise MovieError("Give a clip of the voice first.")
+                    out["voice"] = "clip"
+                else:
+                    out["voice"] = self._voice_name(series, fields["voice"])
+            if fields.get("expressiveness") is not None:
+                lo, hi = C.EXPRESSIVENESS
+                out["expressiveness"] = round(max(lo, min(hi, _given(fields["expressiveness"], "The expression"))), 2)
         return out
 
     async def change_member(self, sid: str, kind: str, iid: str, fields: dict) -> dict:
@@ -833,7 +920,7 @@ class Studio:
         return sh
 
     async def change_episode(self, sid: str, eid: str, title: str | None = None, premise: str | None = None,
-                             approved: bool | None = None) -> dict:
+                             approved: bool | None = None, cut: dict | None = None) -> dict:
         async with self.edit(sid) as s:
             e = self._episode(s, eid)
             if title is not None:
@@ -846,10 +933,27 @@ class Studio:
                 if approved and any(not sh["picture"] for sh in e["shots"]):
                     raise MovieError("Every shot needs a picture description first.")
                 e["approved"] = bool(approved)
+            if cut:
+                e["cut"] = {**C.cut_settings(e), **self._clean_cut(cut)}
         return self.detail(sid)
 
+    @staticmethod
+    def _clean_cut(cut: dict) -> dict:
+        """The cut's settings: the theme under it or not, the volumes (0-2), the text on screen, the end card."""
+        out: dict = {}
+        for key, value in cut.items():
+            if key in ("music", "end_card"):
+                out[key] = bool(value)
+            elif key in C.VOLUMES:
+                out[key] = round(max(0.0, min(2.0, _given(value, "The volume"))), 2)
+            elif key == "text":
+                if value not in C.TEXT_STYLES:
+                    raise MovieError("The text on screen is bubbles, captions or none.")
+                out[key] = value
+        return out
+
     async def delete_episode(self, sid: str, eid: str) -> dict:
-        if any(self.working(sid, f"{what}:{eid}") for what in ("storyboard", "keyframes", "clips", "preview")):
+        if any(self.working(sid, f"{what}:{eid}") for what in EPISODE_JOBS):
             raise MovieError("It is working - stop it first.", 409)
         async with self.edit(sid) as s:
             self._episode(s, eid)
@@ -898,15 +1002,7 @@ class Studio:
                     raise MovieError("The method is auto, new or combine.")
                 sh["method"] = fields["method"]
             if fields.get("lines") is not None:
-                lines = []
-                for ln in fields["lines"][:MAX_LINES]:
-                    text = _text((ln or {}).get("text"), LINE_MAX)
-                    if text:
-                        who = _text((ln or {}).get("who"), NAME_MAX) or NARRATOR
-                        c = _by_id(s["cast"], who) or next((c for c in s["cast"] if c["name"].lower() == who.lower()),
-                                                           None)
-                        lines.append({"who": c["id"] if c else who, "text": text})
-                sh["lines"] = lines
+                sh["lines"] = self._edited_lines(s, sh.get("lines") or [], fields["lines"])
             if fields.get("move") in (-1, 1):
                 i = e["shots"].index(sh)
                 j = i + fields["move"]
@@ -914,18 +1010,49 @@ class Studio:
                     e["shots"][i], e["shots"][j] = e["shots"][j], e["shots"][i]
         return self.detail(sid)
 
+    @staticmethod
+    def _edited_lines(series: dict, old: list[dict], given: list) -> list[dict]:
+        """A shot's lines as the owner wrote them: a line kept word for word keeps its id, its take and its time; a
+        changed one in the same place keeps its id and time (a typo fixed), not its take; a new one is new."""
+        new: list[dict] = []
+        for ln in given[:MAX_LINES]:
+            text = _text((ln or {}).get("text"), LINE_MAX)
+            if text:
+                who = _text((ln or {}).get("who"), NAME_MAX) or NARRATOR
+                c = _by_id(series["cast"], who) or next((c for c in series["cast"]
+                                                         if c["name"].lower() == who.lower()), None)
+                new.append({"who": c["id"] if c else who, "text": text})
+        left = list(old)
+
+        def take(line: dict) -> bool:
+            for k, o in enumerate(left):
+                if o is line:
+                    del left[k]
+                    return True
+            return False
+        for ln in new:
+            same = next((o for o in left if (o.get("who"), o.get("text")) == (ln["who"], ln["text"])), None)
+            if same is not None and take(same):
+                ln.update({k: same[k] for k in ("id", "audio", "at") if k in same})
+        for i, ln in enumerate(new):
+            if "id" not in ln:
+                if i < len(old) and take(old[i]):
+                    ln.update({k: old[i][k] for k in ("id", "at") if k in old[i]})
+                ln.setdefault("id", _id("l"))
+        return new
+
     async def delete_shot(self, sid: str, eid: str, hid: str) -> dict:
-        for what in ("keyframes", "clips"):
+        for what in QUEUED_JOBS:
             if self.live.get((sid, f"{what}:{eid}"), {}).get("shot") == hid:
-                raise MovieError("It is making this shot's pictures or clip right now - stop it first.", 409)
+                raise MovieError("It is making something for this shot right now - stop it first.", 409)
         async with self.edit(sid) as s:
             e = self._episode(s, eid)
             self._shot(e, hid)
             e["shots"] = [sh for sh in e["shots"] if sh["id"] != hid]
-        for what in ("keyframes", "clips"):
+        for what in QUEUED_JOBS:
             q = self.queues.get((sid, f"{what}:{eid}"))
-            if q and hid in q:
-                q.remove(hid)
+            if q:
+                q[:] = [x for x in q if x.partition(":")[0] != hid]     # in place: the job reads this list
         return self.detail(sid)
 
     async def pick_keyframe(self, sid: str, eid: str, hid: str, file: str = "", keep: bool = False) -> dict:
@@ -985,7 +1112,7 @@ class Studio:
         if e["shots"] and not replace:
             raise MovieError("The episode has shots: writing the storyboard again replaces them, with their "
                              "pictures and clips.", 409)
-        if any(self.working(sid, f"{what}:{eid}") for what in ("keyframes", "clips", "preview")):
+        if any(self.working(sid, f"{what}:{eid}") for what in EPISODE_JOBS if what != "storyboard"):
             raise MovieError("It is working on this episode - stop that first.", 409)
         self._start(sid, f"storyboard:{eid}", self._storyboard(sid, eid, replace))
 
@@ -1183,8 +1310,6 @@ class Studio:
     async def _preview(self, sid: str, eid: str) -> None:
         """The clips joined in order, silent, in the first clip's size and frame rate - by ffmpeg in the sandbox, in a
         folder of its own that is removed afterwards (the series' own folder is out of the sandbox's reach)."""
-        from ..agent.tools.base import ToolContext
-        from ..agent.tools.shell import SandboxError, sandbox_exec
         from ..projects import store as projects
         key = (sid, f"preview:{eid}")
         s = self.load(sid)
@@ -1192,29 +1317,16 @@ class Studio:
         clips = [sh["clip"] for sh in e["shots"] if sh.get("clip")]
         stamp = preview_stamp(e)
         self.live[key] = {"what": "preview", "total": len(clips)}
-        ws = self.hub.env.workspace_dir
-        token = secrets.token_hex(6)
-        folder = projects.real_dir(ws, "movies-tmp", token)
+        folder = self._tmp_folder()
         try:
             names = []
             for i, c in enumerate(clips):
                 name = f"c{i + 1}.mp4"
                 projects.safe_write(folder, folder / name, self.file(sid, c["file"]).read_bytes())
                 names.append(name)
-            wd = projects.Workdir(folder, None, ws, self.hub.env.sandbox_workspace)
-            ctx = ToolContext(hub=self.hub, run=None, chat={}, project=None, workdir=wd, ticket=None, model={})
             cmd = join_command(names, "preview.mp4", int(clips[0]["width"]), int(clips[0]["height"]),
                                int(clips[0]["fps"]))
-            try:
-                res = await sandbox_exec(ctx, cmd, wd.sandbox_path, 600, offline=True)
-            except SandboxError as exc:
-                raise MovieError(f"The preview failed: {exc}") from exc
-            out = folder / "preview.mp4"
-            if (res.get("exit_code") != 0 or res.get("timed_out") or out.is_symlink() or not out.is_file()
-                    or out.stat().st_size == 0):
-                err = " ".join(str(res.get("stderr") or "").split())[:300]
-                raise MovieError(f"The preview failed{': ' + err if err else ''}.")
-            data = out.read_bytes()
+            data = await self._sandbox(folder, cmd, 600, "preview.mp4", "The preview failed")
         finally:
             shutil.rmtree(folder, ignore_errors=True)
         async with self.edit(sid) as s:
@@ -1268,8 +1380,9 @@ class Studio:
 
     def _again(self, sid: str, key: str) -> None:
         what, _, eid = key.partition(":")
-        if self.queues.get((sid, key)) and not self.working(sid, key) and what in ("keyframes", "clips"):
-            factory = self._keyframes if what == "keyframes" else self._clips
+        if self.queues.get((sid, key)) and not self.working(sid, key) and what in QUEUED_JOBS:
+            factory = {"keyframes": self._keyframes, "clips": self._clips, "voices": self._voices,
+                       "sounds": self._sounds}[what]
             self._start(sid, key, factory(sid, eid))
 
     async def cancel(self, sid: str, key: str) -> None:

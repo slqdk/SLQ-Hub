@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.72.0, 2026-11-03)
+## State (0.73.0, 2026-11-03)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -916,6 +916,28 @@ real ffmpeg): the whole episode through the page - the look, three characters, a
 episode, the storyboard written and approved, keyframes made and chosen, clips made and kept, the preview joined
 (20 s, playing), a changed shot marked before a change with Keep as it is; the phone (no sideways scroll); no page
 errors. NOT seen on the VM: item 91.
+0.73.0, Søren: "Continue with the rest" - Movies' sound and cut (DESIGN §8 "Movies", "Sound and the cut"): each
+character's voice (one of the speech model's, or a clip of a real voice converted in the sandbox), the lines spoken
+(a queue by line id; takes kept through edits), an effect for each shot, the series' theme in versions, "Keep as it
+is" for lines and effects, and the cut: the clips on the first clip's frame grid, each line at its time, the theme
+ducked under the speech, speech bubbles (a narration box for the narrator) or captions, an end card, drawn by
+`render_overlays.py` (Pillow and DejaVu, in the sandbox: the Hub's image has no æ, ø, å) and rendered by ffmpeg in
+the sandbox; the film downloads. Tests: tests/test_movies_sound.py (6) - one runs the real cut (python3 and ffmpeg
+here) and probes the film (two streams, 21.625 s as the timeline says); tests/test_movies.py updated. Measured here
+with the real ffmpeg 6.1 (the sandbox image's): the cut of 3 clips, 3 lines, an effect, a looped theme and 3 bubbles
+in 2.5 s; bubbles, the narration box, captions and the end card looked at (æ, ø, å drawn). An independent review (a
+separate agent: the filter graph run with real ffmpeg in six shapes, up to 144 bubbles) found 9 problems, fixed and
+tested: a cut shown up to date with a line added after it; lines queued by position (an edit could give a take to the
+wrong line); the narrator's voice stuck on a voice the new model lacks; no way back from "before a change" for lines and
+effects after a model change; the preview hidden once there is a cut; a line's error cleared by the next line's
+success; clips of another frame rate moving the lines after them (now whole frames on the cut's grid); the sandbox's
+result read through a possible link (now `open_inside`); the docs. In Chromium against the dev server (the voice
+clip and the cut through the real ffmpeg): a voice chosen and a clip given through the page, the theme made twice and
+chosen, the lines spoken, the effects made, a line moved to 1.2 s, the cut (22.67 s, playing, download named after
+the episode), captions dating it, a voice change dating it with its reason, "Keep the lines as they are"; the phone
+(no sideways scroll); no page errors. Also on 2026-11-03 Søren's first Movies clips on the card came out as flat,
+saturated colours and as black - item 57's failure; the measurements are asked for (item 57). NOT seen on the VM:
+item 92.
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
 host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU
@@ -1461,7 +1483,10 @@ the host if the VM ever stops by itself.
     model loaded after 300 s, as long as the card staying in use through both
     of the clearing's two-minute waits would take; the Hub's log says whether
     it did.
-57. **The clip from a picture that came out broken** (second test run): the
+57. **The clip from a picture that came out broken** (second test run; again on 2026-11-03: Søren's first Movies
+    clips from cartoon keyframes - one flat white, black, cyan and red where the picture should be, one black;
+    asked for: the series' video model and quality, ComfyUI's log of those jobs, one shot made again at Full
+    quality - right means the Turbo LoRA, item 60c - and if still broken, again on a freshly started ComfyUI): the
     5B, right after a 14B job the Hub had cancelled, made a clip that keeps
     the picture only in the top-left corner of its first frame and is flat
     colours after. Not explained. ComfyUI's log shows nothing amiss for it:
@@ -1689,6 +1714,15 @@ the host if the VM ever stops by itself.
       converter's cases are ComfyUI 0.42.3's own templates; files from other sites (Civitai, OpenArt) are
       untried - an export is the way to see what went wrong. When COMFYUI_REF changes, the editor's format may
       too: tools/workflow_oracle/ (convert.js, compare.py) is how the converter was checked - run it again.
+92. **Movies' sound and cut (0.73.0)** - none of it has been heard on the VM:
+    - **Voices**: Røst's mic and nic for short cartoon lines in Danish; a clip of a real voice (a phone recording,
+      5-20 s) through the sandbox's ffmpeg - does Røst keep the voice? Time per line on the CPU.
+    - **Effects**: Stable Audio for 2-10 s shots from the storyboard's sound text - useful, or music where effects
+      were asked for? The storyboard now asks for effects only.
+    - **The theme**: ACE-Step's 40 s instrumental from the default words - and its loop when an episode is longer.
+    - **The cut**: its time in the sandbox for a 30 s portrait episode (here 2.5 s for 8 s at 704x1280 on this CPU),
+      how the ducking sounds (threshold 0.05, ratio 4) at the default volumes (speech 1.0, effects 0.8, theme 0.3),
+      the bubbles' size on a phone, and the download on the phone (`download` keeps the episode's title as its name).
 91. **Movies (0.72.0)** - none of it has run on the card:
     - **A series**: Movies in the menu; the look on the klein size his LoRAs were trained for, with the cartoon LoRA;
       the four characters with their LoRAs; their sheets - does a sheet look like the person, in the cartoon style

@@ -1,12 +1,15 @@
 // Movies (0.72.0): short films made shot by shot. A series keeps its look, its cast and its sets; an episode goes
 // from what happens to a storyboard, keyframes, clips and a preview - each stage stops for you (approve, choose,
 // keep) and goes on from there whenever you come back. The Hub sets each shot's LoRAs.
+// 0.73.0: the sound - each character's voice, the lines spoken, an effect for each shot, the series' theme - and the
+// cut: the film with the lines at their times, the theme under them, speech bubbles and an end card.
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { ArrowDown, ArrowUp, Check, ChevronLeft, CircleStop, Clapperboard, Menu, Plus, RefreshCw, Trash2,
-  WandSparkles } from "lucide-react";
+import { ArrowDown, ArrowUp, Check, ChevronLeft, CircleStop, Clapperboard, Download, Menu, Mic, Music, Play, Plus,
+  RefreshCw, Scissors, Square, Trash2, Upload, WandSparkles } from "lucide-react";
 import { api, ApiError } from "../lib/api";
-import { jobText, linesToText, movieFile, textToLines, type CastMember, type Episode, type MovieJob, type MovieOptions,
-  type MovieSet, type MovieStyle, type Series, type SeriesItem, type Shot, type Variant } from "../lib/movies";
+import { jobText, linesToText, movieFile, queuedFor, textToLines, type CastMember, type CutSettings, type Episode,
+  type MovieJob, type MovieOptions, type MovieSet, type MovieStyle, type Series, type SeriesItem, type Shot,
+  type Variant } from "../lib/movies";
 import { linkProps, navigate } from "../lib/router";
 import { useApp } from "../state";
 import { ConfirmButton, Empty, Lamp, Tabs } from "../components/ui";
@@ -158,15 +161,52 @@ function JobLine({ job, error, onStop }: { job?: MovieJob; error?: string; onSto
   return error ? <div className="mv-job small warn-text">{error}</div> : null;
 }
 
-function StateTag({ state, kept }: { state: string; kept?: boolean }) {
+function StateTag({ state, kept, fresh = "chosen" }: { state: string; kept?: boolean; fresh?: string }) {
   if (state === "stale") return <span className="tag mv-warn">before a change</span>;
-  if (state === "fresh") return <span className="tag ok">{kept === false ? "to look at" : kept ? "kept" : "chosen"}</span>;
+  if (state === "fresh") return <span className="tag ok">{kept === false ? "to look at" : kept ? "kept" : fresh}</span>;
   return null;
 }
 
 function Stale({ onKeep }: { onKeep: () => void }) {
   return <div className="small warn-text">Made before a change. <button type="button" className="link-btn"
     onClick={onKeep}>Keep as it is</button></div>;
+}
+
+/** Plays a sound - one at a time on the page. */
+function PlayButton({ src, label }: { src: string; label: string }) {
+  const [playing, setPlaying] = useState(false);
+  const audio = useRef<HTMLAudioElement | null>(null);
+  useEffect(() => {
+    const other = (ev: Event) => {
+      if ((ev as CustomEvent<string>).detail !== src) audio.current?.pause();
+    };
+    window.addEventListener("mv:play", other);
+    return () => {
+      window.removeEventListener("mv:play", other);
+      audio.current?.pause();
+      audio.current = null;
+      setPlaying(false);
+    };
+  }, [src]);
+  const toggle = () => {
+    if (playing) {
+      audio.current?.pause();
+      return;
+    }
+    window.dispatchEvent(new CustomEvent("mv:play", { detail: src }));
+    const a = audio.current ?? new Audio(src);
+    audio.current = a;
+    a.onplay = () => setPlaying(true);
+    a.onpause = () => setPlaying(false);
+    a.onended = () => setPlaying(false);
+    a.currentTime = 0;
+    a.play().catch(() => setPlaying(false));
+  };
+  return (
+    <button type="button" className={`icon-btn small mv-play${playing ? " on" : ""}`} onClick={toggle}
+      aria-label={`${playing ? "Stop" : "Play"} ${label}`} title={`${playing ? "Stop" : "Play"} ${label}`}>
+      {playing ? <Square size={12} /> : <Play size={13} />}</button>
+  );
 }
 
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
@@ -191,8 +231,9 @@ function SeriesList({ overview }: { overview: Overview }) {
   return (
     <>
       <p className="lead">Short films made shot by shot. A series keeps its look, its cast (each character with
-        their LoRA) and its sets. An episode goes from what happens to a storyboard, keyframes, clips and a preview -
-        each stage stops for you: approve the storyboard, choose a keyframe for each shot, keep each clip.</p>
+        their LoRA and voice), its sets and its theme. An episode goes from what happens to a storyboard, keyframes,
+        clips, its sound and the cut - each stage stops for you: approve the storyboard, choose a keyframe for each
+        shot, keep each clip, listen to the lines.</p>
       <div className="row mv-new">
         <input className="input grow" placeholder="Name of a new series" value={name} maxLength={60}
           onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && name.trim() && create()} />
@@ -256,7 +297,8 @@ function stagesText(e: Episode): string {
   if (!p.shots) return "No storyboard yet";
   return `${p.shots} shot${p.shots === 1 ? "" : "s"}, ${p.seconds} s · storyboard ${p.approved ? "approved" : "to approve"}`
     + ` · keyframes ${p.keyframes}/${p.shots} · clips ${p.kept}/${p.shots} kept`
-    + (p.preview === "fresh" ? " · preview" : "");
+    + (p.lines ? ` · lines ${p.spoken}/${p.lines} spoken` : "")
+    + (p.final === "fresh" ? " · cut" : p.preview === "fresh" ? " · preview" : "");
 }
 
 function EpisodesTab({ series, act }: { series: Series; act: Act }) {
@@ -358,6 +400,7 @@ function MemberCard({ series, options, kind, item, act }: { series: Series; opti
                 onSave={(v) => act(() => api(base, { method: "PATCH", body: { strength: v } }))} /></label>
           </div>
         )}
+        {c && <VoiceRow series={series} c={c} base={base} act={act} />}
         {notes.map((n) => <div key={n} className="small warn-text">{cap(n)}.</div>)}
         <div className="row">
           <button className="btn small" disabled={!!series.jobs[key]}
@@ -369,6 +412,49 @@ function MemberCard({ series, options, kind, item, act }: { series: Series; opti
         {item.variants.length > 0 && <Pictures sid={sid} variants={item.variants} chosen={chosen}
           onPick={(file) => act(() => api(`${base}/pick`, { body: { file } }))} />}
       </div>
+    </div>
+  );
+}
+
+/** A character's voice: one of the speech model's own, or a clip of a real voice (5-20 s of one person). */
+function VoiceRow({ series, c, base, act }: { series: Series; c: CastMember; base: string; act: Act }) {
+  const audio = series.audio;
+  const input = useRef<HTMLInputElement>(null);
+  const [sending, setSending] = useState(false);
+  const upload = async (file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    setSending(true);
+    await act(() => api(`${base}/voice`, { form }), `${c.name} speaks with the clip's voice`);
+    setSending(false);
+  };
+  const voices = audio.voices.filter((v) => v.id !== "default");
+  return (
+    <div className="row mv-lora-row">
+      {audio.speech ? (
+        <label className="field grow"><span>Voice</span>
+          <select className="select" value={c.voice}
+            onChange={(e) => act(() => api(base, { method: "PATCH", body: { voice: e.target.value } }))}>
+            <option value="">{audio.speech}'s default</option>
+            {voices.map((v) => <option key={v.id} value={v.id}>{cap(v.id)}{v.description ? ` - ${v.description}` : ""}</option>)}
+            {c.voice && c.voice !== "clip" && !voices.some((v) => v.id === c.voice) && <option value={c.voice}>
+              {cap(c.voice)} - not one of {audio.speech}'s</option>}
+            {c.voice_clip && <option value="clip">A real voice - the clip ({c.voice_clip_seconds} s)</option>}
+          </select></label>
+      ) : <div className="grow small faint">{audio.note ? `${cap(audio.note)}.` : "No speech model is downloaded."}</div>}
+      {audio.speech && audio.expressive && (
+        <label className="field mv-strength"><span>Expression</span>
+          <NumberDraft value={c.expressiveness} min={0.25} max={2} step={0.05}
+            onSave={(v) => act(() => api(base, { method: "PATCH", body: { expressiveness: v } }))} /></label>)}
+      {c.voice_clip && <PlayButton src={movieFile(series.id, c.voice_clip)} label={`${c.name}'s clip`} />}
+      <button type="button" className="btn small" disabled={sending} onClick={() => input.current?.click()}
+        title="5-20 seconds of one person speaking: a recording, a voice memo, a video">
+        <Upload size={14} /> {sending ? "Reading the clip" : c.voice_clip ? "Another clip" : "A real voice"}</button>
+      <input ref={input} type="file" accept="audio/*,video/*" hidden onChange={(e) => {
+        const f = e.target.files?.[0];
+        e.target.value = "";
+        if (f) upload(f);
+      }} />
     </div>
   );
 }
@@ -422,7 +508,20 @@ function LookTab({ series, options, act }: { series: Series; options: MovieOptio
         <label className="field"><span>Longest episode (seconds)</span>
           <NumberDraft value={st.max_seconds} min={5} max={120} step={1} onSave={(v) => save({ max_seconds: v })} /></label>
         <label className="field"><span>Language of the lines</span>
-          <Draft value={st.language} maxLength={40} onSave={(v) => save({ language: v })} /></label>
+          <select className="select" value={st.language} onChange={(e) => save({ language: e.target.value })}>
+            {options.languages.map((l) => <option key={l} value={l}>{l}</option>)}
+            {!options.languages.includes(st.language) && <option value={st.language}>{st.language}</option>}
+          </select>
+          {series.audio.note && <small className="warn-text">{cap(series.audio.note)}{/[.!?]$/.test(series.audio.note) ? "" : "."}</small>}</label>
+        {series.audio.speech && (
+          <label className="field"><span>The narrator's voice</span>
+            <select className="select" value={st.narrator_voice} onChange={(e) => save({ narrator_voice: e.target.value })}>
+              <option value="">{series.audio.speech}'s default</option>
+              {series.audio.voices.filter((v) => v.id !== "default").map((v) => <option key={v.id} value={v.id}>
+                {cap(v.id)}{v.description ? ` - ${v.description}` : ""}</option>)}
+              {st.narrator_voice && !series.audio.voices.some((v) => v.id === st.narrator_voice) && (
+                <option value={st.narrator_voice}>{cap(st.narrator_voice)} - not one of {series.audio.speech}'s</option>)}
+            </select></label>)}
       </div>
       <label className="field"><span>Style words - on every picture and clip</span>
         <Draft multiline rows={2} value={st.words} maxLength={600} onSave={(v) => save({ words: v })} /></label>
@@ -431,6 +530,47 @@ function LookTab({ series, options, act }: { series: Series; options: MovieOptio
         <small>{options.writer ? `${options.writer} writes the storyboards.` : "No chat model is downloaded to write storyboards."}</small></label>
       <p className="small faint">A change here makes the pictures made before it "before a change": make new ones, or keep
         them as they are.</p>
+      <ThemeSection series={series} act={act} />
+    </div>
+  );
+}
+
+/** The series' theme: its words and length, the versions made, the chosen one under every episode. */
+function ThemeSection({ series, act }: { series: Series; act: Act }) {
+  const th = series.theme;
+  const base = `/hub/api/movies/${series.id}`;
+  const save = (theme: Record<string, unknown>) => act(() => api(base, { method: "PATCH", body: { theme } }));
+  return (
+    <div className="stack mv-theme">
+      <h3>Theme music</h3>
+      <p className="small faint">Plays under every episode, quieter while someone speaks.
+        {series.audio.music ? ` ${series.audio.music} makes it.` : " No music model is downloaded (Settings, Models)."}</p>
+      <div className="mv-shot-row">
+        <label className="field grow"><span>What it sounds like</span>
+          <Draft multiline rows={2} value={th.prompt} maxLength={600} onSave={(v) => save({ prompt: v })} /></label>
+        <label className="field mv-seconds"><span>Seconds</span>
+          <NumberDraft value={th.seconds} min={10} max={180} step={1} onSave={(v) => save({ seconds: v })} /></label>
+      </div>
+      {th.state === "stale" && <Stale onKeep={() => act(() => api(`${base}/theme/pick`, { body: { keep: true } }))} />}
+      <div className="row">
+        <button className="btn small" disabled={!!series.jobs.theme || !series.audio.music}
+          onClick={() => act(() => api(`${base}/theme/make`, { method: "POST" }))}>
+          <Music size={14} /> {th.variants.length ? "Another version" : "Make the theme"}</button>
+      </div>
+      <JobLine job={series.jobs.theme} error={series.errors.theme}
+        onStop={() => act(() => api(`${base}/jobs/cancel`, { body: { key: "theme" } }))} />
+      {th.variants.length > 0 && (
+        <div className="list">
+          {th.variants.map((v, i) => (
+            <div key={v.file} className="list-row mv-version">
+              <PlayButton src={movieFile(series.id, v.file)} label={`version ${th.variants.length - i}`} />
+              <span className="grow small">Version {th.variants.length - i} · {v.seconds} s{v.bpm ? ` · ${v.bpm} bpm` : ""}</span>
+              {v.file === th.file ? <span className="tag ok">chosen</span>
+                : <button className="btn small quiet" onClick={() => act(() => api(`${base}/theme/pick`, { body: { file: v.file } }))}>Choose</button>}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -460,6 +600,11 @@ function EpisodePage({ series, eid, act }: { series: Series; eid: string; act: A
   const patch = (body: Record<string, unknown>) => act(() => api(base, { method: "PATCH", body }));
   const over = p.seconds > series.style.max_seconds;
   const writing = !!job("storyboard");
+  const audio = series.audio;
+  const soundDone = p.spoken === p.lines && p.effects_made === p.effects && (!e.cut.music || series.theme.state === "fresh");
+  const staleLines = e.shots.some((sh) => sh.lines.some((ln) => ln.state === "stale"));
+  const staleEffects = e.shots.some((sh) => sh.sfx_state === "stale");
+  const keep = (what: "lines" | "effects") => act(() => api(`${base}/keep`, { body: { what } }));
   return (
     <>
       <div className="row mv-head">
@@ -502,17 +647,88 @@ function EpisodePage({ series, eid, act }: { series: Series; eid: string; act: A
           <button className="btn small" disabled={!e.shots.some((s) => s.clip) || writing || !!job("preview")}
             onClick={() => act(() => api(`${base}/preview`, { method: "POST" }))}><Clapperboard size={14} /> Join the clips</button>
         </Stage>
+        <Stage n={5} title="Sound" done={p.shots > 0 && soundDone}
+          detail={!audio.speech && p.lines ? "No speech model is downloaded"
+            : `Lines ${p.spoken} of ${p.lines} spoken · effects ${p.effects_made} of ${p.effects} · `
+              + (series.theme.file ? (series.theme.state === "stale" ? "the theme is from before a change" : "theme chosen") : "no theme yet")}>
+          <button className="btn small" disabled={!p.approved || writing || !audio.speech || p.spoken === p.lines || !!job("voices")}
+            title={p.approved ? undefined : "Approve the storyboard first"}
+            onClick={() => act(() => api(`${base}/voices`, { body: {} }))}><Mic size={14} /> Speak the lines</button>
+          <button className="btn small" disabled={!p.approved || writing || !audio.sound || p.effects_made === p.effects || !!job("sounds")}
+            title={p.approved ? undefined : "Approve the storyboard first"}
+            onClick={() => act(() => api(`${base}/sounds`, { body: {} }))}><WandSparkles size={14} /> Make the effects</button>
+          {!series.theme.file && <button className="btn small" disabled={!audio.music || !!series.jobs.theme}
+            onClick={() => act(() => api(`/hub/api/movies/${sid}/theme/make`, { method: "POST" }))}><Music size={14} /> Make the theme</button>}
+          {staleLines && <button type="button" className="link-btn small" onClick={() => keep("lines")}
+            title="Lines spoken before a change of voice or speech model: keep them as they are">Keep the lines as they are</button>}
+          {staleEffects && <button type="button" className="link-btn small" onClick={() => keep("effects")}
+            title="Effects made before a change: keep them as they are">Keep the effects as they are</button>}
+        </Stage>
+        <Stage n={6} title="Cut" done={p.final === "fresh"}
+          detail={p.final === "fresh" ? `${e.final?.seconds.toFixed(1)} s with sound` : p.final === "stale" ? `Made before a change: ${p.final_why}`
+            : p.cut_missing.length ? `First: ${p.cut_missing.join(", ")}` : `${p.total.toFixed(1)} s with sound - ready`}>
+          <button className="btn small primary" disabled={!p.shots || p.cut_missing.length > 0 || writing || !!job("cut")}
+            onClick={() => act(() => api(`${base}/cut`, { method: "POST" }))}><Scissors size={14} /> {e.final ? "Cut it again" : "Cut it"}</button>
+        </Stage>
       </div>
-      {(["storyboard", "keyframes", "clips", "preview"] as const).map((w) =>
+      {(["storyboard", "keyframes", "clips", "preview", "voices", "sounds", "cut"] as const).map((w) =>
         <JobLine key={w} job={job(w)} error={series.errors[key(w)]} onStop={() => stop(w)} />)}
+      <JobLine job={series.jobs.theme} error={series.errors.theme}
+        onStop={() => act(() => api(`/hub/api/movies/${sid}/jobs/cancel`, { body: { key: "theme" } }))} />
       {e.notes.length > 0 && <div className="callout small">{e.notes.map((n) => <div key={n}>{cap(n)}.</div>)}</div>}
-      {e.preview && <video className="mv-preview" src={movieFile(sid, e.preview.file)} controls playsInline preload="metadata" />}
+      {e.final && (
+        <div className="stack mv-final">
+          <video className="mv-preview" src={movieFile(sid, e.final.file)} controls playsInline preload="metadata" />
+          <div className="row">
+            <a className="btn small" href={movieFile(sid, e.final.file)} download={`${e.title}.mp4`}><Download size={14} /> Download</a>
+            <StateTag state={p.final} fresh="up to date" />
+          </div>
+        </div>
+      )}
+      {e.shots.length > 0 && <CutPanel e={e} onChange={(cut) => patch({ cut })} />}
+      {e.preview && (e.final ? (
+        <details className="mv-cut">
+          <summary className="small"><b>The preview</b> - the clips joined, no sound</summary>
+          <video className="mv-preview" src={movieFile(sid, e.preview.file)} controls playsInline preload="none" />
+        </details>
+      ) : <video className="mv-preview" src={movieFile(sid, e.preview.file)} controls playsInline preload="metadata" />)}
       {e.shots.map((sh, i) => <ShotCard key={sh.id} series={series} e={e} sh={sh} i={i} act={act} />)}
       <div className="row">
         <button className="btn small" onClick={() => act(() => api(`${base}/shots`, { body: { after: e.shots[e.shots.length - 1]?.id } }))}>
           <Plus size={14} /> Add a shot</button>
       </div>
     </>
+  );
+}
+
+/** How the episode is cut: the text on screen, the end card, the theme under it, the volumes. */
+function CutPanel({ e, onChange }: { e: Episode; onChange: (cut: Partial<CutSettings>) => void }) {
+  const c = e.cut;
+  return (
+    <details className="mv-cut">
+      <summary className="small"><b>How it is cut</b> - {c.text === "none" ? "no text" : c.text}
+        {c.end_card ? ", an end card" : ""}{c.music ? ", the theme under it" : ", no theme"}</summary>
+      <div className="form-grid">
+        <label className="field"><span>On screen while a line is heard</span>
+          <select className="select" value={c.text} onChange={(ev) => onChange({ text: ev.target.value as CutSettings["text"] })}>
+            <option value="bubbles">Speech bubbles</option>
+            <option value="captions">Captions at the bottom</option>
+            <option value="none">Nothing</option>
+          </select></label>
+        <label className="field"><span>Speech volume</span>
+          <NumberDraft value={c.speech_volume} min={0} max={2} step={0.05} onSave={(v) => onChange({ speech_volume: v })} /></label>
+        <label className="field"><span>Effects volume</span>
+          <NumberDraft value={c.effects_volume} min={0} max={2} step={0.05} onSave={(v) => onChange({ effects_volume: v })} /></label>
+        <label className="field"><span>Theme volume</span>
+          <NumberDraft value={c.music_volume} min={0} max={2} step={0.05} onSave={(v) => onChange({ music_volume: v })} /></label>
+      </div>
+      <div className="row mv-checks">
+        <label className="check"><input type="checkbox" checked={c.music} onChange={(ev) => onChange({ music: ev.target.checked })} />
+          The theme under it</label>
+        <label className="check"><input type="checkbox" checked={c.end_card} onChange={(ev) => onChange({ end_card: ev.target.checked })} />
+          An end card with the title</label>
+      </div>
+    </details>
   );
 }
 
@@ -528,6 +744,12 @@ function ShotCard({ series, e, sh, i, act }: { series: Series; e: Episode; sh: S
   const framesWait = !!frames?.queued.includes(sh.id);
   const clipping = clips?.shot === sh.id;
   const clipWait = !!clips?.queued.includes(sh.id);
+  const voices = series.jobs[`voices:${e.id}`];
+  const sounds = series.jobs[`sounds:${e.id}`];
+  const speaking = voices?.shot === sh.id;
+  const speakWait = queuedFor(voices, sh.id);
+  const sounding = sounds?.shot === sh.id;
+  const soundWait = queuedFor(sounds, sh.id);
   const notes = sh.variants[0]?.notes ?? [];
   const stop = (what: string) =>
     act(() => api(`/hub/api/movies/${sid}/jobs/cancel`, { body: { key: `${what}:${e.id}` } }));
@@ -540,7 +762,8 @@ function ShotCard({ series, e, sh, i, act }: { series: Series; e: Episode; sh: S
         <button className="icon-btn small" disabled={i === 0} onClick={() => patch({ move: -1 })} aria-label="Move it earlier"><ArrowUp size={14} /></button>
         <button className="icon-btn small" disabled={i === e.shots.length - 1} onClick={() => patch({ move: 1 })} aria-label="Move it later"><ArrowDown size={14} /></button>
         <ConfirmButton className="btn quiet small" confirmText="Delete the shot?" label="Delete the shot"
-          disabled={making || clipping} onConfirm={() => act(() => api(sbase, { method: "DELETE" }))}><Trash2 size={14} /></ConfirmButton>
+          disabled={making || clipping || speaking || sounding}
+          onConfirm={() => act(() => api(sbase, { method: "DELETE" }))}><Trash2 size={14} /></ConfirmButton>
       </div>
       <div className="mv-shot-body">
         <div className="stack mv-shot-words">
@@ -576,7 +799,8 @@ function ShotCard({ series, e, sh, i, act }: { series: Series; e: Episode; sh: S
             <Draft multiline rows={2} value={sh.motion} maxLength={1500} onSave={(v) => patch({ motion: v })}
               placeholder="What moves, and how the camera moves - small and simple" /></label>
           <label className="field"><span>Sound</span>
-            <Draft value={sh.sound} maxLength={1500} onSave={(v) => patch({ sound: v })} placeholder="Effects and music cues" /></label>
+            <Draft value={sh.sound} maxLength={1500} onSave={(v) => patch({ sound: v })}
+              placeholder="What is heard: a door creaks, a cat meows - the theme plays by itself" /></label>
           <label className="field"><span>Lines</span>
             <Draft multiline rows={2} value={linesToText(sh.lines)} onSave={(v) => patch({ lines: textToLines(v) })}
               placeholder="Name: what is said - one a line; empty when nobody speaks" /></label>
@@ -629,6 +853,50 @@ function ShotCard({ series, e, sh, i, act }: { series: Series; e: Episode; sh: S
             {sh.takes.length > 0 && <div className="small faint mv-takes">Earlier takes:{" "}
               {sh.takes.map((t, k) => <span key={t.file}>{k > 0 && ", "}<button type="button" className="link-btn"
                 onClick={() => act(() => api(`${sbase}/clip`, { body: { take: t.file } }))}>{k === 0 ? "the one before" : `${k + 1} before`}</button></span>)}</div>}
+          </div>
+          <div className="mv-media">
+            <div className="row small"><b>Sound</b></div>
+            {sh.sfx_state === "unwanted" ? <div className="small faint">No effect: nothing written under Sound.</div> : (
+              <div className="row mv-sound-row">
+                {sh.sfx ? <PlayButton src={movieFile(sid, sh.sfx.file)} label={`shot ${i + 1}'s effect`} />
+                  : <span className="small faint">{sounding ? "Making the effect" : "No effect yet"}</span>}
+                <span className="grow small ellipsis">{sh.sfx ? `The effect, ${sh.sfx.seconds} s` : ""}</span>
+                <StateTag state={sh.sfx_state} fresh="made" />
+                {sh.sfx_state === "stale" && <button type="button" className="link-btn small"
+                  onClick={() => act(() => api(`${base}/keep`, { body: { what: "effects", shot: sh.id } }))}>Keep</button>}
+                <button className="btn small" disabled={!e.approved || writing || sounding || soundWait || !series.audio.sound}
+                  title={series.audio.sound ? undefined : "No sound-effect model is downloaded"}
+                  onClick={() => act(() => api(`${base}/sounds`, { body: { shots: [sh.id] } }))}>
+                  <WandSparkles size={14} /> {sh.sfx ? "Again" : "Make it"}</button>
+              </div>)}
+            {sh.sfx_error && <div className="small warn-text">{sh.sfx_error}</div>}
+            {sounding && <JobLine job={sounds} onStop={() => stop("sounds")} />}
+            {sh.lines.map((ln, k) => (
+              <div key={ln.id || k} className="mv-line">
+                <div className="small"><b>{ln.name}:</b> {ln.text}</div>
+                <div className="row mv-line-tools">
+                  {ln.audio ? <PlayButton src={movieFile(sid, ln.audio.file)} label={`${ln.name}'s line`} />
+                    : <Mic size={14} className="faint" aria-hidden />}
+                  <span className="small faint">{ln.audio ? `${ln.audio.seconds} s` : "not spoken"}</span>
+                  {ln.state === "stale" && <><span className="tag mv-warn">before a change</span>
+                    <button type="button" className="link-btn small" title="Keep the take as it is"
+                      onClick={() => act(() => api(`${base}/keep`, { body: { what: "lines", shot: sh.id, line: ln.id } }))}>Keep</button></>}
+                  <span className="grow" />
+                  <label className="mv-at small faint" title="Where it starts in the shot - by itself right after the line before">at
+                    <NumberDraft value={ln.at ?? ln.start} min={0} max={sh.seconds_used} step={0.1}
+                      onSave={(v) => act(() => api(`${sbase}/line`, { body: { line: ln.id, at: v } }))} /> s</label>
+                  {ln.at !== null && <button type="button" className="link-btn small" title="Right after the line before"
+                    onClick={() => act(() => api(`${sbase}/line`, { body: { line: ln.id, at: null } }))}>by itself</button>}
+                  <button className="btn small quiet" disabled={!e.approved || writing || !series.audio.speech || speaking || speakWait}
+                    onClick={() => act(() => api(`${base}/voices`, { body: { shots: [sh.id], line: ln.id } }))}>
+                    {ln.audio ? "Again" : "Speak"}</button>
+                </div>
+                {ln.over > 0 && <div className="small warn-text">Runs {ln.over} s past the end of the shot.</div>}
+                {ln.error && <div className="small warn-text">{ln.error}</div>}
+              </div>
+            ))}
+            {speaking && <JobLine job={voices} onStop={() => stop("voices")} />}
+            {speakWait && !speaking && <div className="small faint">Its lines are waiting their turn</div>}
           </div>
         </div>
       </div>

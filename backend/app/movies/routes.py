@@ -1,16 +1,17 @@
 """Movies (0.72.0): series, their cast and sets, episodes and their shots, and the jobs that make the pictures,
-storyboards, clips and previews. The admin's alone - a person's account gets 403 (the gate keeps people off these
-routes already)."""
+storyboards, clips and previews - and since 0.73.0 the sound (voices, the lines spoken, effects, the theme) and the
+cut. The admin's alone - a person's account gets 403 (the gate keeps people off these routes already)."""
 from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from .. import auth
 from ..state import get_hub
+from .sound import MAX_VOICE_UPLOAD
 from .studio import MovieError
 
 router = APIRouter(prefix="/hub/api/movies")
@@ -62,12 +63,13 @@ async def detail(sid: str, request: Request):
 class SeriesPatch(BaseModel):
     name: str | None = None
     style: dict[str, Any] | None = None
+    theme: dict[str, Any] | None = None     # its words and length (0.73.0)
 
 
 @router.patch("/{sid}")
 async def change(sid: str, body: SeriesPatch, request: Request):
     try:
-        return await _m(request).update(sid, body.name, body.style)
+        return await _m(request).update(sid, body.name, body.style, body.theme)
     except MovieError as exc:
         _fail(exc)
     except (TypeError, ValueError, ArithmeticError) as exc:
@@ -105,12 +107,13 @@ class EpisodePatch(BaseModel):
     title: str | None = None
     premise: str | None = None
     approved: bool | None = None        # the storyboard's checkpoint
+    cut: dict[str, Any] | None = None   # the cut's settings (0.73.0)
 
 
 @router.patch("/{sid}/episodes/{eid}")
 async def change_episode(sid: str, eid: str, body: EpisodePatch, request: Request):
     try:
-        return await _m(request).change_episode(sid, eid, body.title, body.premise, body.approved)
+        return await _m(request).change_episode(sid, eid, body.title, body.premise, body.approved, body.cut)
     except MovieError as exc:
         _fail(exc)
 
@@ -234,6 +237,100 @@ async def preview(sid: str, eid: str, request: Request):
         _fail(exc)
 
 
+# ---------------------------------------------------------------- sound and the cut (0.73.0)
+
+class SpeakIn(BaseModel):
+    shots: list[str] | None = None      # every line of these shots; none: each line not spoken or out of date
+    line: str | None = None             # one line (its id) of the one shot named: another take
+
+
+@router.post("/{sid}/episodes/{eid}/voices")
+async def voices(sid: str, eid: str, body: SpeakIn, request: Request):
+    m = _m(request)
+    try:
+        m.make_voices(sid, eid, body.shots, body.line)
+        return m.detail(sid)
+    except MovieError as exc:
+        _fail(exc)
+
+
+@router.post("/{sid}/episodes/{eid}/sounds")
+async def sounds(sid: str, eid: str, body: ShotsIn, request: Request):
+    m = _m(request)
+    try:
+        m.make_sounds(sid, eid, body.shots)
+        return m.detail(sid)
+    except MovieError as exc:
+        _fail(exc)
+
+
+@router.post("/{sid}/episodes/{eid}/cut")
+async def cut(sid: str, eid: str, request: Request):
+    m = _m(request)
+    try:
+        m.make_cut(sid, eid)
+        return m.detail(sid)
+    except MovieError as exc:
+        _fail(exc)
+
+
+class LineAt(BaseModel):
+    line: str                           # its id
+    at: float | None = None             # seconds into the shot; none: right after the line before it
+
+
+@router.post("/{sid}/episodes/{eid}/shots/{hid}/line")
+async def line_at(sid: str, eid: str, hid: str, body: LineAt, request: Request):
+    try:
+        return await _m(request).set_line_at(sid, eid, hid, body.line, body.at)
+    except MovieError as exc:
+        _fail(exc)
+
+
+class KeepIn(BaseModel):
+    what: str                           # "lines" or "effects"
+    shot: str | None = None             # one shot's; none: each in the episode
+    line: str | None = None             # one line (its id)
+
+
+@router.post("/{sid}/episodes/{eid}/keep")
+async def keep_sound(sid: str, eid: str, body: KeepIn, request: Request):
+    """Keep lines or effects made before a change as they are."""
+    try:
+        return await _m(request).keep_sound(sid, eid, body.what, body.shot, body.line)
+    except MovieError as exc:
+        _fail(exc)
+
+
+@router.post("/{sid}/theme/make")
+async def make_theme(sid: str, request: Request):
+    m = _m(request)
+    try:
+        m.make_theme(sid)
+        return m.detail(sid)
+    except MovieError as exc:
+        _fail(exc)
+
+
+@router.post("/{sid}/theme/pick")
+async def pick_theme(sid: str, body: PickIn, request: Request):
+    try:
+        return await _m(request).pick_theme(sid, body.file, body.keep)
+    except MovieError as exc:
+        _fail(exc)
+
+
+@router.post("/{sid}/cast/{cid}/voice")
+async def voice_clip(sid: str, cid: str, request: Request, file: UploadFile = File(...)):
+    """A clip of a real voice (5-20 s of one person speaking) for a character."""
+    m = _m(request)
+    data = await file.read(MAX_VOICE_UPLOAD + 1)
+    try:
+        return await m.set_voice_clip(sid, cid, data, file.filename or "")
+    except MovieError as exc:
+        _fail(exc)
+
+
 class JobIn(BaseModel):
     key: str                            # "keyframes:<episode>", "cast:<character>", ...
 
@@ -265,6 +362,8 @@ class MemberIn(BaseModel):
     look: str | None = None
     lora: str | None = None
     strength: float | None = None
+    voice: str | None = None            # the speech model's own voice ("" its default), or "clip" (0.73.0)
+    expressiveness: float | None = None
 
 
 @router.post("/{sid}/{kind}")

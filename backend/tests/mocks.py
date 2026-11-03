@@ -629,6 +629,9 @@ def make_speech(state: dict) -> FastAPI:
 
         async def gen():
             yield json.dumps({"event": "queued", "busy": False}) + "\n"
+            if state.get("slow"):                              # a long line on a busy CPU
+                import asyncio
+                await asyncio.sleep(state["slow"])
             yield json.dumps({"event": "started", "pieces": len(pieces)}) + "\n"
             for i in range(len(pieces)):
                 yield json.dumps({"event": "progress", "piece": i + 1, "pieces": len(pieces)}) + "\n"

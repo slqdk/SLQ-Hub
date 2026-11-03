@@ -2722,10 +2722,58 @@ owner's alone like LoRAs and training.
   while a job stops gets a job of its own. Numbers that are not numbers
   (NaN, infinity) are refused. A restart clears what a cut-off preview left
   in the workspace.
-- **Not in v1**: sound - the lines spoken in each character's voice, the
-  effects, the theme - and the cut (the timeline with the lines at their
-  times, music under speech, speech bubbles, an end card). That is the next
-  version: the lines and sounds are already in the shots.
+- **Sound and the cut (0.73.0**, Søren: "Continue with the rest";
+  `app/movies/sound.py` makes them, `app/movies/cut.py` says what goes
+  where):
+  - *Voices*: each character speaks with one of the speech model's own
+    voices for the lines' language (Settings' Danish or other speech model -
+    Røst for Danish), with an expression (Chatterbox only), or with a clip
+    of a real voice: an uploaded recording converted by ffmpeg in the
+    sandbox, offline, in a folder of its own (`voice_command`: local files
+    only, the first 30 s as 24 kHz mono WAV, at least 3 s of sound) and kept
+    as `voices/<character>-<token>.wav`. The narrator - anyone not in the
+    cast - has a voice of the model's own (Look). The lines' language is now
+    one of the speech models' (a list); a language they do not know is said.
+  - *Lines* get an id (`l` + 6 hex; lines from 0.72.0 get one from what they
+    are, kept on the next save). The "voices" job speaks each line not
+    spoken or spoken before a change (the speech service, on the CPU, no
+    queue), every line of a shot, or one line again; its queue holds
+    `<shot>:<line id>`, so an edit that moves the lines while it waits gives
+    no take to the wrong line, and a take for a line whose words changed
+    meanwhile is thrown away. Lines edited in the text box: one kept word for
+    word keeps its id, take and time; a changed one in the same place keeps
+    its id and time, not its take; a failed line says why on itself.
+  - *Effects*: each shot's sound text (the storyboard now writes effects
+    only - "no music: the theme plays under every episode") made by the
+    sound model (Stable Audio) as long as the shot, through the queue.
+  - *The theme*: the series' music (ACE-Step, instrumental, 10-180 s,
+    default 40 s - a longer episode plays it again), versions chosen like a
+    sheet; the first one made is chosen until another is.
+  - *Stamps*: a line's take - its words, the speaker's voice and expression
+    (or clip), the speech model, the language; an effect - its words, the
+    shot's length, the sound model; the theme - its words, length and the
+    music model. "Keep as it is" works for lines and effects too, one or all
+    of an episode's (a new speech model makes every line "before a change").
+  - *The cut* (only with every shot's clip and every line spoken): a
+    timeline on the cut's frame grid (the first clip's rate; each shot as
+    long as its clip in whole frames, so clips of another rate do not move
+    what follows), each line by itself 0.3 s into its shot and 0.25 s after
+    the one before - or where the owner puts it ("at", within the shot) -
+    each effect at its shot (faded out at the shot's end), the theme under
+    everything (faded in and out, ducked by the speech with
+    `sidechaincompress`), speech bubbles (a yellow narration box for the
+    narrator) or captions while a line is heard and until the next one
+    starts, and an end card (the title on the last keyframe, blurred and
+    darkened). `render_overlays.py` draws the bubbles and the end card with
+    Pillow and DejaVu in the sandbox - the Hub's own image has no font with
+    æ, ø and å - and `cut_command` renders the film with ffmpeg (H.264 and
+    AAC 48 kHz, `+faststart`) in `workspace/movies-tmp/<token>/`, removed
+    afterwards; the result is read back without following a link. The cut's
+    settings (text on screen, end card, theme on or off, three volumes) are
+    the episode's. The film is up to date while it is made of everything the
+    episode has now - every shot, effect and line, spoken or not - each of
+    them up to date; the page says what dated it, and keeps the silent
+    preview a click away.
 
 ---
 
@@ -3260,7 +3308,15 @@ whether the work lives up to what is expected.
   combined shots keep the characters recognisable from their sheets (if not,
   a pass per character with its own LoRA over its part of the picture), how
   Wan's clips from cartoon keyframes look, the time per episode, and how well
-  Qwen3.8 keeps to the storyboard rules (no lip sync, 30 s).
+  Qwen3.8 keeps to the storyboard rules (no lip sync, 30 s). Seen on
+  2026-11-03: Søren's first clips from Movies came out as flat, saturated
+  colours and as black - the picture-to-video failure of the second test run
+  (HANDOFF item 57), not explained yet; the measurements are asked for.
+  Sound and the cut (0.73.0): not heard on the VM - Røst's voices for short
+  cartoon lines, a clip of a real voice through the sandbox's ffmpeg, Stable
+  Audio's effects for 2-10 s shots, ACE-Step's theme, how the ducking sounds
+  at the default volumes, and the cut's time in the sandbox (here 2.5 s for
+  8 s at 704×1280; the reviewer's 23 s with 144 bubbles peaked at 1.7 GB).
 - **The check at Extra** (0.71.0, §8): not run on the card. Unknown: how
   often Qwen3.8 finds the broken bodies klein draws, and how often it calls a
   right picture wrong (each false alarm costs a try); fingers are the least
