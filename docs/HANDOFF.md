@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.73.0, 2026-11-03)
+## State (0.73.1, 2026-11-03)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -938,6 +938,11 @@ the episode), captions dating it, a voice change dating it with its reason, "Kee
 (no sideways scroll); no page errors. Also on 2026-11-03 Søren's first Movies clips on the card came out as flat,
 saturated colours and as black - item 57's failure; the measurements are asked for (item 57). NOT seen on the VM:
 item 92.
+0.73.1, item 57 explained with Søren on the VM (2026-11-03): videos from a picture broke because of ComfyUI's
+"dynamic VRAM", which 0.42.3 turns on for AMD from ROCm 7.14 (the VM's) - a video from a description was right in the
+same session. `COMFY_ARGS=--disable-dynamic-vram --reserve-vram 6` in `/srv/slq-hub/.env` (set by hand on the VM;
+`install.sh` and `deploy/env.example` now write it) made shot 1's clip right; the self-test's new "comfyui memory" line
+warns without the two flags (`app/cli.py comfy_memory`, tests/test_comfy_memory.py). NOT seen yet: item 93.
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
 host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU
@@ -1483,18 +1488,19 @@ the host if the VM ever stops by itself.
     model loaded after 300 s, as long as the card staying in use through both
     of the clearing's two-minute waits would take; the Hub's log says whether
     it did.
-57. **The clip from a picture that came out broken** (second test run; again on 2026-11-03: Søren's first Movies
-    clips from cartoon keyframes - one flat white, black, cyan and red where the picture should be, one black;
-    asked for: the series' video model and quality, ComfyUI's log of those jobs, one shot made again at Full
-    quality - right means the Turbo LoRA, item 60c - and if still broken, again on a freshly started ComfyUI): the
-    5B, right after a 14B job the Hub had cancelled, made a clip that keeps
-    the picture only in the top-left corner of its first frame and is flat
-    colours after. Not explained. ComfyUI's log shows nothing amiss for it:
-    13 min 20 s, no warning, no tiled-encode fallback - but it began 39 s
-    after the 14B job ended (item 51), under whatever that job left in RAM.
-    To tell which: a fresh ComfyUI (`sudo bash /opt/slq-hub/update.sh compose
-    restart comfyui`), then Settings → Tests, only "Make a picture move",
-    with the 5B (Settings → Assistant → Video).
+57. **The clip from a picture that came out broken - EXPLAINED 2026-11-03** (with Søren, one change at a time on
+    the VM): Movies' three clips (the 5B Turbo, 704x1280, 5 s) - shot 1 right only in the first 512-px decode tile
+    (about 450x470 px) and flat colours after, shots 2 and 3 black; ComfyUI's log without a warning, every model
+    "prepared for dynamic VRAM loading" (and shot 1's four steps in 3 s against 57-63 s). A video from a description
+    with the same model in the same session: right. `--disable-dynamic-vram`: the decode out of memory (the 5B and
+    its text encoder kept on the card, 18.8 GiB; one conv3d of a 512-px tile asking for 6.75 GiB - MIOpen is off
+    on AMD, so PyTorch's own 3D convolution unrolls the tile; ComfyUI's estimate for the decode is 3.9 GiB).
+    `--disable-dynamic-vram --reserve-vram 6`: the text encoder unloaded before the 5B, the decode had its room
+    (the allocator failed once at 7.25 GB with 6.17 GB free, then got it after freeing its cache), and the clip was
+    right. The 25 Oct clip was the plain 5B at 20 steps, so the Turbo is not involved. Kept in `.env`; the
+    self-test checks it (0.73.1). First seen in the second test run: the 5B, right after a 14B job the Hub had
+    cancelled, made a clip that kept the picture only in the top-left corner of its first frame and was flat
+    colours after - 13 min 20 s, nothing amiss in ComfyUI's log; the 14B job before it was not the cause.
 58. **Skills with the real models** (0.23.0): whether Qwen3.8 follows the
     skill maker - reads all of a long PDF or a big workbook (`read_file`
     gives 2,000 rows a sheet), writes a SKILL.md that passes the checks the
@@ -1714,6 +1720,14 @@ the host if the VM ever stops by itself.
       converter's cases are ComfyUI 0.42.3's own templates; files from other sites (Civitai, OpenArt) are
       untried - an export is the way to see what went wrong. When COMFYUI_REF changes, the editor's format may
       too: tools/workflow_oracle/ (convert.js, compare.py) is how the converter was checked - run it again.
+93. **ComfyUI without dynamic VRAM (0.73.1)** - only one clip from a picture seen right so far:
+    - **Shots 2 and 3** of the test episode made again (Again on each: their broken clips count as made).
+    - **Pictures**: klein 9B with its 15.6 GB text encoder and 6 GB kept free - does the text encoder still load
+      whole ("loaded completely" in the log), and a picture's time against the 3.4 s it took with dynamic VRAM?
+    - **The 14B pair** (fp8 experts, Wan 2.1 VAE) - never run with these flags; its decode may need more room.
+    - **ComfyUI updates**: its log says `--disable-dynamic-vram` "will be removed soon" - before COMFYUI_REF is
+      raised, a video from a picture has to be checked; telling ComfyUI (GitHub) what happened here is what the
+      warning asks for.
 92. **Movies' sound and cut (0.73.0)** - none of it has been heard on the VM:
     - **Voices**: Røst's mic and nic for short cartoon lines in Danish; a clip of a real voice (a phone recording,
       5-20 s) through the sandbox's ffmpeg - does Røst keep the voice? Time per line on the CPU.

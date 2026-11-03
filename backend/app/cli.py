@@ -317,6 +317,27 @@ def _comfy_folders(rep, env) -> None:
         rep.line("PASS", "comfyui folders", "the copies of people's pictures are deleted after each answer")
 
 
+def comfy_memory(stats: dict) -> tuple[str, str, str] | None:
+    """ComfyUI 0.42.3 pages model weights in and out of the card ("dynamic VRAM") on AMD from ROCm 7.14 unless told
+    not to - and with it Wan 2.2 5B's videos from a picture came out as flat colours or black on the RX 7900 XTX: the
+    first 512-px decode tile right, the rest not (2026-11-03, HANDOFF item 57). Off, the decode needs room ComfyUI's
+    estimate leaves out (6.75 GiB for one 3D convolution with MIOpen off), which --reserve-vram 6 keeps free.
+    -> (state, what, the fix) for the self-test; None for a card that is not AMD's."""
+    system = stats.get("system") or {}
+    device = (stats.get("devices") or [{}])[0] or {}
+    if "rocm" not in str(system.get("pytorch_version") or "").lower() and "AMD" not in str(device.get("name") or ""):
+        return None
+    argv = [str(a) for a in system.get("argv") or []]
+    fix = ("COMFY_ARGS=--disable-dynamic-vram --reserve-vram 6 in /srv/slq-hub/.env, then: sudo bash update.sh "
+           "compose up -d comfyui")
+    if "--disable-dynamic-vram" not in argv:
+        return "WARN", "dynamic VRAM is on: videos from a picture come out as flat colours or black on this card", fix
+    if "--reserve-vram" not in argv:
+        return "WARN", "dynamic VRAM off without --reserve-vram: a video's decode runs out of memory", fix
+    reserve = argv[argv.index("--reserve-vram") + 1] if argv.index("--reserve-vram") + 1 < len(argv) else "?"
+    return "PASS", f"dynamic VRAM off, {reserve} GB kept free for decoding videos", ""
+
+
 def _sandbox_exec(c: httpx.Client, env, cmd: str, timeout: int = 60) -> dict:
     r = c.post(env.sandbox_url + "/exec", headers={"X-Internal-Token": env.internal_token},
                json={"cmd": cmd, "cwd": "/workspace", "timeout": timeout}, timeout=timeout + 15)
@@ -498,6 +519,9 @@ def selftest(images: bool = False, speech: bool = False) -> int:
         st = c.get(env.comfy_url + "/system_stats").json()
         dev = (st.get("devices") or [{}])[0]
         rep.line("PASS", "comfyui", f"{dev.get('name', '?')}, torch {st.get('system', {}).get('pytorch_version')}")
+        memory = comfy_memory(st)
+        if memory:
+            rep.line(memory[0], "comfyui memory", memory[1], memory[2])
     except Exception as exc:  # noqa: BLE001
         rep.line("WARN", "comfyui", f"not answering ({exc.__class__.__name__}) - image tools are off",
                  "docker compose logs comfyui")

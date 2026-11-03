@@ -208,7 +208,7 @@ TORCH_INDEX=https://download.pytorch.org/whl/rocm7.14
 TORCH_VERSION=2.14.1
 TORCHVISION_VERSION=0.29.1
 SEARXNG_TAG=latest
-COMFY_ARGS=
+COMFY_ARGS=--disable-dynamic-vram --reserve-vram 6
 SANDBOX_CPUS=6
 SANDBOX_MEM=8g
 INSTALL_EXTRA_MODELS=$(if [[ "$klein" =~ ^[yYjJ] ]]; then echo flux2-klein-4b; fi)

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.73.1 - 2026-11-03
+
+- **Videos from a picture work on the AMD card.** They came out as flat
+  colours or black because ComfyUI's new "dynamic VRAM" loading breaks that
+  path on this card. ComfyUI now runs without it and keeps 6 GB free for
+  decoding videos. A new install sets this by itself, and the self-test warns
+  when it is missing.
+
 ## 0.73.0 - 2026-11-03
 
 - **Movies get their sound and the final cut.** Each character gets a voice:

@@ -3292,11 +3292,21 @@ whether the work lives up to what is expected.
 - **Video** (0.19.0, §8): the test runs on the card (2026-10-25) measured
   the 5B at 720p and 121 frames - 28-41 s a step, 10-14 minutes a clip - and
   found its whole decode out of memory; in tiles (0.22.1) the second run's
-  clip from a description came out right. Its clip from a picture did not:
-  after a 14B job the Hub had given up on, the 5B's clip kept the picture only
-  in the top-left corner of its first frame (448 px square, where the first
-  decode tile's overlap begins), and the frames after it were flat colours -
-  not explained yet (ComfyUI's log). Unknown on the 7900 XTX:
+  clip from a description came out right. Its clips from a picture did not
+  (the 25 Oct run, and Movies' first three on 2026-11-03): the picture right
+  only in the first 512-px decode tile, flat colours or black after, and
+  nothing in ComfyUI's log. Explained on 2026-11-03 by measuring: ComfyUI
+  0.42.3 turns on "dynamic VRAM" (weights paged in and out as they are
+  needed) for AMD from ROCm 7.14 - the VM's - and with it only the picture's
+  path breaks (a video from a description came out right in the same
+  session). With `--disable-dynamic-vram` the decode ran out of memory
+  instead: ComfyUI kept the 5B and its text encoder on the card and one 3D
+  convolution of a 512-px tile asked for 6.75 GiB (MIOpen is off on AMD, so
+  PyTorch builds it in one buffer; ComfyUI's estimate for the whole decode is
+  3.9 GiB). With `--reserve-vram 6` too, the clip from a picture came out
+  right (0.73.1: the default in `.env`, and the self-test warns without
+  them). ComfyUI's log says the flag "will be removed soon": a ComfyUI
+  update has to be checked with a video from a picture. Unknown on the 7900 XTX:
   the 14B pair's time, fast and full, and whether it fits the VM's RAM; the fp8 experts on gfx1100; and the 14B pair's memory -
   ComfyUI loads the high-noise expert, then the low-noise one (14.3 GB each),
   which with the 6.7 GB text encoder is about 35 GB of weights for the VM's
@@ -3311,7 +3321,8 @@ whether the work lives up to what is expected.
   Qwen3.8 keeps to the storyboard rules (no lip sync, 30 s). Seen on
   2026-11-03: Søren's first clips from Movies came out as flat, saturated
   colours and as black - the picture-to-video failure of the second test run
-  (HANDOFF item 57), not explained yet; the measurements are asked for.
+  (HANDOFF item 57) - and right once ComfyUI ran without dynamic VRAM and
+  with 6 GB kept free (Video, above).
   Sound and the cut (0.73.0): not heard on the VM - Røst's voices for short
   cartoon lines, a clip of a real voice through the sandbox's ffmpeg, Stable
   Audio's effects for 2-10 s shots, ACE-Step's theme, how the ducking sounds
