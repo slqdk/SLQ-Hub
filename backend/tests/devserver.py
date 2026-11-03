@@ -35,7 +35,9 @@ import io
 import json
 import math
 import re
+import shutil
 import struct
+import subprocess
 import tempfile
 import wave
 from pathlib import Path
@@ -185,6 +187,9 @@ asks what a pump alarm or error code means.
 """
 
 
+CHECKS = {"pictures": 0}                            # Extra's picture checks so far (0.71.0)
+
+
 def responder(body: dict) -> dict:
     msgs = body["messages"]
 
@@ -210,6 +215,18 @@ def responder(body: dict) -> dict:
     if "continues in a new chat" in low:      # Continue in a new chat (0.27.0): the notes, slowly enough to watch
         return {"content": "## Goal\n- Carry on with the work of the chat before.\n## Decisions and facts\n"
                            "- Everything that mattered there.\n## Next\n- The next step.", "delay": 1.5}
+    if text.startswith("You check a picture an image model just made"):     # 0.71.0: Extra's check of a picture -
+        CHECKS["pictures"] += 1                         # the first of each two has a mistake: watch it made again
+        if CHECKS["pictures"] % 2:
+            return {"content": json.dumps({"figures": [{"what": "fox", "heads": 1, "arms": 0, "hands": 0, "legs": 5}],
+                                           "mistakes": [{"what": "the fox has a fifth leg growing from its chest",
+                                                         "serious": True}], "verdict": "mistakes"}), "delay": 1}
+        return {"content": json.dumps({"figures": [{"what": "fox", "heads": 1, "arms": 0, "hands": 0, "legs": 4}],
+                                       "mistakes": [{"what": "a blurry snowflake on the left", "serious": False}],
+                                       "verdict": "ok"}), "delay": 1}
+    if text.startswith("You check a video a video model just made"):        # and of a video's frames
+        return {"content": json.dumps({"mistakes": [{"what": "the fox's tail splits in two", "frame": 3,
+                                                     "serious": True}], "verdict": "mistakes"}), "delay": 1}
     if "Your task: an independent review" in str(msgs[0].get("content") or ""):     # 0.30.0: the reviewer
         listed = re.findall(r"^- (\S+) \((?:new|changed),", text, re.M) + re.findall(r"its source: ([^\s;]+)", text)
         if tools_done == 0 and listed:
@@ -600,12 +617,31 @@ def sandbox_handler(workspace: Path):
     def handle(body: dict) -> dict:
         cmd = body.get("cmd") or ""
         folder = workspace / str(body.get("cwd") or "/workspace").removeprefix("/workspace").lstrip("/")
+        if "/.hub/tmp/check-" in cmd and shutil.which("ffmpeg"):    # Extra's video check (0.71.0): its frames, real
+            run = subprocess.run(["sh", "-c", cmd.replace("/workspace/", f"{workspace}/")], capture_output=True,
+                                 text=True, timeout=120)
+            return {"exit_code": run.returncode, "stdout": run.stdout, "stderr": run.stderr, "timed_out": False,
+                    "duration_ms": 5, "truncated": False}
         if "jingle.wav" in cmd:
             (folder / "jingle.wav").write_bytes(_tone())
             (folder / "guide.pdf").write_bytes(PDF)
         return {"exit_code": 0, "stdout": f"ran: {cmd}\n", "stderr": "", "timed_out": False, "duration_ms": 5,
                 "truncated": False}
     return handle
+
+
+def _pictures() -> list[bytes]:
+    """The fake ComfyUI's pictures, one per queued prompt: a fox-coloured square, then a blue one, and so on - Extra's
+    check makes the first again (0.71.0), and the two must look apart."""
+    from PIL import Image, ImageDraw
+    out = []
+    for i in range(200):
+        img = Image.new("RGB", (512, 512), (214, 110, 40) if i % 2 == 0 else (60, 110, 200))
+        ImageDraw.Draw(img).text((20, 20), f"picture {i + 1}", fill=(255, 255, 255))
+        buf = io.BytesIO()
+        img.save(buf, "PNG")
+        out.append(buf.getvalue())
+    return out
 
 
 def _test_clip(base: Path) -> bytes | None:
@@ -728,7 +764,7 @@ def main() -> None:
               static_dir=dist if (dist / "index.html").is_file() else None, speech_url="http://speech:7100")
     _seed_training(data)
     fakes = {"sup": {}, "llama": {"responder": responder},
-             "comfy": {"audio_seconds": 3.0, "video_bytes": _test_clip(base)},
+             "comfy": {"audio_seconds": 3.0, "video_bytes": _test_clip(base), "pictures": _pictures()},
              "sandbox": {"handler": sandbox_handler(data / "workspace")}, "mcp": {}, "speech": {},
              # LoRA training: a job "trains" for a few minutes (60 looks, one per 5 s), then writes its results
              "trainer": {"root": str(data / "training"), "looks_to_finish": 60},

@@ -2,9 +2,10 @@
 MP4 in the working folder, where the card under the answer plays it."""
 from __future__ import annotations
 
+from .. import media_check
 from .audio import _progress, slug
 from .base import Tool, ToolContext, ToolResult, gpu_failure, obj, register
-from .images import _image_bytes
+from .images import _image_bytes, _note
 
 ORIENTATIONS = ("landscape", "portrait", "square")
 MAX_PICTURE_BYTES = 50 * 1024 * 1024
@@ -94,13 +95,18 @@ async def video_generate(ctx: ToolContext, args: dict) -> ToolResult:
     except (ValueError, VideoError) as exc:
         return gpu_failure("Video generation failed", exc)
     ctx.workdir.write(rel, out["data"], "agent", "hub", f"made {rel}")
+    # At the Effort Extra, frames from across it are checked; it is not made again (0.71.0)
+    checked = await media_check.video(ctx, rel, float(out["seconds"]), prompt, progress=_note(ctx, "video_progress"))
     source = {"t2v": "", "i2v": f" from {first}", "flf2v": f" from {first} to {last}"}[out["ability"]]
     quality_text = f", {out['quality']} quality" if out.get("quality") else ""
     cut = f" (seconds is at most {out['max_seconds']:g})" if seconds > out["max_seconds"] else ""
+    display: dict = {"video": [{"path": rel, "seconds": out["seconds"], "model": out["model"]["name"]}]}
+    if checked is not None:
+        display["checked"] = checked.record
     return ToolResult(f"Saved {rel}{source}: {out['seconds']:g} s{cut}, {out['frames']} frames at {out['fps']} fps, "
                       f"{out['width']}x{out['height']}, {out['model']['name']}{quality_text}, seed {out['seed']} "
-                      f"({out['compute']:.0f} s on the GPU). It has no sound. {_reach(ctx, out['data'])}",
-                      display={"video": [{"path": rel, "seconds": out["seconds"], "model": out["model"]["name"]}]})
+                      f"({out['compute']:.0f} s on the GPU). It has no sound. {_reach(ctx, out['data'])}"
+                      f"{checked.text if checked is not None else ''}", display=display)
 
 
 def _params(models: list[str]) -> dict:

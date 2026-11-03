@@ -1104,7 +1104,8 @@ message's options, the chat's settings (`level`), the project's, then
 Settings → Assistant (`level_chats`, default quick; `level_projects`, default
 extra). A `thinking` true/false stored before 0.38.0 reads as think/quick. A
 model's own thinking mode (Settings → Models) decides whether a *default*
-level thinks, not a level the user chose. `Engine.level` gates the review.
+level thinks, not a level the user chose. `Engine.level` gates the review,
+and (0.71.0) the check of the pictures and videos a turn makes (§8).
 Chat 145 measured why: each of its two turns spent 12-14 minutes in the
 review and 6 minutes in single steps that thought up to the 8,000-token
 budget; Qwen3.8 ignores `reasoning_effort`, so "Think a little" changed
@@ -2100,6 +2101,48 @@ files afterwards.
   a bigger original keeps the model's size rather than being blown up from one
   megapixel. The tool's result says the size, and the original's when they
   differ.
+- **Checked at Extra** (0.71.0, `app/agent/media_check.py`; Søren: "when
+  ... the thinking is set on Extra.. i would like it to verify the picture.
+  Like check for extra or missing bodyparts on humans, animals or just out of
+  shape stuff before delivering the result to me.. if it cant make it right,
+  then suggest improvements to my prompt"). At the effort Extra,
+  `image_generate` and `image_edit` show each picture they made to the turn's
+  model in a request of its own - the picture, the description and a
+  checklist, not the conversation; no thinking; on this server the answer is
+  held to a JSON schema (`response_format`). It first counts each person's
+  and animal's heads, arms, hands and legs (at most 8 figures - the counting
+  is there to make it look, the Hub reads only the mistakes), then lists the
+  mistakes it sees, each `serious` or not: a part too many or missing where
+  it should show (hidden or cut off by the frame is not missing), limbs from
+  the wrong place or merged, melted faces, things melted or broken, a main
+  subject asked for missing or the wrong number of them, text asked for spelled
+  wrong - and not what the description asks for. A picture with a serious
+  mistake is made again with a new seed (a call's such pictures in one go on
+  the card) up to `agent.check_media` times (Settings → Assistant, "2"; "0"
+  checks only, "off" not at all); the user gets the try without one, or the
+  one with the fewest (no answer the Hub can read ranks between: it is not
+  made again). The result tells the model what was found - when a picture
+  is still wrong, to say so plainly, not call it fine, and suggest how to
+  change the prompt (fewer figures, a simpler pose, what the hands do, a
+  closer framing, another model). The tries thrown away stay with the call's
+  display (`checked.rejected`, by try) - under the picture behind "Show the
+  try it threw away", and as pictures in the export - so Søren can see what
+  the check found and whether it was right. A call with a seed is checked
+  but not made again (the seed makes the same picture). A **video** is not
+  made again (minutes on the card): ffmpeg in the sandbox takes six frames
+  from across it (the middle of six equal parts; the Hub's image has no
+  ffmpeg), into `.hub/tmp/check-<id>/`, removed after; they go to the model
+  at 896 px with their times, and the checklist adds what changes between
+  frames. Their contact sheet is kept for the user ("Show the frames it
+  checked"). The check runs on the turn's model - the card switches back to
+  it after the picture anyway, so a picture without mistakes costs only the
+  check, and each new try a switch to ComfyUI and back - or, for a turn in
+  the cloud, the cloud model, which sees the pictures anyway. A model that
+  cannot see pictures does not check, and the result says so. The checks are
+  `check` steps in the turn (model, verdict, seconds; switches are `load`
+  steps). A person's chat checks too; its device keeps the thrown-away tries
+  with the chat and never sends them back. Without Extra, 0.68.0's line
+  stays: the model is asked to look at the bodies itself.
 
 ### Sound (0.13.0)
 
@@ -3126,6 +3169,12 @@ whether the work lives up to what is expected.
   `COMFY_ARGS` in `.env` is the knob (`--cache-none`, `--reserve-vram`). Also
   how the models do with Danish prompts (umt5 is multilingual; Wan learnt
   from English and Chinese captions).
+- **The check at Extra** (0.71.0, §8): not run on the card. Unknown: how
+  often Qwen3.8 finds the broken bodies klein draws, and how often it calls a
+  right picture wrong (each false alarm costs a try); fingers are the least
+  likely to be seen. And the time: a check, and a new try's two switches
+  (ComfyUI loading klein again after the chat model, and back) - the turn's
+  `check` and `load` steps measure both.
 
 ---
 

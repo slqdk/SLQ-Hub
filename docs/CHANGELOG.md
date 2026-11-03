@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.71.0 - 2026-11-03
+
+- **Pictures are checked before you get them, at the Effort Extra.** The
+  chat's model looks at each picture it makes or changes: people and animals
+  with an arm, hand or leg too many or missing, melted or merged shapes, a
+  missing subject, text spelled wrong. A picture with a serious mistake is
+  made again with another seed - up to 2 times by default - and you get the
+  one that came out right. If none did, you get the best one, what is wrong
+  with it, and suggestions for the prompt. Under the picture: what the check
+  found, and "Show the try it threw away", so you can see whether it was
+  right. Settings -> Assistant -> "Pictures and videos it makes (Extra)":
+  more or fewer tries, check only, or off. A call with a seed is checked but
+  not made again.
+- **Videos are checked too**, from six frames across the clip - also for
+  things that change shape between them. A video is not made again (it takes
+  minutes): you are told what is wrong and how the prompt could help. "Show
+  the frames it checked" shows them.
+
 ## 0.70.0 - 2026-11-03
 
 - **LoRAs in categories.** The picture menu in a chat now lists LoRAs the

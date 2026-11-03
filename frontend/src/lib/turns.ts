@@ -14,7 +14,8 @@ export interface ToolView {
   images?: ImageRef[];
   display?: Display | null;
   seconds?: number;
-  progress?: { value: number; max: number };   // a long GPU or speech job, while it runs
+  progress?: { value: number; max: number; label?: string };   // a long GPU or speech job, while it runs (label:
+                                               // what it does now - "checking", "try 2" - 0.71.0)
   children?: Item[];
   subagent?: { description: string; finished: boolean };
   ask?: AskInfo;                               // what the turn asks before this call (internet set to ask first)
@@ -292,7 +293,8 @@ function applyStream(items: Item[], ev: RunEvent): void {
     case "audio_progress":
     case "video_progress": {
       const t = findTool(items, d.id);
-      if (t && Number(d.max) > 0) t.progress = { value: Number(d.value) || 0, max: Number(d.max) };
+      const label = typeof d.label === "string" && d.label ? d.label : undefined;
+      if (t && (Number(d.max) > 0 || label)) t.progress = { value: Number(d.value) || 0, max: Number(d.max) || 0, label };
       break;
     }
     case "tool_result": {

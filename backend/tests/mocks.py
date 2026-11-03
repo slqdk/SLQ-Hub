@@ -590,6 +590,9 @@ def make_comfy(state: dict) -> FastAPI:
             return Response(state.get("video_bytes") or fake_mp4(), media_type="video/mp4")
         if filename.endswith(".glb"):
             return Response(state.get("glb_bytes") or b"glTF", media_type="model/gltf-binary")
+        if state.get("pictures"):                             # one picture per queued prompt, the last repeats
+            n = int(m.group(1)) if (m := re.fullmatch(r"p(\d+)\.png", filename)) else 1
+            return Response(state["pictures"][min(n, len(state["pictures"])) - 1], media_type="image/png")
         return Response(state.get("picture_bytes") or PNG_1x1, media_type="image/png")
 
     return app

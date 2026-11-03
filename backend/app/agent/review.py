@@ -40,7 +40,9 @@ REVIEW_TOOLS = {"list_files", "read_file", "search_files", "bash", "web_app", "w
 # The calls that make or change work. A turn without one is not reviewed, whatever else changed the working folder
 # while it ran (a sync from the user's PC, an upload in the Files panel).
 MAKES = {"write_file", "edit_file", "move_file", "bash", "artifact"}
-MEDIA = ("image/", "audio/", "video/")             # made pictures, sound and video are not reviewed (the user judges)
+# Made pictures, sound and video are not reviewed (the user judges): at Extra the picture and video tools check
+# their own before the user gets them (media_check.py, 0.71.0).
+MEDIA = ("image/", "audio/", "video/")
 VERDICT = re.compile(r"VERDICT:\s*\**\s*(OK|PROBLEMS?)\b", re.I)
 # The artifacts' source, for the reviewer to read (sync and the files card leave .hub out); web_app runs them.
 SOURCES = ".hub/review"

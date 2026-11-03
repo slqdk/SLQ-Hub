@@ -116,7 +116,7 @@ export async function collect(turnId: string, chat: string, result: DeviceResult
   for (const m of result.messages) {
     for (const b of m.content) {
       if (b.type !== "tool_result") continue;
-      for (const i of b.images ?? []) {
+      for (const i of S.toolBlobs(b)) {
         if (await S.getBlob(i.sha)) continue;
         try {
           const r = await fetch(`/hub/api/device/turns/${turnId}/blob/${i.sha}`, { credentials: "same-origin" });

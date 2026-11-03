@@ -148,6 +148,8 @@ DEFAULTS: dict = {
         "escalate_to": "qwen3.8-27b",      # a stuck turn goes on with this model ("" = it answers with what it has)
         "review_model": "",                # "" = the hand-over model above (else the same), "same", or a model id
         "review_minutes": 15,              # the review's time: then it is asked for its report (0 = only its steps)
+        "check_media": "2",                # Extra (0.71.0): pictures and videos checked; a picture with a serious
+                                           # mistake made again up to this often ("0": only checked, "off": not)
         "notes_file": True,                # NOTES.md in the working folder: written, reminded of, read first (0.31.0)
     },
     "cloud": {

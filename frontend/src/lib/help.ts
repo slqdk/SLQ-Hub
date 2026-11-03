@@ -388,6 +388,9 @@ export const SECTIONS: HelpSection[] = [
           "Say the shape or size: square, portrait, wide, or exact pixels such as 1920x1080.",
           "\"fast\" uses a turbo model for a quick draft; ask for up to four pictures to choose from.",
           "Name a model to use another one for a single picture.",
+          "At the Effort Extra each picture is checked before you get it - arms, hands and legs too many or missing, "
+            + "melted shapes - and one with a mistake is made again; under the picture, Show the tries it threw away. "
+            + "If no try comes out right, you get the best one and suggestions for the prompt.",
         ],
         needs: ["images.generate"],
       },
@@ -640,7 +643,9 @@ export const SECTIONS: HelpSection[] = [
           { text: "Rain running down a window at night, city lights behind - portrait, for a phone" },
         ],
         tips: ["Describe the motion and the camera (static, slow push-in, pan, orbit, tracking shot).",
-          "One shot per clip; for a story, make several and ask it to join them."],
+          "One shot per clip; for a story, make several and ask it to join them.",
+          "At the Effort Extra six frames from across the clip are checked for wrong bodies and things that change "
+            + "shape; it is not made again (minutes), but you are told what is wrong and how the prompt could help."],
         needs: ["video.t2v"],
       },
       {

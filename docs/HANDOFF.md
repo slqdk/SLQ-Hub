@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.70.0, 2026-11-03)
+## State (0.71.0, 2026-11-03)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -887,6 +887,18 @@ LoRAs trained before their training's. Tests: tests/test_lora_categories.py (4).
 (desktop light, phone dark): the menu's folders, a LoRA turned on inside one with its slider, "For other picture
 models", the LoRA list sorted by category with its tag, the category field with suggestions, New training's
 category following the kind, the training's category saved from its editor. NOT seen on the VM: item 89.
+0.71.0, Søren: "When i create a picture or a video, and the thinking is set on Extra.. i would like it to verify the
+picture. Like check for extra or missing bodyparts on humans, animals or just out of shape stuff before delivering
+the result to me.. if it cant make it right, then suggest improvements to my prompt." At Extra the picture tools
+show each picture to the turn's model in a request of its own (a checklist, JSON held to a schema, no thinking),
+make one with a serious mistake again with a new seed up to Settings -> Assistant's tries (2), give the best and
+tell the model to suggest prompt changes when none came out right; the tries thrown away are kept under the
+picture and in the export. A video is checked from six frames (ffmpeg in the sandbox), not made again (DESIGN §8
+"Checked at Extra"). Tests: tests/test_media_check.py (16). Measured here: the frames command with the real ffmpeg
+on a 1280x704 H.264 test clip (6 frames in 1.3 s on this CPU) and the contact sheet. In Chromium against the dev
+server (desktop light, phone dark): "checking 1/1" and "checking try 2 1/1" in the tool row, the check's line under
+the picture and the thrown-away try behind its link, the video's line in the warning colour and its frames sheet,
+the export's lines and pictures; no console errors. NOT seen on the VM: item 90.
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
 host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU
@@ -1660,6 +1672,22 @@ the host if the VM ever stops by itself.
       converter's cases are ComfyUI 0.42.3's own templates; files from other sites (Civitai, OpenArt) are
       untried - an export is the way to see what went wrong. When COMFYUI_REF changes, the editor's format may
       too: tools/workflow_oracle/ (convert.js, compare.py) is how the converter was checked - run it again.
+90. **The check at Extra (0.71.0)** - none of it has run on the card:
+    - **Does it see what is wrong?** In a chat at Extra with klein 9B: prompts that broke before (several people,
+      hands holding things, "3 arms, or a hand is missing"). Under each picture: "Checked by ...", and "Show the try
+      it threw away" - were the thrown-away ones really wrong (false alarms cost a try each), and does the kept one
+      look right? Fingers are the least likely to be seen. An export has the check's lines and every try as a
+      picture. If it misses too much: thinking for the check, or a look at each figure cut out bigger, are the next
+      levers - measure first.
+    - **The time**: the turn's `check` steps (seconds per check) and `load` steps (the switches: ComfyUI loading
+      klein again after Qwen3.8, and back) in the export - a new try costs both. Settings -> Assistant -> "Pictures
+      and videos it makes (Extra)" lowers the tries, or checks only.
+    - **A video at Extra**: the frames come from ffmpeg in the sandbox (`.hub/tmp/check-*`, removed after - the Hub
+      and the sandbox are both uid 1000, so the Hub can delete them; not seen on the VM). Does Qwen3.8 see a limb
+      that changes between six frames at 896 px?
+    - **The JSON schema** (`response_format`) on llama-server b11783 with a vision request and thinking off: the
+      fake server ignores it. If the check's answers come back unreadable ("no clear answer" under every picture),
+      look at the model step in the export.
 89. **LoRA categories (0.70.0)**: after the update, Settings -> Models -> LoRAs should show his trained LoRAs with
     People/Things/Styles (from their trainings, at start-up - the log says nothing; check the tags), and the picture
     menu their folders. A LoRA he later clears stays without one (only LoRAs without the key are sorted in).

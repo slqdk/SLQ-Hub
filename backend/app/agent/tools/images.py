@@ -13,6 +13,7 @@ from ...catalog import Catalog
 from ...chats import store as chats
 from ...projects import blobs
 from ...projects.store import mime_of
+from .. import media_check
 from .base import Tool, ToolContext, ToolResult, gpu_failure, obj, register
 from .shell import SandboxError, sandbox_exec
 
@@ -131,10 +132,34 @@ async def image_ocr(ctx: ToolContext, args: dict) -> ToolResult:
     return ToolResult(f"OCR text of {rel} ({lang}):\n{text}" if text else f"No text found in {rel}.")
 
 
-async def _progress(ctx: ToolContext):
+async def _progress(ctx: ToolContext, label: str = ""):
+    """The sampler's steps for the tool row; label: which try (a picture made again after the check)."""
     async def cb(value: int, maximum: int, node):
-        ctx.emit("image_progress", id=ctx.call_id, value=value, max=maximum)
+        ctx.emit("image_progress", id=ctx.call_id, value=value, max=maximum, **({"label": label} if label else {}))
     return cb
+
+
+def _note(ctx: ToolContext, kind: str = "image_progress"):
+    """The check's progress for the tool row (0.71.0): what it does, and which picture of how many."""
+    async def note(label: str, value: int, maximum: int) -> None:
+        ctx.emit(kind, id=ctx.call_id, value=value, max=maximum, label=label)
+    return note
+
+
+def _seeded(args: dict) -> bool:
+    """The call gave a seed: the same seed makes the same picture, so a check does not make it again."""
+    return args.get("seed") not in (None, "")
+
+
+def _check_text(checked, otherwise: str = "") -> str:
+    """For the model: what the check found (Effort Extra) - or, without one, `otherwise`."""
+    return otherwise if checked is None else checked.text
+
+
+def _checked(display: dict, checked) -> dict:
+    if checked is not None:
+        display["checked"] = checked.record
+    return display
 
 
 def _save_outputs(ctx: ToolContext, items: list[dict], save_as: str | None, prompt: str) -> list[str]:
@@ -246,14 +271,20 @@ async def image_generate(ctx: ToolContext, args: dict) -> ToolResult:
     if not prompt:
         return ToolResult("prompt is required", is_error=True)
     from ...images.pipeline import ImageError
+    width, height = int(args.get("width") or 1024), int(args.get("height") or 1024)
+
+    async def make(count: int, seed=None, label: str = "") -> list[dict]:
+        return await pipe.generate(prompt, width, height, count=count, seed=seed, fast=bool(args.get("fast")),
+                                   model=_picture_model(ctx), negative=args.get("negative") or "", ticket=ctx.ticket,
+                                   on_progress=await _progress(ctx, label), loras=_loras(ctx))
     try:
-        items = await pipe.generate(prompt, int(args.get("width") or 1024), int(args.get("height") or 1024),
-                                    count=int(args.get("count") or 1), seed=args.get("seed"),
-                                    fast=bool(args.get("fast")), model=_picture_model(ctx),
-                                    negative=args.get("negative") or "", ticket=ctx.ticket,
-                                    on_progress=await _progress(ctx), loras=_loras(ctx))
+        items = await make(int(args.get("count") or 1), args.get("seed"))
     except ImageError as exc:
         return gpu_failure("Image generation failed", exc)
+    # At the Effort Extra each picture is checked, and one with a serious mistake made again (0.71.0)
+    checked = await media_check.pictures(ctx, items, lambda n, label: make(n, None, label), prompt,
+                                         seeded=_seeded(args), progress=_note(ctx))
+    items = checked.items if checked is not None else items
     paths = _save_outputs(ctx, items, args.get("save_as"), prompt)
     desc = ", ".join(f"{it['width']}x{it['height']} seed {it['seed']}" for it in items)
     where = _saved_text(paths)
@@ -262,11 +293,11 @@ async def image_generate(ctx: ToolContext, args: dict) -> ToolResult:
     made = _made_with(pipe, items[0])                                       # the owner's name for the model
     return ToolResult(f"Generated {len(items)} image(s) with {made['model']}{_lora_text(items[0])} ({desc}). They "
                       f"are shown to the user and below, with a line saying what made them.{_ignored(args)}{where}"
-                      f"{enhanced}{BODIES}",
+                      f"{enhanced}{_check_text(checked, BODIES)}",
                       images=[{"sha": it["sha"], "mime": "image/png"} for it in items],
-                      display={"generated": [{"sha": it["sha"], "seed": it["seed"], "path": p}
-                                             for it, p in zip(items, paths + [None] * len(items))],
-                               "made_with": made})
+                      display=_checked({"generated": [{"sha": it["sha"], "seed": it["seed"], "path": p}
+                                                      for it, p in zip(items, paths + [None] * len(items))],
+                                        "made_with": made}, checked))
 
 
 async def image_edit(ctx: ToolContext, args: dict) -> ToolResult:
@@ -279,22 +310,29 @@ async def image_edit(ctx: ToolContext, args: dict) -> ToolResult:
     except FileNotFoundError as exc:
         return ToolResult(f"No such image: {exc}", is_error=True)
     from ...images.pipeline import ImageError
+    prompt = args.get("prompt") or ""
+
+    async def make(count: int, seed=None, label: str = "") -> list[dict]:
+        return await pipe.edit(prompt, datas, seed=seed, fast=bool(args.get("fast")), model=_picture_model(ctx),
+                               ticket=ctx.ticket, on_progress=await _progress(ctx, label), count=count,
+                               loras=_loras(ctx))
     try:
-        items = await pipe.edit(args.get("prompt") or "", datas, seed=args.get("seed"), fast=bool(args.get("fast")),
-                                model=_picture_model(ctx), ticket=ctx.ticket, on_progress=await _progress(ctx),
-                                count=int(args.get("count") or 1), loras=_loras(ctx))
+        items = await make(int(args.get("count") or 1), args.get("seed"))
     except ImageError as exc:
         return gpu_failure("Image editing failed", exc)
-    paths = _save_outputs(ctx, items, args.get("save_as"), args.get("prompt") or "edit")
+    checked = await media_check.pictures(ctx, items, lambda n, label: make(n, None, label), prompt, edit=True,
+                                         seeded=_seeded(args), progress=_note(ctx))
+    items = checked.items if checked is not None else items
+    paths = _save_outputs(ctx, items, args.get("save_as"), prompt or "edit")
     where = _saved_text(paths)
     made = _made_with(pipe, items[0], ctx)
     why = f" {made['note'][0].upper()}{made['note'][1:]}." if made.get("note") else ""
     return ToolResult(f"Edited image(s) ready with {made['model']} ({len(items)}, {_size_note(items[0])})"
-                      f"{_lora_text(items[0])}.{why}{_ignored(args)}{where}",
+                      f"{_lora_text(items[0])}.{why}{_ignored(args)}{where}{_check_text(checked)}",
                       images=[{"sha": it["sha"], "mime": "image/png"} for it in items],
-                      display={"generated": [{"sha": it["sha"], "seed": it["seed"], "path": p}
-                                             for it, p in zip(items, paths + [None] * len(items))],
-                               "made_with": made})
+                      display=_checked({"generated": [{"sha": it["sha"], "seed": it["seed"], "path": p}
+                                                      for it, p in zip(items, paths + [None] * len(items))],
+                                        "made_with": made}, checked))
 
 
 async def image_remove_background(ctx: ToolContext, args: dict) -> ToolResult:

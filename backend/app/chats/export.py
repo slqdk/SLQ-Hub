@@ -21,6 +21,7 @@ import zipfile
 from datetime import datetime, timezone
 
 from .. import db
+from ..agent import media_check
 from ..projects import blobs
 from . import store
 
@@ -142,6 +143,8 @@ def referenced_files(rows: list[dict]) -> list[dict]:
                 disp = b.get("display") or {}
                 for img in [*(b.get("images") or []), *(disp.get("images") or [])]:
                     add(img.get("sha"), img.get("caption"), img.get("mime"), f"tool {b.get('name')}")
+                for sha, caption in media_check.shown_shas(disp.get("checked") or {}):
+                    add(sha, caption, "", f"tool {b.get('name')}")     # the check's tries thrown away (0.71.0)
     for f in seen.values():
         up = store.get_upload(f["sha"]) or {}
         f["name"] = f["name"] or up.get("filename") or ""
@@ -294,6 +297,10 @@ def transcript(chat: dict, project: dict | None, rows: list[dict], runs: list[di
                 disp = b.get("display") or {}
                 for img in [*(b.get("images") or []), *(disp.get("images") or [])]:
                     out += [picture(img.get("sha"), img.get("caption") or "picture"), ""]
+                if isinstance(disp.get("checked"), dict):        # Extra's check (0.71.0), and what it threw away
+                    out += [f"*({media_check.summary(disp['checked'])})*", ""]
+                    for sha, caption in media_check.shown_shas(disp["checked"]):
+                        out += [picture(sha, caption), ""]
                 if disp.get("artifact"):
                     a = disp["artifact"]
                     out += [f"*(artifact: {a.get('title')}, version {a.get('version')})*", ""]

@@ -2,7 +2,8 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { AppWindow, Brain, Check, ChevronDown, ChevronRight, Code2, Download, FileText, GitBranch, Image as ImageIcon, Shapes,
   Sparkles } from "lucide-react";
-import { api, mediaUrl, type ArtifactRef, type MadeWith, type Skill, type SkillCardData, type SkillDraft } from "../lib/api";
+import { api, mediaUrl, type ArtifactRef, type MadeWith, type MediaCheck, type Skill, type SkillCardData,
+  type SkillDraft } from "../lib/api";
 import { bytes, seconds } from "../lib/format";
 import { thoughtGist, toolAbout, toolLabel, toolOutcome, toolSummary, workSummary, type Decision, type Item,
   type ReviewItem, type ToolView } from "../lib/turns";
@@ -231,6 +232,7 @@ function WorkBlock({ items, actions }: { items: Item[]; actions: TurnActions }) 
   const tools = items.flatMap(shownTools);
   const sum = workSummary(tools);
   const images = tools.flatMap((t) => t.images ?? []);
+  const checks = tools.flatMap((t) => t.display?.checked ? [t.display.checked] : []);
   const bad = sum.lastFailed && !actions.live;
   const note = sum.failed && !bad ? ` (${sum.failed} failed on the way)` : bad ? " - the last step failed" : "";
   return (
@@ -243,8 +245,9 @@ function WorkBlock({ items, actions }: { items: Item[]; actions: TurnActions }) 
         <span className="tool-time">{tools.length} step{tools.length === 1 ? "" : "s"}</span>
       </button>
       {open && <div className="work-body"><Items items={items} actions={{ ...actions, live: false }} flat /></div>}
-      {!open && images.length > 0 && <div className="tool-body"><ToolImages images={images}
-        made={tools.flatMap((t) => t.images?.length && t.display?.made_with ? [t.display.made_with] : [])} /></div>}
+      {!open && (images.length > 0 || checks.length > 0) && <div className="tool-body"><ToolImages images={images}
+        made={tools.flatMap((t) => t.images?.length && t.display?.made_with ? [t.display.made_with] : [])}
+        checks={checks} /></div>}
     </div>
   );
 }
@@ -273,7 +276,7 @@ function ToolRow({ tool, actions, hint = "" }: { tool: ToolView; actions: TurnAc
         {about ? <span className="tool-text"><span className="tool-name">{about}</span>{sum}</span> : sum}
         <span className="tool-time">{tool.state === "approval" || tool.state === "question" ? "waiting for you"
           : tool.seconds != null ? (tool.seconds >= 1 ? seconds(tool.seconds) : "")    // not "0 ms" (0.46.0)
-          : busy ? (tool.progress ? `${tool.progress.value}/${tool.progress.max}` : "running") : ""}</span>
+          : busy ? (tool.progress ? progressText(tool.progress) : "running") : ""}</span>
       </button>
       {tool.state === "approval" && (actions.approve || actions.runId) && <Approval tool={tool}
         answer={actions.approve ?? ((callId, decision) => api(`/hub/api/runs/${actions.runId}/approve`,
@@ -285,25 +288,86 @@ function ToolRow({ tool, actions, hint = "" }: { tool: ToolView; actions: TurnAc
         <div className="tool-body"><div className="sub-run"><Items items={tool.children} actions={{ ...actions }} /></div></div>
       )}
       {open && <ToolDetail tool={tool} />}
-      {!open && tool.images && tool.images.length > 0 && (
-        <div className="tool-body"><ToolImages images={tool.images} made={tool.display?.made_with ? [tool.display.made_with] : []} /></div>
+      {!open && ((tool.images?.length ?? 0) > 0 || tool.display?.checked) && (
+        <div className="tool-body"><ToolImages images={tool.images ?? []}
+          made={tool.display?.made_with ? [tool.display.made_with] : []}
+          checks={tool.display?.checked ? [tool.display.checked] : []} /></div>
       )}
     </div>
   );
 }
 
-function ToolImages({ images, made = [] }: { images: { sha: string; caption?: string }[]; made?: MadeWith[] }) {
+/** A running GPU job's progress: the sampler's steps, with what it does when it says (0.71.0: "checking", "try 2"). */
+function progressText(p: { value: number; max: number; label?: string }): string {
+  const steps = p.max > 0 ? `${p.value}/${p.max}` : "";
+  return p.label ? `${p.label}${steps ? " " + steps : ""}` : steps;
+}
+
+function ToolImages({ images, made = [], checks = [] }: { images: { sha: string; caption?: string }[];
+  made?: MadeWith[]; checks?: MediaCheck[] }) {
   return (
     <>
-      <div className="tool-images">
+      {images.length > 0 && <div className="tool-images">
         {images.map((im) => (
           <a key={im.sha} href={mediaUrl(im.sha)} target="_blank" rel="noreferrer" title={im.caption}>
             <img src={mediaUrl(im.sha)} alt={im.caption ?? "image from the tool"} loading="lazy" />
           </a>
         ))}
-      </div>
+      </div>}
       <MadeWithLines made={made} />
+      {checks.map((c, i) => <CheckLine key={i} check={c} />)}
     </>
+  );
+}
+
+/** What Extra's check of the pictures or the video found (0.71.0), as one line. */
+function checkText(c: MediaCheck): { text: string; bad: boolean } {
+  if (c.skipped) return { text: `Not checked: ${c.skipped}.`, bad: false };
+  const by = c.by ?? "the model";
+  if (c.frames) {
+    const found = c.state === "ok" ? "no mistakes found" : c.state === "unclear" ? "no clear answer"
+      : c.state === "mistakes" ? (c.mistakes ?? []).join("; ") : "not checked";
+    return { text: `Checked ${c.frames.length} frames with ${by}: ${found}.`, bad: c.state === "mistakes" };
+  }
+  const pics = c.pictures ?? [];
+  const parts = pics.map((p, i) => {
+    const name = pics.length === 1 ? "" : `picture ${i + 1}: `;
+    if (p.state === "ok") return name + "no mistakes found" + (p.tries > 1 ? ` on try ${p.try ?? p.tries}` : "");
+    if (p.state === "mistakes") return name + (p.tries > 1 ? `still wrong after ${p.tries} tries - ` : "")
+      + p.mistakes.join("; ");
+    return name + (p.state === "unclear" ? "no clear answer" : "not checked");
+  });
+  return { text: `Checked by ${by}: ${parts.join(", ")}.${c.stopped ? ` (${c.stopped[0].toUpperCase()}${c.stopped.slice(1)}.)` : ""}`,
+    bad: pics.some((p) => p.state === "mistakes") };
+}
+
+/** Under the pictures or the video (0.71.0): what the check found - and a click away the tries it threw away, or the
+ *  frames it looked at, so you can see whether it was right. */
+function CheckLine({ check }: { check: MediaCheck }) {
+  const [open, setOpen] = useState(false);
+  const { text, bad } = checkText(check);
+  const thrown = check.rejected ?? [];
+  const several = (check.pictures?.length ?? 0) > 1;
+  const what = thrown.length ? (thrown.length === 1 ? "the try it threw away" : `the ${thrown.length} tries it threw away`)
+    : check.sheet ? "the frames it checked" : "";
+  return (
+    <div className="check-line small">
+      <span className={bad ? "warn-text" : undefined}>{text}</span>
+      {what && <> <button type="button" className="link-btn" onClick={() => setOpen((o) => !o)}>
+        {open ? "Hide" : "Show"} {what}</button></>}
+      {open && thrown.length > 0 && <div className="tool-images check-thrown">
+        {thrown.map((r) => (
+          <figure key={r.sha}>
+            <a href={mediaUrl(r.sha)} target="_blank" rel="noreferrer">
+              <img src={mediaUrl(r.sha)} alt={`Try ${r.try ?? ""}, thrown away`} loading="lazy" /></a>
+            <figcaption>{several ? `Picture ${r.picture}, try` : "Try"} {r.try ?? "?"}: {r.mistakes.join("; ")}</figcaption>
+          </figure>))}
+      </div>}
+      {open && !thrown.length && check.sheet && <div className="tool-images check-thrown">
+        <a href={mediaUrl(check.sheet)} target="_blank" rel="noreferrer">
+          <img className="sheet" src={mediaUrl(check.sheet)} alt="The frames that were checked" loading="lazy" /></a>
+      </div>}
+    </div>
   );
 }
 

@@ -5,7 +5,7 @@
 //   data    per chat: messages (stored blocks), runs (stats), artifacts (all versions)
 //   files   per chat and path: the chat's files (attachments, what the assistant made)
 //   blobs   pictures the messages show, by key (the user's photos, generated pictures)
-import type { Block, ChatSettings, RunRecord } from "../lib/api";
+import type { Block, ChatSettings, Display, ImageRef, RunRecord } from "../lib/api";
 
 export interface LocalMessage { id: number; role: "user" | "assistant" | "tool"; content: Block[]; run_id: string | null;
   created_at: string }
@@ -178,9 +178,17 @@ export function blobKeys(blocks: Block[]): string[] {
   const out: string[] = [];
   for (const b of blocks) {
     if ((b.type === "image" || b.type === "file") && b.sha) out.push(b.sha);
-    if (b.type === "tool_result") for (const i of b.images ?? []) out.push(i.sha);
+    if (b.type === "tool_result") for (const i of toolBlobs(b)) out.push(i.sha);
   }
   return out;
+}
+
+/** A tool result's pictures: those it showed, and those Extra's check keeps beside it (0.71.0: the tries it threw
+ * away, a video's frames) - kept on the device with the chat, never sent back to the Hub. */
+export function toolBlobs(b: { images?: ImageRef[]; display?: Display | null }): ImageRef[] {
+  const c = b.display?.checked;
+  return [...(b.images ?? []), ...(c?.rejected ?? []).map((r) => ({ sha: r.sha, mime: "image/png" })),
+    ...(c?.sheet ? [{ sha: c.sheet, mime: "image/jpeg" }] : [])];
 }
 
 export function newKey(): string {

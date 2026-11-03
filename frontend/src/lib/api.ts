@@ -144,6 +144,24 @@ export interface MadeWith { model: string; loras: { name: string; strength: numb
   left_out: string[];
   /** An edit made by another model than the chat's, and why (the chat's only makes new pictures). */
   note?: string }
+/** Extra's check of made pictures or a video (0.71.0). A picture's state: ok, mistakes (serious ones, still there),
+ * unclear (no answer the Hub could read) or unchecked (the check stopped). */
+export interface MediaCheck {
+  skipped?: string;                    // not checked, and why
+  by?: string;                         // the model that checked
+  seconds?: number;
+  stopped?: string;
+  pictures?: { state: string; tries: number; try?: number; mistakes: string[]; minor: string[] }[];
+  rejected?: { sha: string; seed?: number; picture: number; try?: number; mistakes: string[] }[];
+  seeded?: boolean;                    // not made again: the call gave a seed
+  only?: boolean;                      // not made again: Settings, check only
+  // a video: its frames' times, a picture of them, and what was found
+  frames?: number[];
+  sheet?: string;
+  state?: string;
+  mistakes?: string[];
+  minor?: string[];
+}
 export interface Display {
   artifact?: ArtifactRef;
   todos?: Todo[];
@@ -155,6 +173,8 @@ export interface Display {
   audio?: { path: string; seconds: number; model: string }[];
   /** A picture tool's result (0.59.0): the model that made it, the LoRAs used and any left out. */
   made_with?: MadeWith;
+  /** At the Effort Extra (0.71.0): what the check of the pictures or the video found, and the tries thrown away. */
+  checked?: MediaCheck;
   answers?: string[][];          // ask_user (0.43.0): what the user chose, per question
   video?: { path: string; seconds: number; model: string }[];
   skill?: SkillCardData;

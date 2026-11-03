@@ -1429,7 +1429,8 @@ function AgentTab({ s }: { s: S }) {
         { key: "level_projects", label: "Effort in projects", type: "select", options: LEVEL_OPTIONS,
           help: "A project can have its own (its settings), a chat its own. Extra: when a turn has made or changed code, " +
             "pages or documents, another model checks the work in a fresh context the way you would use it - runs it, " +
-            "opens pages and plays games - and reports; with problems, the model goes on from the report." },
+            "opens pages and plays games - and reports; with problems, the model goes on from the report. Pictures " +
+            "and videos are checked before you get them (below)." },
         { key: "escalate_to", label: "When the model gets stuck, hand over to", type: "select",
           options: [{ value: "", label: "Nobody: it answers with what it has" },
             ...(models?.llm ?? []).filter((m) => m.installed).map((m) => ({ value: m.id, label: m.name }))],
@@ -1447,6 +1448,17 @@ function AgentTab({ s }: { s: S }) {
           help: "Near the end - or 3 steps before its 24 - the reviewer is asked to finish, and its last step can only " +
             "answer: you always get its report and verdict, with what it did not get to check. The time is looked at " +
             "between its steps, so a slow model can go a few minutes over." },
+        { key: "check_media", label: "Pictures and videos it makes (Extra)", type: "select",
+          options: [{ value: "off", label: "Not checked" }, { value: "0", label: "Checked, never made again" },
+            { value: "1", label: "Checked, a picture with a mistake made again once" },
+            { value: "2", label: "Checked, a picture with a mistake made again up to 2 times" },
+            { value: "3", label: "Checked, a picture with a mistake made again up to 3 times" },
+            { value: "4", label: "Checked, a picture with a mistake made again up to 4 times" }],
+          help: "The chat's model looks at each picture before you get it - arms, hands and legs too many or missing, " +
+            "melted or broken shapes, text that was asked for - and one with a serious mistake is made again with " +
+            "another seed; if every try has one, you get the best and suggestions for the prompt. The tries it threw " +
+            "away are under the picture. A video is checked from six frames but not made again (it takes minutes). " +
+            "The model must see pictures; each new try switches the card to ComfyUI and back." },
         { key: "notes_file", label: "Keep the work's notes in NOTES.md", type: "bool",
           help: "A file in the chat's or project's folder: the Hub writes the chat's notes there when it condenses the " +
             "chat or continues it in a new one, reminds the assistant to write what it found in long work, and tells " +
