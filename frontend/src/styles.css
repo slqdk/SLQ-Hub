@@ -980,10 +980,10 @@ div.tests-result-head { cursor: default; }
 .train-pic img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 6px; background: var(--cabinet); }
 .train-pic textarea { font-size: 12.5px; line-height: 1.35; resize: vertical; min-height: 64px; }
 .train-pic-x { position: absolute; top: 4px; right: 4px; background: color-mix(in srgb, var(--sheet) 85%, transparent); }
-.train-settings { display: grid; grid-template-columns: 1fr 120px 100px; gap: 12px; align-items: end; }
+.train-settings { display: grid; grid-template-columns: 1fr 1fr 120px 100px; gap: 12px; align-items: end; }
 @media (max-width: 560px) {
   .train-settings { grid-template-columns: 1fr 1fr; }
-  .train-settings .train-name { grid-column: 1 / -1; }
+  .train-settings .train-name, .train-settings .train-category { grid-column: 1 / -1; }
 }
 .train-steps { display: flex; flex-direction: column; gap: 12px; }
 .train-step { display: flex; gap: 14px; align-items: flex-start; }

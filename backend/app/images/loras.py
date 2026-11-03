@@ -27,6 +27,7 @@ MAX_BYTES = 3 * 1024**3           # LoRAs are 10-300 MB as a rule; a rank-128 Qw
 HEADER_MAX = 64 * 1024 * 1024
 ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,62}$")
 NAME_MAX, TRIGGER_MAX, NOTE_MAX = 80, 120, 500
+CATEGORY_MAX = 40          # 0.70.0: a category, the heading a LoRA is listed under in a chat's picture menu (as skills)
 # Strength: a LoRA as trained is 1 (0-2). A slider LoRA (0.55.0) moves one quality along a line - plus for more,
 # minus for the opposite - and is made weak per step, so its makers give strengths like 4 or -3.
 RANGE, SLIDER_RANGE = (0.0, 2.0), (-10.0, 10.0)
@@ -166,11 +167,12 @@ class Loras:
         tmp.replace(self.list_path)
 
     def list(self) -> list[dict]:
-        """Every LoRA whose file is there, with its family's label."""
+        """Every LoRA whose file is there, with its family's label and its category ("" for none)."""
         out = []
         for x in self._load():
             if self.path(x["id"]).is_file():
-                out.append({**x, "base_label": FAMILIES.get(x.get("base", ""), "Unknown model")})
+                out.append({**x, "category": str(x.get("category") or ""),
+                            "base_label": FAMILIES.get(x.get("base", ""), "Unknown model")})
         return out
 
     def get(self, lid: str) -> dict | None:
@@ -190,8 +192,10 @@ class Loras:
     @staticmethod
     def _clean(name: str | None = None, base: str | None = None, trigger: str | None = None,
                strength: float | None = None, note: str | None = None, slider: bool | None = None,
-               is_slider: bool = False) -> dict:
+               is_slider: bool = False, category: str | None = None) -> dict:
         out: dict = {}
+        if category is not None:
+            out["category"] = " ".join(str(category).split())[:CATEGORY_MAX]
         if slider is not None:
             out["slider"] = bool(slider)
             is_slider = bool(slider)
@@ -223,7 +227,7 @@ class Loras:
 
     def add_file(self, src: Path, filename: str = "", name: str = "", base: str = "", trigger: str = "",
                  strength: float = 1.0, note: str = "", source: dict | None = None, move: bool = True,
-                 slider: bool | None = None) -> dict:
+                 slider: bool | None = None, category: str = "") -> dict:
         """A .safetensors LoRA into the list (moved, or copied with move=False). Its family is guessed when not
         given; so is its trigger word."""
         src = Path(src)
@@ -237,7 +241,8 @@ class Loras:
             said = f"{filename} {src.name} {name} {json.dumps(header.get('__metadata__') or {})[:4000]}".lower()
             slider = "slider" in said
         fields = self._clean(name=name or Path(filename or src.name).stem, base=base or guess_base(header),
-                             trigger=trigger or guess_trigger(header), strength=strength, note=note, slider=slider)
+                             trigger=trigger or guess_trigger(header), strength=strength, note=note, slider=slider,
+                             category=category)
         with self._lock:
             items = self._load()
             taken = {x["id"] for x in items}
@@ -262,7 +267,8 @@ class Loras:
             if entry is None:
                 raise LoraError("No such LoRA.", 404)
             fields = self._clean(**{k: v for k, v in changes.items() if k in ("name", "base", "trigger", "strength",
-                                                                             "note", "slider") and v is not None},
+                                                                             "note", "slider", "category")
+                                    and v is not None},
                                  is_slider=bool(entry.get("slider")))
             if "strength" not in fields:                      # no longer a slider: its strength back into 0-2
                 lo, hi = strength_range(fields.get("slider", bool(entry.get("slider"))))
@@ -270,6 +276,22 @@ class Loras:
             entry.update(fields)
             self._save(items)
         return self.get(lid) or entry
+
+    def categorize(self, categories: dict[str, str], only_unset: bool = False) -> int:
+        """Set categories by LoRA id: a training's category given to its LoRAs, or (only_unset) a first category for
+        LoRAs that never had one. -> how many changed."""
+        n = 0
+        with self._lock:
+            items = self._load()
+            for x in items:
+                if x["id"] in categories and not (only_unset and "category" in x):
+                    cat = self._clean(category=categories[x["id"]])["category"]
+                    if x.get("category") != cat:
+                        x["category"] = cat
+                        n += 1
+            if n:
+                self._save(items)
+        return n
 
     def delete(self, lid: str) -> None:
         with self._lock:

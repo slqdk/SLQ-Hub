@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.70.0 - 2026-11-03
+
+- **LoRAs in categories.** The picture menu in a chat now lists LoRAs the
+  way the Skills menu lists skills: those without a category first, then a
+  folder for each category (it remembers which you opened, and says how many
+  are on), and the LoRAs for other picture models in one last folder. Set a
+  LoRA's category in its settings (Settings -> Models -> LoRAs) - People,
+  Styles, or your own.
+- **Trained LoRAs get their training's category**: People, Things or Styles
+  by what it learns, or one you give it - in New training, or in the
+  training's settings, where a change moves its LoRAs along. LoRAs you
+  trained before are sorted in by their training when the Hub starts.
+
 ## 0.69.1 - 2026-11-02
 
 - **FLUX.2 klein is back at 4 steps** for new pictures: 0.68.0's 8 gave no

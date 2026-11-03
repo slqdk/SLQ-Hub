@@ -244,6 +244,8 @@ export interface Lora { id: string; name: string; base: string; base_label: stri
   /** A slider LoRA (0.55.0): strength -10 to 10, plus for more of its quality, minus for the opposite. */
   slider?: boolean;
   note?: string; size: number; added: string; source?: { kind: string; file?: string; run?: string };
+  /** 0.70.0: the heading it is listed under in a chat's picture menu ("" for none). */
+  category?: string;
   fits: { id: string; name: string }[] }
 export interface LoraList { loras: Lora[]; families: Record<string, string> }
 
@@ -273,7 +275,9 @@ export interface TrainingRun { id: string; name: string; trigger: string; kind: 
   size?: number;
   /** What it trains on (0.56.0): "FLUX.2 klein 4B" or "9B" (0.61.0), or an SDXL model such as "RealVisXL V5.0
    *  (SDXL)". */
-  base_label?: string; checkpoint?: string; checkpoint_name?: string }
+  base_label?: string; checkpoint?: string; checkpoint_name?: string;
+  /** 0.70.0: the category its LoRAs get (absent: made before, by what it learns). */
+  category?: string }
 export interface TrainingDetail extends TrainingRun {
   images_list: { name: string; caption: string; v: number }[];
   checkpoints: { step: number; file: string; size: number }[];

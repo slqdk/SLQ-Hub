@@ -382,6 +382,8 @@ def _lora_lines(ctx: ToolContext, entry: dict | None) -> str:
     on, off = [], []
     for x in items:
         bits = [f"for {x.get('base_label') or 'an unknown family of'} models"]
+        if x.get("category"):                                   # 0.70.0: People, Styles, the owner's own
+            bits.insert(0, f"category {x['category']}")
         if x.get("slider"):
             bits.append("a slider LoRA")
         if x.get("trigger"):

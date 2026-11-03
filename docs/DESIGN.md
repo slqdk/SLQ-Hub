@@ -2003,6 +2003,20 @@ files afterwards.
     shown under the picture. The menu lists every LoRA - those of another
     family greyed out with the model they need - and a LoRA that is on but
     does not fit is struck through above the message box.
+    **Categories** (0.70.0, Søren: "i need trained loras to be in categories
+    in the selection list(chat)"). A LoRA has `category` (40 characters, ""
+    for none; PATCH `/loras/{id}`), and the picture menu lists them as the
+    Skills menu lists skills: none first, then a folder per category (A-Z,
+    open ones remembered in the browser, "N on · count"), and the LoRAs of
+    other families in a last folder, "For other picture models" - one of
+    them that is on stays in its own folder, to be turned off. A training has
+    a category too - by what it learns unless set (`KIND_CATEGORY`: People,
+    Things, Styles) - that each checkpoint added from it gets; changing it
+    (also while it trains) moves its LoRAs along (`Training.set_category`).
+    At start-up the LoRAs trained before get their training's (or the kind
+    in their note when the training is gone, else "Trained") - only those
+    that never had a category key (`Training.categorize_loras`). The
+    image tool's list of LoRAs names each one's category.
   - **Training a LoRA (0.50.0, the admin's alone).** Settings -> Models ->
     LoRAs -> Train a LoRA (`backend/app/training/`). A run is a folder in
     `data/training`: pictures with a caption beside each (the chat model

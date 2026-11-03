@@ -9,3 +9,4 @@ def install(hub: Hub) -> None:
     hub.extras["training"] = Training(hub)           # 0.50.0: LoRA training, the admin's alone
     hub.extras["routers"].append(routes.router)
     hub.extras["startup_hooks"].append(hub.extras["training"].resume_after_restart)
+    hub.extras["startup_hooks"].append(hub.extras["training"].categorize_after_start)   # 0.70.0

@@ -42,12 +42,13 @@ class RunIn(BaseModel):
     rank: int = 16
     base: str | None = None          # "flux2-klein-4b", "flux2-klein-9b" (0.61.0), "flux2-klein-9b-uncensored"
                                      # (0.63.0) or "sdxl:<an SDXL model's id>"
+    category: str | None = None      # 0.70.0: its LoRAs' category in the picture menu; None: by what it learns
 
 
 @router.post("/runs")
 async def create_run(body: RunIn, request: Request):
     try:
-        return _t(request).create(body.name, body.trigger, body.kind, body.steps, body.rank, body.base)
+        return _t(request).create(body.name, body.trigger, body.kind, body.steps, body.rank, body.base, body.category)
     except TrainingError as exc:
         _fail(exc)
 
@@ -64,6 +65,7 @@ class RunPatch(BaseModel):
     name: str | None = None
     steps: int | None = None
     rank: int | None = None
+    category: str | None = None          # 0.70.0: also while it works; its LoRAs move with it
 
 
 @router.patch("/runs/{rid}")

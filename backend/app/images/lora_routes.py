@@ -74,6 +74,7 @@ class LoraPatch(BaseModel):
     strength: float | None = None
     note: str | None = None
     slider: bool | None = None
+    category: str | None = None          # 0.70.0: "" for none
 
 
 @router.patch("/loras/{lid}")

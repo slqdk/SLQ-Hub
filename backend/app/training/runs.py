@@ -113,6 +113,9 @@ SDXL_CONFIG_FILES = re.compile(r"\.(json|txt|model)$", re.I)
 CHECKPOINTS = "/models/comfy/checkpoints"
 SDXL_NEGATIVE = "bad hands, bad anatomy, ugly, deformed"          # RealVisXL's card, shortened
 KINDS = ("person", "thing", "style")
+# 0.70.0: the category a training's LoRAs are listed under in a chat's picture menu - its own, or by what it learns
+KIND_CATEGORY = {"person": "People", "thing": "Things", "style": "Styles"}
+CATEGORY_MAX = 40
 SAVE_EVERY = 250
 MIN_IMAGES, MAX_IMAGES = 5, 80
 IMAGE_EXT = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff", ".heic", ".heif"}
@@ -173,6 +176,10 @@ def _size(path: Path) -> int:
         except OSError:
             pass
     return total
+
+
+def _category(text) -> str:
+    return " ".join(str(text or "").split())[:CATEGORY_MAX]
 
 
 def _next_name(name: str) -> str:
@@ -307,7 +314,7 @@ class Training:
         raise TrainingError("Train on FLUX.2 klein 4B, 9B or 9B uncensored, or on one of your SDXL models.")
 
     def create(self, name: str, trigger: str, kind: str = "thing", steps: int = 1500, rank: int = 16,
-               base: str | None = None) -> dict:
+               base: str | None = None, category: str | None = None) -> dict:
         name = " ".join(str(name).split())[:80]
         trigger = str(trigger).strip()[:41]
         if not name:
@@ -325,6 +332,7 @@ class Training:
         (d / "images").mkdir(parents=True)
         (d / "output").mkdir()
         run = {"id": rid, "name": name, "trigger": trigger, "kind": kind, "steps": steps, "rank": rank,
+               "category": KIND_CATEGORY[kind] if category is None else _category(category),
                **on, "state": "draft", "error": "", "created": time.time(), "lora": None}
         self._save(run)
         return run
@@ -342,9 +350,49 @@ class Training:
             raise TrainingError("Rank 8, 16, 32 or 64.")
         return steps, rank
 
-    def update(self, rid: str, name: str | None = None, steps: int | None = None, rank: int | None = None) -> dict:
-        """Name, steps and rank of a run that is not working (the trigger word and kind are in its captions)."""
+    def category_of(self, run: dict) -> str:
+        """The category its LoRAs get: its own, or for a training made before 0.70.0 the one of what it learns."""
+        return str(run["category"]) if "category" in run else KIND_CATEGORY.get(run.get("kind", ""), "")
+
+    def set_category(self, rid: str, category: str) -> dict:
+        """A training's category, also while it works - and its LoRAs already in the list move with it."""
+        run = self._set(rid, category=_category(category))
+        store = self.hub.extras.get("loras")
+        if store is not None:
+            mine = {x["id"]: run["category"] for x in store.list() if (x.get("source") or {}).get("run") == rid}
+            store.categorize(mine)
+        return run
+
+    def categorize_loras(self) -> int:
+        """At start-up (0.70.0): LoRAs trained here before categories get their training's (or, for one whose
+        training is gone, the kind its note names, else "Trained"). Only those that never had one."""
+        store = self.hub.extras.get("loras")
+        if store is None:
+            return 0
+        wanted = {}
+        for x in store.list():
+            src = x.get("source") or {}
+            if src.get("kind") != "trained":
+                continue
+            try:
+                wanted[x["id"]] = self.category_of(self._load(str(src.get("run") or "")))
+            except (OSError, ValueError, TrainingError):
+                m = re.search(r"\((person|thing|style), step", str(x.get("note") or ""))
+                wanted[x["id"]] = KIND_CATEGORY[m.group(1)] if m else "Trained"
+        return store.categorize(wanted, only_unset=True)
+
+    async def categorize_after_start(self) -> None:
+        self.categorize_loras()
+
+    def update(self, rid: str, name: str | None = None, steps: int | None = None, rank: int | None = None,
+               category: str | None = None) -> dict:
+        """Name, steps and rank of a run that is not working (the trigger word and kind are in its captions); its
+        category at any time."""
+        if category is not None and name is None and steps is None and rank is None:
+            return self.set_category(rid, category)
         run = self._editable(rid)
+        if category is not None:
+            self.set_category(rid, category)
         steps, rank = self._checked(steps, rank)
         fields: dict = {}
         if name is not None:
@@ -372,7 +420,9 @@ class Training:
         run = self.create(name or _next_name(src["name"]), trigger or src["trigger"], kind or src["kind"],
                           src["steps"], src["rank"],
                           base=base or (f"sdxl:{src.get('checkpoint')}" if src.get("base") == "sdxl"
-                                        else self.klein(src)["model"]))
+                                        else self.klein(src)["model"]),
+                          category=src["category"] if "category" in src and (kind or src["kind"]) == src["kind"]
+                          else None)                               # another kind: that kind's category
         old, new = src["trigger"], run["trigger"]
         word = re.compile(rf"(?<![A-Za-z0-9_]){re.escape(old)}(?![A-Za-z0-9_])", re.I)
         dest = self.root / run["id"] / "images"
@@ -1018,6 +1068,7 @@ class Training:
                                note=f"Trained here on {self.base_label(run)} from "
                                     f"{len(list((self._dir(rid) / 'images').glob('*.jpg')))} pictures ({run['kind']}, "
                                     f"step {cp['step']} of {run['steps']}).",
-                               source={"kind": "trained", "run": rid, "step": cp["step"]})
+                               source={"kind": "trained", "run": rid, "step": cp["step"]},
+                               category=self.category_of(run))
         self._set(rid, lora=entry["id"])
         return entry

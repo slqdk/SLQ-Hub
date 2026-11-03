@@ -3,7 +3,9 @@
 // checkpoint - chosen by its sample pictures - becomes a LoRA.
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { CircleHelp, Copy, GraduationCap, ImagePlus, Sparkles, X } from "lucide-react";
-import { api, type TrainingBase, type TrainingDetail, type TrainingOverview, type TrainingRun } from "../lib/api";
+import { api, type LoraList, type TrainingBase, type TrainingDetail, type TrainingOverview,
+  type TrainingRun } from "../lib/api";
+import { KIND_CATEGORY, loraCategoryNames } from "../lib/loras";
 import { bytes, seconds } from "../lib/format";
 import { useApp } from "../state";
 import { ConfirmButton, Lamp, type LampState, Modal } from "./ui";
@@ -155,6 +157,8 @@ export function TrainingSection({ onAdded }: { onAdded: () => void }) {
               <Lamp state={lampOf(r)} />
               <div className="grow" style={{ minWidth: 200 }}>
                 <b>{r.name}</b> <span className="tag">{KINDS[r.kind]?.label ?? r.kind}</span>
+                {(r.category ?? KIND_CATEGORY[r.kind]) && <span className="tag" title="Its LoRAs' folder in a chat's picture menu">
+                  {r.category ?? KIND_CATEGORY[r.kind]}</span>}
                 <div className="meta">Trigger word <b>{r.trigger}</b> · {r.base_label ?? data.base.label} ·{" "}
                   {r.images ?? 0} pictures · {progressText(r)}{r.size ? ` · ${bytes(r.size)}` : ""}</div>
                 <ProgressBar run={r} />
@@ -183,13 +187,15 @@ function NewTraining({ data, onClose, onMade }: { data: TrainingOverview; onClos
   const { toast } = useApp();
   const [f, setF] = useState({ name: "", trigger: "", kind: "thing", steps: "1500", rank: "16",
     base: data.bases[0]?.id ?? data.base.model });
+  const [category, setCategory] = useState<string | null>(null);     // null: by what it learns (0.70.0)
+  const categories = useLoraCategories();
   const [busy, setBusy] = useState(false);
   const chosen = data.bases.find((b) => b.id === f.base) ?? data.bases[0];
   const make = async () => {
     setBusy(true);
     try {
       const run = await api<TrainingRun>("/hub/api/training/runs",
-        { body: { ...f, steps: Number(f.steps), rank: Number(f.rank) } });
+        { body: { ...f, steps: Number(f.steps), rank: Number(f.rank), category: category ?? KIND_CATEGORY[f.kind] } });
       onMade(run.id);
     } catch (e) {
       toast((e as Error).message, "fault");
@@ -210,6 +216,11 @@ function NewTraining({ data, onClose, onMade }: { data: TrainingOverview; onClos
           {Object.entries(KINDS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
         </select>
         <small>{KINDS[f.kind].hint}</small></label>
+      <label className="field"><span>Category</span>
+        <input className="input" value={category ?? KIND_CATEGORY[f.kind]} maxLength={40} list="training-categories"
+          onChange={(e) => setCategory(e.target.value)} />
+        <CategoryList id="training-categories" names={categories} />
+        <small>Its LoRAs' folder in a chat's picture menu. Empty: listed first, without a folder.</small></label>
       <label className="field"><span>Trigger word</span>
         <input className="input" value={f.trigger} maxLength={40} placeholder="e.g. rkxv"
           onChange={(e) => setF({ ...f, trigger: e.target.value.replace(/[^A-Za-z0-9_]/g, "") })} />
@@ -332,6 +343,19 @@ function GuideText({ guide, kind, sdxl }: { guide: Guide; kind: string; sdxl?: b
 }
 
 /** "Rikke" -> "Rikke v2", "Rikke v2" -> "Rikke v3" (as the Hub names a copy). */
+/** The LoRA categories in use (and the kinds' own), for the category fields' suggestions (0.70.0). */
+function useLoraCategories(): string[] {
+  const [names, setNames] = useState<string[]>(Object.values(KIND_CATEGORY));
+  useEffect(() => {
+    api<LoraList>("/hub/api/loras").then((d) => setNames(loraCategoryNames(d.loras)), () => {});
+  }, []);
+  return names;
+}
+
+function CategoryList({ id, names }: { id: string; names: string[] }) {
+  return <datalist id={id}>{names.map((c) => <option key={c} value={c} />)}</datalist>;
+}
+
 function nextName(name: string): string {
   const m = /^(.*?)\s+v(\d+)$/.exec(name.trim());
   return m ? `${m[1]} v${Number(m[2]) + 1}` : `${name.trim().slice(0, 76)} v2`;
@@ -397,6 +421,8 @@ function TrainingEditor({ rid, data, onClose, onAdded, onDuplicate, onBaseFiles 
   const [busy, setBusy] = useState("");
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [settings, setSettings] = useState<{ name: string; steps: string } | null>(null);
+  const [category, setCategory] = useState<string | null>(null);
+  const categories = useLoraCategories();
   const [guide, setGuide] = useState<Guide>("");
   const guideBox = useRef<HTMLDivElement>(null);
   const toggle = (g: Guide) => setGuide(guide === g ? "" : g);
@@ -466,6 +492,8 @@ function TrainingEditor({ rid, data, onClose, onAdded, onDuplicate, onBaseFiles 
   const checkpoint = (step: number) => run.checkpoints.find((c) => c.step === step);
   const ready = pics.length >= data.min_images && uncaptioned === 0;
   const s = settings ?? { name: run.name, steps: String(run.steps) };
+  const runCategory = run.category ?? KIND_CATEGORY[run.kind] ?? "";      // a training made before 0.70.0: by kind
+  const shownCategory = category ?? runCategory;
   const base = data.bases.find((b) => b.id === run.base);          // a klein size (SDXL runs have "sdxl")
 
   return (
@@ -490,6 +518,12 @@ function TrainingEditor({ rid, data, onClose, onAdded, onDuplicate, onBaseFiles 
           <input className="input" value={s.name} maxLength={80} disabled={!editable}
             onChange={(e) => setSettings({ ...s, name: e.target.value })}
             onBlur={() => s.name.trim() && s.name !== run.name && saveSettings({ name: s.name })} /></label>
+        <label className="field train-category"><span>Category</span>
+          <input className="input" value={shownCategory} maxLength={40} list="run-categories"
+            title="Its LoRAs' folder in a chat's picture menu - the ones already added move too"
+            onChange={(e) => setCategory(e.target.value)}
+            onBlur={() => { if (shownCategory.trim() !== runCategory) saveSettings({ category: shownCategory }).then(onAdded); setCategory(null); }} />
+          <CategoryList id="run-categories" names={categories} /></label>
         <label className="field"><span>Steps <HelpDot on={guide === "steps"} onClick={() => toggle("steps")}
           label="About steps" /></span>
           <input className="input" type="number" min={250} max={6000} step={250} value={s.steps} disabled={!editable}

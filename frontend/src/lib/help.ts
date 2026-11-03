@@ -419,8 +419,12 @@ export const SECTIONS: HelpSection[] = [
         ],
         how: ["The picture menu under the message box chooses the picture model and turns LoRAs on for every "
           + "picture in the chat - the assistant cannot pick others. A LoRA that is on shows above the message box.",
-          "A LoRA works only with picture models of its family: the menu shows the others greyed out with the model "
-          + "they need, and one that is on but does not fit the chat's model is struck through.",
+          "Categories: give a LoRA one in its settings (People, Styles, your own), and the picture menu shows each "
+          + "category as a folder - LoRAs without one first. A training gives its LoRAs its own category, by what it "
+          + "learns unless you set one; change it there and its LoRAs move along.",
+          "A LoRA works only with picture models of its family: the menu keeps the others in a last folder, \"For other "
+          + "picture models\", greyed out with the model they need, and one that is on but does not fit the chat's model "
+          + "is struck through.",
           "Under every picture: the model that made it and the LoRAs it used - or which were left out, and why.",
           "Its trigger word is put in the prompt for you. Strength 1 is as trained, lower is a lighter touch; the "
           + "picture menu has a slider for each LoRA you tick.",

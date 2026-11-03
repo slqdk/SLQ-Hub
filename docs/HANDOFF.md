@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.69.1, 2026-11-02)
+## State (0.70.0, 2026-11-03)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -880,6 +880,13 @@ NOT seen on the VM: how the sidebar feels with his few hundred chats (the list s
 default is 4 again (config.py, `pipeline.klein_sampling`); the setting, klein 9B base, the look at the bodies and
 the prompt hint stay. What he compared (prompts, seeds, model, LoRAs) was not seen. Left to try for the broken
 bodies: klein 9B base with the same prompt and seed; a chat without LoRAs; an export of a chat with a bad picture.
+0.70.0, Søren: "i need trained loras to be in categories in the selection list(chat)." LoRAs have a category, shown
+in the chat's picture menu as folders the way the Skills menu shows skills (DESIGN §8 "Categories" under LoRAs);
+trainings have one (People, Things, Styles by kind unless set) that their LoRAs get and follow; a start-up hook gives
+LoRAs trained before their training's. Tests: tests/test_lora_categories.py (4). In Chromium against the dev server
+(desktop light, phone dark): the menu's folders, a LoRA turned on inside one with its slider, "For other picture
+models", the LoRA list sorted by category with its tag, the category field with suggestions, New training's
+category following the kind, the training's category saved from its editor. NOT seen on the VM: item 89.
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
 host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU
@@ -1653,6 +1660,9 @@ the host if the VM ever stops by itself.
       converter's cases are ComfyUI 0.42.3's own templates; files from other sites (Civitai, OpenArt) are
       untried - an export is the way to see what went wrong. When COMFYUI_REF changes, the editor's format may
       too: tools/workflow_oracle/ (convert.js, compare.py) is how the converter was checked - run it again.
+89. **LoRA categories (0.70.0)**: after the update, Settings -> Models -> LoRAs should show his trained LoRAs with
+    People/Things/Styles (from their trainings, at start-up - the log says nothing; check the tags), and the picture
+    menu their folders. A LoRA he later clears stays without one (only LoRAs without the key are sorted in).
 88. **klein's steps and klein 9B base (0.68.0)** - none of it has run on the card:
     - **8 steps against 4**: tried by Søren on the card (2026-11-02): "8 steps did not work" - the default is 4 again
       (0.69.1). Not known: whether 8 was no better or worse, and on which prompts.

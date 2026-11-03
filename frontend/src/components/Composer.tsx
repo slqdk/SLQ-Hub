@@ -7,6 +7,7 @@ import { ArrowUp, BookOpen, Brain, Check, ChevronDown, ChevronRight, Cloud, Cpu,
   Paperclip, Plus, Settings2, Sparkles, Square, Wand2, X } from "lucide-react";
 import { upload, type AnswerItem, type AnswersBlock, type Lora, type ModelEntry, type Skill, type Upload } from "../lib/api";
 import { byCategory, NO_CATEGORY, useFolders } from "../lib/skills";
+import { byLoraCategory, NO_LORA_CATEGORY } from "../lib/loras";
 import { LEVEL_LABEL, LEVELS, levelText, type Level } from "../lib/effort";
 import { clearDraft, NEW_SKILL_TEXT, peekDraft, SKILL_MAKER } from "../lib/draft";
 import { bytes } from "../lib/format";
@@ -466,29 +467,9 @@ export function Composer({ running, onSend, onStop, settings, onSettings, models
                 {loras.length > 0 && <>
                   <div className="menu-sep" />
                   <div className="menu-head">LoRAs on every picture</div>
-                  {fitting.map((l) => (
-                    <div key={l.id}>
-                      <button className="menu-item" role="menuitemcheckbox"
-                        aria-checked={settings.image_loras.includes(l.id)} onClick={() => toggleLora(l.id)}>
-                        {settings.image_loras.includes(l.id) ? <Check size={15} /> : <span style={{ width: 15 }} />}
-                        <span>{l.name}<small>{l.slider ? "Slider: plus for more, minus for the opposite"
-                          : [l.trigger && `Trigger word ${l.trigger}`, l.note].filter(Boolean).join(" · ")
-                            || `Strength ${l.strength}`}</small></span>
-                      </button>
-                      {settings.image_loras.includes(l.id) && <LoraStrength lora={l}
-                        value={settings.image_lora_strength[l.id]} onCommit={(v) => setStrength(l.id, v)} />}
-                    </div>
-                  ))}
-                  {loras.filter((l) => !fits(l)).map((l) => {
-                    const on = settings.image_loras.includes(l.id);       // on: can be turned off; off: cannot be used
-                    return (
-                      <button key={l.id} className="menu-item unfit" role="menuitemcheckbox" aria-checked={on}
-                        disabled={!on} onClick={() => toggleLora(l.id)}>
-                        {on ? <Check size={15} /> : <span style={{ width: 15 }} />}
-                        <span>{l.name}<small>{on ? "Not used with this model - click to turn it off" : unfitText(l)}</small></span>
-                      </button>
-                    );
-                  })}
+                  <LoraFolders loras={loras} fits={fits} on={settings.image_loras} unfitText={unfitText}
+                    onToggle={toggleLora} strength={(l) => <LoraStrength lora={l}
+                      value={settings.image_lora_strength[l.id]} onCommit={(v) => setStrength(l.id, v)} />} />
                 </>}
               </>
             )}
@@ -530,6 +511,66 @@ export function Composer({ running, onSend, onStop, settings, onSettings, models
         )}
       </div>
     </div>
+  );
+}
+
+/** The picture menu's LoRAs (0.70.0, Søren: "i need trained loras to be in categories in the selection list"): those
+ *  in no category first, then each category as a folder that opens when its name is clicked (remembered in this
+ *  browser), as the Skills menu has them. A folder counts the LoRAs that fit this chat's picture model and how many
+ *  are on; one on for another family is shown in its folder, to turn off; the rest for other models wait in the last
+ *  folder, greyed. */
+function LoraFolders({ loras, fits, on, unfitText, onToggle, strength }: { loras: Lora[]; fits: (l: Lora) => boolean;
+  on: string[]; unfitText: (l: Lora) => string; onToggle: (id: string) => void;
+  strength: (l: Lora) => React.ReactNode }) {
+  const folders = useFolders("hub:lora-menu-open");
+  const shown = loras.filter((l) => fits(l) || on.includes(l.id));
+  const others = loras.filter((l) => !fits(l) && !on.includes(l.id));
+  const item = (l: Lora) => {
+    const isOn = on.includes(l.id);
+    if (!fits(l)) {                                    // on, but not for this model: it can only be turned off
+      return (
+        <button key={l.id} className="menu-item unfit" role="menuitemcheckbox" aria-checked onClick={() => onToggle(l.id)}>
+          <Check size={15} /><span>{l.name}<small>Not used with this model - click to turn it off</small></span>
+        </button>
+      );
+    }
+    return (
+      <div key={l.id}>
+        <button className="menu-item" role="menuitemcheckbox" aria-checked={isOn} onClick={() => onToggle(l.id)}>
+          {isOn ? <Check size={15} /> : <span style={{ width: 15 }} />}
+          <span>{l.name}<small>{l.slider ? "Slider: plus for more, minus for the opposite"
+            : [l.trigger && `Trigger word ${l.trigger}`, l.note].filter(Boolean).join(" · ") || `Strength ${l.strength}`}</small></span>
+        </button>
+        {isOn && strength(l)}
+      </div>
+    );
+  };
+  const folder = (key: string, title: string, count: string, children: React.ReactNode) => {
+    const open = folders.isOpen(key);
+    return (
+      <div key={key}>
+        <button type="button" className="menu-sub menu-folder" aria-expanded={open} onClick={() => folders.click(key)}>
+          {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}<span className="grow">{title}</span>
+          <span className="faint">{count}</span>
+        </button>
+        {open && children}
+      </div>
+    );
+  };
+  return (
+    <>
+      {byLoraCategory(shown).map(([cat, list]) => {
+        if (cat === NO_LORA_CATEGORY) return <div key={cat}>{list.map(item)}</div>;
+        const n = list.filter((l) => on.includes(l.id)).length;
+        return folder(`cat:${cat}`, cat, `${n ? `${n} on · ` : ""}${list.length}`, list.map(item));
+      })}
+      {others.length > 0 && folder(":other-models", "For other picture models", String(others.length),
+        others.map((l) => (
+          <button key={l.id} className="menu-item unfit" role="menuitemcheckbox" aria-checked={false} disabled>
+            <span style={{ width: 15 }} /><span>{l.name}<small>{unfitText(l)}</small></span>
+          </button>
+        )))}
+    </>
   );
 }
 

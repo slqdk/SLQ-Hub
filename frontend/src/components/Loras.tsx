@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { Plus } from "lucide-react";
 import { api, type Lora, type LoraList } from "../lib/api";
 import { bytes } from "../lib/format";
+import { byLoraCategory, loraCategoryNames, NO_LORA_CATEGORY } from "../lib/loras";
 import { useApp } from "../state";
 import { TrainingSection } from "./Training";
 import { ConfirmButton, Lamp, Modal } from "./ui";
@@ -60,11 +61,12 @@ export function LorasSection() {
         {data === null ? <div className="faint">Loading</div> : data.loras.length === 0
           ? <div className="list-row"><span className="muted">No LoRAs yet. Add a .safetensors LoRA from your computer,
             or train one below.</span></div>
-          : data.loras.map((l) => (
+          : byLoraCategory(data.loras).flatMap(([, list]) => list).map((l) => (     /* by category, as in a chat */
             <div className="list-row" key={l.id} style={{ alignItems: "flex-start", flexWrap: "wrap" }}>
               <Lamp state={l.fits.length ? "off" : "act"} />
               <div className="grow" style={{ minWidth: 220 }}>
                 <b>{l.name}</b> <span className="tag">{l.base ? l.base_label : "Which models?"}</span>
+                {l.category && <span className="tag" title="Its heading in a chat's picture menu">{l.category}</span>}
                 {l.source?.kind === "trained" && <span className="tag">Trained here</span>}
                 {l.slider && <span className="tag">Slider</span>}
                 <div className="meta">
@@ -83,17 +85,17 @@ export function LorasSection() {
           ))}
       </div>
       <TrainingSection onAdded={load} />
-      {editing && data && <LoraSettings lora={editing} families={data.families} onClose={() => setEditing(null)}
-        onSaved={() => { setEditing(null); load(); }} />}
+      {editing && data && <LoraSettings lora={editing} families={data.families} categories={loraCategoryNames(data.loras)}
+        onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} />}
     </section>
   );
 }
 
-function LoraSettings({ lora, families, onClose, onSaved }: { lora: Lora; families: Record<string, string>;
-  onClose: () => void; onSaved: () => void }) {
+function LoraSettings({ lora, families, categories, onClose, onSaved }: { lora: Lora; families: Record<string, string>;
+  categories: string[]; onClose: () => void; onSaved: () => void }) {
   const { toast } = useApp();
   const [f, setF] = useState({ name: lora.name, base: lora.base, trigger: lora.trigger ?? "",
-    strength: String(lora.strength), note: lora.note ?? "", slider: !!lora.slider });
+    strength: String(lora.strength), note: lora.note ?? "", slider: !!lora.slider, category: lora.category ?? "" });
   const setSlider = (slider: boolean) => {          // a plain LoRA's strength is 0-2: bring it back in
     const s = Number(f.strength);
     setF({ ...f, slider, strength: slider || (s >= 0 && s <= 2) ? f.strength : String(Math.max(0, Math.min(2, s))) });
@@ -112,6 +114,12 @@ function LoraSettings({ lora, families, onClose, onSaved }: { lora: Lora; famili
         <button className="btn primary" onClick={save}>Save</button></>}>
       <label className="field"><span>Name</span>
         <input className="input" value={f.name} maxLength={80} onChange={(e) => setF({ ...f, name: e.target.value })} /></label>
+      <label className="field"><span>Category</span>
+        <input className="input" value={f.category} maxLength={40} list="lora-categories" placeholder={NO_LORA_CATEGORY}
+          onChange={(e) => setF({ ...f, category: e.target.value })} />
+        <datalist id="lora-categories">{categories.map((c) => <option key={c} value={c} />)}</datalist>
+        <small>Its heading in a chat's picture menu, where each category is a folder - e.g. People, Styles,
+          Sliders. Empty: listed first, without a folder.</small></label>
       <label className="field"><span>For which picture models</span>
         <select className="input" value={f.base} onChange={(e) => setF({ ...f, base: e.target.value })}>
           <option value="">Not known</option>
