@@ -2640,6 +2640,93 @@ sound, with ComfyUI's own nodes only (the image is unchanged):
   templates end in a preview). Saved under `workflows/` in the working
   folder; pictures are shown, video and sound play under the answer.
 
+### Movies (0.72.0)
+
+Søren asked how to make short family cartoon reels - at most 30 s each, four
+characters from his LoRAs and a cartoon LoRA - then: "Does it make sense to
+make a Movie workflow section that can do this? With checkpoints?" A chat
+cannot do it well: the picture menu's LoRAs are the owner's (0.59.0), so the
+assistant cannot switch them per shot, and an episode's 25 pictures, 6 clips
+and the sounds would all go through the model's context. Movies is a page of
+its own (the menu's Movies; `app/movies/`, `views/MoviesView.tsx`), the
+owner's alone like LoRAs and training.
+
+- **A series** (`data/movies/<id>/series.json`, its files beside it) holds
+  what every episode shares. Its look: the picture model (default Settings'),
+  a style LoRA and its strength, style words (on every picture and clip),
+  the format (portrait 720×1280 for reels, landscape, square), how many
+  pictures to choose from (1-4), the video model and quality, the longest
+  episode, the lines' language and the storyboard rules. Its cast (at most 8):
+  name, looks, a LoRA and its strength, and a character sheet - the whole
+  figure front on, on grey - chosen from pictures made with the character's
+  LoRA and the style LoRA. Its sets (at most 12): a picture of each place,
+  empty, made with the style LoRA.
+- **An episode** goes through four checkpoints; each stops for the owner and
+  goes on from there whenever he comes back, because every result is stored:
+  1. *Storyboard*: the chat model (Settings' default, through the queue,
+     without thinking, the answer held to a JSON schema) writes the shots
+     from the premise, the cast's and the sets' names and looks, and the
+     rules - each shot's seconds (1-10), set, characters, picture (the first
+     frame, for the picture model), motion (for the video model), sound and
+     lines in the series' language. Names not in the series are left out,
+     and said. The owner edits, adds, moves and deletes shots, then
+     approves; writing it again replaces the shots (asked first).
+  2. *Keyframes* (only once approved): pictures to choose from for each
+     shot. A shot with one character - "a new picture" - gets that
+     character's LoRA and the style LoRA, the character's and the set's looks
+     in words. A shot with two or more is combined (`image_edit`'s graph):
+     the set's picture first (the result takes its shape) and the characters'
+     sheets after it - FLUX.2 klein reads six - with the style LoRA only:
+     LoRAs of several people in one picture blend their faces. A shot can be
+     set to either way; combining without any picture yet falls back to a
+     new picture, and the page names what still has none. A picture model
+     that cannot change pictures (Z-Image, ERNIE, Chroma, SDXL) never
+     combines: `image_edit` would hand the change to another model, without
+     the series' LoRAs.
+  3. *Clips*: each chosen keyframe animated (Wan, picture to video) with the
+     shot's motion and the style words, at the shot's length; the owner keeps
+     each, or makes it again - the three takes before stay a click away.
+  4. *Preview*: the clips joined in order, silent, at the first clip's size
+     and frame rate - ffmpeg in the sandbox (`join_command`: scaled and
+     padded into one size, one frame rate, H.264), in
+     `workspace/movies-tmp/<token>/`, removed afterwards. The series' own
+     folder is out of the sandbox's reach.
+- **What a result was made from is stamped on it** (a hash): a keyframe's -
+  the picture model as it is now (Settings' when the look names none), the
+  rest of the look, the shot's picture, characters, set and way, each
+  character's looks, LoRA and (combined) sheet, the set's name, looks and
+  (combined) picture; a clip's - its keyframe, motion, length, style words,
+  video model (Settings' when none is named) and quality; a sheet's and a
+  set's picture's likewise; the preview's - the clips in order, and it is
+  out of date too while one of them is. A change makes only what depends on
+  it "before a change" (a clip also when its keyframe is), and "Keep as it
+  is" accepts a result for the change. Nothing is deleted by a change.
+- **Jobs**: one per character, set, storyboard, the keyframes and clips of an
+  episode (a queue of shots - a shot asked for while it works joins it) and
+  its preview, in the background through the scheduler: owner `movies`,
+  priority normal (chats go first), the storyboard interactive. Each job's
+  progress (shot, picture, step) is on the page, which asks every 2 s while
+  something works; Stop cancels it (ComfyUI's job too). A failed shot says
+  why on the shot and the queue goes on; a stopped or failed job says so
+  until it runs again. Nothing is half-stored: results are written under the
+  series' lock together with the files they point at, and files nothing
+  points at go (pictures beyond the newest 12 per shot, sheet or set, the
+  chosen one always kept). A restart forgets running jobs; what they had
+  finished stays. The picture pipeline stores what it makes as uploads; a
+  movie job takes their bytes and forgets those uploads again (the series'
+  copies are what count, and deleting a series frees them). A storyboard is
+  held to the series as it is when it is stored (a character deleted while it
+  was written is not in it), and shots added by hand meanwhile are not
+  replaced unasked. Nothing is made from an episode while its storyboard is
+  written; a shot cannot be deleted while it is being made; a shot asked for
+  while a job stops gets a job of its own. Numbers that are not numbers
+  (NaN, infinity) are refused. A restart clears what a cut-off preview left
+  in the workspace.
+- **Not in v1**: sound - the lines spoken in each character's voice, the
+  effects, the theme - and the cut (the timeline with the lines at their
+  times, music under speech, speech bubbles, an end card). That is the next
+  version: the lines and sounds are already in the shots.
+
 ---
 
 ## 9. Libraries (multimodal RAG)
@@ -3169,6 +3256,11 @@ whether the work lives up to what is expected.
   `COMFY_ARGS` in `.env` is the knob (`--cache-none`, `--reserve-vram`). Also
   how the models do with Danish prompts (umt5 is multilingual; Wan learnt
   from English and Chinese captions).
+- **Movies** (0.72.0, §8): not run on the card. Unknown: whether klein's
+  combined shots keep the characters recognisable from their sheets (if not,
+  a pass per character with its own LoRA over its part of the picture), how
+  Wan's clips from cartoon keyframes look, the time per episode, and how well
+  Qwen3.8 keeps to the storyboard rules (no lip sync, 30 s).
 - **The check at Extra** (0.71.0, §8): not run on the card. Unknown: how
   often Qwen3.8 finds the broken bodies klein draws, and how often it calls a
   right picture wrong (each false alarm costs a try); fingers are the least

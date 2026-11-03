@@ -745,6 +745,25 @@ export const SECTIONS: HelpSection[] = [
         tips: ["Settings says what each workflow needs and lets you choose what the assistant may set."],
         needs: ["workflows"],
       },
+      {
+        id: "movies",
+        owner: true,
+        title: "Short films, shot by shot",
+        what: "Movies in the menu: a series keeps its look (the picture model, a style LoRA), its cast (each "
+          + "character with their LoRA and a sheet) and its sets. An episode goes from what happens to a storyboard, "
+          + "keyframes, clips and a preview - and stops at each stage for you.",
+        how: [
+          "Make a series, choose its look, add the cast and the sets, and make each one's picture - choose the best.",
+          "Add an episode: say what happens, and the chat model writes the storyboard. Change the shots, then Approve.",
+          "Make the keyframes: pictures to choose from for each shot. A shot with one character gets that character's "
+            + "LoRA; a shot with several is combined from the set's picture and their sheets.",
+          "Make the clips from the chosen keyframes, keep the good ones, and join them into a preview.",
+        ],
+        tips: ["A change marks only what depends on it as made before a change - make it again, or keep it as it is.",
+          "You can leave while it works: it goes on, and the page shows where it is when you come back.",
+          "The preview has no sound yet."],
+        needs: ["images.generate"],
+      },
     ],
   },
   {

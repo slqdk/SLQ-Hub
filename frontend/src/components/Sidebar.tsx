@@ -1,7 +1,7 @@
 // The cabinet-grey rail: new chat, search, projects, recent chats, and the GPU plate.
 import { useEffect, useMemo, useState } from "react";
-import { Archive, ArchiveRestore, BookOpen, CircleHelp, FolderClosed, MessageSquarePlus, Plus, Search, Settings, Sparkles,
-  X } from "lucide-react";
+import { Archive, ArchiveRestore, BookOpen, CircleHelp, Clapperboard, FolderClosed, MessageSquarePlus, Plus, Search,
+  Settings, Sparkles, X } from "lucide-react";
 import { api, folderFromName, type ChatListItem } from "../lib/api";
 import { archiveWithUndo, unarchive } from "../lib/archive";
 import { dateGroup } from "../lib/format";
@@ -89,6 +89,8 @@ export function Sidebar({ route }: { route: Route }) {
             <div className="side-group side-places">
               <a className="side-item" {...linkProps("/skills")} onClickCapture={close}
                 aria-current={route.name === "skills" ? "page" : undefined}><Sparkles size={15} /> Skills</a>
+              <a className="side-item" {...linkProps({ name: "movies" })} onClickCapture={close}
+                aria-current={route.name === "movies" ? "page" : undefined}><Clapperboard size={15} /> Movies</a>
               <a className="side-item" {...linkProps({ name: "archived" })} onClickCapture={close}
                 aria-current={route.name === "archived" ? "page" : undefined}><Archive size={15} /> Archived</a>
             </div>

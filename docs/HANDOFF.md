@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.71.0, 2026-11-03)
+## State (0.72.0, 2026-11-03)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -899,6 +899,23 @@ on a 1280x704 H.264 test clip (6 frames in 1.3 s on this CPU) and the contact sh
 server (desktop light, phone dark): "checking 1/1" and "checking try 2 1/1" in the tool row, the check's line under
 the picture and the thrown-away try behind its link, the video's line in the warning colour and its frames sheet,
 the export's lines and pictures; no console errors. NOT seen on the VM: item 90.
+0.72.0, Søren (after asking how to make 30-s family cartoon reels with four LoRA characters): "Does it make sense to
+make a Movie workflow section that can do this? With checkpoints?" Movies (DESIGN §8 "Movies"): a series' look, cast
+and sets; an episode from a premise to a storyboard (the chat model), keyframes (the Hub sets each shot's LoRAs; group
+shots combined from the set's picture and the sheets), clips and a silent preview, each stage a checkpoint, each result
+stamped with what it was made from. Sound and the cut are the next version. Tests: tests/test_movies.py (10). An
+independent review (a separate agent, the whole feature, with probe tests) found 12 problems, all fixed and tested: the
+preview shown up to date while its clips were not; group shots on a model that cannot change pictures handed to
+another model; the storyboard stored onto the series as it was when it started (a deleted character back in, shots
+added meanwhile replaced); every picture also kept as an upload, never freed; a failed or timed-out ffmpeg taken as the
+preview; a shot asked for while a job stopped lost; the pictures' and the clip's failures in one field; two quick chip
+taps losing one; the set's name and Settings' default models not in the stamps; NaN and infinity taken as numbers; jobs
+started from a storyboard being rewritten; the armed "Write it again" spilling out of its card. In
+Chromium against the dev server (klein 4B, two LoRAs and a storyboard added to its fakes; the preview joined by the
+real ffmpeg): the whole episode through the page - the look, three characters, a sheet made and chosen, the set, the
+episode, the storyboard written and approved, keyframes made and chosen, clips made and kept, the preview joined
+(20 s, playing), a changed shot marked before a change with Keep as it is; the phone (no sideways scroll); no page
+errors. NOT seen on the VM: item 91.
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
 host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU
@@ -1672,6 +1689,18 @@ the host if the VM ever stops by itself.
       converter's cases are ComfyUI 0.42.3's own templates; files from other sites (Civitai, OpenArt) are
       untried - an export is the way to see what went wrong. When COMFYUI_REF changes, the editor's format may
       too: tools/workflow_oracle/ (convert.js, compare.py) is how the converter was checked - run it again.
+91. **Movies (0.72.0)** - none of it has run on the card:
+    - **A series**: Movies in the menu; the look on the klein size his LoRAs were trained for, with the cartoon LoRA;
+      the four characters with their LoRAs; their sheets - does a sheet look like the person, in the cartoon style
+      (LoRA strengths: character 1.0, style 0.8 to begin with)?
+    - **Group shots**: a shot with two or three characters is combined from the set's picture and their sheets
+      (klein's edit with up to six pictures). Are the characters recognisable? If not: a pass per character with its
+      LoRA over its part of the picture is the next step - measure first, with the export of a series' files.
+    - **The storyboard**: does Qwen3.8 keep to the rules (speakers off-screen, 30 s, one or two characters a shot) and
+      write useful picture and motion text? The rules are in the series' Look.
+    - **Clips**: Wan 2.2 5B Turbo from cartoon keyframes - do the characters stay themselves for 5 s? Time per clip.
+    - **The preview**: ffmpeg in the sandbox in workspace/movies-tmp (offline, Landlock ABI 8 on the VM).
+    - **Disk**: data/movies/<series> - pictures (about 1-2 MB each, at most 12 per shot) and clips (a few MB each).
 90. **The check at Extra (0.71.0)** - none of it has run on the card:
     - **Does it see what is wrong?** In a chat at Extra with klein 9B: prompts that broke before (several people,
       hands holding things, "3 arms, or a hand is missing"). Under each picture: "Checked by ...", and "Show the try

@@ -215,6 +215,20 @@ def responder(body: dict) -> dict:
     if "continues in a new chat" in low:      # Continue in a new chat (0.27.0): the notes, slowly enough to watch
         return {"content": "## Goal\n- Carry on with the work of the chat before.\n## Decisions and facts\n"
                            "- Everything that mattered there.\n## Next\n- The next step.", "delay": 1.5}
+    if text.startswith("You write the storyboard"):     # Movies (0.72.0): the dev series' cast and kitchen
+        return {"delay": 1.5, "content": json.dumps({"shots": [
+            {"seconds": 5, "set": "Køkken", "characters": ["Far"], "picture": "Far in striped pyjamas tiptoes through "
+             "the dark kitchen at night, moonlight through the window, full body", "motion": "exaggerated sneaking "
+             "steps, the camera slowly pushes in", "sound": "creaking floorboards", "lines": []},
+            {"seconds": 5, "set": "Køkken", "characters": ["Far"], "picture": "Close-up from inside the fridge: Far's "
+             "face lit by the fridge light, the last slice of layer cake in front of him", "motion": "his eyes widen, "
+             "he licks his lips", "sound": "an angelic choir 'aaah'", "lines": []},
+            {"seconds": 5, "set": "Køkken", "characters": ["Far", "Mor"], "picture": "Mor in her dressing gown "
+             "behind Far, both holding forks, medium shot", "motion": "both lean in, eyes narrow", "sound": "western "
+             "whistle", "lines": [{"who": "Mor", "text": "Seriøst?"}]},
+            {"seconds": 5, "set": "Køkken", "characters": ["Lille Bo"], "picture": "Lille Bo sits on the floor in "
+             "front of the open fridge, cheeks full, cream on his nose, an empty plate", "motion": "he chews and "
+             "blinks", "sound": "theme sting", "lines": [{"who": "Lille Bo", "text": "Mm?"}]}]})}
     if text.startswith("You check a picture an image model just made"):     # 0.71.0: Extra's check of a picture -
         CHECKS["pictures"] += 1                         # the first of each two has a mistake: watch it made again
         if CHECKS["pictures"] % 2:
@@ -617,6 +631,10 @@ def sandbox_handler(workspace: Path):
     def handle(body: dict) -> dict:
         cmd = body.get("cmd") or ""
         folder = workspace / str(body.get("cwd") or "/workspace").removeprefix("/workspace").lstrip("/")
+        if str(body.get("cwd") or "").startswith("/workspace/movies-tmp/") and shutil.which("ffmpeg"):
+            run = subprocess.run(["sh", "-c", cmd], cwd=folder, capture_output=True, text=True, timeout=300)
+            return {"exit_code": run.returncode, "stdout": run.stdout, "stderr": run.stderr, "timed_out": False,
+                    "duration_ms": 5, "truncated": False}            # a movie's preview (0.72.0): joined for real
         if "/.hub/tmp/check-" in cmd and shutil.which("ffmpeg"):    # Extra's video check (0.71.0): its frames, real
             run = subprocess.run(["sh", "-c", cmd.replace("/workspace/", f"{workspace}/")], capture_output=True,
                                  text=True, timeout=120)
@@ -681,6 +699,23 @@ def _controller(size: int, bg: tuple, x: int, y: int, label: str = "") -> bytes:
     return buf.getvalue()
 
 
+def _seed_loras(data: Path, models: Path) -> None:
+    """Movies (0.72.0): a character's LoRA and a cartoon style's, for FLUX.2 klein 4B - fake files, as the fake ComfyUI
+    reads none."""
+    if (data / "loras.json").exists():
+        return
+    entries = [{"id": "far", "name": "Far", "base": "flux2-klein", "trigger": "farxv", "strength": 1.0,
+                "category": "People"},
+               {"id": "tegneserie", "name": "Tegneserie", "base": "flux2-klein", "trigger": "toonxv", "strength": 0.8,
+                "category": "Styles"}]
+    data.mkdir(parents=True, exist_ok=True)
+    (data / "loras.json").write_text(json.dumps(entries))
+    for e in entries:
+        f = models / "comfy" / "loras" / "hub" / f"{e['id']}.safetensors"
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_bytes(b"fake")
+
+
 def _seed_training(data: Path) -> None:
     """Two LoRA trainings: one trained (samples by step, checkpoints), one being prepared (pictures, no captions)."""
     import time as _t
@@ -740,7 +775,8 @@ def main() -> None:
     _install_fake_models(models, {"qwen3.8-27b", "qwen3.6-35b-a3b", "embed-text", "rerank", "embed-vl",
                                   "qwen-image-2.1", "qwen-image-2.1-turbo", "ernie-image-turbo", "z-image-turbo",
                                   "roest-v3", "roest-v3-turbo", "ace-step-1.5-xl-turbo", "stable-audio-3-medium",
-                                  "wan2.2-5b"})
+                                  "wan2.2-5b", "flux2-klein-4b"})
+    _seed_loras(data, models)
     for model in ("roest-v3", "roest-v3-turbo"):
         for name, hz in (("mic", 118), ("nic", 205)):          # the voices: a low one and a high one, as WAV
             (models / "speech" / model / "voices" / f"{name}.wav").write_bytes(_voice(hz))

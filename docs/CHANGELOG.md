@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.72.0 - 2026-11-03
+
+- **Movies**, in the menu: short films made shot by shot. A series keeps its
+  look (the picture model, a style LoRA and words, portrait for reels), its
+  cast (each character with their LoRA, their looks and a sheet you choose)
+  and its sets (a picture of each place). An episode goes from what happens
+  to a storyboard written by the chat model, to keyframes, clips and a
+  silent preview of the clips joined.
+- **Each stage stops for you**: approve the storyboard, choose a keyframe for
+  each shot, keep each clip. Leave while it works - it goes on in the
+  queue, and the page shows where it is when you come back.
+- **The Hub sets each shot's LoRAs**: a shot with one character gets that
+  character's LoRA and the style LoRA; a shot with several is combined from
+  the set's picture and their sheets, with the style LoRA only, so faces do
+  not blend.
+- **A change marks only what depends on it**: a new picture description makes
+  that shot's keyframe and clip "before a change", nothing else. Make it
+  again, or keep it as it is. Earlier clips stay one click away.
+
 ## 0.71.0 - 2026-11-03
 
 - **Pictures are checked before you get them, at the Effort Extra.** The
