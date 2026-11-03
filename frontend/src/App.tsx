@@ -16,6 +16,7 @@ import { ProjectView } from "./views/ProjectView";
 import { SettingsView } from "./views/SettingsView";
 import { ArchivedView } from "./views/ArchivedView";
 import { MoviesView } from "./views/MoviesView";
+import { PersonasView } from "./views/PersonasView";
 import { SkillsView } from "./views/SkillsView";
 
 export type PanelState =
@@ -74,6 +75,9 @@ export function App() {
       break;
     case "movies":
       main = <MoviesView key={route.id ?? "list"} id={route.id} episode={route.episode} />;
+      break;
+    case "personas":
+      main = <PersonasView key={route.id ?? "list"} id={route.id} />;
       break;
     case "settings":
       main = <SettingsView tab={route.tab} sub={route.sub} />;

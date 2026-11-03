@@ -12,6 +12,7 @@ import sys
 
 import pytest
 
+from app.audio import clips
 from app.movies import cut as C
 
 from .mocks import _png, wav_tone
@@ -163,10 +164,10 @@ async def test_a_clip_of_a_real_voice_converted_in_the_sandbox(signed_in, app, f
     s = await ok(await signed_in.post(f"{API}/{sid}/cast/{x['far']}/voice",
                                       files={"file": ("far's voice.M4A", b"a phone recording", "audio/mp4")},
                                       headers=ORIGIN))
-    assert seen["offline"] and seen["cwd"].startswith("/workspace/movies-tmp/")
+    assert seen["offline"] and seen["cwd"].startswith("/workspace/voice-tmp/")
     assert seen["cmd"] == ("ffmpeg -nostdin -v error -protocol_whitelist file -y -i in.m4a -t 30 -vn -ac 1 -ar 24000 "
                            "-c:a pcm_s16le -f wav voice.wav")
-    assert not list((ws / "movies-tmp").iterdir())
+    assert not list((ws / "voice-tmp").iterdir())
     far = s["cast"][0]
     assert far["voice"] == "clip" and far["voice_clip"].startswith(f"voices/{x['far']}-")
     assert far["voice_clip_seconds"] == 8.0
@@ -183,7 +184,7 @@ async def test_a_clip_of_a_real_voice_converted_in_the_sandbox(signed_in, app, f
     r = await signed_in.post(f"{API}/{sid}/cast/{x['far']}/voice", files={"file": ("notes", b"x", "text/plain")},
                              headers=ORIGIN)
     assert r.status_code == 400 and "The clip could not be read: in.bin: Invalid data found" in r.text
-    assert not list((ws / "movies-tmp").iterdir())
+    assert not list((ws / "voice-tmp").iterdir())
     s = await ok(await signed_in.get(f"{API}/{sid}"))
     assert s["cast"][0]["voice_clip"] == far["voice_clip"]                      # the good one stays
     # Far's line spoken with his clip: the speech service gets the clip itself
@@ -443,7 +444,7 @@ def test_the_timeline_the_overlays_and_the_command():
     assert stamp != C.line_stamp(series, {**line, "text": "Hvor er kagen nu?"}, env)
     assert (C.lang_code("Danish"), C.lang_code("da"), C.lang_code("DANISH"), C.lang_code("Klingon")) == \
         ("da", "da", "da", "")
-    assert C.wav_seconds(wav_tone(2.0)) == 2.0 and C.wav_seconds(b"not a wav") == 0.0
+    assert clips.seconds(wav_tone(2.0)) == 2.0 and clips.seconds(b"not a wav") == 0.0
 
 
 def test_the_overlays_are_drawn_with_danish_letters(tmp_path):

@@ -59,8 +59,10 @@ const shortPath = (p: string) => p.split("/").slice(-2).join("/");
 
 export function Composer({ running, onSend, onStop, settings, onSettings, models, pictureModels = [], pictureDefault,
   libraries, skills, placeholder, autoFocus, refs = [], onRemoveRef, onOpenRef, onBrowseFiles, browseLabel,
-  uploader = upload, showLibraries = true, onManageSkills, reviewOnExtra = true, answered = {}, loras = [] }: {
+  uploader = upload, showLibraries = true, onManageSkills, reviewOnExtra = true, answered = {}, loras = [],
+  simple = false }: {
   loras?: Lora[];                  // 0.49.0: the admin's LoRAs (only the admin's chat passes them)
+  simple?: boolean;                // 0.74.0: a chat with a persona - files only: no skills, model, pictures or effort
   running: boolean;
   /** answers: a chosen skill's questions answered on its card (0.43.0), to go with the message. */
   onSend: (text: string, uploads: Upload[], answers: AnswersBlock[]) => Promise<boolean>;
@@ -349,7 +351,7 @@ export function Composer({ running, onSend, onStop, settings, onSettings, models
         onChange={(e) => {
           setText(e.target.value);
           // (the list shows once there are skills that match: also when the list of skills arrives after the "/")
-          const found = findSlash(e.target.value, e.target.selectionStart ?? e.target.value.length);
+          const found = simple ? null : findSlash(e.target.value, e.target.selectionStart ?? e.target.value.length);
           setSlash(found);
           if (found?.query !== slash?.query) setSlashAt(0);
         }}
@@ -411,7 +413,7 @@ export function Composer({ running, onSend, onStop, settings, onSettings, models
             </>
           )}
         </MenuButton>
-        <MenuButton up className={`picker${chosen.length ? " on" : ""}`} menuClassName="wide"
+        {!simple && <MenuButton up className={`picker${chosen.length ? " on" : ""}`} menuClassName="wide"
           label={<><Sparkles size={15} /> <span className="hide-narrow">Skills</span>
             {chosen.length > 0 && <span className="num">{chosen.length}</span>}</>}
           title={chosen.length ? `Skills in this chat: ${chosen.map((k) => k.title).join(", ")}` : "Skills for this chat"}>
@@ -429,8 +431,8 @@ export function Composer({ running, onSend, onStop, settings, onSettings, models
               <div className="menu-foot faint small">Tip: type / in the message to pick a skill.</div>
             </>
           )}
-        </MenuButton>
-        <MenuButton up anchorClassName="shrink" label={<>{model?.kind === "cloud" ? <Cloud size={15} /> : <Cpu size={15} />} <span className="ellipsis chip-model">{model?.name ?? "No model"}</span></>}
+        </MenuButton>}
+        {!simple && <MenuButton up anchorClassName="shrink" label={<>{model?.kind === "cloud" ? <Cloud size={15} /> : <Cpu size={15} />} <span className="ellipsis chip-model">{model?.name ?? "No model"}</span></>}
           title={`Model: ${model?.name ?? "none"}`}>
           {(close) => (
             <>
@@ -445,8 +447,8 @@ export function Composer({ running, onSend, onStop, settings, onSettings, models
               ))}
             </>
           )}
-        </MenuButton>
-        {(pictureModels.length > 1 || loras.length > 0) && (
+        </MenuButton>}
+        {!simple && (pictureModels.length > 1 || loras.length > 0) && (
           <MenuButton up label={<><ImageIcon size={15} /> <span className="ellipsis chip-picture hide-narrow">{picture?.name ?? "Pictures"}
             {lorasOn.length ? ` + ${lorasOn.length} LoRA${lorasOn.length > 1 ? "s" : ""}` : ""}</span></>}
             title={`Model for pictures: ${picture?.name ?? "none"}${lorasOn.length ? `, with ${lorasOn.map((l) => `${l.name} (${strengthOf(l)})`).join(", ")}` : ""}${unfitOn.length ? `; not used with it: ${unfitOn.map((l) => l.name).join(", ")}` : ""}`}>
@@ -475,7 +477,7 @@ export function Composer({ running, onSend, onStop, settings, onSettings, models
             )}
           </MenuButton>
         )}
-        <MenuButton up className={`picker${settings.level !== "quick" ? " on" : ""}`}
+        {!simple && <MenuButton up className={`picker${settings.level !== "quick" ? " on" : ""}`}
           label={<><Brain size={15} /> <span className="hide-narrow">{LEVEL_LABEL[settings.level]}</span></>}
           title={`Effort: ${LEVEL_LABEL[settings.level]}`}>
           {(close) => (
@@ -501,7 +503,7 @@ export function Composer({ running, onSend, onStop, settings, onSettings, models
               )}
             </>
           )}
-        </MenuButton>
+        </MenuButton>}
         <span className="spacer" />
         {running && <button className="send stop" onClick={onStop} aria-label="Stop" title="Stop"><Square size={14} fill="currentColor" /></button>}
         {(!running || hasContent) && (

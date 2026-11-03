@@ -10,6 +10,7 @@ export type Route =
   | { name: "skills" }
   | { name: "archived" }                                  // 0.69.0: the archived chats
   | { name: "movies"; id?: string; episode?: string }     // 0.72.0: a series and its episodes
+  | { name: "personas"; id?: string }                     // 0.74.0: someone to chat with
   | { name: "settings"; tab: string; sub?: string }      // sub (0.65.0): a part of a tab - Models' Images, LoRAs ...
   | { name: "help"; section?: string };
 
@@ -26,6 +27,8 @@ export function parse(path: string): Route {
   if (/^\/archived\/?$/.test(path)) return { name: "archived" };
   m = path.match(/^\/movies(?:\/([a-z0-9]{2,16}))?(?:\/([a-z0-9]{2,16}))?\/?$/);
   if (m) return { name: "movies", id: m[1], episode: m[2] };
+  m = path.match(/^\/personas(?:\/([a-z0-9]{2,16}))?\/?$/);
+  if (m) return { name: "personas", id: m[1] };
   m = path.match(/^\/settings(?:\/([\w-]+))?(?:\/([\w-]+))?\/?$/);
   if (m) return { name: "settings", tab: m[1] ?? "models", sub: m[2] };
   m = path.match(/^\/help(?:\/([\w-]+))?\/?$/);
@@ -43,6 +46,7 @@ export function href(r: Route): string {
     case "skills": return "/skills";
     case "archived": return "/archived";
     case "movies": return `/movies${r.id ? `/${r.id}` : ""}${r.id && r.episode ? `/${r.episode}` : ""}`;
+    case "personas": return r.id ? `/personas/${r.id}` : "/personas";
     case "settings": return `/settings/${r.tab}${r.sub ? `/${r.sub}` : ""}`;
     case "help": return r.section ? `/help/${r.section}` : "/help";
   }

@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.73.1, 2026-11-03)
+## State (0.74.0, 2026-11-03)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -943,6 +943,29 @@ item 92.
 same session. `COMFY_ARGS=--disable-dynamic-vram --reserve-vram 6` in `/srv/slq-hub/.env` (set by hand on the VM;
 `install.sh` and `deploy/env.example` now write it) made shot 1's clip right; the self-test's new "comfyui memory" line
 warns without the two flags (`app/cli.py comfy_memory`, tests/test_comfy_memory.py). NOT seen yet: item 93.
+0.74.0, Søren: "If i need a 'virtual personality' that i can chat with ... like a sports women, or a housewife. Can
+that be done with skills?" - "Yes. Do that.. also with memory". Personas (DESIGN §8 "Personas"): a persona's own
+system prompt instead of the assistant's (a skill only adds to it), only the tools it is given (`remember`; the web
+and pictures when turned on), its model and level each turn, notes about the owner it keeps itself (`remember`; the
+Memory tab), the titles of the last chats, portraits or a picture of the owner's, a voice (one of the speech model's
+or a clip), answers read aloud as a job the page asks after. Shared with Movies now: `app/sandbox_job.py` (a command
+in the sandbox) and `app/audio/clips.py` (a voice clip). Tests: tests/test_personas.py (6), test_help (the new
+tool). An independent review (a separate agent, 17 probe tests and a simulation of the player) found 17 problems
+and 4 suspicions, fixed and tested: the Memory tab saving over a note written meanwhile (now 409 against the notes
+the edit started from); every note changing the next prompt's end, so llama-server read the whole chat again (now
+the chat keeps what it started from until it is condensed); condensing with the work notes' prompt and a NOTES.md
+(now a conversation's own); one answer playing twice after Stop; each Chat click a new empty chat, listed to the
+persona as a conversation; a phone photo stored on its side; `remember` hitting the first of several matching
+notes, doubling list marks and duplicates, cutting long notes silently; the hand-over route making persona chats;
+a deleted persona's chats kept from projects (now ordinary chats); a stopped answer read aloud; a folder made again
+for a deleted persona; `said/` never pruned; libraries in a persona chat's + menu; Movies' play buttons and Hear it
+playing together; the export describing the assistant's next turn; "Søren" making English answers Danish; the
+chat list not following a new name or picture; read-aloud requests waiting minutes (now a job); Safari's rule on
+sound. In Chromium against the dev server (its fake model answers in character and notes what follows "husk"):
+a persona made through the page, portraits made and chosen, a voice chosen and heard, a chat with the greeting,
+the name and picture over each answer, a note written, the answers read aloud as they came, the speaker under an
+answer, the Memory tab refusing to save over a new note and saving on the second Save, the chat list's picture, the
+phone (no sideways scroll); no page errors. NOT seen on the VM: item 94.
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
 host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU
@@ -1720,6 +1743,18 @@ the host if the VM ever stops by itself.
       converter's cases are ComfyUI 0.42.3's own templates; files from other sites (Civitai, OpenArt) are
       untried - an export is the way to see what went wrong. When COMFYUI_REF changes, the editor's format may
       too: tools/workflow_oracle/ (convert.js, compare.py) is how the converter was checked - run it again.
+94. **Personas (0.74.0)** - none of it has run with the real models:
+    - **In character**: does Qwen3.8 27B stay the persona over a long chat (no "How can I help you today?", no
+      bullet lists), in Danish with "Always write in Danish", and with the user's language? The persona's prompt is
+      in the export ("next turn"), the chat's prompts in its runs.
+    - **Its notes**: does it call `remember` for what matters and not for small talk, and do the notes read well in
+      the next chat? The Memory tab shows them; `data/personas/<id>/notes.md` on the VM.
+    - **The cache**: a chat's second turn after a note should not read the whole chat again (the turn's prompt
+      tokens in the export: cached vs. read).
+    - **Read aloud**: Røst v3 Turbo for a 2-4 sentence answer - how long before it plays (here at once: the fakes),
+      and through hub.slq.dk (the page asks every 1.5 s, so the proxy's timeout does not matter). On the iPhone:
+      does the answer play by itself after Send, and the speaker under an answer?
+    - **Portraits**: the default picture model from a role and looks (a photo), and with a character LoRA.
 93. **ComfyUI without dynamic VRAM (0.73.1)** - only one clip from a picture seen right so far:
     - **Shots 2 and 3** of the test episode made again (Again on each: their broken clips count as made).
     - **Pictures**: klein 9B with its 15.6 GB text encoder and 6 GB kept free - does the text encoder still load
@@ -1939,6 +1974,9 @@ the host if the VM ever stops by itself.
 | `services/speech/server.py` | The speech service (Chatterbox on the CPU): text pieces, voices, the two model families, NDJSON over aiohttp. |
 | `services/comfyui/nodes/slq_audio/` | The Hub's own ComfyUI nodes (0.18.0): ACE-Step timbre and cover source, the planner-free text encoder, Mel-Band RoFormer stems, Seed-VC voice conversion (README.md there; the image installs them with Seed-VC and MSST at pinned commits). |
 | `backend/app/rag/` | Libraries: extraction, indexing, search, the `library_search` tool. |
+| `backend/app/movies/`, `frontend/src/views/MoviesView.tsx` | Movies (0.72.0): series, cast, sets, episodes and their jobs (`studio.py`), the sound and the cut (`sound.py`, `cut.py`, `render_overlays.py`). |
+| `backend/app/personas/`, `backend/app/agent/tools/persona.py`, `frontend/src/views/PersonasView.tsx` | Personas (0.74.0): the personas and their files, memory, portraits and voice (`store.py`), their system prompt and condensing (`prompt.py`), the `remember` tool; the page, the player (`lib/personas.ts`). |
+| `backend/app/sandbox_job.py`, `backend/app/audio/clips.py` | A command in the sandbox for the Hub's own jobs (Movies' preview and cut, voice clips); a clip of a real voice as the speech models take it. |
 | `backend/app/cli.py` | `selftest`, `set-password`, `create-key`, `keys`. |
 | `frontend/src/` | The UI: `views/` (chat, project, libraries, settings), `components/`, `lib/turns.ts` (the turn view model for history and live runs). |
 | `frontend/src/chat/`, `frontend/chat.html` | The phone chat page (`/chat`): its own entry, on the model API with a key (`hub.ts`), chats in IndexedDB on the device (`store.ts`). |

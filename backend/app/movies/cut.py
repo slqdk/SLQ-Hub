@@ -11,9 +11,7 @@ is heard, and an end card with the episode's title. ffmpeg renders it in the san
 drawn the bubbles and the end card there with the DejaVu fonts: the Hub's own image has no font with æ, ø and å."""
 from __future__ import annotations
 
-import io
 import shlex
-import wave
 
 from .common import _by_id, _stamp
 
@@ -29,7 +27,6 @@ LINE_START, LINE_GAP = 0.3, 0.25         # a shot's first line, and the pause be
 END_SECONDS = 2.5                        # the end card
 FADE = 0.3                               # an effect's fade-out at its shot's end
 LINGER = 0.4                             # a bubble stays a moment after its line - until the next one starts
-VOICE_MIN, VOICE_MAX = 3.0, 30.0         # a voice clip: the least the speech models can use, and what they hear
 EXPRESSIVENESS = (0.25, 2.0)
 DEFAULT_EXPRESSIVENESS = 0.5
 
@@ -286,19 +283,3 @@ def cut_command(tl: dict, width: int, height: int, overlays: list[dict], music: 
     return (f"ffmpeg -nostdin -v error -y {' '.join(inputs)} -filter_complex {shlex.quote(';'.join(graph))} "
             f"-map '[{last}]' -map '[aout]' -t {total:.3f} -c:v libx264 -preset veryfast -crf 20 -pix_fmt yuv420p "
             f"-r {fps} -c:a aac -b:a 192k -ar 48000 -movflags +faststart final.mp4")
-
-
-def voice_command(src: str, dst: str) -> str:
-    """A voice clip as the speech models take it: its first 30 s as 24 kHz mono WAV - local files only, so a
-    playlist inside a crafted file cannot make ffmpeg fetch anything (as speech_generate's clips)."""
-    return (f"ffmpeg -nostdin -v error -protocol_whitelist file -y -i {shlex.quote(src)} -t {VOICE_MAX:g} -vn -ac 1 "
-            f"-ar 24000 -c:a pcm_s16le -f wav {shlex.quote(dst)}")
-
-
-def wav_seconds(data: bytes) -> float:
-    """A WAV's length (0.0 when it is not one)."""
-    try:
-        with wave.open(io.BytesIO(data)) as w:
-            return w.getnframes() / float(w.getframerate() or 1)
-    except (wave.Error, EOFError, ValueError):
-        return 0.0

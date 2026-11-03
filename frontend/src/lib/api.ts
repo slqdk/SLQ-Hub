@@ -1,4 +1,5 @@
 // The Hub's UI API: one fetch wrapper and the shapes it returns.
+import type { PersonaBrief } from "./personas";
 
 export class ApiError extends Error {
   status: number;
@@ -188,13 +189,15 @@ export interface Message { id: number; chat_id: number; role: "user" | "assistan
 export interface ChatSettings { model: string | null; thinking: boolean | null; effort: string | null; skills: string[];
   libraries: number[]; image_model: string | null; level?: string | null;
   image_loras?: string[];        // 0.49.0: the admin's LoRAs on every picture in the chat
-  image_lora_strength?: Record<string, number> }   // 0.54.0: their strength in this chat
+  image_lora_strength?: Record<string, number>;   // 0.54.0: their strength in this chat
+  persona?: string | null }                        // 0.74.0: the persona the chat is with
 export interface Chat { id: number; project_id: number | null; title: string; settings: ChatSettings; summary?: string;
   summary_upto?: number;
   created_at: string; updated_at: string; test_run?: string | null;
   archived?: number }                                    // 0.69.0: out of the chat lists (1), kept as it is
 export interface ChatListItem { id: number; project_id: number | null; title: string; updated_at: string;
   created_at: string; project_name: string | null; running: boolean; archived?: number;
+  persona?: { id: string; name: string; picture: string } | null;     // 0.74.0: a chat with a persona
   energy_wh?: number | null; cost?: number | null;        // a project's chats: what each used of the card (0.24.0)
   // and for the project's overview (0.34.0): answers, tokens, the time its turns took, the models that worked (ids;
   // a cloud model by its name) and how the last turn ended
@@ -221,7 +224,8 @@ export interface ChatData { chat: Chat; messages: Message[]; artifacts: Artifact
   run: RunInfo | null; project: Project | null;
   /** How full the last request was, and whether the chat was condensed (0.27.0: the long-chat hint). */
   context?: { used: number; limit: number; condensed: boolean };
-  allowed?: { tool: string; created_at: string }[] }      // "Allow in this chat" answers
+  allowed?: { tool: string; created_at: string }[];      // "Allow in this chat" answers
+  persona?: PersonaBrief | null }                        // 0.74.0: the persona the chat is with
 
 export interface ProjectSettings { model: string | null; cloud_escalation: boolean; skills: string[]; libraries: number[];
   thinking: boolean | null; image_model: string | null; level?: string | null;

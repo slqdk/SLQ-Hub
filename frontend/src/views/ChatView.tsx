@@ -1,15 +1,17 @@
 // A chat: history, the live turn, and the composer.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
-import { Archive, ArchiveRestore, Cloud, Copy, Download, FileText, FolderInput, FolderOpen, Menu, MessageSquarePlus, MoreHorizontal, NotebookPen, Pencil, RotateCcw, ShieldCheck, Sparkles, Trash2 } from "lucide-react";
+import { Archive, ArchiveRestore, Cloud, Copy, Download, FileText, FolderInput, FolderOpen, Menu, MessageSquarePlus, MoreHorizontal, NotebookPen, Pencil, RotateCcw, ShieldCheck, Sparkles, Square, Trash2, Volume2 } from "lucide-react";
 import { archiveWithUndo, unarchive } from "../lib/archive";
 import { api, mediaUrl, type ArtifactRef, type Block, type ChatData, type ChatSettings, type Library, type Message, type ModelEntry, type ProducedFile, type RunEvent, type RunRecord, type Settings, type Lora, type LoraList, type Skill, type Upload, type AnswersBlock, answeredIn } from "../lib/api";
 import { clearDraftSkills, peekDraftSkills, setDraft as setMessageDraft } from "../lib/draft";
 import { levelOf } from "../lib/effort";
 import { energy, money, seconds, tokens } from "../lib/format";
+import { answerKey, playAnswer, stopPlaying, unlockAudio, usePlaying } from "../lib/personas";
 import { linkProps, navigate } from "../lib/router";
 import { buildTurns, isContinue, liveSegments, newLive, reduceLive, toolLabel, unfinished, waitsForAnswer, type AssistantTurn,
   type LiveRun } from "../lib/turns";
 import { useApp } from "../state";
+import { Avatar } from "../components/Avatar";
 import { Composer, type ComposerSettings } from "../components/Composer";
 import { FilesCard, producedFiles, UnfinishedNote, type FileHandlers } from "../components/FilesCard";
 import { Items } from "../components/Turn";
@@ -143,6 +145,17 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
     }
   }, [chatId, toast]);
 
+  // 0.74.0: a persona's answers read aloud as they come, when it is set so (its page)
+  const autoSay = useRef<(d: ChatData, runId: string) => void>(() => undefined);
+  autoSay.current = (d, runId) => {
+    const p = d.persona;
+    if (!p?.read_aloud || !p.speech || !chatId) return;
+    const last = [...buildTurns(d.messages, d.runs)].reverse()
+      .find((t) => t.type === "assistant" && t.runId === runId && t.text) as AssistantTurn | undefined;
+    if (last) playAnswer(p.id, chatId, last.firstMessageId).catch(() => undefined);
+  };
+  useEffect(() => () => stopPlaying(), [chatId]);
+
   const attach = useCallback((runId: string) => {
     if (esRef.current && liveRef.current?.runId === runId) return;
     detach();
@@ -174,6 +187,7 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
       es.close();
       if (esRef.current === es) esRef.current = null;
       const err = liveRef.current?.status === "error" ? liveRef.current.error : null;
+      const answered = liveRef.current?.status === "done";      // not stopped: a persona reads it aloud
       const d = await loadAgain(runId);
       if (liveRef.current?.runId !== runId) return;           // another turn or another chat by now
       if (d?.run?.id === runId) {
@@ -186,6 +200,7 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
       setLive(null);
       refreshLists();
       if (err) toast(err, "fault");
+      else if (d && answered) autoSay.current(d, runId);
       // A message that came after the turn's last step (or with Stop) has started the next turn.
       if (d?.run && d.run.id !== runId) attachRef.current?.(d.run.id);
     };
@@ -272,6 +287,7 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
   };
 
   const send = async (text: string, uploads: Upload[], answers: AnswersBlock[] = []): Promise<boolean> => {
+    if (data?.persona?.read_aloud) unlockAudio();     // the answer is read aloud later, from this key press or tap
     try {
       let id = chatId;
       if (!id) {
@@ -359,6 +375,16 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
   // Continue in a new chat (0.27.0): the new chat's first answer is the notes, written while it opens.
   const handover = async () => {
     if (!chatId) return;
+    if (data?.persona) {                              // 0.74.0: a persona's next chat starts from its notes about you
+      try {
+        const r = await api<{ chat: { id: number } }>(`/hub/api/personas/${data.persona.id}/chat`, { method: "POST" });
+        refreshLists();
+        navigate({ name: "chat", id: r.chat.id });
+      } catch (e) {
+        toast((e as Error).message, "fault");
+      }
+      return;
+    }
     try {
       const r = await api<{ chat: ChatData["chat"]; run_id: string; archived?: number }>(`/hub/api/chats/${chatId}/handover`, { body: {} });
       refreshLists();
@@ -409,6 +435,7 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
   }
 
   const title = data?.chat.title ?? (project ? `New chat in ${project.name}` : "New chat");
+  const persona = data?.persona ?? null;                 // 0.74.0: a chat with a persona
   const showFiles = (select?: string) => folder && openPanel({ kind: "files", folder, select, at: Date.now() });
   const fileHandlers: FileHandlers = {
     src: fileSrc,
@@ -426,6 +453,9 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
     <div className="main">
       <div className="topbar">
         <button className="icon-btn menu-btn" onClick={() => setSidebarOpen(true)} aria-label="Open the menu"><Menu size={18} /></button>
+        {persona && <a className="persona-chip" {...linkProps({ name: "personas", id: persona.id })}
+          title={`${persona.name}${persona.role ? `, ${persona.role}` : ""} - the persona's page`}>
+          <Avatar persona={persona} size={26} /><span className="hide-narrow">{persona.name}</span></a>}
         {renaming ? (
           <input className="input" autoFocus defaultValue={data?.chat.title} style={{ maxWidth: 420 }}
             onBlur={(e) => rename(e.target.value)}
@@ -457,8 +487,10 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
                   <NotebookPen size={15} /><span>Notes<small>What the earlier part of the chat was condensed into</small></span></button>}
                 {(data?.messages.length ?? 0) > 0 && <button className="menu-item" disabled={running}
                   onClick={() => { close(); handover(); }}>
-                  <MessageSquarePlus size={15} /><span>Continue in a new chat<small>A fresh chat with notes from this one, and its files</small></span></button>}
-                {data && !project && !data.chat.test_run && <button className="menu-item" disabled={running}
+                  <MessageSquarePlus size={15} />{persona
+                    ? <span>New chat with {persona.name}<small>It starts from {persona.name}'s notes about you</small></span>
+                    : <span>Continue in a new chat<small>A fresh chat with notes from this one, and its files</small></span>}</button>}
+                {data && !project && !data.chat.test_run && !persona && <button className="menu-item" disabled={running}
                   onClick={() => { close(); setShowMove(true); }}>
                   <FolderInput size={15} /><span>Move to a project<small>Its files go into the project, and it works there from now on</small></span></button>}
                 {data && !data.chat.test_run && (data.chat.archived
@@ -508,12 +540,19 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
             </div>
           )}
           <div className="messages">
+            {persona?.greeting && (
+              <div className="msg-assistant">
+                <PersonaName persona={persona} />
+                <Markdown text={persona.greeting} />
+              </div>
+            )}
             {turns.map((t, i) => t.type === "user" ? (
               <UserMessage key={`u${t.message.id}`} message={t.message} editing={editing === t.message.id}
                 canEdit={!running} onEdit={() => setEditing(t.message.id)} onCancel={() => setEditing(null)}
                 onSave={(text) => saveEdit(t.message.id, text)} onOpenFile={folder ? showFiles : undefined} />
             ) : (
               <div className="msg-assistant" key={t.key}>
+                {persona && <PersonaName persona={persona} />}
                 <Items items={t.items} actions={{ openArtifact, chatWithSkill }} />
                 {(!t.runId || lastPart.get(t.runId) === i) && (() => {
                   const files = folder ? producedFiles(t.run) : [];
@@ -524,9 +563,11 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
                 })()}
                 <TurnFoot turn={t} names={modelNames} canRetry={!running && t === lastAssistant}
                   stats={!t.runId || lastPart.get(t.runId) === i} onRetry={() => retry()}
+                  say={persona?.speech && chatId && t.text ? { pid: persona.id, chatId, messageId: t.firstMessageId } : undefined}
                   onCloud={cloudOk && !running && t === lastAssistant && effective.model !== "cloud"
                     ? () => continueTurn(true) : undefined} />
-                {!running && t === lastAssistant && isLong(data?.context) && <LongChatHint onContinue={handover} />}
+                {!running && t === lastAssistant && isLong(data?.context) && <LongChatHint onContinue={handover}
+                  label={persona ? `New chat with ${persona.name}` : undefined} />}
               </div>
             ))}
             {live && (() => {
@@ -540,6 +581,7 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
                     onOpenFile={folder ? showFiles : undefined} />
                 ) : (
                   <div className="msg-assistant" key={`la${i}`}>
+                    {persona && <PersonaName persona={persona} />}
                     <Items items={seg.items} actions={{ openArtifact, chatWithSkill, runId: live.runId, live: true,
                       stopThinking: () => api(`/hub/api/runs/${live.runId}/stop-thinking`, { method: "POST" }) }} />
                     {i === tail && state}
@@ -556,10 +598,12 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
       <div className="composer-wrap">
         <div className="column">
           <Composer running={running} onSend={send} onStop={stop} settings={effective} onSettings={changeSettings}
+            simple={!!persona} showLibraries={!persona}
             answered={answeredIn(data?.messages ?? [])}
             models={chatModels} pictureModels={pictureModels} pictureDefault={pictureDefault} libraries={libraries} skills={skills} autoFocus
             loras={loras}
-            placeholder={running ? "Add something while it works" : project ? `Ask about ${project.name}, or give it a task` : undefined}
+            placeholder={running ? "Add something while it works" : persona ? `Write to ${persona.name}`
+              : project ? `Ask about ${project.name}, or give it a task` : undefined}
             refs={folder ? refs : []} onRemoveRef={(p) => onRefs((r) => r.filter((x) => x !== p))} onOpenRef={(p) => showFiles(p)}
             onBrowseFiles={folder ? () => showFiles() : undefined} browseLabel={project ? "Project files" : "This chat's files"}
             onManageSkills={() => navigate({ name: "skills" })} />
@@ -577,11 +621,11 @@ export function isLong(ctx: ChatData["context"]): boolean {
   return !!ctx && (ctx.condensed || (ctx.limit > 0 && ctx.used >= 0.6 * ctx.limit));
 }
 
-function LongChatHint({ onContinue }: { onContinue: () => void }) {
+function LongChatHint({ onContinue, label = "Continue in a new chat" }: { onContinue: () => void; label?: string }) {
   return (
     <div className="long-hint" role="note">
       <span>This chat is getting long - a fresh chat answers better.</span>
-      <button className="btn small" onClick={onContinue}><MessageSquarePlus size={14} /> Continue in a new chat</button>
+      <button className="btn small" onClick={onContinue}><MessageSquarePlus size={14} /> {label}</button>
     </div>
   );
 }
@@ -745,11 +789,13 @@ export function ChatSpent({ runs }: { runs: RunRecord[] }) {
   );
 }
 
-export function TurnFoot({ turn, names, canRetry, onRetry, stats = true, onCloud }: { turn: AssistantTurn;
-  names: Record<string, string>; canRetry: boolean; onRetry: () => void; stats?: boolean; onCloud?: () => void }) {
+export function TurnFoot({ turn, names, canRetry, onRetry, stats = true, onCloud, say }: { turn: AssistantTurn;
+  names: Record<string, string>; canRetry: boolean; onRetry: () => void; stats?: boolean; onCloud?: () => void;
+  say?: { pid: string; chatId: number; messageId: number } }) {      // 0.74.0: a persona's answer, read aloud
   const { toast } = useApp();
   return (
     <div className="msg-foot">
+      {say && <SayButton {...say} />}
       {turn.text && <button className="icon-btn small" aria-label="Copy the answer"
         onClick={async () => toast((await copyText(turn.text)) ? "Copied" : "Copying failed", "run")}><Copy size={14} /></button>}
       {canRetry && <button className="icon-btn small" aria-label="Answer again" onClick={onRetry}><RotateCcw size={14} /></button>}
@@ -758,6 +804,32 @@ export function TurnFoot({ turn, names, canRetry, onRetry, stats = true, onCloud
       {onCloud && <button className="btn quiet small" onClick={onCloud}
         title="The cloud model takes the work over from here (Settings, Cloud)"><Cloud size={14} /> Continue in the cloud</button>}
     </div>
+  );
+}
+
+/** A persona's name and picture over its answers (0.74.0). */
+function PersonaName({ persona }: { persona: { id: string; name: string; picture: string } }) {
+  return <div className="persona-name"><Avatar persona={persona} size={24} /><b>{persona.name}</b></div>;
+}
+
+/** A persona's answer read aloud in its voice: made the first time (the speech model works on the CPU), then kept. */
+function SayButton({ pid, chatId, messageId }: { pid: string; chatId: number; messageId: number }) {
+  const { toast } = useApp();
+  const p = usePlaying();
+  const mine = p?.key === answerKey(chatId, messageId) ? p.state : null;
+  const label = mine === "making" ? "Reading it aloud - a moment" : mine ? "Stop" : "Read aloud";
+  return (
+    <button className={`icon-btn small say-btn${mine ? " on" : ""}`} aria-label={label} title={label}
+      onClick={() => {
+        if (mine) {
+          stopPlaying();
+          return;
+        }
+        unlockAudio();
+        playAnswer(pid, chatId, messageId).catch((e) => toast((e as Error).message, "fault"));
+      }}>
+      {mine === "making" ? <Lamp state="wait" size="sm" /> : mine ? <Square size={12} /> : <Volume2 size={14} />}
+    </button>
   );
 }
 

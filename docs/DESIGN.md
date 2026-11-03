@@ -2775,6 +2775,99 @@ owner's alone like LoRAs and training.
     them up to date; the page says what dated it, and keeps the silent
     preview a click away.
 
+### Personas (0.74.0)
+
+Søren: "If i need a 'virtual personality' that i can chat with ... always
+have that personality answer me ... like a sports women, or a housewife. Can
+that be done with skills?" - "Yes. Do that.. also with memory". A skill or a
+project's instructions can only add to the assistant's system prompt: the
+model still reads that it is the assistant in SLQ Hub with tools, a working
+folder and rules for work, and it slides back into answering like one. A
+persona replaces that prompt. Personas are a page of their own (the menu's
+Personas; `app/personas/`, `views/PersonasView.tsx`), the owner's alone like
+Movies - the gate keeps people off the routes, and the routes refuse them too.
+
+- **A persona** (`data/personas/<id>/persona.json`, its files beside it):
+  name, role ("a marathon runner from Aarhus"), personality, how they talk,
+  lines in their voice (examples copy the tone better than words about it),
+  a greeting, a language (any the speech models know, or the user's own),
+  a chat model (default Settings') and Answers: at once or thinks first
+  (quick or think; no Extra - there is nothing to review). Switches: memory
+  (on), the web, pictures, read the answers aloud (off).
+- **A chat with a persona** is an ordinary chat whose settings name it
+  (`persona`, set only by `POST /personas/{id}/chat`, which reuses an empty
+  chat of the persona's rather than piling them up; the chat routes drop
+  `persona` and `persona_memory` from any other create or change, and a chat
+  with a persona cannot move into a project or be continued with the
+  hand-over - its next chat starts from the persona's notes).
+  `Agent.system_for` gives it `personas/prompt.py`'s prompt instead of the
+  assistant's: who they are and how they talk, the greeting it opened with
+  (shown at the top of the chat, never stored as a message - some chat
+  templates refuse a conversation that starts with the assistant), what they
+  can and cannot do, then the date, their notes and the titles of their last
+  six chats with the owner (newest first, not this one, none where nothing was
+  said), then the chat's condensed notes. The prompt says they are a character
+  played by an AI model and may say so when sincerely asked - not to pretend
+  to be a person. `Agent.persona_turn` gives each turn the persona's model and
+  level, whatever the message asks for; `persona_engine` its tools only
+  (`Engine.only`): `remember` with memory on, `web_search`/`web_fetch` with
+  the web, `image_generate` and `view_image` with pictures - no files, code,
+  MCP or subagents. No NOTES.md reminder, no independent review, no hand-over
+  to another model (a stronger model would have to become the same person;
+  a stuck turn ends in an answer instead), no cloud. The troubleshooting
+  export's "next turn" uses the same two.
+- **What a chat starts from** (`persona_memory` on the chat): the notes and
+  titles as they were at its first turn, kept until the chat is condensed. A
+  note the persona writes during a chat would otherwise change the end of
+  the system prompt at the next turn, and llama-server would read the whole
+  conversation again (its cache is a prefix); the chat has what was said
+  anyway, and the next chat starts from the new note. A long chat is
+  condensed with a prompt of its own (what was talked about, what the owner
+  told, plans, promises, the mood - not the work notes' headings), and no
+  NOTES.md is written for it.
+- **Memory**: `notes.md`, one note a line, at most 6000 characters, in every
+  prompt of theirs. The persona keeps it with the `remember` tool: add,
+  replace or forget one note of at most 300 characters (longer is refused,
+  not cut; a list mark is no part of a note; a note matched by `old` in
+  several places is refused with the candidates; a replacement that is there
+  already stays once; full means replace or forget first). The owner reads
+  and corrects it on the Memory tab - saved only over the notes the edit
+  started from (409 when the persona wrote meanwhile; the page keeps the
+  owner's text, and Save again keeps it over what it showed). With memory off
+  the persona neither reads nor writes notes and gets no titles of earlier
+  chats. The owner's own memory (`/memories`) is the assistant's and stays
+  out.
+- **The picture**: four portraits from the role and the looks ("Portrait of a
+  marathon runner ... Head and shoulders ...") with Settings' picture model -
+  or, for a LoRA made for another kind of model, a downloaded model of its
+  kind (none: refused before the queue) - at priority normal, chosen like a
+  series' sheet; or a picture of the owner's (any Pillow reads, turned upright
+  by its EXIF, kept as a PNG of at most 1024 px). The pipeline's uploads are
+  forgotten: the persona keeps its own copies. The chat shows the picture over
+  each answer, in the header and in the chat list.
+- **The voice**: one of the speech model's own (for the persona's language;
+  Danish when it writes in the owner's) or a clip of a real voice, converted
+  like Movies' characters (`audio/clips.py`, ffmpeg in the sandbox, offline;
+  `sandbox_job.py` now runs both). An answer is read aloud on the CPU like
+  `speech_generate` (no queue: the speech service is not on the card) - its
+  text without code, links, Markdown marks or emoji, at most 2000 characters,
+  from the answer's first message to the owner's next one - as a job: `say`
+  answers `{"making": true}` until the file is there and the page asks again
+  (a long answer takes minutes on the CPU; a proxy in front of the Hub would
+  give up on a request that waits). The file is kept in `said/` under the
+  first message's id and a stamp of the words, voice, expression, model and
+  language - the newest 200 - so it plays at once the second time and a new
+  voice makes it again. With "Read the answers aloud" the page plays each
+  answer when its turn ends (not a stopped one); one voice plays at a time,
+  Movies' play buttons included, and a tap or key press unlocks the page's
+  one audio element (Safari on a phone plays sound only from one). "Hear it"
+  speaks the greeting.
+- Deleting a persona deletes its folder, and its chats become ordinary chats
+  (`clear_persona`: the assistant's prompt from their next message on).
+- Known limit: a persona with the web can be talked into a note by a page it
+  reads, as the assistant can into its memory; the owner sees every note on
+  the Memory tab.
+
 ---
 
 ## 9. Libraries (multimodal RAG)

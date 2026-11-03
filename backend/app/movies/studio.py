@@ -32,7 +32,6 @@ import asyncio
 import copy
 import json
 import logging
-import os
 import re
 import secrets
 import shlex
@@ -450,8 +449,11 @@ class Studio(SoundJobs):
 
     def sweep(self) -> None:
         """At start-up: what a job that a restart cut off left - a preview's or a cut's folder in the workspace, a
-        file it was writing."""
-        shutil.rmtree(Path(self.hub.env.workspace_dir) / "movies-tmp", ignore_errors=True)
+        voice clip's, a file it was writing."""
+        from .. import sandbox_job
+        from ..audio import clips
+        sandbox_job.sweep(self.hub, "movies-tmp")
+        sandbox_job.sweep(self.hub, clips.TMP)
         if self.root.is_dir():
             for p in self.root.glob("*/**/.*.tmp"):
                 if p.is_file() and not p.is_symlink():
@@ -463,33 +465,17 @@ class Studio(SoundJobs):
     # ------------------------------------------------------------ the sandbox
     def _tmp_folder(self) -> Path:
         """A folder of a job's own under the workspace, where the sandbox reaches it (removed by the job)."""
-        from ..projects import store as projects
-        return projects.real_dir(self.hub.env.workspace_dir, "movies-tmp", secrets.token_hex(6))
+        from .. import sandbox_job
+        return sandbox_job.tmp_folder(self.hub, "movies-tmp")
 
     async def _sandbox(self, folder: Path, cmd: str, timeout: int, out_name: str, failed: str) -> bytes:
-        """Run a command in the sandbox in the job's folder - offline - and read the file it made: an error when it
-        failed, ran out of time or left nothing (or a link) behind."""
-        from ..agent.tools.base import ToolContext
-        from ..agent.tools.shell import SandboxError, sandbox_exec
-        from ..projects import store as projects
-        ws = self.hub.env.workspace_dir
-        wd = projects.Workdir(folder, None, ws, self.hub.env.sandbox_workspace)
-        ctx = ToolContext(hub=self.hub, run=None, chat={}, project=None, workdir=wd, ticket=None, model={})
+        """Run a command in the sandbox in the job's folder - offline - and read the file it made (sandbox_job.py):
+        an error when it failed, ran out of time or left nothing (or a link) behind."""
+        from .. import sandbox_job
         try:
-            res = await sandbox_exec(ctx, cmd, wd.sandbox_path, timeout, offline=True)
-        except SandboxError as exc:
-            raise MovieError(f"{failed}: {exc}") from exc
-        err = " ".join(str(res.get("stderr") or "").split())[-300:]
-        if res.get("exit_code") != 0 or res.get("timed_out"):
-            raise MovieError(f"{failed}{': ' + err if err else ''}.")
-        try:                                       # not through a link the sandbox could have put in its place
-            with os.fdopen(wd.open_inside(out_name), "rb") as fh:
-                data = fh.read()
-        except (OSError, ValueError):
-            data = b""
-        if not data:
-            raise MovieError(f"{failed}: it left nothing.")
-        return data
+            return await sandbox_job.run(self.hub, folder, cmd, timeout, out_name, failed)
+        except sandbox_job.SandboxJobError as exc:
+            raise MovieError(str(exc)) from exc
 
     # ------------------------------------------------------------ storage
     def _dir(self, sid: str) -> Path:

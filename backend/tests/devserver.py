@@ -23,8 +23,8 @@ src/Main.st and gives it to the fake MCP server's build tool, which takes files:
 "loop" (repeats the same searches until the Hub makes it answer), "long chat" (a long answer with a big
 tool result, to fill the context: Continue in a new chat is offered), "make a skill" (writes a skill and shows its
 card with Add skill), "window" (writes a
-Windows Forms program and looks at it with windows_app: needs --sandbox), or anything else (a short markdown
-answer). --sandbox http://IP:7000 sends the sandbox's work to a real sandbox daemon (token "tok") that mounts
+Windows Forms program and looks at it with windows_app: needs --sandbox), a chat with a persona (an answer in
+character; "husk"/"remember" adds a note), or anything else (a short markdown answer). --sandbox http://IP:7000 sends the sandbox's work to a real sandbox daemon (token "tok") that mounts
 this Hub's data/workspace as /workspace. The built UI (frontend/dist) is
 served when it exists; otherwise use `npm run dev` in frontend/.
 """
@@ -215,6 +215,17 @@ def responder(body: dict) -> dict:
     if "continues in a new chat" in low:      # Continue in a new chat (0.27.0): the notes, slowly enough to watch
         return {"content": "## Goal\n- Carry on with the work of the chat before.\n## Decisions and facts\n"
                            "- Everything that mattered there.\n## Next\n- The next step.", "delay": 1.5}
+    system = str(msgs[0].get("content") or "") if msgs and msgs[0]["role"] == "system" else ""
+    persona = re.match(r"You are ([^,.]+)[^\n]*? You are chatting with", system)
+    if persona and "short title" not in low:       # Personas (0.74.0): in character; "husk"/"remember" notes it
+        if tools_done == 0 and re.search(r"\b(husk|remember)\b", low):
+            note = re.sub(r"^.*?\b(husk|remember)\b( at| that)?[:,]?\s*", "", text, flags=re.I | re.S)[:120]
+            return {"content": "Det skal jeg nok huske.", "tool_calls": [{"name": "remember", "arguments": {
+                "action": "add", "text": note or text[:120]}}], "delay": 0.4}
+        if tools_done:
+            return {"content": "Noteret, makker. Hvad skal vi så nu?", "delay": 0.4}
+        return {"content": f"Hej! {persona.group(1)} her. Det lyder godt - fortæl mig lidt mere: hvordan gik "
+                           "træningen i går, og hvad har du spist i dag?", "delay": 0.6}
     if text.startswith("You write the storyboard"):     # Movies (0.72.0): the dev series' cast and kitchen
         return {"delay": 1.5, "content": json.dumps({"shots": [
             {"seconds": 5, "set": "Køkken", "characters": ["Far"], "picture": "Far in striped pyjamas tiptoes through "

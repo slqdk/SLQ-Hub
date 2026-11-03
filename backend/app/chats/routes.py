@@ -24,6 +24,7 @@ log = logging.getLogger("hub.chats")
 
 router = APIRouter(prefix="/hub/api")
 MAX_UPLOAD = 512 * 1024 * 1024
+PERSONA_KEYS = ("persona", "persona_memory")      # 0.74.0: set by the Hub only
 
 
 def _agent(request: Request):
@@ -55,10 +56,25 @@ async def list_chats(request: Request, project_id: int | None = None, q: str = "
                             archived=None if with_archived else archived)
     agent = _agent(request)
     more = store.runs_overview([r["id"] for r in rows]) if project_id is not None and not all else {}
+    personas = _personas_of(request, rows)
     for r in rows:
         r["running"] = agent.runs.active_for_chat(r["id"]) is not None
         r.update(more.get(r["id"], {}))
+        r["persona"] = personas.get(r.get("persona") or "")
     return rows
+
+
+def _personas_of(request: Request, rows: list[dict]) -> dict[str, dict]:
+    """The personas the chats are with (0.74.0): the list shows a persona's picture with the chat."""
+    p = get_hub(request).extras.get("personas")
+    if p is None:
+        return {}
+    out = {}
+    for pid in {r.get("persona") for r in rows if r.get("persona")}:
+        face = p.face(pid)
+        if face is not None:
+            out[pid] = face
+    return out
 
 
 @router.get("/chats/continued")
@@ -89,7 +105,8 @@ class ChatCreate(BaseModel):
 async def create_chat(body: ChatCreate):
     if body.project_id is not None and not projects.get_project(body.project_id):
         raise HTTPException(404, "no such project")
-    settings = {k: v for k, v in (body.settings or {}).items() if k in store.CHAT_DEFAULTS}   # not continued_from
+    # not continued_from - and not a persona: a chat with one is made on its page (personas/routes.py)
+    settings = {k: v for k, v in (body.settings or {}).items() if k in store.CHAT_DEFAULTS and k not in PERSONA_KEYS}
     return store.create_chat(body.project_id, body.title or "New chat", settings)
 
 
@@ -128,7 +145,14 @@ async def get_chat(chat_id: int, request: Request):
             "runs": lean_runs(runs), "run": _run_info(agent.runs.active_for_chat(chat_id)),
             "context": context_use(get_hub(request), chat, runs),
             "project": projects.get_project(chat["project_id"]) if chat.get("project_id") else None,
-            "allowed": store.chat_permissions(chat_id)}
+            "allowed": store.chat_permissions(chat_id), "persona": _persona_brief(request, chat)}
+
+
+def _persona_brief(request: Request, chat: dict) -> dict | None:
+    """The persona a chat is with (0.74.0): its name, picture and greeting at the top of the chat."""
+    p = get_hub(request).extras.get("personas")
+    pid = (chat.get("settings") or {}).get("persona")
+    return p.brief(pid) if p is not None and pid else None
 
 
 @router.delete("/chats/{chat_id}/allowed")
@@ -152,7 +176,8 @@ async def patch_chat(chat_id: int, body: ChatPatch):
         chat = store.set_archived(chat_id, body.archived)
         if body.title is None and body.settings is None:
             return chat
-    return store.update_chat(chat_id, title=body.title, settings=body.settings)
+    settings = {k: v for k, v in body.settings.items() if k not in PERSONA_KEYS} if body.settings is not None else None
+    return store.update_chat(chat_id, title=body.title, settings=settings)
 
 
 class NotesIn(BaseModel):
@@ -416,6 +441,9 @@ async def handover(chat_id: int, request: Request):
         raise HTTPException(409, "This chat is working on an answer - wait for it, or stop it.")
     if not store.count_messages(chat_id):
         raise HTTPException(409, "There is nothing to carry over yet.")
+    if _persona_brief(request, old):                     # 0.74.0: its next chat starts from the persona's notes
+        raise HTTPException(409, "A chat with a persona goes on in a new chat with the persona (its page, or the "
+                                 "chat's menu): the persona's notes carry over.")
     old_dir = None if old.get("project_id") else agent.workdir(old).root
     if old_dir is not None:
         size = await asyncio.to_thread(_folder_size, old_dir)
@@ -459,6 +487,8 @@ async def move_to_project(chat_id: int, body: MoveIn, request: Request):
             raise HTTPException(409, "This chat is in a project already.")
         if chat.get("test_run"):
             raise HTTPException(409, "A test case's chat cannot be moved.")
+        if _persona_brief(request, chat):
+            raise HTTPException(409, "A chat with a persona stays outside projects.")
         if agent.runs.active_for_chat(chat_id):
             raise HTTPException(409, "This chat is working on an answer - wait for it, or stop it.")
         name = " ".join((body.new_project or "").split())

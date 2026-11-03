@@ -22,6 +22,7 @@ MODULES = [
     "app.model3d.feature",
     "app.workflows.feature",
     "app.movies.feature",
+    "app.personas.feature",
     "app.rag.feature",
     "app.evals.feature",
 ]

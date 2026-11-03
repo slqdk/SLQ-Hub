@@ -11,7 +11,7 @@ from pydantic import BaseModel
 
 from .. import auth
 from ..state import get_hub
-from .sound import MAX_VOICE_UPLOAD
+from ..audio.clips import MAX_UPLOAD as MAX_VOICE_UPLOAD
 from .studio import MovieError
 
 router = APIRouter(prefix="/hub/api/movies")

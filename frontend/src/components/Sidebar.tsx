@@ -1,12 +1,13 @@
 // The cabinet-grey rail: new chat, search, projects, recent chats, and the GPU plate.
 import { useEffect, useMemo, useState } from "react";
-import { Archive, ArchiveRestore, BookOpen, CircleHelp, Clapperboard, FolderClosed, MessageSquarePlus, Plus, Search,
-  Settings, Sparkles, X } from "lucide-react";
+import { Archive, ArchiveRestore, BookOpen, CircleHelp, Clapperboard, Drama, FolderClosed, MessageSquarePlus, Plus,
+  Search, Settings, Sparkles, X } from "lucide-react";
 import { api, folderFromName, type ChatListItem } from "../lib/api";
 import { archiveWithUndo, unarchive } from "../lib/archive";
 import { dateGroup } from "../lib/format";
 import { linkProps, navigate, type Route } from "../lib/router";
 import { useApp } from "../state";
+import { Avatar } from "./Avatar";
 import { GpuPlate } from "./Queue";
 import { Lamp, Logo, Modal } from "./ui";
 
@@ -91,6 +92,8 @@ export function Sidebar({ route }: { route: Route }) {
                 aria-current={route.name === "skills" ? "page" : undefined}><Sparkles size={15} /> Skills</a>
               <a className="side-item" {...linkProps({ name: "movies" })} onClickCapture={close}
                 aria-current={route.name === "movies" ? "page" : undefined}><Clapperboard size={15} /> Movies</a>
+              <a className="side-item" {...linkProps({ name: "personas" })} onClickCapture={close}
+                aria-current={route.name === "personas" ? "page" : undefined}><Drama size={15} /> Personas</a>
               <a className="side-item" {...linkProps({ name: "archived" })} onClickCapture={close}
                 aria-current={route.name === "archived" ? "page" : undefined}><Archive size={15} /> Archived</a>
             </div>
@@ -119,7 +122,9 @@ export function Sidebar({ route }: { route: Route }) {
               {g.items.map((c) => (
                 <div key={c.id} className="side-row">
                   <a className="side-item" {...linkProps({ name: "chat", id: c.id })} onClickCapture={close}
-                    aria-current={current === c.id ? "page" : undefined} title={c.project_name ? `${c.title} (${c.project_name})` : c.title}>
+                    aria-current={current === c.id ? "page" : undefined}
+                    title={c.persona ? `${c.title} (with ${c.persona.name})` : c.project_name ? `${c.title} (${c.project_name})` : c.title}>
+                    {c.persona && <Avatar persona={c.persona} size={18} />}
                     <span className="ellipsis">{c.title}</span>
                     {!!c.archived && <span className="tag">archived</span>}
                     {c.running && <Lamp state="run" size="sm" pulse title="Working" />}

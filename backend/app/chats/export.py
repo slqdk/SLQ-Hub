@@ -428,15 +428,19 @@ def _context(hub, agent, chat: dict, project: dict | None) -> dict:
     from ..agent.loop import Engine, last_token_ratio, vision
     from ..agent.runs import Run
     from ..llm import payload as P
+    persona, chat, _ = agent.persona_turn(chat, {})      # a chat with a persona: as its next turn would be (0.74.0)
     try:
         entry, thinking, effort = agent.resolve(chat, project, {})
     except RuntimeError as exc:
         return {"error": str(exc)}
     wd = agent.workdir(chat)
-    escalation = bool(project and project["settings"].get("cloud_escalation") and cloudmod.configured(hub.settings))
+    escalation = bool(project and project["settings"].get("cloud_escalation") and cloudmod.configured(hub.settings)
+                      and persona is None)
     engine = Engine(hub, Run(chat["id"]), chat, project, wd, entry, None, thinking=thinking, effort=effort,
                     escalation=escalation)
-    system = agent.system_for(chat, project, wd, entry, handover_to=engine.handover_label())
+    if persona is not None:
+        agent.persona_engine(engine, persona, chat, project, wd, entry)
+    system = agent.system_for(chat, project, wd, entry, handover_to=engine.handover_label(), persona=persona)
     rows = store.messages(chat["id"], after_id=int(chat.get("summary_upto") or 0))
     keep_from = rows[-12]["id"] if len(rows) > 12 else 0
     messages = [{"role": "system", "content": system},

@@ -4,8 +4,8 @@
 // 0.73.0: the sound - each character's voice, the lines spoken, an effect for each shot, the series' theme - and the
 // cut: the film with the lines at their times, the theme under them, speech bubbles and an end card.
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { ArrowDown, ArrowUp, Check, ChevronLeft, CircleStop, Clapperboard, Download, Menu, Mic, Music, Play, Plus,
-  RefreshCw, Scissors, Square, Trash2, Upload, WandSparkles } from "lucide-react";
+import { ArrowDown, ArrowUp, Check, ChevronLeft, CircleStop, Clapperboard, Download, Menu, Mic, Music, Plus,
+  RefreshCw, Scissors, Trash2, Upload, WandSparkles } from "lucide-react";
 import { api, ApiError } from "../lib/api";
 import { jobText, linesToText, movieFile, queuedFor, textToLines, type CastMember, type CutSettings, type Episode,
   type MovieJob, type MovieOptions, type MovieSet, type MovieStyle, type Series, type SeriesItem, type Shot,
@@ -13,6 +13,7 @@ import { jobText, linesToText, movieFile, queuedFor, textToLines, type CastMembe
 import { linkProps, navigate } from "../lib/router";
 import { useApp } from "../state";
 import { ConfirmButton, Empty, Lamp, Tabs } from "../components/ui";
+import { Draft, NumberDraft, PlayButton } from "../components/fields";
 
 type Act = (call: () => Promise<unknown>, done?: string) => Promise<unknown>;
 type Overview = { series: SeriesItem[]; options: MovieOptions };
@@ -89,48 +90,6 @@ export function MoviesView({ id, episode }: { id?: string; episode?: string }) {
 
 // ---------------------------------------------------------------- small parts
 
-/** Text that is saved when the field is left - and follows the series while it is not being written in. */
-function Draft({ value, onSave, multiline, rows = 2, placeholder, className, maxLength }: { value: string;
-  onSave: (v: string) => void; multiline?: boolean; rows?: number; placeholder?: string; className?: string;
-  maxLength?: number }) {
-  const [draft, setDraft] = useState(value);
-  const focused = useRef(false);
-  useEffect(() => {
-    if (!focused.current) setDraft(value);
-  }, [value]);
-  const common = {
-    value: draft, placeholder, maxLength,
-    onFocus: () => { focused.current = true; },
-    onBlur: () => {
-      focused.current = false;
-      if (draft !== value) onSave(draft);
-    },
-  };
-  return multiline
-    ? <textarea className={className ?? "textarea"} rows={rows} {...common} style={{ minHeight: 0 }}
-      onChange={(e) => setDraft(e.target.value)} />
-    : <input className={className ?? "input"} {...common} onChange={(e) => setDraft(e.target.value)}
-      onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()} />;
-}
-
-function NumberDraft({ value, onSave, min, max, step }: { value: number; onSave: (v: number) => void; min: number;
-  max: number; step: number }) {
-  const [draft, setDraft] = useState(String(value));
-  const focused = useRef(false);
-  useEffect(() => {
-    if (!focused.current) setDraft(String(value));
-  }, [value]);
-  return <input className="input" type="number" inputMode="decimal" min={min} max={max} step={step} value={draft}
-    onFocus={() => { focused.current = true; }} onChange={(e) => setDraft(e.target.value)}
-    onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
-    onBlur={() => {
-      focused.current = false;
-      const n = Number(draft);
-      if (draft.trim() !== "" && Number.isFinite(n) && n !== value) onSave(Math.min(max, Math.max(min, n)));
-      else setDraft(String(value));
-    }} />;
-}
-
 /** Pictures to choose from; the chosen one is marked. */
 function Pictures({ sid, variants, chosen, onPick }: { sid: string; variants: Variant[]; chosen: string;
   onPick: (file: string) => void }) {
@@ -170,43 +129,6 @@ function StateTag({ state, kept, fresh = "chosen" }: { state: string; kept?: boo
 function Stale({ onKeep }: { onKeep: () => void }) {
   return <div className="small warn-text">Made before a change. <button type="button" className="link-btn"
     onClick={onKeep}>Keep as it is</button></div>;
-}
-
-/** Plays a sound - one at a time on the page. */
-function PlayButton({ src, label }: { src: string; label: string }) {
-  const [playing, setPlaying] = useState(false);
-  const audio = useRef<HTMLAudioElement | null>(null);
-  useEffect(() => {
-    const other = (ev: Event) => {
-      if ((ev as CustomEvent<string>).detail !== src) audio.current?.pause();
-    };
-    window.addEventListener("mv:play", other);
-    return () => {
-      window.removeEventListener("mv:play", other);
-      audio.current?.pause();
-      audio.current = null;
-      setPlaying(false);
-    };
-  }, [src]);
-  const toggle = () => {
-    if (playing) {
-      audio.current?.pause();
-      return;
-    }
-    window.dispatchEvent(new CustomEvent("mv:play", { detail: src }));
-    const a = audio.current ?? new Audio(src);
-    audio.current = a;
-    a.onplay = () => setPlaying(true);
-    a.onpause = () => setPlaying(false);
-    a.onended = () => setPlaying(false);
-    a.currentTime = 0;
-    a.play().catch(() => setPlaying(false));
-  };
-  return (
-    <button type="button" className={`icon-btn small mv-play${playing ? " on" : ""}`} onClick={toggle}
-      aria-label={`${playing ? "Stop" : "Play"} ${label}`} title={`${playing ? "Stop" : "Play"} ${label}`}>
-      {playing ? <Square size={12} /> : <Play size={13} />}</button>
-  );
 }
 
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);

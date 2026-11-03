@@ -769,6 +769,25 @@ export const SECTIONS: HelpSection[] = [
           "The theme gets quieter by itself while someone speaks."],
         needs: ["images.generate"],
       },
+      {
+        id: "personas",
+        tools: ["remember"],
+        owner: true,
+        title: "Someone to chat with",
+        what: "Personas in the menu: a character who answers as themselves instead of the assistant - a runner who "
+          + "coaches you, a home cook, a grumpy old sailor. You say who they are and how they talk; they can have a "
+          + "picture and a voice, and they remember what you tell them from one chat to the next.",
+        how: [
+          "Make a persona, give them a name and say who they are: their personality, how they talk, a few lines in "
+            + "their voice, a greeting. Choose their language and model.",
+          "Make portraits from how they look (with a LoRA if you have one), or use a picture of your own.",
+          "Give them a voice - one of the speech model's, or a clip of a real voice - and Hear it.",
+          "Chat with them: every chat starts from their notes about you and the titles of your last chats.",
+        ],
+        tips: ["Their notes are on the Memory tab: read and correct what they remember.",
+          "The web and pictures are off until you turn them on - a persona has only what you give them.",
+          "With Read the answers aloud, each answer is spoken as it comes; else the speaker under an answer reads it."],
+      },
     ],
   },
   {

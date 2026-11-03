@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 import secrets
 import shutil
 from pathlib import Path
@@ -20,8 +19,6 @@ from .common import PRIORITY, MovieError, _by_id, _given, _now
 log = logging.getLogger(__name__)
 
 SCRIPT = Path(__file__).with_name("render_overlays.py")
-MAX_VOICE_UPLOAD = 50 * 1024 * 1024
-SUFFIX_RE = re.compile(r"^\.[a-z0-9]{1,8}$")
 NO_SOUND_MODELS = "(Settings -> Models -> Sound, music and speech)"
 
 
@@ -90,25 +87,14 @@ class SoundJobs:
     # ------------------------------------------------------------ a voice of one's own
     async def set_voice_clip(self, sid: str, cid: str, data: bytes, filename: str = "") -> dict:
         """A clip of a real voice for a character: its first 30 s as the speech models take it (24 kHz mono WAV),
-        converted by ffmpeg in the sandbox - the place for files from outside - and kept with the series."""
-        from ..projects import store as projects
+        converted by ffmpeg in the sandbox - the place for files from outside (audio/clips.py) - and kept with the
+        series."""
+        from ..audio import clips
         self._member(self.load(sid), "cast", cid)
-        if not data:
-            raise MovieError("The file is empty.")
-        if len(data) > MAX_VOICE_UPLOAD:
-            raise MovieError("The file is over 50 MB - 10-20 seconds of one person speaking is enough.", 413)
-        suffix = Path(filename or "").suffix.lower()
-        name = f"in{suffix if SUFFIX_RE.match(suffix) else '.bin'}"
-        folder = self._tmp_folder()
         try:
-            projects.safe_write(folder, folder / name, data)
-            out = await self._sandbox(folder, C.voice_command(name, "voice.wav"), 120, "voice.wav",
-                                      "The clip could not be read")
-        finally:
-            shutil.rmtree(folder, ignore_errors=True)
-        seconds = C.wav_seconds(out)
-        if seconds < C.VOICE_MIN:
-            raise MovieError(f"The clip has {seconds:.1f} s of sound - a voice needs 5-20 s of one person speaking.")
+            out, seconds = await clips.convert(self.hub, data, filename)
+        except clips.ClipError as exc:
+            raise MovieError(str(exc), exc.status) from exc
         async with self.edit(sid) as s:
             c = self._member(s, "cast", cid)
             c["voice_clip"] = self._put(sid, f"voices/{cid}-{secrets.token_hex(3)}.wav", out)

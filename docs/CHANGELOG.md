@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.74.0 - 2026-11-03
+
+- **Personas**, in the menu: someone to chat with instead of the assistant -
+  a runner who coaches you, a home cook, a grumpy old sailor. Say who they
+  are, how they talk, a few lines in their voice and how they greet you;
+  choose their language and model. They answer as themselves, not as an
+  assistant.
+- **They remember you.** A persona keeps its own notes about you - your
+  life, plans, what you agreed - and every chat with it starts from them and
+  the titles of your last chats. Read and correct the notes on its Memory
+  tab, or turn memory off.
+- **A face and a voice.** Make portraits from how they look (with a LoRA if
+  you have one) or use a picture of your own - it shows over their answers
+  and in the chat list. Give them one of the speech model's voices or a clip
+  of a real voice; the speaker under an answer reads it aloud, or every
+  answer is read as it comes.
+- A persona has only what you give it: the web and pictures are off until
+  you turn them on.
+
 ## 0.73.1 - 2026-11-03
 
 - **Videos from a picture work on the AMD card.** They came out as flat

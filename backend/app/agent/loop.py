@@ -140,8 +140,8 @@ class WrapUp:
 
 
 def _ensure_tools_loaded() -> None:
-    from .tools import (ask, audio, files, history, images, knowledge, model3d, shell, video, web,  # noqa: F401
-                        webapp, windows, workflows)
+    from .tools import (ask, audio, files, history, images, knowledge, model3d, persona, shell, video,  # noqa: F401
+                        web, webapp, windows, workflows)
     from . import meta_tools  # noqa: F401
 
 
@@ -215,6 +215,7 @@ class Engine:
         # when allowed, artifacts and files go back to the device.
         self.device = None
         self.only: set[str] | None = None   # the only tools it may have (the reviewer's: review.REVIEW_TOOLS)
+        self.persona: dict | None = None     # a chat with a persona (0.74.0): its tools only, nobody to hand over to
         self.mcp_checks = False              # with `only`: also the MCP tools the review may use (mcp.tools)
         self.level = "quick"                 # the turn's effort (Agent.level_of): extra has the independent review
         self.top_model: str | None = None   # the turn's model, when this engine works for it with another (reviewer)
@@ -240,7 +241,7 @@ class Engine:
                            engine=self, online=online, online_once=online_once)
 
     def local_target(self) -> dict | None:
-        if self.depth or self.cloud is not None or self.handed_over_from:
+        if self.depth or self.cloud is not None or self.handed_over_from or self.persona is not None:
             return None
         return local_target(self.hub, self.model)
 
@@ -995,6 +996,9 @@ class Engine:
             job.meta["model"] = target["id"]
 
 
+# A chat with a persona (0.74.0): the persona's model and level, whatever the message asks for.
+PERSONA_SKIP = {"model", "level", "thinking", "effort", "cloud"}
+
 # Tools a person's chat does not get (agent/device.py): their memory and the owner's libraries stay out.
 DEVICE_SKIP = {"memory", "library_search"}
 
@@ -1165,14 +1169,72 @@ class Agent:
                       or s.get("agent", "effort"))
         return entry, thinking, effort
 
+    def user_name(self) -> str:
+        return self.hub.settings.get("agent", "user_name") or (self.hub.env.admin_user or "the user").title()
+
     def skills_for(self, chat: dict | None, project: dict | None, device=None) -> list[dict]:
         """The skills the user chose for the chat and its project (0.23.0: picked by hand)."""
         from .skills import turn_skills
         return turn_skills(self.hub.extras["skills"], chat, project, device)
 
+    def persona_of(self, chat: dict | None) -> dict | None:
+        """The persona a chat is with (0.74.0) - None for any other chat, and for one whose persona was deleted."""
+        store = self.hub.extras.get("personas")
+        return store.of_chat(chat) if store is not None else None
+
+    def persona_turn(self, chat: dict, options: dict) -> tuple[dict | None, dict, dict]:
+        """A chat with a persona (0.74.0): the persona, and the chat and the turn's options as the persona has them -
+        its model and level, whatever the message asked for. Any other chat comes back as it is."""
+        persona = self.persona_of(chat)
+        if persona is None:
+            return None, chat, options
+        options = {k: v for k, v in options.items() if k not in PERSONA_SKIP}
+        chat = {**chat, "settings": {**chat["settings"], "model": persona["model"] or None, "level": persona["level"],
+                                     "thinking": None, "effort": None}}
+        return persona, chat, options
+
+    def persona_engine(self, engine: Engine, persona: dict, chat: dict, project: dict | None, wd: projects.Workdir,
+                       entry: dict) -> None:
+        """The persona's own tools; no NOTES.md reminder (and no hand-over: Engine.local_target)."""
+        engine.persona, engine.remind_notes = persona, False
+        engine.only = self.persona_tools(chat, project, wd, entry, persona)
+
+    def persona_tools(self, chat: dict, project: dict | None, wd: projects.Workdir, entry: dict,
+                      persona: dict) -> set[str]:
+        """The tools a chat with the persona has now: what it is given, as far as the Hub can do it."""
+        from ..personas.store import tool_names
+        ctx = ToolContext(hub=self.hub, run=None, chat=chat, project=project, workdir=wd, ticket=None, model=entry)
+        out = set()
+        for name in tool_names(persona):
+            t = REGISTRY.get(name)
+            try:
+                if t is not None and t.available(ctx):
+                    out.add(name)
+            except Exception:  # noqa: BLE001 - a broken check hides the tool, nothing more
+                continue
+        return out
+
     def system_for(self, chat: dict, project: dict | None, wd: projects.Workdir, entry: dict, *,
                    handover_to: str = "", subagent: bool = False, cloud_model: str = "",
-                   taken_over_from: str = "", device=None, cloud_chosen: bool = False) -> str:
+                   taken_over_from: str = "", device=None, cloud_chosen: bool = False,
+                   persona: dict | None = None) -> str:
+        if persona is None and device is None and not subagent:
+            persona = self.persona_of(chat)
+        if persona is not None:                  # a chat with a persona: who it is, not the assistant (0.74.0)
+            from ..personas.prompt import persona_prompt
+            store = self.hub.extras["personas"]
+            tools = self.persona_tools(chat, project, wd, entry, persona)
+            # what the chat started from (kept on the chat: a note written during it would change the prompt's end,
+            # and the model server would read the whole conversation again); off: no notes, no earlier chats
+            snap = (chat.get("settings") or {}).get("persona_memory")
+            if not isinstance(snap, dict):
+                snap = store.memory_of(persona, chat.get("id"))
+            remembers = bool(persona.get("memory"))
+            return persona_prompt(persona, user=self.user_name(), model_name=Catalog.label(entry),
+                                  notes=str(snap.get("notes") or "") if remembers else "",
+                                  recent=[tuple(x) for x in snap.get("recent") or [] if isinstance(x, list)
+                                          and len(x) == 2] if remembers else [],
+                                  summary=chat.get("summary") or "", tools=tools)
         skills = self.skills_for(chat, project, device)
         images = self.hub.extras.get("images")
         audio = self.hub.extras.get("audio")
@@ -1193,7 +1255,7 @@ class Agent:
         from .tools import webapp as webapp_tool
         from .tools import windows as windows_tool
         mem = self.hub.extras["memory"].index(project["id"] if project else None)
-        user = self.hub.settings.get("agent", "user_name") or (self.hub.env.admin_user or "the user").title()
+        user = self.user_name()
         from . import notes_file
         notes = notes_file.find(wd.own_root) if notes_file.wanted(self.hub.settings) and not subagent else None
         moved = str((chat.get("settings") or {}).get("moved_from") or "") if project else ""
@@ -1213,9 +1275,9 @@ class Agent:
 
     def build_messages(self, chat: dict, project: dict | None, wd: projects.Workdir, entry: dict, run: Run,
                        handover_to: str = "", taken_over_from: str = "", cloud_model: str = "",
-                       cloud_chosen: bool = False) -> list[dict]:
+                       cloud_chosen: bool = False, persona: dict | None = None) -> list[dict]:
         sp = self.system_for(chat, project, wd, entry, handover_to=handover_to, taken_over_from=taken_over_from,
-                             cloud_model=cloud_model, cloud_chosen=cloud_chosen)
+                             cloud_model=cloud_model, cloud_chosen=cloud_chosen, persona=persona)
         rows = chats.messages(chat["id"], after_id=int(chat.get("summary_upto") or 0))
         keep_from = rows[-12]["id"] if len(rows) > 12 else 0
         return [{"role": "system", "content": sp},
@@ -1243,6 +1305,9 @@ class Agent:
                                                  + chat["summary"]},
                      {"role": "assistant", "content": "Noted."}]
         tail = [{"role": "user", "content": C.SUMMARY_PROMPT}]
+        if engine.persona is not None:                # a persona's chat: what was talked about, not work (0.74.0)
+            from ..personas.prompt import condense_prompt
+            tail = [{"role": "user", "content": condense_prompt(engine.persona, self.user_name())}]
         # The request must fit the context: room for the notes it writes, a margin for the tokenizer.
         notes = min(2000, engine.ctx_limit // 4)
         room = int((engine.ctx_limit * 0.8 - notes) / engine.token_ratio) - C.estimate_tokens(head + tail)
@@ -1259,7 +1324,10 @@ class Agent:
         async for chunk in self.hub.llm.stream_chat(self.hub.main_url, pl):
             acc.feed(chunk)
         summary = acc.result()["content"].strip()
-        if summary:                                   # the new notes replace the old ones (which they took in)
+        if summary and engine.persona is not None:    # the prompt changes anyway: the persona's memory as it is now
+            chats.update_chat(chat_id, summary=summary, summary_upto=split, settings={
+                "persona_memory": self.hub.extras["personas"].memory_of(engine.persona, chat_id)})
+        elif summary:                                 # the new notes replace the old ones (which they took in)
             chats.update_chat(chat_id, summary=summary, summary_upto=split)
             if await self.notes_to_file(chat, engine.workdir, summary, "the chat was condensed", engine.device):
                 from . import notes_file                   # the Hub's write is not the model keeping its notes
@@ -1267,7 +1335,7 @@ class Agent:
         chat = chats.get_chat(chat_id)
         engine.chat = chat
         return self.build_messages(chat, engine.project, engine.workdir, engine.model, run, engine.handover_label(),
-                                   engine.handed_over_from)
+                                   engine.handed_over_from, persona=engine.persona)
 
     async def _write_handover(self, engine: Engine, old_id: int, persist) -> None:
         """The first answer of a chat that continues another: the notes the work goes on from, written from the
@@ -1369,6 +1437,11 @@ class Agent:
         try:
             if chat is None:
                 raise RuntimeError("the chat was deleted")
+            persona, chat, options = self.persona_turn(chat, options)     # a persona's model and level (0.74.0)
+            if persona is not None and not isinstance(chat["settings"].get("persona_memory"), dict):
+                snap = self.hub.extras["personas"].memory_of(persona, chat["id"])   # what the chat starts from
+                chats.update_chat(chat["id"], settings={"persona_memory": snap})
+                chat["settings"]["persona_memory"] = snap
             entry, thinking, effort = self.resolve(chat, project, options)
             chats.run_started(run.id, chat["id"], entry["id"])
             wd = self.workdir(chat)
@@ -1376,7 +1449,7 @@ class Agent:
             from .skills import materialize                # the chosen skills' files, for code (.hub/skills/)
             await asyncio.to_thread(materialize, self.hub.extras["skills"], self.skills_for(chat, project), wd.root)
             escalation = bool(project and project["settings"].get("cloud_escalation")
-                              and cloudmod.configured(self.hub.settings))
+                              and cloudmod.configured(self.hub.settings)) and persona is None
             chose_cloud = (chat.get("settings") or {}).get("model") == CLOUD
             if options.get("cloud") and not escalation:
                 raise RuntimeError(NO_CLOUD)
@@ -1422,6 +1495,8 @@ class Agent:
             engine.notes_at = await asyncio.to_thread(notes_file.stamp, wd.own_root)
             engine.turn_options = {k: options[k] for k in ("thinking", "effort") if options.get(k) is not None}
             engine.steps.append({"type": "queue", "seconds": waited})
+            if persona is not None:                       # its own tools, no NOTES.md, no independent review
+                self.persona_engine(engine, persona, chat, project, wd, entry)
 
             async def persist(role: str, blocks: list[dict]) -> dict:
                 m = chats.add_message(chat["id"], role, blocks, run.id)
@@ -1433,14 +1508,15 @@ class Agent:
             else:
                 messages = self.build_messages(chat, project, wd, entry, run, engine.handover_label(),
                                                cloud_model=cloud_label,
-                                               cloud_chosen=in_cloud and not options.get("cloud"))
+                                               cloud_chosen=in_cloud and not options.get("cloud"), persona=persona)
                 max_steps = int(self.hub.settings.get("agent", "max_steps") or 60)
                 from .review import review as review_turn
                 # A test run (Settings -> Tests) measures the model it tests: no other model's review in its steps.
                 await engine.loop(messages, persist, max_steps=max_steps,
                                   compact=lambda msgs: self._compact(chat["id"], engine, run, msgs),
-                                  review=None if test else (lambda msgs: review_turn(self, engine, chat, project, wd,
-                                                                                     before, msgs, persist)))
+                                  review=None if test or persona is not None else (
+                                      lambda msgs: review_turn(self, engine, chat, project, wd, before, msgs,
+                                                               persist)))
                 await self._title(chat, engine)
         except asyncio.CancelledError:
             status = "cancelled"

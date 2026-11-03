@@ -30,7 +30,9 @@ from ..projects import blobs
 CHAT_DEFAULTS = {"model": None, "thinking": None, "effort": None, "skills": [], "libraries": [], "image_model": None,
                  "level": None,                 # effort (0.38.0): quick | think | extra; None = the project's or Settings'
                  "image_loras": [],             # 0.49.0: the admin's LoRAs on every picture in the chat (ids)
-                 "image_lora_strength": {}}     # 0.54.0: their strength in this chat (id -> 0..2), else the LoRA's
+                 "image_lora_strength": {},     # 0.54.0: their strength in this chat (id -> 0..2), else the LoRA's
+                 "persona": None,               # 0.74.0: the persona the chat is with (personas/), set when made
+                 "persona_memory": None}        # and what the chat starts from: its notes, its last chats' titles
 
 
 def _chat(r) -> dict:
@@ -75,7 +77,8 @@ def list_chats(project_id: int | None = None, q: str = "", limit: int = 200, all
              f", (SELECT SUM((julianday(r.ended_at) - julianday(r.started_at)) * 86400) {runs}"
              f" AND r.ended_at IS NOT NULL) seconds"
              if project_id is not None and not all_projects else "")
-    sql = ("SELECT c.id, c.project_id, c.title, c.updated_at, c.created_at, c.archived, p.name project_name" + spent +
+    sql = ("SELECT c.id, c.project_id, c.title, c.updated_at, c.created_at, c.archived, p.name project_name, "
+           "json_extract(c.settings, '$.persona') persona" + spent +
            " FROM chats c LEFT JOIN projects p ON p.id=c.project_id WHERE c.test_run IS NULL")
     params: list = []
     if archived is not None:
@@ -94,6 +97,23 @@ def list_chats(project_id: int | None = None, q: str = "", limit: int = 200, all
     params.append(limit)
     with db.connect() as con:
         return [dict(r) for r in con.execute(sql, params).fetchall()]
+
+
+def persona_chats(persona: str, limit: int = 50) -> list[dict]:
+    """A persona's chats (0.74.0), the last active first - archived ones too: they are its past conversations - with
+    how many messages each has."""
+    with db.connect() as con:
+        return [dict(r) for r in con.execute(
+            "SELECT c.id, c.title, c.updated_at, c.created_at, c.archived, (SELECT COUNT(*) FROM messages m WHERE "
+            "m.chat_id=c.id) messages FROM chats c WHERE c.test_run IS NULL AND json_extract(c.settings, "
+            "'$.persona')=? ORDER BY c.updated_at DESC, c.id DESC LIMIT ?", (persona, limit))]
+
+
+def clear_persona(persona: str) -> int:
+    """A deleted persona's chats become ordinary chats (0.74.0). -> how many."""
+    with db.connect() as con:
+        return con.execute("UPDATE chats SET settings=json_remove(json_set(settings, '$.persona', NULL), "
+                           "'$.persona_memory') WHERE json_extract(settings, '$.persona')=?", (persona,)).rowcount
 
 
 def runs_overview(chat_ids: list[int]) -> dict[int, dict]:
