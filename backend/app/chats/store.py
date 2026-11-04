@@ -32,7 +32,8 @@ CHAT_DEFAULTS = {"model": None, "thinking": None, "effort": None, "skills": [], 
                  "image_loras": [],             # 0.49.0: the admin's LoRAs on every picture in the chat (ids)
                  "image_lora_strength": {},     # 0.54.0: their strength in this chat (id -> 0..2), else the LoRA's
                  "persona": None,               # 0.74.0: the persona the chat is with (personas/), set when made
-                 "persona_memory": None}        # and what the chat starts from: its notes, its last chats' titles
+                 "persona_memory": None,        # and what the chat starts from: its notes, its last chats' titles
+                 "persona_task": None}          # 0.75.0: the persona's task the chat is the chat of
 
 
 def _chat(r) -> dict:
@@ -105,7 +106,8 @@ def persona_chats(persona: str, limit: int = 50) -> list[dict]:
     with db.connect() as con:
         return [dict(r) for r in con.execute(
             "SELECT c.id, c.title, c.updated_at, c.created_at, c.archived, (SELECT COUNT(*) FROM messages m WHERE "
-            "m.chat_id=c.id) messages FROM chats c WHERE c.test_run IS NULL AND json_extract(c.settings, "
+            "m.chat_id=c.id) messages, json_extract(c.settings, '$.persona_task') task FROM chats c WHERE "
+            "c.test_run IS NULL AND json_extract(c.settings, "
             "'$.persona')=? ORDER BY c.updated_at DESC, c.id DESC LIMIT ?", (persona, limit))]
 
 
@@ -113,7 +115,8 @@ def clear_persona(persona: str) -> int:
     """A deleted persona's chats become ordinary chats (0.74.0). -> how many."""
     with db.connect() as con:
         return con.execute("UPDATE chats SET settings=json_remove(json_set(settings, '$.persona', NULL), "
-                           "'$.persona_memory') WHERE json_extract(settings, '$.persona')=?", (persona,)).rowcount
+                           "'$.persona_memory', '$.persona_task') WHERE json_extract(settings, '$.persona')=?",
+                           (persona,)).rowcount
 
 
 def runs_overview(chat_ids: list[int]) -> dict[int, dict]:

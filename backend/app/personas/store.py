@@ -14,6 +14,7 @@ alone, like Movies."""
 from __future__ import annotations
 
 import asyncio
+import copy
 import hashlib
 import io
 import json
@@ -26,10 +27,12 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+from .tasks import TaskJobs
+
 log = logging.getLogger(__name__)
 
 ID_RE = re.compile(r"^p[0-9a-f]{8}$")
-FILE_RE = re.compile(r"^(?:pictures|voice|said)/[a-z0-9][a-z0-9-]{0,80}\.(?:png|wav|mp3)$")
+FILE_RE = re.compile(r"^(?:pictures|voice|said|posts)/[a-z0-9][a-z0-9-]{0,80}\.(?:png|jpg|webp|gif|wav|mp3|mp4|webm)$")
 LIMITS = {"name": 40, "role": 160, "personality": 4000, "speech": 2000, "examples": 3000, "greeting": 600,
           "look": 600}
 NOTES_MAX = 6000                 # the persona's notes about the owner: in every prompt of theirs
@@ -45,7 +48,7 @@ PRIORITY = "normal"              # a chat's turn goes first
 DEFAULTS = {"name": "", "role": "", "personality": "", "speech": "", "examples": "", "greeting": "", "language": "",
             "model": "", "level": "quick", "look": "", "lora": "", "strength": 1.0, "picture": "", "variants": [],
             "voice": "", "voice_clip": "", "voice_clip_seconds": 0.0, "expressiveness": 0.5, "web": False,
-            "pictures": False, "memory": True, "read_aloud": False}
+            "pictures": False, "memory": True, "read_aloud": False, "tasks": []}
 PORTRAIT = ("Portrait of {who}. {look}Head and shoulders, looking into the camera with a natural, friendly "
             "expression, soft light, a simple background.")
 SAMPLE = {"da": "Hej, jeg hedder {name}. Hvad skal vi snakke om i dag?",
@@ -101,15 +104,20 @@ def guess_language(text: str) -> str:
     return "da" if da > en else "en"
 
 
-def tool_names(p: dict) -> set[str]:
-    """The tools a chat with the persona may have: its memory, and the web and pictures when it is given them."""
+def tool_names(p: dict, task: dict | None = None) -> set[str]:
+    """The tools a chat with the persona may have: its memory, and the web and pictures when it is given them - and
+    in a task's chat (0.75.0) what the task's post needs, and post_draft to hand it in."""
     out: set[str] = set()
     if p.get("memory"):
         out.add("remember")
-    if p.get("web"):
+    if p.get("web") or (task or {}).get("web"):
         out |= {"web_search", "web_fetch"}
-    if p.get("pictures"):
-        out |= {"image_generate", "view_image"}
+    if p.get("pictures") or (task and task.get("media") != "none"):
+        out |= {"image_generate", "image_edit", "view_image"}
+    if task and task.get("media") in ("video", "either"):
+        out.add("video_generate")
+    if task:
+        out.add("post_draft")
     return out
 
 
@@ -131,11 +139,13 @@ def _note(value) -> str:
     return MARK.sub("", " ".join(str(value or "").split()))
 
 
-class Personas:
+class Personas(TaskJobs):
     def __init__(self, hub):
         self.hub = hub
         self.root = Path(hub.env.data_dir) / "personas"
         self.locks: dict[str, asyncio.Lock] = {}
+        self.task_jobs: dict[str, asyncio.Task] = {}    # tasks being done: "<id>/<task>" -> the job (tasks.py)
+        self.schedule_job: asyncio.Task | None = None
         self.tasks: dict[str, asyncio.Task] = {}        # portraits being made
         self.live: dict[str, dict] = {}                 # their progress
         self.errors: dict[str, str] = {}                # why the last ones failed
@@ -153,7 +163,7 @@ class Personas:
             data = json.loads((self._dir(pid) / "persona.json").read_text(encoding="utf-8"))
         except (OSError, ValueError):
             raise PersonaError("No such persona.", 404) from None
-        return {**DEFAULTS, **data}
+        return {**copy.deepcopy(DEFAULTS), **data}        # (a fresh list each: "tasks" is changed in place)
 
     def get(self, pid: str | None) -> dict | None:
         """The persona, or None (a chat's persona may have been deleted)."""
@@ -261,12 +271,14 @@ class Personas:
                 "greeting": p["greeting"], "read_aloud": bool(p["read_aloud"]), "speech": self.speech_ready()}
 
     def chats(self, pid: str, limit: int = 50) -> list[dict]:
-        """The persona's conversations, the last active first: chats with something said in them."""
+        """The persona's chats, the last active first: those with something said in them (a task's chat says
+        which task it is - "task")."""
         from ..chats import store as chats
         return [c for c in chats.persona_chats(pid, limit) if c.get("messages")]
 
     def detail(self, pid: str) -> dict:
         p = self.load(pid)
+        p["tasks"] = [{**t, "running": self.task_running(pid, t["id"])} for t in p["tasks"]]
         return {**p, "notes": self.notes(pid), "notes_max": NOTES_MAX, "chats": self.chats(pid),
                 "audio": self.audio_info(p.get("language") or ""),
                 "job": self.live.get(pid) if self.working(pid) else None, "error": self.errors.get(pid, "")}
@@ -293,6 +305,8 @@ class Personas:
         from ..chats import store as chats
         if self.working(pid):
             raise PersonaError("Portraits are being made - stop them first.", 409)
+        if any(self.task_running(pid, t["id"]) for t in self.load(pid)["tasks"]):
+            raise PersonaError("A task's post is being made - wait for it first.", 409)
         d = self._dir(pid)
         if not (d / "persona.json").is_file():
             raise PersonaError("No such persona.", 404)
@@ -452,10 +466,10 @@ class Personas:
         return {"add": "Noted.", "replace": "Changed.", "forget": "Forgotten."}[action]
 
     def recent(self, pid: str, exclude: int | None = None, limit: int = RECENT) -> list[tuple[str, str]]:
-        """The persona's last conversations with the owner: (when, title), newest first - not the one going on, and
-        none where nothing was said."""
-        return [(str(c.get("updated_at") or ""), c["title"]) for c in self.chats(pid, limit + 1)
-                if c["id"] != exclude][:limit]
+        """The persona's last conversations with the owner: (when, title), newest first - not the one going on, none
+        where nothing was said, and no task's chat (its posts are not a conversation)."""
+        return [(str(c.get("updated_at") or ""), c["title"]) for c in self.chats(pid, limit + 20)
+                if c["id"] != exclude and not c.get("task")][:limit]
 
     def memory_of(self, p: dict, chat_id: int | None) -> dict:
         """What a chat with the persona starts from: its notes and the titles of the last chats, as they are now. A chat
@@ -471,7 +485,8 @@ class Personas:
         from the first message, like any chat's."""
         from ..chats import store as chats
         self.load(pid)
-        empty = next((c for c in chats.persona_chats(pid, 20) if not c.get("messages") and not c.get("archived")), None)
+        empty = next((c for c in chats.persona_chats(pid, 20) if not c.get("messages") and not c.get("archived")
+                      and not c.get("task")), None)
         if empty is not None:
             return chats.get_chat(empty["id"])
         return chats.create_chat(None, "New chat", {"persona": pid})
@@ -517,7 +532,26 @@ class Personas:
         t = self.tasks.get(pid)
         return t is not None and not t.done()
 
-    def _portrait_model(self, p: dict) -> str | None:
+    def me_way(self, p: dict) -> str:
+        """How a picture of the persona itself is made here (0.75.0): "lora" - its LoRA, on a downloaded model of
+        its kind; "portrait" - an edit of its chosen portrait; "" - neither can be made now."""
+        pipe, store = self.hub.extras.get("images"), self.hub.extras.get("loras")
+        if pipe is None or not pipe.available():
+            return ""
+        if p.get("lora") and store is not None and store.get(p["lora"]) is not None:
+            try:
+                self.portrait_model(p)
+                return "lora"
+            except PersonaError:
+                pass
+        try:
+            if p.get("picture") and pipe.installed("edit") and self.path(p["id"], p["picture"]).is_file():
+                return "portrait"
+        except PersonaError:
+            pass
+        return ""
+
+    def portrait_model(self, p: dict) -> str | None:
         """Settings' picture model - or, for a LoRA made for another kind of model, a downloaded one of its kind."""
         from ..images.pipeline import family
         pipe, store = self.hub.extras["images"], self.hub.extras.get("loras")
@@ -539,7 +573,7 @@ class Personas:
             raise PersonaError("Describe how the persona looks first.")
         if self.working(pid):
             raise PersonaError("Portraits are being made already.", 409)
-        model = self._portrait_model(p)
+        model = self.portrait_model(p)
         self.errors.pop(pid, None)
         self.live[pid] = {"what": "portraits"}
         self.tasks[pid] = asyncio.get_running_loop().create_task(self._portrait(pid, model))

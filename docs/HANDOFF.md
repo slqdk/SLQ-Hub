@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.74.0, 2026-11-03)
+## State (0.75.0, 2026-11-04)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -966,6 +966,27 @@ a persona made through the page, portraits made and chosen, a voice chosen and h
 the name and picture over each answer, a note written, the answers read aloud as they came, the speaker under an
 answer, the Memory tab refusing to save over a new note and saving on the second Save, the chat list's picture, the
 phone (no sideways scroll); no page errors. NOT seen on the VM: item 94.
+0.75.0, Søren: "I need to be able to give my persona tasks... like: At 7PM every monday, Prepare a social media
+post with a picture or video about something.. a comment on the news, that resembles the personas opinions, an
+exercise statement, a breakfast picture and quote.. and then list the posts for me to review" - and "i have a lora
+for her". Persona tasks and posts (DESIGN §8 "Persona tasks and posts"): a task's days and time, its own archived
+chat with the persona, the tools the task needs and `post_draft`, the post kept as a draft for the owner (the
+Personas page's "Posts to review", the persona's Posts tab: change, approve, copy, download, another, discard).
+Nothing is published. `image_generate` got `me` in persona chats: a picture of the persona with its LoRA, else an
+edit of its portrait. Tests: tests/test_persona_tasks.py (15). The independent review (a separate agent) was
+stopped part-way by Søren; the problems its probe tests had shown were fixed, each with a test that fails without
+the fix: after days off the oldest missed time was taken, so nothing was made up for (now the newest); a task chat
+kept the persona's notes from its first run for good (now each run starts from the notes as they are); a task with
+the web waited for the internet question nobody was there to answer; one task that failed to start stopped the
+others that minute, and Make one now could race the schedule; a run a restart cut off left its question in the chat
+and the task silent; `me` was offered with no model that edits; a run started in a chat the owner was talking in;
+a second post_draft in one run made two posts; a video task was accepted with no video model; a persona could be
+deleted while its task worked; changing a task's words moved a due time a week on; a handed-in video was read on the
+event loop. The review's remaining checks did not run - nobody has gone over this as a whole with fresh eyes. In
+Chromium against the dev server (its fake model makes a picture of itself and hands in a post when it reads
+"Scheduled task"): a task made through the page, Make one now, the post with its picture made from the portrait,
+the review list, the text changed, approved, the task's chat, the phone (no sideways scroll); no page errors. NOT
+seen on the VM: item 95.
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
 host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU
@@ -1743,6 +1764,20 @@ the host if the VM ever stops by itself.
       converter's cases are ComfyUI 0.42.3's own templates; files from other sites (Civitai, OpenArt) are
       untried - an export is the way to see what went wrong. When COMFYUI_REF changes, the editor's format may
       too: tools/workflow_oracle/ (convert.js, compare.py) is how the converter was checked - run it again.
+95. **Persona tasks and posts (0.75.0)** - none of it has run on the VM:
+    - **The schedule on the real clock**: a task at the next whole minute or two (Change, then wait) - does it start
+      by itself, at the household's time, and does the next time move a week on? The Hub's log says "persona
+      tasks" when the schedule fails.
+    - **The model alone**: does Gemma 4 31B (or Qwen3.8) do the whole task without anyone there - look things up
+      (with the web on the task), make the picture, then call `post_draft` with the text and the path - or does it
+      answer in prose without handing in ("No post was handed in" on the task)? The task's chat (Its chat) shows
+      each step. Is the text in her voice and language, and different from last week's?
+    - **Pictures of her**: with Laura's LoRA, does `me: true` look like her on the model the portraits use, and
+      does the model leave `me` out for the breakfast table? Without a LoRA: an edit of the portrait (Qwen-Image 2.1
+      edit) - does she keep her face?
+    - **Video posts**: a video task - the picture first, then the video from it, on the card through the queue; how
+      long one post takes, and whether a short Wan 2.2 clip is what a post wants.
+    - **The review on the phone**: Copy and Download (a picture or an mp4) on the iPhone through hub.slq.dk.
 94. **Personas (0.74.0)** - none of it has run with the real models:
     - **In character**: does Qwen3.8 27B stay the persona over a long chat (no "How can I help you today?", no
       bullet lists), in Danish with "Always write in Danish", and with the user's language? The persona's prompt is
@@ -1975,7 +2010,7 @@ the host if the VM ever stops by itself.
 | `services/comfyui/nodes/slq_audio/` | The Hub's own ComfyUI nodes (0.18.0): ACE-Step timbre and cover source, the planner-free text encoder, Mel-Band RoFormer stems, Seed-VC voice conversion (README.md there; the image installs them with Seed-VC and MSST at pinned commits). |
 | `backend/app/rag/` | Libraries: extraction, indexing, search, the `library_search` tool. |
 | `backend/app/movies/`, `frontend/src/views/MoviesView.tsx` | Movies (0.72.0): series, cast, sets, episodes and their jobs (`studio.py`), the sound and the cut (`sound.py`, `cut.py`, `render_overlays.py`). |
-| `backend/app/personas/`, `backend/app/agent/tools/persona.py`, `frontend/src/views/PersonasView.tsx` | Personas (0.74.0): the personas and their files, memory, portraits and voice (`store.py`), their system prompt and condensing (`prompt.py`), the `remember` tool; the page, the player (`lib/personas.ts`). |
+| `backend/app/personas/`, `backend/app/agent/tools/persona.py`, `frontend/src/views/PersonasView.tsx`, `frontend/src/views/PersonaTasks.tsx` | Personas (0.74.0): the personas and their files, memory, portraits and voice (`store.py`), their system prompt and condensing (`prompt.py`), the `remember` tool; the page, the player (`lib/personas.ts`). Tasks and posts (0.75.0): the schedule, a task's run and the posts (`tasks.py`), `post_draft`; the Tasks and Posts tabs and the review list (`PersonaTasks.tsx`). |
 | `backend/app/sandbox_job.py`, `backend/app/audio/clips.py` | A command in the sandbox for the Hub's own jobs (Movies' preview and cut, voice clips); a clip of a real voice as the speech models take it. |
 | `backend/app/cli.py` | `selftest`, `set-password`, `create-key`, `keys`. |
 | `frontend/src/` | The UI: `views/` (chat, project, libraries, settings), `components/`, `lib/turns.ts` (the turn view model for history and live runs). |

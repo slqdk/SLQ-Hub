@@ -771,7 +771,7 @@ export const SECTIONS: HelpSection[] = [
       },
       {
         id: "personas",
-        tools: ["remember"],
+        tools: ["remember", "post_draft"],
         owner: true,
         title: "Someone to chat with",
         what: "Personas in the menu: a character who answers as themselves instead of the assistant - a runner who "
@@ -783,10 +783,16 @@ export const SECTIONS: HelpSection[] = [
           "Make portraits from how they look (with a LoRA if you have one), or use a picture of your own.",
           "Give them a voice - one of the speech model's, or a clip of a real voice - and Hear it.",
           "Chat with them: every chat starts from their notes about you and the titles of your last chats.",
+          "Give them tasks (the Tasks tab): \"Mondays at 19:00: a post about your week's training, with a picture of "
+            + "you\". At that time they write the post in their voice, make the picture or video - with their LoRA "
+            + "when they are in it - and hand it in. The posts wait for you: Posts to review on the Personas page.",
         ],
         tips: ["Their notes are on the Memory tab: read and correct what they remember.",
           "The web and pictures are off until you turn them on - a persona has only what you give them.",
-          "With Read the answers aloud, each answer is spoken as it comes; else the speaker under an answer reads it."],
+          "With Read the answers aloud, each answer is spoken as it comes; else the speaker under an answer reads it.",
+          "Nothing is posted anywhere: approve a post, change its text, copy it and download its picture or video - "
+            + "or Discard it and press Another for a new one.",
+          "A task's time missed while the Hub was off is made up for within six hours, else left out."],
       },
     ],
   },

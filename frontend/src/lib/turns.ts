@@ -464,6 +464,7 @@ function outcomeLine(t: ToolView): string {
   switch (t.name) {
     case "bash": return bashOutcome(r, failed);
     case "remember": return s("action") === "forget" ? `Forgot: ${s("old") || s("text")}` : s("text") || first;
+    case "post_draft": return failed ? first : `Handed in for review: ${s("text").split("\n")[0]}`;
     case "read_file": {
       if (first.endsWith(":") && r.includes("\n")) return `${s("path")} - ${plural(r.split("\n").length - 1, "line")}`;
       return oneLine(first);
@@ -541,6 +542,7 @@ function givenLine(t: ToolView): string {
     }
     case "escalate": return s("reason");
     case "remember": return s("action") === "forget" ? `Forget: ${s("old") || s("text")}` : s("text");   // 0.74.0
+    case "post_draft": return s("text").split("\n")[0];                                                 // 0.75.0
     default: {
       const first = Object.values(a).find((v) => typeof v === "string");
       return typeof first === "string" ? first : "";
@@ -551,6 +553,7 @@ function givenLine(t: ToolView): string {
 export function toolLabel(name: string): string {
   if (name === "ask_user") return "Question";
   if (name === "remember") return "Memory";               // a persona's notes about you (0.74.0)
+  if (name === "post_draft") return "Post";               // a persona's task hands in its post (0.75.0)
   const m = name.match(/^mcp__(.+?)__(.+)$/);
   if (m) return `${m[1]}: ${m[2]}`;
   return name.replace(/_/g, " ");
@@ -574,7 +577,7 @@ const VERBS: Record<string, [string, string]> = {          // tool: [verb, what 
   view_image: ["looked at", ""], list_files: ["looked through", "the folder"], search_files: ["searched", "the files"],
   bash: ["ran", "command"], web_search: ["searched", "the web"], web_fetch: ["read", "page"],
   image_generate: ["made", "picture"], image_edit: ["edited", "picture"], ask_user: ["asked", "you"],
-  remember: ["noted", ""],
+  remember: ["noted", ""], post_draft: ["handed in", "post"],
 };
 
 /** Finished steps in a line (0.46.0): what was done to what - "edited picture-animals/SKILL.md 2x, read it 2x,

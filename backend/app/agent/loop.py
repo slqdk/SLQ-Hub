@@ -216,6 +216,9 @@ class Engine:
         self.device = None
         self.only: set[str] | None = None   # the only tools it may have (the reviewer's: review.REVIEW_TOOLS)
         self.persona: dict | None = None     # a chat with a persona (0.74.0): its tools only, nobody to hand over to
+        # 0.75.0: tools whose internet question is answered already - a persona's task that may look things up
+        # (the owner said so on the task; nobody is there to answer at its time)
+        self.internet_granted: set[str] = set()
         self.mcp_checks = False              # with `only`: also the MCP tools the review may use (mcp.tools)
         self.level = "quick"                 # the turn's effort (Agent.level_of): extra has the independent review
         self.top_model: str | None = None   # the turn's model, when this engine works for it with another (reviewer)
@@ -668,7 +671,7 @@ class Engine:
                         remember_allowed(key)
                     elif owner and decision == "chat" and chat_id is not None:
                         remember_in_chat(chat_id, key)
-                if name in internet.TOOLS and internet.asking(self.hub.settings):
+                if name in internet.TOOLS and internet.asking(self.hub.settings) and name not in self.internet_granted:
                     ask, online = internet.question(name, args, ok_here, await internet.code_can_go_offline(self.hub))
                     if ask is not None:
                         decision = await self._ask(
@@ -1198,6 +1201,9 @@ class Agent:
         """The persona's own tools; no NOTES.md reminder (and no hand-over: Engine.local_target)."""
         engine.persona, engine.remind_notes = persona, False
         engine.only = self.persona_tools(chat, project, wd, entry, persona)
+        task = self.hub.extras["personas"].task_of(persona, chat)
+        if task is not None and task.get("web"):                # the owner said yes on the task (0.75.0)
+            engine.internet_granted = {"web_search", "web_fetch"}
 
     def persona_tools(self, chat: dict, project: dict | None, wd: projects.Workdir, entry: dict,
                       persona: dict) -> set[str]:
@@ -1205,7 +1211,7 @@ class Agent:
         from ..personas.store import tool_names
         ctx = ToolContext(hub=self.hub, run=None, chat=chat, project=project, workdir=wd, ticket=None, model=entry)
         out = set()
-        for name in tool_names(persona):
+        for name in tool_names(persona, self.hub.extras["personas"].task_of(persona, chat)):
             t = REGISTRY.get(name)
             try:
                 if t is not None and t.available(ctx):
@@ -1234,7 +1240,9 @@ class Agent:
                                   notes=str(snap.get("notes") or "") if remembers else "",
                                   recent=[tuple(x) for x in snap.get("recent") or [] if isinstance(x, list)
                                           and len(x) == 2] if remembers else [],
-                                  summary=chat.get("summary") or "", tools=tools)
+                                  summary=chat.get("summary") or "", tools=tools,
+                                  task=store.task_of(persona, chat) is not None,
+                                  me=store.me_way(persona) if "image_generate" in tools else "")
         skills = self.skills_for(chat, project, device)
         images = self.hub.extras.get("images")
         audio = self.hub.extras.get("audio")

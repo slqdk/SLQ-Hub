@@ -48,7 +48,13 @@ class PersonaIn(BaseModel):
 @router.get("")
 async def overview(request: Request):
     p = _p(request)
-    return {"personas": p.list(), "options": p.options()}
+    return {"personas": p.list(), "options": p.options(), "drafts": len(p.posts(status="draft"))}
+
+
+@router.get("/posts")
+async def all_posts(request: Request, status: str | None = None):
+    """0.75.0: the personas' posts, the newest first - status "draft": those waiting for the owner's review."""
+    return {"posts": _p(request).posts(status=status)}
 
 
 @router.post("")
@@ -184,6 +190,84 @@ async def sample(pid: str, request: Request):
         return _p(request).sample(pid)
     except PersonaError as exc:
         _fail(exc)
+
+
+class TaskIn(BaseModel):
+    title: str | None = None
+    instruction: str | None = None
+    days: list[int] | None = None          # 0 Monday .. 6 Sunday
+    time: str | None = None                # "19:00", the household's time
+    media: str | None = None               # picture, video, either, none
+    web: bool | None = None
+    enabled: bool | None = None
+
+
+@router.post("/{pid}/tasks")
+async def add_task(pid: str, body: TaskIn, request: Request):
+    """0.75.0: a task - at its days and time the persona makes a post for the owner's review."""
+    try:
+        return await _p(request).add_task(pid, body.model_dump(exclude_none=True))
+    except PersonaError as exc:
+        _fail(exc)
+
+
+@router.patch("/{pid}/tasks/{tid}")
+async def change_task(pid: str, tid: str, body: TaskIn, request: Request):
+    try:
+        return await _p(request).update_task(pid, tid, body.model_dump(exclude_none=True))
+    except PersonaError as exc:
+        _fail(exc)
+
+
+@router.delete("/{pid}/tasks/{tid}")
+async def delete_task(pid: str, tid: str, request: Request):
+    try:
+        return await _p(request).delete_task(pid, tid)
+    except PersonaError as exc:
+        _fail(exc)
+
+
+@router.post("/{pid}/tasks/{tid}/run")
+async def run_task(pid: str, tid: str, request: Request):
+    """Make one now - its post comes with the others."""
+    p = _p(request)
+    try:
+        p.start_task(pid, tid)
+        return p.detail(pid)
+    except PersonaError as exc:
+        _fail(exc)
+
+
+@router.get("/{pid}/posts")
+async def posts(pid: str, request: Request):
+    try:
+        _p(request).load(pid)
+        return {"posts": _p(request).posts(pid)}
+    except PersonaError as exc:
+        _fail(exc)
+
+
+class PostIn(BaseModel):
+    text: str | None = None
+    status: str | None = None              # draft, approved
+
+
+@router.patch("/{pid}/posts/{sid}")
+async def change_post(pid: str, sid: str, body: PostIn, request: Request):
+    """The owner's review: the text changed, approved."""
+    try:
+        return await _p(request).update_post(pid, sid, body.model_dump(exclude_none=True))
+    except PersonaError as exc:
+        _fail(exc)
+
+
+@router.delete("/{pid}/posts/{sid}")
+async def delete_post(pid: str, sid: str, request: Request):
+    try:
+        await _p(request).delete_post(pid, sid)
+    except PersonaError as exc:
+        _fail(exc)
+    return {"ok": True}
 
 
 @router.get("/{pid}/file")

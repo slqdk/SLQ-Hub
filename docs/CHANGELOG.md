@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.75.0 - 2026-11-04
+
+- **Tasks for a persona.** Give a persona a task on its Tasks tab - "a post
+  about your Monday run, with a picture of you running" - with the days and
+  the time it is done. At that time the persona does it alone: looks things
+  up if you let it, makes the picture or video, and writes the post in its
+  own voice. Make one now tries it at once.
+- **Posts to review.** Nothing is published. The posts wait on the Personas
+  page under "Posts to review" and on the persona's Posts tab: change the
+  text, approve it, copy it, download the picture or video, ask for another,
+  or discard it.
+- **Pictures of the persona itself**, in a task or in a chat: with its LoRA
+  if it has one, otherwise made from its portrait - and without the persona
+  when the picture is of something else (a breakfast table).
+
 ## 0.74.0 - 2026-11-03
 
 - **Personas**, in the menu: someone to chat with instead of the assistant -

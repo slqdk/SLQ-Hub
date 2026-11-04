@@ -218,6 +218,23 @@ def responder(body: dict) -> dict:
     system = str(msgs[0].get("content") or "") if msgs and msgs[0]["role"] == "system" else ""
     persona = re.match(r"You are ([^,.]+)[^\n]*? You are chatting with", system)
     if persona and "short title" not in low:       # Personas (0.74.0): in character; "husk"/"remember" notes it
+        offered = {t["function"]["name"] for t in body.get("tools") or []}
+        if text.startswith("Scheduled task") and "post_draft" in offered:     # 0.75.0: a task's post
+            video = "video_generate" in offered and "video" in low
+            if tools_done == 0 and "image_generate" in offered:
+                return {"content": "", "delay": 0.4, "tool_calls": [{"name": "image_generate", "arguments": {
+                    "prompt": "A woman in a red running jacket on a harbour path at sunset, smiling, photo",
+                    "me": True, "save_as": "post.png"}}]}
+            if tools_done == 1 and video:
+                return {"content": "", "delay": 0.4, "tool_calls": [{"name": "video_generate", "arguments": {
+                    "prompt": "she jogs towards the camera, slow push in", "image": "post.png",
+                    "save_as": "post.mp4"}}]}
+            if not any(m["role"] == "tool" and "Handed in" in str(m.get("content")) for m in msgs[start + 1:]):
+                media = ["post.mp4"] if video else ["post.png"] if "image_generate" in offered else []
+                return {"content": "", "delay": 0.4, "tool_calls": [{"name": "post_draft", "arguments": {
+                    "text": "Mandagsløb ✅ 10 km langs havnen i aftes - benene protesterede, hovedet jublede. Hvem "
+                            "løber med næste mandag? 🏃‍♀️\n\n#løb #mandagsløb #aarhus", "media": media}}]}
+            return {"content": "Lagt klar til dig.", "delay": 0.3}
         if tools_done == 0 and re.search(r"\b(husk|remember)\b", low):
             note = re.sub(r"^.*?\b(husk|remember)\b( at| that)?[:,]?\s*", "", text, flags=re.I | re.S)[:120]
             return {"content": "Det skal jeg nok huske.", "tool_calls": [{"name": "remember", "arguments": {

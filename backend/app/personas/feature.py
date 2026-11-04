@@ -9,3 +9,4 @@ def install(hub: Hub) -> None:
     hub.extras["personas"] = Personas(hub)             # 0.74.0: someone to chat with, the admin's alone
     hub.extras["routers"].append(routes.router)
     hub.extras["startup_hooks"].append(hub.extras["personas"].sweep_after_start)
+    hub.extras["startup_hooks"].append(hub.extras["personas"].start_schedule)      # 0.75.0: the tasks' times

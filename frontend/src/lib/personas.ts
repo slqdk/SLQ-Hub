@@ -10,12 +10,24 @@ export interface PersonaVariant { file: string; made: number; own?: boolean }
 export interface PersonaAudio { language: string; speech: string; voices: { id: string; description: string }[];
   note: string; expressive: boolean }
 export interface PersonaChat { id: number; title: string; updated_at: string; created_at: string; archived: number }
+/** 0.75.0: a task - at its days and time the persona makes a post for the owner's review. */
+export type TaskMedia = "picture" | "video" | "either" | "none";
+export interface PersonaTask {
+  id: string; title: string; instruction: string; days: number[]; time: string; media: TaskMedia; web: boolean;
+  enabled: boolean; chat_id: number | null; next_run: number | null; last_run: number | null; last_error: string;
+  last_post: string; running: boolean;
+}
+export interface PostMedia { file: string; kind: "picture" | "video" }
+export interface PersonaPost {
+  id: string; task: string; title: string; text: string; media: PostMedia[]; status: "draft" | "approved";
+  made: number; chat: number | null; persona: { id: string; name: string; picture: string };
+}
 export interface Persona {
   id: string; name: string; role: string; personality: string; speech: string; examples: string; greeting: string;
   language: string; model: string; level: "quick" | "think"; look: string; lora: string; strength: number;
   picture: string; variants: PersonaVariant[]; voice: string; voice_clip: string; voice_clip_seconds: number;
   expressiveness: number; web: boolean; pictures: boolean; memory: boolean; read_aloud: boolean;
-  created: number; updated: number;
+  created: number; updated: number; tasks: PersonaTask[];
   notes: string; notes_max: number; chats: PersonaChat[]; audio: PersonaAudio;
   job: { what: string; value?: number; max?: number } | null; error: string;
 }
@@ -26,6 +38,25 @@ export interface PersonaOptions { models: { id: string; name: string }[]; defaul
 
 export const personaFile = (pid: string, path: string) =>
   `/hub/api/personas/${pid}/file?path=${encodeURIComponent(path)}`;
+
+export const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const DAY_NAMES = ["Mondays", "Tuesdays", "Wednesdays", "Thursdays", "Fridays", "Saturdays", "Sundays"];
+
+/** "Mondays at 19:00", "Every day at 07:30", "Mon, Wed, Fri at 18:00". */
+export function scheduleText(t: { days: number[]; time: string }): string {
+  const d = [...t.days].sort();
+  const when = d.length === 7 ? "Every day" : d.length === 5 && d.every((x, i) => x === i) ? "Weekdays"
+    : d.length === 2 && d[0] === 5 && d[1] === 6 ? "Weekends" : d.length === 1 ? DAY_NAMES[d[0]]
+    : d.map((x) => DAYS[x]).join(", ");
+  return `${when} at ${t.time}`;
+}
+
+/** "Mon 9 Nov, 19:00" (local time). */
+export function whenText(epoch: number): string {
+  const t = new Date(epoch * 1000);
+  return `${t.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" })}, `
+    + t.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+}
 
 // ---------------------------------------------------------------- one voice at a time
 

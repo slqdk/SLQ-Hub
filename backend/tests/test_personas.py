@@ -393,7 +393,7 @@ def test_what_is_read_aloud_and_the_prompt_without_tools():
     assert S.guess_language("Good morning Søren! How are you today, Søren?") == "en"
     assert S.guess_language("Godmorgen Søren! Løb du i går?") == "da"
     assert S.tool_names({"memory": True, "web": False, "pictures": True}) == {"remember", "image_generate",
-                                                                             "view_image"}
+                                                                             "image_edit", "view_image"}
     text = persona_prompt({**S.DEFAULTS, "name": "Grete", "role": "", "language": ""}, user="Søren",
                           model_name="Qwen", tools=frozenset())
     assert text.startswith("You are Grete. You are chatting with Søren")

@@ -13,9 +13,10 @@ import { useApp } from "../state";
 import { Avatar } from "../components/Avatar";
 import { Draft, NumberDraft, PlayButton } from "../components/fields";
 import { ConfirmButton, Empty, Lamp, SwitchRow, Tabs } from "../components/ui";
+import { PostsTab, ReviewList, TasksTab } from "./PersonaTasks";
 
 type Act = (call: () => Promise<unknown>, done?: string) => Promise<unknown>;
-type Overview = { personas: PersonaItem[]; options: PersonaOptions };
+type Overview = { personas: PersonaItem[]; options: PersonaOptions; drafts: number };
 
 export function PersonasView({ id }: { id?: string }) {
   const { setSidebarOpen, toast } = useApp();
@@ -48,10 +49,10 @@ export function PersonasView({ id }: { id?: string }) {
     loadPersona();
   }, [loadPersona]);
   useEffect(() => () => stopPlaying(), []);
-  const working = !!persona?.job;
-  useEffect(() => {                                 // while portraits are made: how far, every two seconds
+  const working = !!persona?.job || !!persona?.tasks.some((t) => t.running);
+  useEffect(() => {                                 // while portraits or a post are made: how far, every few seconds
     if (!working) return;
-    const t = window.setInterval(loadPersona, 2000);
+    const t = window.setInterval(loadPersona, 2500);
     return () => window.clearInterval(t);
   }, [working, loadPersona]);
 
@@ -112,6 +113,7 @@ function PersonaList({ overview }: { overview: Overview }) {
       <p className="lead">Someone to chat with instead of the assistant: a runner who coaches you, a home cook, a
         grumpy old sailor. Say who they are and how they talk - they answer as themselves, in their own voice if you
         like, and remember what you tell them from one chat to the next.</p>
+      <ReviewList />
       <div className="row mv-new">
         <input className="input grow" placeholder="Name of a new persona" value={name} maxLength={40}
           onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && name.trim() && create()} />
@@ -140,7 +142,7 @@ function PersonaList({ overview }: { overview: Overview }) {
 
 // ---------------------------------------------------------------- a persona
 
-type Tab = "who" | "look" | "memory" | "chats";
+type Tab = "who" | "look" | "memory" | "tasks" | "posts" | "chats";
 
 function PersonaPage({ p, options, act, reload }: { p: Persona; options: PersonaOptions; act: Act;
   reload: () => Promise<void> }) {
@@ -180,11 +182,15 @@ function PersonaPage({ p, options, act, reload }: { p: Persona; options: Persona
         { id: "who", label: "Who" },
         { id: "look", label: "Picture and voice" },
         { id: "memory", label: "Memory" },
+        { id: "tasks", label: `Tasks${p.tasks.length ? ` (${p.tasks.length})` : ""}` },
+        { id: "posts", label: "Posts" },
         { id: "chats", label: `Chats (${p.chats.length})` },
       ]} />
       {tab === "who" && <WhoTab p={p} options={options} save={save} />}
       {tab === "look" && <LookTab p={p} options={options} act={act} save={save} />}
       {tab === "memory" && <MemoryTab p={p} act={act} save={save} reload={reload} />}
+      {tab === "tasks" && <TasksTab p={p} act={act} />}
+      {tab === "posts" && <PostsTab p={p} />}
       {tab === "chats" && <ChatsTab p={p} />}
     </>
   );

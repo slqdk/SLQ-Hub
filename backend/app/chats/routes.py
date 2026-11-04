@@ -24,7 +24,7 @@ log = logging.getLogger("hub.chats")
 
 router = APIRouter(prefix="/hub/api")
 MAX_UPLOAD = 512 * 1024 * 1024
-PERSONA_KEYS = ("persona", "persona_memory")      # 0.74.0: set by the Hub only
+PERSONA_KEYS = ("persona", "persona_memory", "persona_task")      # 0.74.0: set by the Hub only
 
 
 def _agent(request: Request):

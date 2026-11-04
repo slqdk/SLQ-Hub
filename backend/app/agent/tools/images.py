@@ -204,6 +204,16 @@ def _picture_model(ctx: ToolContext) -> str | None:
     return None
 
 
+def _persona_me(ctx: ToolContext) -> tuple | None:
+    """A chat with a persona that can be pictured here (0.75.0): (the personas, the persona, how: "lora" or
+    "portrait") - its pictures of itself (me: true) use its LoRA, or else an edit of its portrait. None anywhere
+    else, and where neither works (no model of the LoRA's kind, no model that edits)."""
+    store = ctx.hub.extras.get("personas")
+    p = store.of_chat(ctx.chat) if store is not None and _admins_turn(ctx) else None
+    way = store.me_way(p) if p is not None else ""
+    return (store, p, way) if way else None
+
+
 def _admins_turn(ctx: ToolContext) -> bool:
     """LoRAs are the admin's alone (0.49.0): never in a person's chat (their device's turn)."""
     return getattr(ctx.engine, "device", None) is None
@@ -272,21 +282,39 @@ async def image_generate(ctx: ToolContext, args: dict) -> ToolResult:
         return ToolResult("prompt is required", is_error=True)
     from ...images.pipeline import ImageError
     width, height = int(args.get("width") or 1024), int(args.get("height") or 1024)
+    model, loras, portrait = _picture_model(ctx), _loras(ctx), None
+    me = _persona_me(ctx) if args.get("me") else None
+    if me is not None:                       # a persona's picture of itself (0.75.0): its LoRA, else its portrait
+        store, p, way = me
+        from ...personas.store import PersonaError
+        try:
+            if way == "lora":
+                model, loras = store.portrait_model(p), [{"id": p["lora"], "strength": p.get("strength")}]
+            else:
+                portrait = store.file(p["id"], p["picture"]).read_bytes()
+        except PersonaError as exc:
+            return ToolResult(f"A picture of you cannot be made: {exc}", is_error=True)
 
     async def make(count: int, seed=None, label: str = "") -> list[dict]:
+        if portrait is not None:
+            return await pipe.edit(f"The person in the picture, with the same face, hair and build: {prompt}",
+                                   [portrait], seed=seed, fast=bool(args.get("fast")), ticket=ctx.ticket,
+                                   on_progress=await _progress(ctx, label), count=count)
         return await pipe.generate(prompt, width, height, count=count, seed=seed, fast=bool(args.get("fast")),
-                                   model=_picture_model(ctx), negative=args.get("negative") or "", ticket=ctx.ticket,
-                                   on_progress=await _progress(ctx, label), loras=_loras(ctx))
+                                   model=model, negative=args.get("negative") or "", ticket=ctx.ticket,
+                                   on_progress=await _progress(ctx, label), loras=loras)
     try:
         items = await make(int(args.get("count") or 1), args.get("seed"))
     except ImageError as exc:
         return gpu_failure("Image generation failed", exc)
     # At the Effort Extra each picture is checked, and one with a serious mistake made again (0.71.0)
     checked = await media_check.pictures(ctx, items, lambda n, label: make(n, None, label), prompt,
-                                         seeded=_seeded(args), progress=_note(ctx))
+                                         edit=portrait is not None, seeded=_seeded(args), progress=_note(ctx))
     items = checked.items if checked is not None else items
     paths = _save_outputs(ctx, items, args.get("save_as"), prompt)
     desc = ", ".join(f"{it['width']}x{it['height']} seed {it['seed']}" for it in items)
+    if portrait is not None:
+        desc += ", from your portrait"
     where = _saved_text(paths)
     used = items[0].get("prompt_used")
     enhanced = f"\nERNIE-Image's prompt enhancer turned the prompt into: {used[:2000]}" if used else ""
@@ -393,14 +421,17 @@ register(Tool("image_ocr", "Read the text in an image with Tesseract OCR (defaul
               "photos and screenshots your own vision is often better; use OCR for long printed text.",
               obj({"path": {"type": "string"}, "languages": {"type": "string"}}, ["path"]), image_ocr, group="images",
               read_only=True))
-def _generate_params() -> dict:
-    """No model and no LoRAs (0.59.0): the chat's picture menu chooses them."""
+def _generate_params(me: bool = False) -> dict:
+    """No model and no LoRAs (0.59.0): the chat's picture menu chooses them. me (0.75.0): a persona's picture of
+    itself."""
     params = {"prompt": {"type": "string"}, "width": {"type": "integer"}, "height": {"type": "integer"},
               "count": {"type": "integer", "description": "1-4, default 1. More only when the user asks for "
                                                            "several pictures or for options."},
               "seed": {"type": "integer"},
               "fast": {"type": "boolean"}, "negative": {"type": "string"},
               "save_as": {"type": "string", "description": "Path in the working folder"}}
+    if me:
+        params["me"] = {"type": "boolean", "description": "true when you yourself are in the picture"}
     return obj(params, ["prompt"])
 
 
@@ -410,7 +441,7 @@ def _lora_lines(ctx: ToolContext, entry: dict | None) -> str:
     picture model (`entry`)."""
     from ...images.pipeline import family
     store = ctx.hub.extras.get("loras")
-    if store is None or not _admins_turn(ctx):
+    if store is None or not _admins_turn(ctx) or _in_persona_chat(ctx):    # a persona has its own (me: true)
         return ""
     items = store.list()
     if not items:
@@ -440,6 +471,11 @@ def _lora_lines(ctx: ToolContext, entry: dict | None) -> str:
     return text
 
 
+def _in_persona_chat(ctx: ToolContext) -> bool:
+    store = ctx.hub.extras.get("personas")
+    return store is not None and store.of_chat(ctx.chat) is not None
+
+
 def _generate_dynamic(ctx: ToolContext) -> tuple[str, dict]:
     """The downloaded picture models, the chat's own first, each with how to
     write its prompt (tags for SDXL anime models, sentences for the rest)."""
@@ -448,6 +484,14 @@ def _generate_dynamic(ctx: ToolContext) -> tuple[str, dict]:
     gens = pipe.installed("generate")
     mine = pipe.chosen(_picture_model(ctx))
     chosen = next((e for e in gens if e["id"] == mine), gens[0] if gens else None)
+    me = _persona_me(ctx)
+    if me is not None:                      # a persona (0.75.0): its own pictures, no picture menu to point to
+        p = me[1]
+        how = "its LoRA keeps you looking like yourself" if me[2] == "lora" else "it is made from your portrait"
+        look = f" You look like this: {p['look']}" if p.get("look") else ""
+        return (f"Make a picture from a description: write a detailed English prompt - subject, setting, light, "
+                f"composition. me: true when you are in the picture yourself ({how}); leave it out for a picture "
+                f"without you.{look} Takes 15-90 s.", _generate_params(True))
     if chosen is None:
         return GENERATE_TEXT, _generate_params()
     return (f"Generate images from a text prompt with {Catalog.label(chosen)}, this chat's picture model. The user "

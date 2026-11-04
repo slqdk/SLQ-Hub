@@ -2868,6 +2868,77 @@ Movies - the gate keeps people off the routes, and the routes refuse them too.
   reads, as the assistant can into its memory; the owner sees every note on
   the Memory tab.
 
+### Persona tasks and posts (0.75.0)
+
+Søren: "I need to be able to give my persona tasks... like: At 7PM every
+monday, Prepare a social media post with a picture or video about
+something.. a comment on the news, that resembles the personas opinions, an
+exercise statement, a breakfast picture and quote.. and then list the posts
+for me to review" - and "i have a lora for her". Nothing is published: the
+Hub has no account on any network, and a post nobody has read should not go
+out under anyone's name. The persona prepares; the owner reviews, copies or
+downloads, and posts it himself. `app/personas/tasks.py` (a mixin of
+`Personas`), `views/PersonaTasks.tsx`.
+
+- **A task** (`tasks` in persona.json, at most 20 a persona): a title, what to
+  do in the owner's words, the days (0 Monday) and the time (HH:MM in the
+  household's time zone - `TZ`, default Europe/Copenhagen - summer time
+  followed), what the post has (a picture, a video, either, or text only -
+  refused when no model of that kind is downloaded, when it is set and again
+  when it runs), whether the persona may look things up for it (the web for
+  that task's runs only, and without the question when Internet for the
+  assistant is "ask": nobody is there to answer it), on or off. The next time
+  is worked out when the days, time or switch change; a change of words keeps
+  a time that is due.
+- **The schedule**: a startup hook looks every 30 s. A due task starts once.
+  After the Hub was off, the newest missed time counts: made up for when it is
+  less than six hours ago (`CATCH_UP`), else left out, and the task says so. A
+  task whose last run still works waits for its next time (and says so); a
+  task that cannot start does not hold up the others. A run that a restart
+  cut off says so at the next start (`working` on the task).
+- **A run** happens in the task's own chat with the persona - archived: not
+  one of the owner's conversations, never reused by Chat, not among the titles
+  a persona's prompt lists; the persona page lists it under the task's name.
+  The Hub writes `Scheduled task "<title>" - Monday 9 November 2026, 19:00:`
+  and the instruction as a user message and starts a turn: the persona's
+  prompt with a "Scheduled tasks" section (nobody is there to answer: do it
+  alone, hand it in with post_draft, say something new each time - the earlier
+  posts are above in the same chat), its model and level, and the tools the
+  task needs - the persona's own, the web if the task has it, `image_generate`
+  `image_edit` `view_image` for a picture, `video_generate` for a video, and
+  `post_draft`. Each run starts from the persona's notes as they are then (a
+  week has gone by), not the chat's first snapshot. A chat the owner is
+  talking in is not written into ("Not started: its chat is working on an
+  answer"); a "Scheduled task" message a restart left without an answer is
+  replaced, not stacked.
+- **post_draft** (`agent/tools/persona.py`; only in a task's chat, not in
+  subagents): the post's text (at most 5000 characters) and up to four files
+  from the chat's folder - pictures (png, jpg, webp, gif; Pillow verifies them;
+  50 MB) or videos (mp4, webm by their first bytes; 500 MB) - read without
+  following a link and copied into the persona's `posts/`. A task that needs a
+  picture or a video refuses a post without one, with what to do. Handed in
+  again in the same run, the new post replaces the draft. Posts are kept in
+  `posts.json`: the newest 500, drafts never dropped.
+- **Pictures of the persona itself**: in a persona's chats `image_generate`
+  gets `me` where such a picture can be made (`Personas.me_way`): with the
+  persona's LoRA on a downloaded model of its kind (the model the portraits
+  use, the trigger word and strength), else as an edit of the chosen portrait
+  ("The person in the picture, with the same face, hair and build: ...") when
+  an edit model is downloaded; neither, no `me` and no word of it in the
+  prompt. The prompt says when to leave it out (a breakfast table, a view),
+  and for a video of itself: the picture first, then the video from it. The
+  Hub's list of LoRAs for the assistant stays out of a persona's prompt.
+- **The review**: the Personas page lists the drafts of every persona ("Posts
+  to review"), each persona's Posts tab all of its posts. A post shows its
+  pictures or video and its text: change the text, Approve (or back to
+  review), Copy the text, Download, Another (the task runs now), its chat,
+  Discard (its files go). The Tasks tab: when it runs next, the last error or
+  post, Make one now, Change, on/off, Delete (not while it works). A persona
+  is not deleted while one of its tasks works (409).
+- Known limits: weekdays and a time only (no "first Monday of the month");
+  nothing is made while the Hub is off beyond the six hours; with "either"
+  the model chooses.
+
 ---
 
 ## 9. Libraries (multimodal RAG)

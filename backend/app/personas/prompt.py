@@ -35,8 +35,21 @@ WEB = """- web_search and web_fetch let you look things up when {user} asks abou
 that may have changed (news, prices, opening hours). Tell what you found in your own words, and say where it is \
 from when that matters."""
 PICTURES = """- image_generate makes a picture (write its prompt in English); use it when {user} asks for a picture \
-or one says it better than words. view_image looks at a picture in your folder."""
+or one says it better than words.{me}{edit} view_image looks at a picture in your folder."""
+ME_LORA = """ With me: true the picture is of you - your LoRA keeps you looking like yourself; leave it out for a \
+picture without you (a breakfast table, a view)."""
+ME_PORTRAIT = """ With me: true the picture is of you, made from your portrait so that you look like yourself; leave \
+it out for a picture without you (a breakfast table, a view)."""
+VIDEO = """- video_generate makes a short video (5 seconds or so). For a video of yourself, make the picture of you \
+first, then the video from it (its image)."""
 CANNOT = "- You cannot {what} - if {user} asks, say so the way {name} would rather than pretend."
+TASKS = """# Scheduled tasks
+This is the chat of a task {user} gave you. Messages that start with "Scheduled task" come from {user}'s schedule, \
+not from {user} typing: nobody is there to answer questions, so do it on your own. Make what the post needs - look \
+things up, make the picture or the video - then hand it in with post_draft: the post's text exactly as it is to be \
+posted, in your voice and language (hashtags if they fit), and the picture or video. {user} reviews every post \
+before it goes anywhere. Your earlier posts for this task are above: say something new each time. Once it is handed \
+in, answer with one short line."""
 
 
 CONDENSE = """Condense the conversation above between {user} and {name} into the notes {name} goes on from without \
@@ -62,7 +75,9 @@ def when(stamp: str) -> str:
 
 
 def persona_prompt(p: dict, *, user: str, model_name: str, notes: str = "", recent: list[tuple[str, str]] = (),
-                   summary: str = "", tools: set[str] | frozenset = frozenset(), now: datetime | None = None) -> str:
+                   summary: str = "", tools: set[str] | frozenset = frozenset(), now: datetime | None = None,
+                   task: bool = False, me: str = "") -> str:
+    """me: how a picture of the persona itself is made here - "lora", "portrait" or "" (Personas.me_way)."""
     name = p["name"]
     role = f", {p['role'].rstrip('.')}" if p.get("role") else ""
     lang = LANG_FIXED.format(language=p["language"], user=user) if p.get("language") else LANG_USER.format(user=user)
@@ -82,8 +97,14 @@ def persona_prompt(p: dict, *, user: str, model_name: str, notes: str = "", rece
     cannot = [what for what, ok in (("look things up on the internet", web), ("make pictures", pictures)) if not ok]
     cannot += ["set reminders", "send messages"]
     what = ", ".join(cannot[:-1]) + " or " + cannot[-1]
-    can = [MEMORY if "remember" in tools else NO_MEMORY] + [WEB] * web + [PICTURES] * pictures + [CANNOT]
-    parts.append("# What you can do\n" + "\n".join(x.format(user=user, name=name, what=what) for x in can))
+    me = ME_LORA if me == "lora" else ME_PORTRAIT if me == "portrait" else ""
+    can = ([MEMORY if "remember" in tools else NO_MEMORY] + [WEB] * web + [PICTURES] * pictures
+           + [VIDEO] * ("video_generate" in tools) + [CANNOT])
+    edit = " image_edit changes a picture in your folder." if "image_edit" in tools else ""
+    parts.append("# What you can do\n" + "\n".join(x.format(user=user, name=name, what=what, me=me, edit=edit)
+                                                   for x in can))
+    if task:
+        parts.append(TASKS.format(user=user))
     now = now or datetime.now(local_tz())
     parts.append(f"Today is {now.strftime('%A %d %B %Y')}. Each message from {user} starts with the local date and "
                  "time it was sent, in square brackets: use it when the time of day matters, and never write such a "
