@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.76.1, 2026-11-04)
+## State (0.76.2, 2026-11-04)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -1022,6 +1022,11 @@ in Chromium against the dev server the same check as 0.76.0's with a configurati
 reviewed by a separate agent (the posting is 0.76.0's, reviewed; the new part is the sign-in and the API's host).
 tests/test_training.py::test_the_trainer_stops_a_job failed in two full runs that day and passes on its own (three
 runs of the file): the fake ai-toolkit was still "stopping" 10 s after SIGINT under the suite's load - not looked into.
+0.76.2: Søren's configuration made (ID 1816854056024329, "Instagram Login Compatible", the token "System-user access
+token (SUAT)", expiration "Never"); the dashboard's own Login URL begins
+`https://www.facebook.com/dialog/oauth?client_id=1093705243490654&config_id=1816854056024329&display=popup&override_default_response_type=true&re...`
+(the rest cut off in his screenshot): the Hub's dialog URL now sends override_default_response_type=true as well
+(display=popup is left out - the Hub's page goes to the dialog itself, not a popup).
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
 host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU

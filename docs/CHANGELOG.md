@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.76.2 - 2026-11-04
+
+- Instagram's Unified login asks Meta for its sign-in exactly as Meta's own
+  login link does.
+
 ## 0.76.1 - 2026-11-04
 
 - **Instagram with Unified login.** Meta no longer gives new apps "Instagram

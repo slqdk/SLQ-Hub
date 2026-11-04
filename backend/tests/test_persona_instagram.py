@@ -484,6 +484,7 @@ async def test_unified_login_for_an_app_made_since_october_2026(signed_in, app, 
     assert f"{u.scheme}://{u.netloc}{u.path}" == "https://www.facebook.com/dialog/oauth"
     assert q["client_id"] == "1093705243490654" and q["config_id"] == "1234567890123" and q["prompt"] == "login"
     assert q["response_type"] == "code" and q["redirect_uri"] == "https://hub.test/hub/api/personas/instagram/callback"
+    assert q["override_default_response_type"] == "true"                      # as Meta's own Login URL has it
     assert "scope" not in q                                                   # the configuration says what it asks
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="https://hub.test") as outside:
         r = await outside.get(f"{API}/instagram/callback", params={"code": "CODE1", "state": q["state"]})

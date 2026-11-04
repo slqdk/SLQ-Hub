@@ -2980,7 +2980,9 @@ done in the profile text". `app/personas/instagram.py` (a mixin of `Personas`).
   instagram_basic and instagram_content_publish among its permissions). With a
   configuration ID in the settings the Hub signs in through Meta's dialog
   (`www.facebook.com/dialog/oauth`: the app's ID - not an Instagram app ID -,
-  `config_id`, `prompt=login`: Instagram or Facebook), swaps the code at
+  `config_id`, `response_type=code` with `override_default_response_type=true`
+  as the dashboard's own Login URL has it (0.76.2), `prompt=login`: Instagram
+  or Facebook), swaps the code at
   graph.facebook.com with the app's ID and secret for the system-user token,
   finds the account with `/me/assigned_instagram_accounts` (the first, when
   there are several - the box says so) and posts through graph.facebook.com:

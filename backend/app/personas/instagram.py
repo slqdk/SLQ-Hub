@@ -312,8 +312,10 @@ class InstagramJobs:
         self.ig_states[state] = {"pid": pid, "back": back, "exp": now + STATE_TTL}
         config = self.ig_config()
         if config:                                     # Unified login: Instagram or Facebook, both offered (prompt)
+            # as the dashboard's own Login URL has it (seen 2026-11-04): a system-user token wants the code
             return f"{DIALOG}?" + urlencode({"client_id": app_id, "config_id": config, "redirect_uri": redirect,
-                                             "response_type": "code", "state": state, "prompt": "login"})
+                                             "response_type": "code", "override_default_response_type": "true",
+                                             "state": state, "prompt": "login"})
         return f"{AUTHORIZE}?" + urlencode({"client_id": app_id, "redirect_uri": redirect, "response_type": "code",
                                             "scope": SCOPES, "state": state, "force_reauth": "true"})
 
