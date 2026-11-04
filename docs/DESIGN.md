@@ -3555,7 +3555,19 @@ whether the work lives up to what is expected.
   PyTorch builds it in one buffer; ComfyUI's estimate for the whole decode is
   3.9 GiB). With `--reserve-vram 6` too, the clip from a picture came out
   right (0.73.1: the default in `.env`, and the self-test warns without
-  them). ComfyUI's log says the flag "will be removed soon": a ComfyUI
+  them). It was not enough on 2026-11-04: Laura's 2-s clips from a picture
+  (the 5B Turbo, 864x1056) failed five times out of five in the decode -
+  ComfyUI's log: the text encoder only partly unloaded for the 5B (2.7 GB of
+  it left next to the 5B's 9.5 GB and the VAE's 1.3 GB), the decode given 4.7
+  GB by ComfyUI's estimate, and its 3D convolution asking for 6.75 GiB in one
+  piece with 6.4 GiB free. 0.76.3: a decode that runs out of memory is done
+  again at once in 256-px tiles (same 64-px overlap, about a third of the
+  room): after an out-of-memory ComfyUI unloads every model and keeps the
+  outputs of the nodes that ran before (its cache - only `/free` with
+  `free_memory` clears it, which the Hub sends before a chat model loads, not
+  between the two tries), so the second graph - the same but for the
+  decode's tile size - runs only the decode, with the card to itself. Twice
+  short, or the sampling short, is an error as before. ComfyUI's log says the flag "will be removed soon": a ComfyUI
   update has to be checked with a video from a picture. Unknown on the 7900 XTX:
   the 14B pair's time, fast and full, and whether it fits the VM's RAM; the fp8 experts on gfx1100; and the 14B pair's memory -
   ComfyUI loads the high-noise expert, then the low-noise one (14.3 GB each),

@@ -515,6 +515,14 @@ def make_comfy(state: dict) -> FastAPI:
     @app.post("/prompt")
     async def prompt(request: Request):
         body = await request.json()
+        if state.get("files"):                                # like ComfyUI: a LoadImage's file must be there
+            for node in body["prompt"].values():
+                name = (node.get("inputs") or {}).get("image") if node.get("class_type") == "LoadImage" else None
+                if isinstance(name, str) and not (state["files"] / "input" / name).is_file():
+                    return JSONResponse({"error": {"type": "prompt_outputs_failed_validation",
+                                                   "message": "Prompt outputs failed validation"},
+                                         "node_errors": {"x": {"errors": [{"message": f"Invalid image file: {name}"}]}}},
+                                        status_code=400)
         state["prompts"].append(body["prompt"])
         state.setdefault("queued_at", []).append(time.monotonic())
         pid = f"p{len(state['prompts'])}"
@@ -574,10 +582,11 @@ def make_comfy(state: dict) -> FastAPI:
             if node.get("class_type") == "SLQSeedVC":         # what the conversion did, as the node reports it
                 outputs[node_id] = {"text": [state.get("vc_text", json.dumps(
                     {"semitones": 12, "reference_seconds": 18.5, "seconds": 61.0, "rate": 44100}))]}
-        if state.get("fail_with"):
+        if state.get("fail_with") or n in (state.get("fail_prompts") or {}):
+            node, message = (state.get("fail_node", "SLQSeedVC"), state["fail_with"]) if state.get("fail_with") \
+                else state["fail_prompts"][n]                 # (0.76.3: one prompt fails, the next may not)
             return {pid: {"status": {"status_str": "error", "completed": False, "messages": [
-                ["execution_error", {"node_type": state.get("fail_node", "SLQSeedVC"),
-                                     "exception_message": state["fail_with"]}]]},
+                ["execution_error", {"node_type": node, "exception_message": message}]]},
                 "outputs": {}}}
         return {pid: {"status": {"status_str": "success", "completed": True, "messages": []}, "outputs": outputs}}
 

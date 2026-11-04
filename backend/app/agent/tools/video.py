@@ -103,9 +103,10 @@ async def video_generate(ctx: ToolContext, args: dict) -> ToolResult:
     display: dict = {"video": [{"path": rel, "seconds": out["seconds"], "model": out["model"]["name"]}]}
     if checked is not None:
         display["checked"] = checked.record
+    again = "; decoded again in smaller tiles - the card ran short" if out.get("smaller_tiles") else ""
     return ToolResult(f"Saved {rel}{source}: {out['seconds']:g} s{cut}, {out['frames']} frames at {out['fps']} fps, "
                       f"{out['width']}x{out['height']}, {out['model']['name']}{quality_text}, seed {out['seed']} "
-                      f"({out['compute']:.0f} s on the GPU). It has no sound. {_reach(ctx, out['data'])}"
+                      f"({out['compute']:.0f} s on the GPU{again}). It has no sound. {_reach(ctx, out['data'])}"
                       f"{checked.text if checked is not None else ''}", display=display)
 
 

@@ -35,6 +35,11 @@ WHAT = {"t2v": "video from a description", "i2v": "video from a picture",
         "flf2v": "video from a first and a last picture"}
 
 
+def decode_short(message: str) -> bool:
+    """The decode (VAEDecodeTiled) ran out of the card's memory - not the sampling: that would fail the same way."""
+    return "VAEDecodeTiled" in message and "out of memory" in message.lower()
+
+
 def abilities(entry: dict | None) -> list[str]:
     return list((entry or {}).get("abilities") or [])
 
@@ -158,8 +163,9 @@ class VideoPipeline:
         return names
 
     async def _run(self, graph: dict, ticket: Ticket | None, owner: str, priority: str, label: str,
-                   on_progress=None) -> tuple[bytes, float]:
-        """On the card through the scheduler; the pictures it loaded leave ComfyUI's input folder afterwards."""
+                   on_progress=None, cleanup: bool = True) -> tuple[bytes, float]:
+        """On the card through the scheduler; the pictures it loaded leave ComfyUI's input folder afterwards (not
+        with cleanup False: the graph may be run again)."""
         own = None
         t0 = time.monotonic()
         try:
@@ -182,7 +188,8 @@ class VideoPipeline:
         finally:
             if own is not None:
                 await own.release()
-            self.hub.comfy.delete_files([("input", "", n) for n in input_images(graph)])
+            if cleanup:
+                self.hub.comfy.delete_files([("input", "", n) for n in input_images(graph)])
 
     async def generate(self, *, prompt: str, negative: str = "", image: bytes | None = None,
                        last_image: bytes | None = None, seconds: float = 5.0, orientation: str = "landscape",
@@ -228,20 +235,39 @@ class VideoPipeline:
                       fps=fps, start_image=names.get("start"), sampler=str(s.get("sampler") or "euler"),
                       scheduler=str(s.get("scheduler") or "simple"), shift=float(s.get("shift") or 5.0))
         if family == "wan2.2-5b":
-            graph = W.wan_5b(steps=int(s.get("steps") or 20), cfg=float(s.get("cfg") or 5.0),
-                             lora_strength=float(s.get("lora_strength") or 1.0), **common, **files)
+            def build(tile: int) -> dict:
+                return W.wan_5b(steps=int(s.get("steps") or 20), cfg=float(s.get("cfg") or 5.0),
+                                lora_strength=float(s.get("lora_strength") or 1.0), tile=tile, **common, **files)
         else:
             # the template's steps, split and cfg for fast or full - and its own for an ability that differs (the
             # first-to-last-frame template runs full quality at shift 8 and cfg 4)
             mode = s.get(f"{ability}_{quality}") or s.get(quality) or {}
             common["shift"] = float(mode.get("shift") or common["shift"])
             steps, split = int(mode.get("steps") or 4), int(mode.get("split") or 2)
-            graph = W.wan_14b(steps=steps, split=split, cfg=float(mode.get("cfg") or 1.0), end_image=names.get("end"),
-                              **common, **files)
+
+            def build(tile: int) -> dict:
+                return W.wan_14b(steps=steps, split=split, cfg=float(mode.get("cfg") or 1.0),
+                                 end_image=names.get("end"), tile=tile, **common, **files)
             on_progress = one_bar(on_progress, split, steps)
         n = W.frames(seconds, fps)
-        data, took = await self._run(graph, ticket, owner, priority, f"video: {prompt[:60]}", on_progress)
+        label = f"video: {prompt[:60]}"
+        graph = build(W.TILE)
+        smaller = False
+        try:
+            try:
+                data, took = await self._run(graph, ticket, owner, priority, label, on_progress, cleanup=False)
+            except VideoError as exc:
+                if not decode_short(str(exc)):
+                    raise
+                # 0.76.3: the decode ran out of memory (on AMD one 3D convolution of a tile asks for its room in one
+                # piece). ComfyUI has unloaded every model after it and keeps what it made before the decode: the
+                # same graph with smaller tiles decodes again - only the decode runs, with the card to itself.
+                smaller = True
+                graph = build(W.SMALL_TILE)
+                data, took = await self._run(graph, ticket, owner, priority, label, on_progress, cleanup=False)
+        finally:
+            self.hub.comfy.delete_files([("input", "", nm) for nm in input_images(graph)])
         return {"data": data, "width": width, "height": height, "frames": n, "fps": fps,
                 "seconds": round(n / fps, 2), "seed": sd, "model": entry, "compute": round(took, 1),
                 "quality": quality if family == "wan2.2-14b" else None, "ability": ability,
-                "max_seconds": MAX_SECONDS}
+                "max_seconds": MAX_SECONDS, "smaller_tiles": smaller}

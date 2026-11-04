@@ -463,3 +463,35 @@ async def test_the_hugging_face_dialog_points_to_the_hubs_own_models(signed_in, 
     assert r.status_code == 200 and r.json()["in_hub"][0]["id"] == "seed-vc"     # still pointed there
     r = await signed_in.get("/hub/api/models/hf/search", params={"q": "nothing like it"})
     assert r.status_code == 502
+
+
+async def test_a_decode_that_runs_short_is_done_again_in_smaller_tiles(signed_in, app, fakes, tmp_path):
+    """0.76.3, Laura's 2-s clips on 2026-11-04: the 5B's decode asked for 6.75 GiB in one piece with 6.4 GiB free -
+    five times. ComfyUI unloads every model after it and keeps what it made before: the same graph with 256-px tiles
+    decodes again, the picture still in ComfyUI's input folder for it."""
+    hub = app.state.hub
+    hub.comfy.files = fakes.comfy["files"] = tmp_path / "comfy"
+    install(app, "wan2.2-5b")
+    c = await new_chat(signed_in)
+    put(app, c["id"], "photos/me.jpg", picture((600, 900), "JPEG"))
+    short = "CUDA out of memory. Tried to allocate 6.75 GiB. GPU 0 has a total capacity of 23.98 GiB of which 6.42 GiB is free."
+    fakes.comfy["fail_prompts"] = {1: ["VAEDecodeTiled", short]}
+    res = await call(app, signed_in, c["id"], fakes, {"prompt": "she smiles and blows a kiss", "image": "photos/me.jpg",
+                                                      "seconds": 2})
+    assert res["ok"], res
+    assert "decoded again in smaller tiles - the card ran short" in res["text"]
+    first, second = fakes.comfy["prompts"]
+    assert one(first, "VAEDecodeTiled")["tile_size"] == 512 and one(second, "VAEDecodeTiled")["tile_size"] == 256
+    assert one(second, "VAEDecodeTiled")["overlap"] == 64
+    rest = [{k: v for k, v in g.items() if v["class_type"] != "VAEDecodeTiled"} for g in (first, second)]
+    assert rest[0] == rest[1]                                 # all else the same: ComfyUI's cache has it
+    assert not any((tmp_path / "comfy" / "input").iterdir())  # the picture left ComfyUI's input folder after both
+    # short twice: said so, not a third time
+    fakes.comfy["fail_prompts"] = {3: ["VAEDecodeTiled", short], 4: ["VAEDecodeTiled", short]}
+    res = await call(app, signed_in, c["id"], fakes, {"prompt": "she waves", "image": "photos/me.jpg", "seconds": 2})
+    assert not res["ok"] and "out of memory" in res["text"] and len(fakes.comfy["prompts"]) == 4
+    assert not any((tmp_path / "comfy" / "input").iterdir())
+    # the sampling short of memory is not tried again: it would fail the same way
+    fakes.comfy["fail_prompts"] = {5: ["KSampler", "HIP out of memory"]}
+    res = await call(app, signed_in, c["id"], fakes, {"prompt": "she laughs", "seconds": 2})
+    assert not res["ok"] and "KSampler: HIP out of memory" in res["text"] and len(fakes.comfy["prompts"]) == 5

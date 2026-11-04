@@ -152,7 +152,9 @@ async def test_a_video_out_of_memory_is_the_cards_fault_and_its_job_is_cancelled
     assert results[0]["text"].startswith("Video generation failed: ComfyUI reported an error: VAEDecodeTiled: CUDA out "
                                          "of memory") and "do not repeat it" in results[0]["text"]
     assert not any(e["type"] == "escalated" for e in run.events)
-    pids = [f"p{i}" for i in range(1, 4)]
+    # each call's decode done again in smaller tiles first (0.76.3) - two jobs a call, each dropped
+    assert [g["10"]["inputs"]["tile_size"] for g in fakes.comfy["prompts"]] == [512, 256] * 3
+    pids = [f"p{i}" for i in range(1, 7)]
     assert [i.get("prompt_id") for i in fakes.comfy["interrupts"]] == pids
     assert [q.get("delete") for q in fakes.comfy["queue_edits"]] == [[p] for p in pids]
 

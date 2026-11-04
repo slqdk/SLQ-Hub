@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.76.3 - 2026-11-04
+
+- Fixed: videos made from a picture could fail at the very end ("out of
+  memory" in the decode), every time. The Hub now decodes such a video again
+  at once in smaller pieces; only that last step runs again.
+
 ## 0.76.2 - 2026-11-04
 
 - Instagram's Unified login asks Meta for its sign-in exactly as Meta's own

@@ -43,10 +43,16 @@ def negative(extra: str) -> str:
     return f"{WAN_NEGATIVE}，{extra}" if extra else WAN_NEGATIVE
 
 
-def _decode(samples: list, vae: list) -> dict:
+TILE = 512                     # the decode's tiles; SMALL_TILE when the card ran short (pipeline.py, 0.76.3)
+SMALL_TILE = 256
+
+
+def _decode(samples: list, vae: list, tile: int = TILE) -> dict:
     """The frames from the latent in 512-px tiles (VAEDecodeTiled's default size), each over the whole clip: the
-    node's largest temporal_size, so the clip is one tile in time (its overlap then does nothing)."""
-    return {"class_type": "VAEDecodeTiled", "inputs": {"samples": samples, "vae": vae, "tile_size": 512, "overlap": 64,
+    node's largest temporal_size, so the clip is one tile in time (its overlap then does nothing). On AMD one 3D
+    convolution of a 512-px tile of the 5B asks for 6.75 GiB in one piece (item 57; Laura's clips on 2026-11-04 with
+    6.4 GiB free); a 256-px tile, with the same 64-px overlap, about a third of that."""
+    return {"class_type": "VAEDecodeTiled", "inputs": {"samples": samples, "vae": vae, "tile_size": tile, "overlap": 64,
                                                         "temporal_size": 4096, "temporal_overlap": 8}}
 
 
@@ -58,7 +64,7 @@ def _save(video_ref: list, prefix: str) -> dict:
 def wan_5b(*, prompt: str, negative_prompt: str = "", seconds: float, width: int, height: int, seed: int, unet: str,
            text_encoder: str, vae: str, steps: int = 20, cfg: float = 5.0, shift: float = 8.0,
            sampler: str = "uni_pc", scheduler: str = "simple", fps: int = 24, start_image: str | None = None,
-           lora: str | None = None, lora_strength: float = 1.0, prefix: str = "video/hub") -> dict:
+           lora: str | None = None, lora_strength: float = 1.0, prefix: str = "video/hub", tile: int = TILE) -> dict:
     """lora given: the Turbo (or another LoRA on the 5B) between the model and its sampling."""
     graph = {
         "1": {"class_type": "UNETLoader", "inputs": {"unet_name": unet, "weight_dtype": "default"}},
@@ -74,7 +80,7 @@ def wan_5b(*, prompt: str, negative_prompt: str = "", seconds: float, width: int
               "inputs": {"model": ["2", 0], "positive": ["5", 0], "negative": ["6", 0], "latent_image": ["8", 0],
                          "seed": int(seed) % 2**63, "steps": int(steps), "cfg": float(cfg), "sampler_name": sampler,
                          "scheduler": scheduler, "denoise": 1.0}},
-        "10": _decode(["9", 0], ["4", 0]),
+        "10": _decode(["9", 0], ["4", 0], tile),
         "11": {"class_type": "CreateVideo", "inputs": {"images": ["10", 0], "fps": float(fps)}},
         "12": _save(["11", 0], prefix),
     }
@@ -92,7 +98,7 @@ def wan_14b(*, prompt: str, negative_prompt: str = "", seconds: float, width: in
             high: str, low: str, text_encoder: str, vae: str, lora_high: str | None = None,
             lora_low: str | None = None, steps: int = 4, split: int = 2, cfg: float = 1.0, shift: float = 5.0,
             sampler: str = "euler", scheduler: str = "simple", fps: int = 16, start_image: str | None = None,
-            end_image: str | None = None, prefix: str = "video/hub") -> dict:
+            end_image: str | None = None, prefix: str = "video/hub", tile: int = TILE) -> dict:
     """The 14B pair: lora_high/lora_low given = the 4-step LoRAs. A start_image makes it picture-to-video (the
     i2v experts), an end_image too first-to-last-frame; neither, text-to-video (the t2v experts)."""
     if end_image and not start_image:
@@ -138,7 +144,7 @@ def wan_14b(*, prompt: str, negative_prompt: str = "", seconds: float, width: in
                    "inputs": {"model": ["6", 0], "add_noise": "disable", "noise_seed": 0, **common,
                               "latent_image": ["14", 0], "start_at_step": split, "end_at_step": 10000,
                               "return_with_leftover_noise": "disable"}}
-    graph["16"] = _decode(["15", 0], ["8", 0])
+    graph["16"] = _decode(["15", 0], ["8", 0], tile)
     graph["17"] = {"class_type": "CreateVideo", "inputs": {"images": ["16", 0], "fps": float(fps)}}
     graph["18"] = _save(["17", 0], prefix)
     return graph

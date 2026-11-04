@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.76.2, 2026-11-04)
+## State (0.76.3, 2026-11-04)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -1027,6 +1027,21 @@ token (SUAT)", expiration "Never"); the dashboard's own Login URL begins
 `https://www.facebook.com/dialog/oauth?client_id=1093705243490654&config_id=1816854056024329&display=popup&override_default_response_type=true&re...`
 (the rest cut off in his screenshot): the Hub's dialog URL now sends override_default_response_type=true as well
 (display=popup is left out - the Hub's page goes to the dialog itself, not a popup).
+0.76.3, Søren: "i cant seem to get this video made" - Laura's task "Lørdag aften påklædning" (a 2-s video). His chat
+293 export and ComfyUI's log (`docker logs slq-hub-comfyui`, 13:15-13:17): every 2-s clip from her picture (the 5B
+Turbo, 864x1056) sampled its 4 steps and then ran out of memory in VAEDecodeTiled - five times - "Tried to allocate
+6.75 GiB ... 6.42 GiB is free ... 15.16 GiB is allocated by PyTorch"; the log shows why: the text encoder unloaded only
+partly for the 5B ("Unloaded partially: 1936.48 MB freed, 4483.00 MB remains loaded"), again for the VAE (2723 MB
+left), the 5B (9536 MB) kept, the VAE given "4658.41 MB usable" by ComfyUI's estimate, the allocator's two tries at
+7,247,757,312 bytes with 3.26 and then 6.89 GB free; after it "Got an OOM, unloading all loaded models". His first
+run's 5-s clip, made right after a picture of hers, decoded. Twice the next try found ComfyUI not answering for 300 s,
+and once the model supervisor too (10:49-11:04 and 11:44-11:53; their logs not seen). The fix (DESIGN §8 Video): a
+decode short of memory is done again at once in 256-px tiles - ComfyUI v0.42.3's executor (execution.py read at the
+tag: `unload_all_models()` on an OOM, outputs kept in `caches.outputs`; only `free_memory` resets them) re-runs only
+the decode for the same graph with the decode changed. Tests: tests/test_video.py (the fake ComfyUI fails a given
+prompt and checks a LoadImage's file is still there), each part failing without the fix. NOT seen on the card: that the
+second try decodes (the cache and the room after the unloading), and how long a 256-px decode takes; why ComfyUI stopped
+answering after an OOM (item 56's question again).
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
 host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU
