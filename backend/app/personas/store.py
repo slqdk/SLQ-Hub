@@ -49,7 +49,7 @@ PRIORITY = "normal"              # a chat's turn goes first
 DEFAULTS = {"name": "", "role": "", "personality": "", "speech": "", "examples": "", "greeting": "", "language": "",
             "model": "", "level": "quick", "look": "", "lora": "", "strength": 1.0, "picture": "", "variants": [],
             "voice": "", "voice_clip": "", "voice_clip_seconds": 0.0, "expressiveness": 0.5, "web": False,
-            "pictures": False, "memory": True, "read_aloud": False, "tasks": []}
+            "pictures": False, "check_pictures": False, "memory": True, "read_aloud": False, "tasks": []}
 PORTRAIT = ("Portrait of {who}. {look}Head and shoulders, looking into the camera with a natural, friendly "
             "expression, soft light, a simple background.")
 SAMPLE = {"da": "Hej, jeg hedder {name}. Hvad skal vi snakke om i dag?",
@@ -355,7 +355,7 @@ class Personas(TaskJobs, InstagramJobs):
         if fields.get("expressiveness") is not None:
             out["expressiveness"] = round(max(0.25, min(2.0, self._number(fields["expressiveness"],
                                                                            "The expression"))), 2)
-        for key in ("web", "pictures", "memory", "read_aloud"):
+        for key in ("web", "pictures", "check_pictures", "memory", "read_aloud"):
             if fields.get(key) is not None:
                 out[key] = bool(fields[key])
         if fields.get("voice") is not None:

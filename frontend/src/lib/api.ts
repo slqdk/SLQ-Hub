@@ -143,6 +143,8 @@ export interface ImageRef { sha: string; mime?: string; caption?: string }
 export interface ArtifactRef { id: string; version: number; title: string; type: string; language?: string | null }
 export interface MadeWith { model: string; loras: { name: string; strength: number; slider: boolean }[];
   left_out: string[];
+  /** The pictures' seeds (0.78.0). */
+  seeds?: number[];
   /** An edit made by another model than the chat's, and why (the chat's only makes new pictures). */
   note?: string }
 /** Extra's check of made pictures or a video (0.71.0). A picture's state: ok, mistakes (serious ones, still there),

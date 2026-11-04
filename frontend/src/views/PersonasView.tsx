@@ -253,6 +253,11 @@ function WhoTab({ p, options, save }: { p: Persona; options: PersonaOptions; sav
         Looks things up: news, opening hours, prices.</SwitchRow>
       <SwitchRow checked={p.pictures} onChange={(v) => save({ pictures: v })} title="Pictures" disabled={!options.pictures && !p.pictures}>
         Makes pictures in the chat when you ask{options.pictures ? "" : " (no picture model is downloaded)"}.</SwitchRow>
+      <SwitchRow checked={p.check_pictures} onChange={(v) => save({ check_pictures: v })} title="Check pictures">
+        Before a picture reaches you - in a chat or a task's post - the chat model looks at it for extra, missing or
+        grown-together arms, hands and legs and things that could not exist, and a picture with a serious mistake is
+        made again with a new seed (Settings, Assistant says how often). What it found shows under the picture. A
+        video is looked at, not made again. Slower; the chat model must see pictures.</SwitchRow>
       <SwitchRow checked={p.read_aloud} onChange={(v) => save({ read_aloud: v })} title="Read the answers aloud"
         disabled={!options.speech && !p.read_aloud}>
         Each answer is read aloud in their voice as it comes{options.speech ? "" : " (no speech model is downloaded)"};

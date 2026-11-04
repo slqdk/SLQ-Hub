@@ -15,6 +15,10 @@ user can see what the check found, and whether it was right.
 A video takes minutes on the card: it is not made again. Frames from across it are checked together - also between
 each other: parts that appear, vanish or change - and the result says what is wrong.
 
+A persona's pictures are checked the same way when it has "Check pictures" on (0.78.0, Søren, of his persona
+Laura's pictures: "There are something in almost all pictures that is not correct"): in its chats and in its tasks,
+whatever its Answers setting - a persona answers at once or thinks first, never at Extra.
+
 The check runs on the turn's model (in the cloud when the turn runs there): the card switches back to it after the
 picture anyway, so a picture without mistakes costs only the check; each new try costs a switch to ComfyUI and back.
 A model that cannot see pictures cannot check: the result says so, and the model is asked to look itself. A call
@@ -147,10 +151,18 @@ def tries(settings) -> int | None:
 
 
 def plan(ctx) -> int | None:
-    """None: no check - not Extra, or Settings -> Assistant has it off; else the new tries a picture may get."""
-    if getattr(ctx.engine, "level", "quick") != LEVEL:
+    """None: no check - not Extra (nor a persona's chat with Check pictures on), or Settings -> Assistant has it
+    off; else the new tries a picture may get."""
+    if getattr(ctx.engine, "level", "quick") != LEVEL and not persona_checks(ctx):
         return None
     return tries(ctx.hub.settings)
+
+
+def persona_checks(ctx) -> bool:
+    """A chat of a persona - its own or one of its tasks' - that has Check pictures on (0.78.0)."""
+    store = ctx.hub.extras.get("personas")
+    p = store.of_chat(ctx.chat) if store is not None else None
+    return bool(p and p.get("check_pictures"))
 
 
 def _cloud(ctx):

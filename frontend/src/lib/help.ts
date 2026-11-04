@@ -794,6 +794,8 @@ export const SECTIONS: HelpSection[] = [
         ],
         tips: ["Their notes are on the Memory tab: read and correct what they remember.",
           "The web and pictures are off until you turn them on - a persona has only what you give them.",
+          "With Check pictures on, each of their pictures is looked at before you get it - an extra hand, things grown "
+            + "together - and one with a serious mistake is made again; what was found shows under the picture.",
           "With Read the answers aloud, each answer is spoken as it comes; else the speaker under an answer reads it.",
           "Nothing is posted without you: approve a post, change its text, copy it and download its picture or video "
             + "- or Discard it and press Another for a new one. Approve and post (Instagram connected) posts it at once.",

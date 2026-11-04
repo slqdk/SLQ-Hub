@@ -259,13 +259,16 @@ def _ignored(args: dict) -> str:
             "tell them to pick them there.")
 
 
-def _made_with(pipe, item: dict, ctx: ToolContext | None = None) -> dict:
+def _made_with(pipe, item: dict, ctx: ToolContext | None = None, seeds: list[dict] | None = None) -> dict:
     """The line under the picture (0.59.0): the model it was made with, the LoRAs used (with their strength) and
     any left out, so the user sees what was used instead of guessing. For an edit (ctx given) also why another
     model than the chat's made it: one that only makes new pictures (SDXL, Z-Image, Chroma, ERNIE) cannot change
-    one."""
+    one. seeds: the pictures shown, whose seeds the line gives (0.78.0, Søren: "where are no seed information" -
+    they were only in the call's result)."""
     name = (pipe.entry(item["model"]) or {}).get("name") or item["model"]
     out = {"model": name, "loras": item.get("lora_used") or [], "left_out": item.get("lora_notes") or []}
+    if seeds:
+        out["seeds"] = [it["seed"] for it in seeds if isinstance(it.get("seed"), int)]
     if ctx is not None:
         from ...images.pipeline import family
         mine = pipe.entry(pipe.chosen(_picture_model(ctx))) or {}
@@ -318,7 +321,7 @@ async def image_generate(ctx: ToolContext, args: dict) -> ToolResult:
     where = _saved_text(paths)
     used = items[0].get("prompt_used")
     enhanced = f"\nERNIE-Image's prompt enhancer turned the prompt into: {used[:2000]}" if used else ""
-    made = _made_with(pipe, items[0])                                       # the owner's name for the model
+    made = _made_with(pipe, items[0], seeds=items)                          # the owner's name for the model
     return ToolResult(f"Generated {len(items)} image(s) with {made['model']}{_lora_text(items[0])} ({desc}). They "
                       f"are shown to the user and below, with a line saying what made them.{_ignored(args)}{where}"
                       f"{enhanced}{_check_text(checked, BODIES)}",
@@ -353,7 +356,7 @@ async def image_edit(ctx: ToolContext, args: dict) -> ToolResult:
     items = checked.items if checked is not None else items
     paths = _save_outputs(ctx, items, args.get("save_as"), prompt or "edit")
     where = _saved_text(paths)
-    made = _made_with(pipe, items[0], ctx)
+    made = _made_with(pipe, items[0], ctx, seeds=items)
     why = f" {made['note'][0].upper()}{made['note'][1:]}." if made.get("note") else ""
     return ToolResult(f"Edited image(s) ready with {made['model']} ({len(items)}, {_size_note(items[0])})"
                       f"{_lora_text(items[0])}.{why}{_ignored(args)}{where}{_check_text(checked)}",

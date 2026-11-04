@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.77.0, 2026-11-04)
+## State (0.78.0, 2026-11-04)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -1065,6 +1065,21 @@ above. In Chromium against the dev server (his log replayed through
 the pump, both files): the button beside "main", the box opening at its end, Download (a .log of both files,
 688 lines), no Download before there is a log, desktop dark and phone light; no console errors. NOT seen on the VM:
 item 97.
+0.78.0, Søren: "there are often issues with her hands in the pictures i make in persona... Mostly small details, but
+enough to make it seem unreliable", then two of Laura's pictures (klein 9B (U), her LoRA instalorry at 0.7,
+1024x1280): "the glass in her hand looks off" - enlarged here, the glass she holds has a second stem down to a foot on
+the table (two glasses grown into one); "the door id blocked by a window" - the doorway behind the open door is glass,
+with its own handle. Her hands themselves were right in both. Measured on the card the same afternoon, in a chat:
+the same prompt and seed with klein 9B (the standard text encoder) gave practically the same picture, the glass
+wrong again - so not the uncensored encoder; with klein 9B base (downloaded for it; 20 steps, CFG 5) the glass was
+right but she had a third hand (item 88's question, one picture); then at Effort Extra the check by Gemma 4 31B (U)
+said "woman has an extra hand resting on the table next to the strawberries" - caught. A persona never runs at
+Extra, so: Check pictures, a persona's switch (DESIGN §8 "A persona's pictures checked"; `media_check.persona_checks`),
+and the seeds on the line under a picture (`made_with.seeds`; he could not find the seed - it was only in the step's
+result). Tests: tests/test_media_check.py (a persona chat at At once with the switch on: the picture checked, made
+again, the second shown with its seed; off: not checked), tests/test_loras.py (the line's seeds); each part failed
+without it (4 mutations). In Chromium against the dev server: the switch in the Who tab, saved; "Made with Qwen-Image
+2.1 Turbo · seed 1971709615"; no console errors. NOT seen on the VM: item 98.
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
 host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU
@@ -1842,6 +1857,13 @@ the host if the VM ever stops by itself.
       converter's cases are ComfyUI 0.42.3's own templates; files from other sites (Civitai, OpenArt) are
       untried - an export is the way to see what went wrong. When COMFYUI_REF changes, the editor's format may
       too: tools/workflow_oracle/ (convert.js, compare.py) is how the converter was checked - run it again.
+98. **Check pictures for a persona (0.78.0)** - turn it on for Laura (Personas -> Laura -> Who -> What they can do):
+    - **Her task's post**: does the post's picture come checked - in the task's chat (Its chat) the note under the
+      picture ("Checked by gemma 4 31B (U): ...") and any try thrown away - and how much longer a post takes (a look,
+      and a new try's two switches of the card)?
+    - **What it misses and what it invents**: the subtle ones (a glass grown into another, a door onto a window) as
+      against a third hand; a right picture called wrong costs a try. The tries thrown away show under the picture.
+    - **The seed line**: "Made with ... · seed N" under each picture, also after a new try (the shown picture's seed).
 97. **ComfyUI's log (0.77.0)** - none of it has run in the real container:
     - **After the update**: `/srv/slq-hub/data/logs/comfyui` exists, owned by uid 1000 (the updater makes it before the
       start), and Settings -> System -> Logs -> ComfyUI shows ComfyUI's start - "===== start: python main.py ...
@@ -1953,6 +1975,8 @@ the host if the VM ever stops by itself.
       FLUX.2-klein-base-9b-fp8 - another repository than klein 9B's and the training's), download it (9.6 GB), then
       the same prompts and seeds in a chat with it chosen in the picture menu. Its time per picture (40
       model passes at 1 MP) and memory with the 8 GB text encoder; a person LoRA trained on klein 9B on it.
+      Seen on 2026-11-04 (0.78.0's paragraph): downloaded, it ran with Laura's LoRA - one picture, the glass the
+      4-step model broke right, a third hand instead. Its time per picture still not noted.
     - **The look at the bodies**: does Qwen3.8 27B notice an extra arm in its own picture, and does it then offer
       a new seed instead of calling the picture fine? An export of such a turn shows it.
 87. **hub3d (0.67.1)** - none of it has run on the VM:

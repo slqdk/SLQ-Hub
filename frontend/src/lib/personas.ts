@@ -38,7 +38,8 @@ export interface Persona {
   id: string; name: string; role: string; personality: string; speech: string; examples: string; greeting: string;
   language: string; model: string; level: "quick" | "think"; look: string; lora: string; strength: number;
   picture: string; variants: PersonaVariant[]; voice: string; voice_clip: string; voice_clip_seconds: number;
-  expressiveness: number; web: boolean; pictures: boolean; memory: boolean; read_aloud: boolean;
+  expressiveness: number; web: boolean; pictures: boolean; check_pictures: boolean; memory: boolean;
+  read_aloud: boolean;
   created: number; updated: number; tasks: PersonaTask[]; instagram: PersonaInstagram | null;
   notes: string; notes_max: number; chats: PersonaChat[]; audio: PersonaAudio;
   job: { what: string; value?: number; max?: number } | null; error: string;

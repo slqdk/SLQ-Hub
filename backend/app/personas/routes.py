@@ -45,6 +45,7 @@ class PersonaIn(BaseModel):
     expressiveness: float | None = None
     web: bool | None = None
     pictures: bool | None = None
+    check_pictures: bool | None = None       # 0.78.0: its pictures checked as at the Effort Extra (media_check.py)
     memory: bool | None = None
     read_aloud: bool | None = None
 

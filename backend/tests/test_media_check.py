@@ -366,3 +366,41 @@ def test_the_setting(app):
     for raw, want in (("0", 0), ("3", 3), ("9", M.MAX_TRIES), ("off", None), ("nonsense", 2), (1, 1)):
         s.update("agent", {"check_media": raw})
         assert M.tries(s) == want, raw
+
+
+async def test_a_persona_with_check_pictures_has_its_pictures_checked_at_any_effort(signed_in, app, fakes):
+    """0.78.0, Søren of his persona Laura's pictures: "There are something in almost all pictures that is not
+    correct". A persona answers at once or thinks first, never at Extra: its own switch turns the check on, in its
+    chats and its tasks' chats."""
+    from .test_personas import API, anna, chat_with
+    from .test_loras import ORIGIN
+    p = await anna(signed_in)
+    pid = p["id"]
+    assert p["check_pictures"] is False                                 # off unless turned on
+    d = await signed_in.patch(f"{API}/{pid}", json={"pictures": True, "check_pictures": True}, headers=ORIGIN)
+    assert d.status_code == 200 and d.json()["check_pictures"] is True
+    assert (await signed_in.get(f"{API}/{pid}")).json()["check_pictures"] is True
+    fakes.comfy["pictures"] = [_png((16, 16), RED), _png((16, 16), BLUE)]
+    seen: dict = {}
+    fakes.llama["responder"] = answers(make("a woman waving at a dog in a park"),
+                                       [wrong("the woman has a third hand on the table"), right()], seen)
+    c = await chat_with(signed_in, pid)
+    run = await finish(app, await say(signed_in, c["id"], "Tegn det"))
+    assert run.status == "done", run.events[-1]
+    res = tool_result(run)
+    assert len(fakes.comfy["prompts"]) == 2 and len(seen["checks"]) == 2     # checked, made again, checked
+    assert [colour(blobs.read(i["sha"])) for i in res["images"]] == [BLUE]
+    checked = res["display"]["checked"]
+    assert [(r["try"], r["mistakes"]) for r in checked["rejected"]] == [(1, ["the woman has a third hand on the table"])]
+    graph = fakes.comfy["prompts"][-1]
+    made = res["display"]["made_with"]                                  # the seed of the picture shown (0.78.0)
+    assert made["seeds"] == [int(re.search(r"seed (\d+)", res["text"]).group(1))]
+    assert str(made["seeds"][0]) in json.dumps(graph)                  # the one it was made with
+    # off again: no check, as in any chat below Extra
+    await signed_in.patch(f"{API}/{pid}", json={"check_pictures": False}, headers=ORIGIN)
+    fakes.comfy["pictures"] = [_png((16, 16), RED)]
+    seen.clear()
+    c2 = await chat_with(signed_in, pid)
+    run = await finish(app, await say(signed_in, c2["id"], "Tegn det igen"))
+    assert run.status == "done" and "checks" not in seen and len(fakes.comfy["prompts"]) == 3
+    assert "checked" not in (tool_result(run)["display"] or {})

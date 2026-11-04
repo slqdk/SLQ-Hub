@@ -182,7 +182,8 @@ async def test_the_admin_adds_and_uses_a_lora_and_a_person_never_sees_one(signed
     res = next(e["data"] for e in run.events if e["type"] == "tool_result")
     assert "with the LoRA CX9020" in res["text"]
     assert res["display"]["made_with"] == {"model": "FLUX.2 [klein] 4B", "left_out": [],
-                                           "loras": [{"name": "CX9020", "strength": 0.9, "slider": False}]}
+                                           "loras": [{"name": "CX9020", "strength": 0.9, "slider": False}],
+                                           "seeds": [res["display"]["generated"][0]["seed"]]}
 
     # A call that still names a model and LoRAs (copied from an earlier call) cannot override the menu: a chat on
     # FLUX.2 klein without the LoRA gets neither the other model nor the LoRA, and the result says why.

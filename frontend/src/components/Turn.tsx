@@ -371,18 +371,23 @@ function CheckLine({ check }: { check: MediaCheck }) {
   );
 }
 
-/** Under a picture (0.59.0): what made it - the model, the LoRAs with their strength, and any LoRA left out. */
+/** Under a picture (0.59.0): what made it - the model, the LoRAs with their strength, any LoRA left out, and the
+ * seeds (0.78.0) - one line for the calls that used the same, with all their seeds. */
 function MadeWithLines({ made }: { made: MadeWith[] }) {
-  const seen = new Set<string>();
-  const lines = made.filter((m) => {
-    const key = JSON.stringify(m);
-    return !seen.has(key) && (seen.add(key), true);
-  });
+  const byKey = new Map<string, MadeWith & { seeds: number[] }>();
+  for (const m of made) {
+    const key = JSON.stringify({ ...m, seeds: undefined });
+    const line = byKey.get(key) ?? { ...m, seeds: [] };
+    for (const s of m.seeds ?? []) if (!line.seeds.includes(s)) line.seeds.push(s);
+    byKey.set(key, line);
+  }
+  const lines = [...byKey.values()];
   return <>{lines.map((m, i) => (
     <div key={i} className="made-with small">
       <span>Made with <b>{m.model}</b>{m.loras.map((l) => (
         <span key={l.name}> · LoRA <b>{l.name}</b> {l.slider ? `${l.strength > 0 ? "+" : ""}${l.strength}`
-          : `×${l.strength}`}</span>))}</span>
+          : `×${l.strength}`}</span>))}{m.seeds.length > 0 &&
+          <span> · seed{m.seeds.length > 1 ? "s" : ""} {m.seeds.join(", ")}</span>}</span>
       {m.note && <span className="warn-text">{m.note.charAt(0).toUpperCase() + m.note.slice(1)}.</span>}
       {m.left_out.map((n) => <span key={n} className="warn-text">{n.charAt(0).toUpperCase() + n.slice(1)}.</span>)}
     </div>

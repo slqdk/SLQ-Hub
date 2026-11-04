@@ -2143,6 +2143,23 @@ files afterwards.
   steps). A person's chat checks too; its device keeps the thrown-away tries
   with the chat and never sends them back. Without Extra, 0.68.0's line
   stays: the model is asked to look at the bodies itself.
+- **A persona's pictures checked** (0.78.0). Søren, of Laura's pictures:
+  "There are something in almost all pictures that is not correct" - a wine
+  glass grown into a second glass's stem, a door opening onto a window; with
+  klein 9B base a third hand. In a chat at Extra Gemma 4 31B's check named
+  the third hand. A persona answers at once or thinks first, never at Extra,
+  so it has its own switch, **Check pictures** (`check_pictures`, off by
+  default): with it on, `media_check.plan` checks the pictures and videos of
+  its chats and its tasks' chats as at Extra (the same tries, the same
+  checklist, its chat model looking), so a post's picture with a serious
+  mistake is made again before the post is handed in. Not on: the post
+  shows no note of the check; the task's chat (Its chat) has it under the
+  picture.
+- **The seeds under a picture** (0.78.0, Søren: "where are no seed
+  information" - only the call's result had them, behind the step's arrow).
+  `display.made_with.seeds`: the seeds of the pictures shown (after any new
+  tries); the line under them ends "· seed N", calls with the same model and
+  LoRAs on one line with all their seeds.
 
 ### Sound (0.13.0)
 

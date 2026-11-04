@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.78.0 - 2026-11-04
+
+- New: a persona's "Check pictures" switch (its Who tab, What they can do).
+  With it on, the chat model looks at each of its pictures before you get
+  it - in a chat and in a task's post - and a picture with a serious mistake
+  (an extra hand, things grown together) is made again with a new seed, as
+  the Effort Extra does in other chats.
+- New: the line under a picture shows its seed.
+
 ## 0.77.0 - 2026-11-04
 
 - New: ComfyUI's log in Settings → System → Logs, next to the model server's -
