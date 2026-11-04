@@ -4,6 +4,39 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
+## Next session - start here (written 2026-11-04, at 0.79.1)
+
+The chat of 2026-10-31 to 2026-11-04 built 0.75.0-0.79.1; each version's paragraph under "State" says what and why.
+On VM 222 the Hub ran 0.79.0 at 17:32 that day; **0.79.1 is pushed, not yet installed** (`sudo bash
+/opt/slq-hub/update.sh`). How Søren works: Danish or English, short technical answers; he sends screenshots, chat
+exports (⋯ → Export for troubleshooting) and now ComfyUI's log (Settings → System → Logs → ComfyUI → Download) - ask
+for those before theorising.
+
+Waiting for his result on the card, newest first:
+1. **0.79.1** - Laura's task "Søndag morgen sengefoto" (chat 292): Make one now should hand in its post. Its history
+   holds the two broken calls, sent clean now; the model server's log says "a call's start leaked into its arguments
+   - cut" when it happens again.
+2. **0.79.0** - a task's own LoRAs (item 99). He put amateur_selfie at ×1.4 on that task; 0.6-1.0 was suggested.
+3. **0.78.0** - Check pictures for Laura (item 98). Not seen turned on yet: chat 292's 16:46 run had no check note.
+   Seen working in a chat at Effort Extra: Gemma 4 31B named a third hand, and with a new seed passed a clean picture.
+4. **Settings → Images is on FLUX.2 [klein] 9B base** since his test (68-86 s a picture on the card). It was
+   suggested he go back to 9B (U) now that the check exists; his choice.
+5. **0.76.x** - Laura's Instagram (item 96): the Meta app, its Unified-login configuration and the Hub's fields were
+   set up with him (App ID 1093705243490654, Configuration ID 1816854056024329); whether the connect went through
+   and a post was published is not known here.
+
+Seen working on the card that day: the video decode retry (0.76.3; Lørdag aften's clip decoded in 256-px tiles in
+79 s), ComfyUI's log with "stopped by SIGTERM" at each update (0.77.0, item 97 mostly done), Gemma 4 31B at context
+32768 after it would not load at 256K (its global layers' KV cache).
+
+Offered, not asked for - do not build unasked: a boomerang loop for clips under Instagram's 3 s; ComfyUI's lines in
+a chat's troubleshooting export; a picture model of a persona's own (only if base proves better for her); LoRA
+training on Qwen-Image or Z-Image (the pinned ai-toolkit lists both; disk first); a colour-grade filter after the
+picture (if "filter" meant that rather than a LoRA); finding where the VM's disk went (17 GB free before klein base's
+8.9 GB); faulthandler on SIGUSR1 for item 56's hang. Decided: no Facebook posting (he cancelled it); TikTok by hand.
+
+Known flake: tests/test_training.py::test_the_trainer_stops_a_job fails now and then in a full run and passes alone.
+
 ## State (0.79.1, 2026-11-04)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
