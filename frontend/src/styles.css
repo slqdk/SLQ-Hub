@@ -1166,6 +1166,14 @@ div.tests-result-head { cursor: default; }
 .pe-post-head { gap: 8px; align-items: center; }
 .pe-post-text { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.45; }
 .pe-post-acts { gap: 4px; flex-wrap: wrap; }
+.pe-post-error { color: var(--fault); overflow-wrap: anywhere; }
+.tag.fault { color: var(--fault); background: color-mix(in srgb, var(--fault) 12%, var(--sheet)); }
+.pe-ig { border: 1px solid var(--rule); border-radius: 12px; background: var(--sheet); padding: 10px 12px; gap: 8px; }
+.pe-ig-head { gap: 8px; align-items: center; }
+.pe-ig-acct { gap: 8px; align-items: center; flex-wrap: wrap; }
+.pe-ig-problem { color: var(--fault); overflow-wrap: anywhere; }
+.pe-ig-uri { gap: 8px; align-items: center; min-width: 0; }
+.pe-ig-uri code { overflow-wrap: anywhere; min-width: 0; font-size: 12.5px; }
 @media (max-width: 520px) {
   .pe-posts { grid-template-columns: 1fr; }
 }

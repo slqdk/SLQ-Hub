@@ -27,6 +27,7 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+from .instagram import InstagramJobs
 from .tasks import TaskJobs
 
 log = logging.getLogger(__name__)
@@ -139,13 +140,17 @@ def _note(value) -> str:
     return MARK.sub("", " ".join(str(value or "").split()))
 
 
-class Personas(TaskJobs):
+class Personas(TaskJobs, InstagramJobs):
     def __init__(self, hub):
         self.hub = hub
         self.root = Path(hub.env.data_dir) / "personas"
         self.locks: dict[str, asyncio.Lock] = {}
         self.task_jobs: dict[str, asyncio.Task] = {}    # tasks being done: "<id>/<task>" -> the job (tasks.py)
         self.schedule_job: asyncio.Task | None = None
+        self.ig_states: dict[str, dict] = {}            # Instagram sign-ins started (instagram.py)
+        self.ig_jobs: dict[str, asyncio.Task] = {}      # posts being posted: "<id>/<post>" -> the job
+        self.ig_checked = 0.0                           # when the Instagram tokens were last looked at
+        self.ig_settling: asyncio.Task | None = None    # posts a restart cut off, asked about at Instagram
         self.tasks: dict[str, asyncio.Task] = {}        # portraits being made
         self.live: dict[str, dict] = {}                 # their progress
         self.errors: dict[str, str] = {}                # why the last ones failed
@@ -280,7 +285,7 @@ class Personas(TaskJobs):
         p = self.load(pid)
         p["tasks"] = [{**t, "running": self.task_running(pid, t["id"])} for t in p["tasks"]]
         return {**p, "notes": self.notes(pid), "notes_max": NOTES_MAX, "chats": self.chats(pid),
-                "audio": self.audio_info(p.get("language") or ""),
+                "audio": self.audio_info(p.get("language") or ""), "instagram": self.ig_public(pid),
                 "job": self.live.get(pid) if self.working(pid) else None, "error": self.errors.get(pid, "")}
 
     def create(self, fields: dict) -> dict:
@@ -307,6 +312,8 @@ class Personas(TaskJobs):
             raise PersonaError("Portraits are being made - stop them first.", 409)
         if any(self.task_running(pid, t["id"]) for t in self.load(pid)["tasks"]):
             raise PersonaError("A task's post is being made - wait for it first.", 409)
+        if any(k.startswith(f"{pid}/") for k in self.ig_jobs):
+            raise PersonaError("A post is being put on Instagram - wait for it first.", 409)
         d = self._dir(pid)
         if not (d / "persona.json").is_file():
             raise PersonaError("No such persona.", 404)

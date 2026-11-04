@@ -42,6 +42,7 @@ import tempfile
 import wave
 from pathlib import Path
 
+import httpx
 import uvicorn
 
 from app import auth
@@ -51,8 +52,9 @@ from app.state import Transports
 
 from . import dev_evals
 from .conftest import _install_fake_models
-from .mocks import (HostRouter, float_wav, make_civitai, make_civitai_delivery, make_comfy, make_hf, make_llama,
-                    make_mcp_http, make_sandbox, make_searxng, make_speech, make_supervisor, make_trainer, silent_mp3)
+from .mocks import (HostRouter, float_wav, make_civitai, make_civitai_delivery, make_comfy, make_hf, make_instagram,
+                    make_llama, make_mcp_http, make_sandbox, make_searxng, make_speech, make_supervisor, make_trainer,
+                    silent_mp3)
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -837,13 +839,22 @@ def main() -> None:
                                                              "(a fake answer from cloud.test)."}}}
     if a.object_info:
         fakes["comfy"]["object_info"] = json.loads(Path(a.object_info).read_text(encoding="utf-8"))
+
+    async def fetch(url: str) -> bytes:                # Instagram fetches a signed link: here, from this server itself
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app)) as c:
+            return (await c.get(url)).content
+
+    # Instagram (0.76.0): its sign-in page is not faked - the UI check sends the browser straight to the callback with
+    # code CODE1 and the app's secret must be a1b2c3d4e5f6a7b8c9d0; posting works, the files fetched from here
+    instagram = make_instagram({"fetch": fetch})
     router = HostRouter({"supervisor": make_supervisor(fakes["sup"]), "llm": make_llama(fakes["llama"]),
                          "comfy": make_comfy(fakes["comfy"]), "sandbox:7000": make_sandbox(fakes["sandbox"]),
                          "searxng": make_searxng(), "mcp.test": make_mcp_http(fakes["mcp"]),
                          "huggingface.co": make_hf(HF_DEMO), "civitai.com": make_civitai(CIVITAI_DEMO),
                          "delivery.civitai.test": make_civitai_delivery(CIVITAI_DEMO),
                          "speech:7100": make_speech(fakes["speech"]), "cloud.test": make_llama(fakes["cloud"]),
-                         "trainer:7300": make_trainer(fakes["trainer"])},
+                         "trainer:7300": make_trainer(fakes["trainer"]), "api.instagram.com": instagram,
+                         "graph.instagram.com": instagram},
                         streaming=("llm",))
     t = Transports(llm=router, runner=router, comfy=router, sandbox=None if a.sandbox else router, web=router,
                    speech=router, trainer=router)

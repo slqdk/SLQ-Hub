@@ -786,12 +786,19 @@ export const SECTIONS: HelpSection[] = [
           "Give them tasks (the Tasks tab): \"Mondays at 19:00: a post about your week's training, with a picture of "
             + "you\". At that time they write the post in their voice, make the picture or video - with their LoRA "
             + "when they are in it - and hand it in. The posts wait for you: Posts to review on the Personas page.",
+          "Post to Instagram (the Posts tab): once, make an app at developers.facebook.com with Instagram's API "
+            + "(Instagram login), add the persona's account - a professional one - as an Instagram tester and accept "
+            + "it in Instagram, give Meta the return address the Posts tab shows, and give the Hub the app's "
+            + "Instagram app ID and secret. Then Connect Instagram and sign in as the persona: Approve and post puts "
+            + "a post there.",
         ],
         tips: ["Their notes are on the Memory tab: read and correct what they remember.",
           "The web and pictures are off until you turn them on - a persona has only what you give them.",
           "With Read the answers aloud, each answer is spoken as it comes; else the speaker under an answer reads it.",
-          "Nothing is posted anywhere: approve a post, change its text, copy it and download its picture or video - "
-            + "or Discard it and press Another for a new one.",
+          "Nothing is posted without you: approve a post, change its text, copy it and download its picture or video "
+            + "- or Discard it and press Another for a new one. Approve and post (Instagram connected) posts it at once.",
+          "Instagram fetches the pictures from the Hub's address on the internet, so that address must be reachable; "
+            + "Instagram's API cannot delete a post - that is done in Instagram.",
           "A task's time missed while the Hub was off is made up for within six hours, else left out."],
       },
     ],

@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.76.0 - 2026-11-04
+
+- **Post to Instagram when you approve.** Connect a persona's Instagram
+  account on its Posts tab (once: an app of your own on Meta's developer site
+  - the tab says what to do), and its posts get **Approve and post**: the
+  picture, the pictures or the video go to Instagram as a post, a carousel or
+  a reel, with the text as the caption. The card then says On Instagram, with
+  the link. A post goes there once, also when the Hub restarts on the way.
+- The Hub renews the Instagram sign-in by itself, and says when the account
+  needs connecting again.
+- Posts on their way to Instagram, or that did not get there, show under
+  Posts to review too - with why, and Post again.
+- A task's posts are asked for in Instagram's shape (4:5) and within its
+  limits (2,200 characters, 30 hashtags).
+- Fixed: a picture link with a strange signature gave an error page instead
+  of "not found".
+
 ## 0.75.0 - 2026-11-04
 
 - **Tasks for a persona.** Give a persona a task on its Tasks tab - "a post

@@ -1,12 +1,14 @@
 // A persona's tasks and posts (0.75.0, Søren: "At 7PM every monday, prepare a social media post with a picture or
 // video ... and then list the posts for me to review"): at its days and time a task makes a post - its text in the
-// persona's voice and a picture or video - for the owner's review. Nothing is published.
+// persona's voice and a picture or video - for the owner's review. Nothing is published without the owner: 0.76.0
+// posts an approved one to the persona's Instagram account when it is connected ("Approve and post").
 import { useCallback, useEffect, useState } from "react";
-import { Check, Copy, Download, MessageSquare, Pencil, Play, Plus, RotateCcw, Trash2 } from "lucide-react";
+import { Check, Copy, Download, ExternalLink, MessageSquare, Pencil, Play, Plus, RotateCcw, Send,
+  Trash2 } from "lucide-react";
 import { api } from "../lib/api";
 import { copyText } from "../lib/clipboard";
-import { DAYS, personaFile, scheduleText, whenText, type Persona, type PersonaPost, type PersonaTask,
-  type TaskMedia } from "../lib/personas";
+import { DAYS, personaFile, scheduleText, whenText, type InstagramApp, type Persona, type PersonaPost,
+  type PersonaTask, type TaskMedia } from "../lib/personas";
 import { linkProps } from "../lib/router";
 import { useApp } from "../state";
 import { Avatar } from "../components/Avatar";
@@ -128,7 +130,8 @@ function TaskForm({ initial, onSave, onCancel }: { initial: TaskDraft; onSave: (
 
 // ---------------------------------------------------------------- posts
 
-/** Posts from the Hub: one persona's, or the drafts of all of them - reloaded every 15 s while one is being made. */
+/** Posts from the Hub: one persona's, or the drafts of all of them - reloaded every 15 s while one is being made,
+ *  every 3 s while one is on its way to Instagram. */
 export function usePosts(url: string, live: boolean) {
   const { toast } = useApp();
   const [posts, setPosts] = useState<PersonaPost[] | null>(null);
@@ -142,15 +145,16 @@ export function usePosts(url: string, live: boolean) {
   useEffect(() => {
     load();
   }, [load]);
+  const posting = (posts ?? []).some((s) => s.instagram?.state === "posting");
   useEffect(() => {
-    if (!live) return;
-    const t = window.setInterval(load, 15000);
+    if (!live && !posting) return;
+    const t = window.setInterval(load, posting ? 3000 : 15000);
     return () => window.clearInterval(t);
-  }, [live, load]);
+  }, [live, posting, load]);
   return { posts, load, setPosts };
 }
 
-export function PostsTab({ p }: { p: Persona }) {
+export function PostsTab({ p, reload }: { p: Persona; reload: () => Promise<void> }) {
   const running = p.tasks.some((t) => t.running);
   const { posts, load } = usePosts(`/hub/api/personas/${p.id}/posts`, running);
   useEffect(() => {                                     // a post handed in: here at once
@@ -159,6 +163,7 @@ export function PostsTab({ p }: { p: Persona }) {
   if (!posts) return <div className="faint">Loading</div>;
   return (
     <div className="stack">
+      <InstagramBox p={p} onChange={async () => { await reload(); await load(); }} />
       {running && <div className="row small" style={{ gap: 6 }}><Lamp state="run" size="sm" pulse />
         {p.name} is making a post</div>}
       {posts.length === 0 ? <Empty>No posts yet - give {p.name} a task (Tasks).</Empty>
@@ -167,9 +172,108 @@ export function PostsTab({ p }: { p: Persona }) {
   );
 }
 
-/** The drafts of all personas, for the Personas page. */
+/** 0.76.0: where the persona's approved posts can go - the owner's Meta app (once for all personas), the persona's
+ *  account signed in at Instagram. */
+function InstagramBox({ p, onChange }: { p: Persona; onChange: () => Promise<void> }) {
+  const { toast } = useApp();
+  const [app, setApp] = useState<InstagramApp | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [appId, setAppId] = useState("");
+  const [secret, setSecret] = useState("");
+  useEffect(() => {
+    api<InstagramApp>("/hub/api/personas/instagram").then((a) => {
+      setApp(a);
+      setAppId(a.app_id);
+    }).catch((e) => toast((e as Error).message, "fault"));
+  }, [toast]);
+  if (!app) return null;
+  const ig = p.instagram;
+  const fail = (e: unknown) => toast((e as Error).message, "fault");
+  const saveApp = async () => {
+    try {
+      const a = await api<InstagramApp>("/hub/api/personas/instagram", { method: "PUT",
+        body: { app_id: appId.trim(), app_secret: secret.trim() } });
+      setApp(a);
+      setSecret("");
+      setEditing(false);
+      toast("Saved", "run");
+    } catch (e) {
+      fail(e);
+    }
+  };
+  const connect = async () => {
+    try {                                               // to Instagram's sign-in, and back here
+      window.location.href = (await api<{ url: string }>(`/hub/api/personas/${p.id}/instagram/connect`,
+        { method: "POST" })).url;
+    } catch (e) {
+      fail(e);
+    }
+  };
+  const disconnect = async () => {
+    try {
+      await api(`/hub/api/personas/${p.id}/instagram`, { method: "DELETE" });
+      await onChange();
+    } catch (e) {
+      fail(e);
+    }
+  };
+  const noAddress = !app.public_url.startsWith("https://");
+  return (
+    <section className="pe-ig stack">
+      <div className="row pe-ig-head">
+        <Send size={15} /><b className="grow">Instagram</b>
+        {app.ready && !editing && <button className="btn quiet small" onClick={() => setEditing(true)}>Meta app</button>}
+      </div>
+      {!app.ready || editing ? (<>
+        <p className="muted small" style={{ margin: 0 }}>Approved posts can go to {p.name}'s Instagram account, straight
+          from the Hub. Once, at developers.facebook.com: make an app with Instagram's API (Instagram login), add
+          {" "}{p.name}'s account - a professional one - as an Instagram tester and accept that in Instagram, and give
+          Meta this return address (OAuth redirect URI):</p>
+        {noAddress ? <div className="pe-ig-problem small">Instagram needs the Hub's address on the internet: set
+          HUB_PUBLIC_URL (https://...) in /srv/slq-hub/.env.</div>
+          : <div className="row pe-ig-uri"><code className="mono grow">{app.redirect_uri}</code>
+            <button className="btn quiet small" onClick={async () => toast((await copyText(app.redirect_uri))
+              ? "Copied" : "Copying failed", "run")}><Copy size={13} /> Copy</button></div>}
+        <div className="form-grid">
+          <label className="field"><span>Instagram app ID</span><input className="input mono" value={appId}
+            inputMode="numeric" autoComplete="off" onChange={(e) => setAppId(e.target.value)} /></label>
+          <label className="field"><span>Instagram app secret</span><input className="input mono" type="password"
+            value={secret} autoComplete="off" placeholder={app.secret_set ? "Kept - type a new one to change it" : ""}
+            onChange={(e) => setSecret(e.target.value)} /></label>
+        </div>
+        <div className="row">
+          <span className="grow" />
+          {editing && <button className="btn quiet small" onClick={() => { setEditing(false); setSecret("");
+            setAppId(app.app_id); }}>Cancel</button>}
+          <button className="btn primary small" disabled={!appId.trim() || (!secret.trim() && !app.secret_set)}
+            onClick={saveApp}>Save</button>
+        </div>
+      </>) : ig ? (
+        <div className="row pe-ig-acct">
+          <Lamp state={ig.problem ? "fault" : "run"} size="sm" />
+          {ig.problem ? <span className="grow pe-ig-problem small">{ig.problem}</span>
+            : <span className="grow small">Approve and post puts a post on{" "}
+              <a href={`https://www.instagram.com/${ig.username}/`} target="_blank" rel="noreferrer">@{ig.username}</a>
+              <span className="faint"> - the sign-in is renewed by itself.</span></span>}
+          {ig.problem && <button className="btn primary small" onClick={connect}>Connect again</button>}
+          <ConfirmButton className="btn quiet small" confirmText="Disconnect?" onConfirm={disconnect}>
+            Disconnect</ConfirmButton>
+        </div>
+      ) : (
+        <div className="row pe-ig-acct">
+          <span className="grow muted small">Connect {p.name}'s account, and approved posts can go there. At Instagram,
+            sign in as {p.name} - not as yourself.</span>
+          <button className="btn primary small" onClick={connect}><Send size={13} /> Connect Instagram</button>
+        </div>
+      )}
+    </section>
+  );
+}
+
+/** The drafts of all personas, for the Personas page - and the posts on their way to Instagram or that did not get
+ *  there (0.76.0: "Approve and post" here, and how it went is seen here). */
 export function ReviewList() {
-  const { posts, load } = usePosts("/hub/api/personas/posts?status=draft", true);
+  const { posts, load } = usePosts("/hub/api/personas/posts?status=review", true);
   if (!posts || posts.length === 0) return null;
   return (
     <section className="stack">
@@ -201,6 +305,13 @@ function PostCard({ post, onChange, showWho = false }: { post: PersonaPost; onCh
   };
   const run = () => act(() => api(`/hub/api/personas/${post.persona.id}/tasks/${post.task}/run`, { method: "POST" }),
     "Another one is being made - it comes here");
+  const ig = post.instagram;
+  const account = post.persona.instagram;                // where it can go now ("" when nowhere)
+  const posted = ig?.state === "posted";
+  const posting = ig?.state === "posting";
+  const publish = () => act(() => api(`${base}/instagram`, { method: "POST" }), `Posting to @${account}`);
+  const tag = posted ? ["On Instagram", " ok"] : posting ? ["Posting", ""] : ig?.state === "failed"
+    ? ["Not posted", " fault"] : post.status === "approved" ? ["Approved", " ok"] : ["To review", ""];
   return (
     <article className={`pe-post${post.status === "approved" ? " approved" : ""}`}>
       <div className="pe-post-media">
@@ -214,10 +325,13 @@ function PostCard({ post, onChange, showWho = false }: { post: PersonaPost; onCh
         <div className="row pe-post-head">
           {showWho && <Avatar persona={post.persona} size={22} />}
           <b className="ellipsis grow">{showWho ? `${post.persona.name} · ` : ""}{post.title}</b>
-          <span className={`tag${post.status === "approved" ? " ok" : ""}`}>
-            {post.status === "approved" ? "Approved" : "To review"}</span>
+          <span className={`tag${tag[1]}`}>{tag[0]}</span>
         </div>
-        <div className="faint small">{whenText(post.made)}</div>
+        <div className="faint small">{whenText(post.made)}{posted && ig?.at ? ` · on Instagram ${whenText(ig.at)}` : ""}
+        </div>
+        {posting && <div className="row small" style={{ gap: 6 }}><Lamp state="run" size="sm" pulse />
+          Posting to Instagram</div>}
+        {ig?.state === "failed" && ig.error && <div className="pe-post-error small">{ig.error}</div>}
         {editing ? (
           <>
             <textarea className="textarea" rows={6} value={text} maxLength={5000} onChange={(e) => setText(e.target.value)} />
@@ -231,12 +345,21 @@ function PostCard({ post, onChange, showWho = false }: { post: PersonaPost; onCh
           </>
         ) : <div className="pe-post-text">{post.text}</div>}
         <div className="row pe-post-acts">
+          {post.status === "draft" && account && <ConfirmButton className="btn primary small"
+            confirmText={`Post to @${account}?`} onConfirm={publish}><Send size={13} /> Approve and post</ConfirmButton>}
           {post.status === "draft"
-            ? <button className="btn primary small" onClick={() => act(() => api(base, { method: "PATCH",
-              body: { status: "approved" } }), "Approved")}><Check size={13} /> Approve</button>
-            : <button className="btn quiet small" onClick={() => act(() => api(base, { method: "PATCH",
-              body: { status: "draft" } }))}><RotateCcw size={13} /> Back to review</button>}
-          {!editing && <button className="btn quiet small" onClick={() => setEditing(true)}><Pencil size={13} /> Text</button>}
+            ? <button className={`btn small ${account ? "quiet" : "primary"}`} onClick={() => act(() => api(base,
+              { method: "PATCH", body: { status: "approved" } }), "Approved")}><Check size={13} /> Approve</button>
+            : !posted && !posting && <>
+              {account && <ConfirmButton className="btn primary small" confirmText={`Post to @${account}?`}
+                onConfirm={publish}><Send size={13} /> {ig?.state === "failed" ? "Post again" : "Post to Instagram"}
+              </ConfirmButton>}
+              <button className="btn quiet small" onClick={() => act(() => api(base, { method: "PATCH",
+                body: { status: "draft" } }))}><RotateCcw size={13} /> Back to review</button></>}
+          {posted && ig?.permalink && <a className="btn quiet small" href={ig.permalink} target="_blank"
+            rel="noreferrer"><ExternalLink size={13} /> On Instagram</a>}
+          {!editing && !posted && !posting && <button className="btn quiet small" onClick={() => setEditing(true)}>
+            <Pencil size={13} /> Text</button>}
           <button className="btn quiet small" onClick={async () => toast((await copyText(post.text)) ? "Copied"
             : "Copying failed", "run")}><Copy size={13} /> Copy</button>
           {post.media.map((m, i) => <a key={m.file} className="btn quiet small" href={personaFile(post.persona.id, m.file)}
@@ -245,7 +368,8 @@ function PostCard({ post, onChange, showWho = false }: { post: PersonaPost; onCh
           <button className="btn quiet small" onClick={run} title="The task once more, now"><Play size={13} /> Another</button>
           {post.chat && <a className="btn quiet small" {...linkProps({ name: "chat", id: post.chat })}
             title="How it was made"><MessageSquare size={13} /></a>}
-          <ConfirmButton className="btn quiet small" confirmText="Discard this post?"
+          <ConfirmButton className="btn quiet small" disabled={posting}
+            confirmText={posted ? "Discard it here? It stays on Instagram." : "Discard this post?"}
             onConfirm={() => act(() => api(base, { method: "DELETE" }), "Discarded")}><Trash2 size={13} /> Discard</ConfirmButton>
         </div>
       </div>

@@ -2939,6 +2939,74 @@ downloads, and posts it himself. `app/personas/tasks.py` (a mixin of
   nothing is made while the Hub is off beyond the six hours; with "either"
   the model chooses.
 
+### Persona posts on Instagram (0.76.0)
+
+Søren: "Are there tools where i automatically can upload to platforms, like
+Instagram, tiktok ... when i approve the post?" - then "have the Hub post there
+directly ... Post to TikTok by hand with Download for now", and "the labling is
+done in the profile text". `app/personas/instagram.py` (a mixin of `Personas`).
+
+- **Why straight from the Hub**: no service in between, no fee. Meta's
+  Instagram API with Instagram Login posts to a professional account that the
+  owner's own app lists as a tester - Standard Access, no App Review. (TikTok's
+  API posts only privately until TikTok audits the app: by hand, with
+  Download.)
+- **The app**: the owner's, in Meta's developer dashboard. Its Instagram app ID
+  and secret are kept in Settings section `instagram` (the secret masked like
+  the other secrets, in no export), set on a persona's Posts tab, once for all
+  personas. Meta is given the return address
+  `<HUB_PUBLIC_URL>/hub/api/personas/instagram/callback` (HTTPS).
+- **Connecting**: Connect Instagram sends the browser to Instagram's sign-in
+  (`force_reauth`: the persona's account, not the one the browser is signed in
+  with). Instagram sends it back to the callback - public in the gate (the
+  address on the internet may have no sign-in of the Hub's), vouched for by
+  the state (random, used once, 15 minutes, made by the owner's signed-in
+  Connect). The code is swapped for a token (api.instagram.com), that for one
+  good for 60 days (`ig_exchange_token`), the account read (`/me`: user_id,
+  username) and kept in `data/personas/<id>/instagram.json` (0600; never in
+  persona.json, never sent to the page); the browser goes back to the
+  persona's Posts tab at the address Connect was pressed at (its Origin). The
+  schedule renews the token when it is five days old (`ig_refresh_token`); a
+  run-out or withdrawn one is marked ("connect the account again") and the
+  cards stop offering to post. A renewal or a failure that took a while writes
+  only if the account still holds the token it had: it never brings back an
+  account the owner disconnected meanwhile.
+- **Posting**: Approve and post (or Post to Instagram on an approved post -
+  each asks once more) approves the post and starts a job. Instagram fetches
+  the files itself, from a public address: a picture is made a JPEG between
+  4:5 and 1.91:1 (a taller one loses mostly its bottom), 320 to 1440 wide, at
+  most 8 MB; a video is re-encoded by ffmpeg in the sandbox (H.264 4:2:0, 30
+  frames a second - the video models make 16 or 24 -, at least 3 s: a shorter
+  one holds its last frame -, the moov atom first, no edit lists, AAC: its own
+  sound or silence). Each is kept as `posts/<post>-ig-<n>` while it is posted
+  and handed to Instagram as a signed link,
+  `/hub/media/persona/<id>/<file>?exp&sig` (two hours, an HMAC with the Hub's
+  secret, only such names). One picture is a post, one video a reel (in the
+  feed too), more make a carousel. The containers are asked about with a
+  growing pause (Meta: not more than once a minute).
+- **Published once**: the container that is published is kept with the post
+  before it is published. When anything goes wrong after that - an error, a
+  lost answer, the Hub stopping - Instagram is asked about that container
+  (at once, or at the next start, in the background): PUBLISHED is posted
+  (its id and link found among the account's newest posts by the caption),
+  FINISHED is published on Post again with no new upload, anything else says
+  to look on Instagram before posting again - and Post again asks again first.
+- **On Instagram**: its id and link kept, the card says On Instagram with the
+  link. It is not changed, put back to review or posted again; Discard takes
+  it off the Hub only (Instagram's API cannot delete a post).
+- **Checked before**: a caption of at most 2,200 characters (in UTF-16, as
+  Instagram counts), 30 hashtags and 20 @names; a picture or video. A task's
+  prompt asks for 1024x1280 pictures and those limits.
+- The review list on the Personas page has the drafts and the posts on their
+  way to Instagram or that did not get there (`?status=review`).
+- httpx writes each request's address to the log, and Instagram's GET
+  requests carry the token in theirs (as Meta's documentation sends it): a
+  filter on the httpx logger masks `access_token`, `client_secret` and `code`.
+- Not built: Facebook Pages (asked about - they need a Page, not a profile,
+  and the app Live, or posts are seen by its roles only), TikTok, a post at a
+  later time, Instagram's AI label (no API field for it; Søren labels the
+  account in its profile).
+
 ---
 
 ## 9. Libraries (multimodal RAG)

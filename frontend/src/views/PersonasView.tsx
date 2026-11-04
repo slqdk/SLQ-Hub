@@ -147,7 +147,17 @@ type Tab = "who" | "look" | "memory" | "tasks" | "posts" | "chats";
 function PersonaPage({ p, options, act, reload }: { p: Persona; options: PersonaOptions; act: Act;
   reload: () => Promise<void> }) {
   const { toast, refreshLists } = useApp();
-  const [tab, setTab] = useState<Tab>("who");
+  const [tab, setTab] = useState<Tab>(() => {          // back from Instagram's sign-in (0.76.0): its Posts tab
+    const q = new URLSearchParams(window.location.search);
+    return q.has("instagram") || q.has("instagram_error") ? "posts" : "who";
+  });
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search);
+    const bad = q.get("instagram_error");
+    if (!bad && !q.has("instagram")) return;
+    toast(bad || `${p.name}'s Instagram is connected`, bad ? "fault" : "run");
+    window.history.replaceState(window.history.state, "", window.location.pathname);
+  }, [toast, p.name]);
   const shown = useRef(`${p.name}|${p.picture}`);
   useEffect(() => {                                 // the chat list shows the persona's name and picture too
     if (shown.current === `${p.name}|${p.picture}`) return;
@@ -190,7 +200,7 @@ function PersonaPage({ p, options, act, reload }: { p: Persona; options: Persona
       {tab === "look" && <LookTab p={p} options={options} act={act} save={save} />}
       {tab === "memory" && <MemoryTab p={p} act={act} save={save} reload={reload} />}
       {tab === "tasks" && <TasksTab p={p} act={act} />}
-      {tab === "posts" && <PostsTab p={p} />}
+      {tab === "posts" && <PostsTab p={p} reload={reload} />}
       {tab === "chats" && <ChatsTab p={p} />}
     </>
   );

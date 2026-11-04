@@ -212,6 +212,10 @@ class TaskJobs:
                 await self.tick()
             except Exception:  # noqa: BLE001 - the next look comes all the same
                 log.exception("persona tasks")
+            try:
+                await self.ig_tick()                   # 0.76.0: the Instagram tokens renewed (hourly)
+            except Exception:  # noqa: BLE001
+                log.exception("persona instagram")
 
     async def tick(self, now: float | None = None) -> list[str]:
         """Start each task whose time has come -> "<persona>/<task>" of those started. A time missed by more than
@@ -335,14 +339,25 @@ class TaskJobs:
         tmp.write_text(json.dumps(posts, ensure_ascii=False, indent=1), encoding="utf-8")
         tmp.replace(d / "posts.json")
 
+    def post_face(self, pid: str) -> dict | None:
+        """A post's persona as its card shows it: the name, the picture, the Instagram account its posts can go to
+        ("" when none - 0.76.0)."""
+        face = self.face(pid)
+        return {**face, "instagram": self.ig_username(pid)} if face else None
+
     def posts(self, pid: str | None = None, status: str | None = None, limit: int = 200) -> list[dict]:
-        """Posts, the newest first - one persona's or all of them, each with its persona's name and picture."""
+        """Posts, the newest first - one persona's or all of them, each with its persona's name and picture. Status
+        "review" (0.76.0): the drafts, and those on their way to Instagram or that did not get there."""
+        def wanted(s: dict) -> bool:
+            if status == "review":
+                return s["status"] == "draft" or (s.get("instagram") or {}).get("state") in ("posting", "failed")
+            return not status or s["status"] == status
         out = []
         for item in ([self.face(pid)] if pid else self.list()):
             if item is None:
                 continue
-            face = {k: item[k] for k in ("id", "name", "picture")}
-            out += [{**s, "persona": face} for s in self.posts_of(item["id"]) if not status or s["status"] == status]
+            face = {**{k: item[k] for k in ("id", "name", "picture")}, "instagram": self.ig_username(item["id"])}
+            out += [{**s, "persona": face} for s in self.posts_of(item["id"]) if wanted(s)]
         return sorted(out, key=lambda s: s.get("made") or 0, reverse=True)[:limit]
 
     async def hand_in(self, pid: str, tid: str, chat_id: int | None, run_id: str | None, workdir, text,
@@ -412,7 +427,8 @@ class TaskJobs:
                 self._drop_files(pid, old)
                 posts.remove(old)
             posts.append(post)
-            handled = [s for s in posts if s["status"] != "draft"]
+            handled = [s for s in posts if s["status"] != "draft"
+                       and (s.get("instagram") or {}).get("state") != "posting"]
             for old in handled[:max(0, len(posts) - MAX_POSTS)]:      # the oldest handled ones, when there are many
                 self._drop_files(pid, old)
                 posts.remove(old)
@@ -435,6 +451,10 @@ class TaskJobs:
             post = next((s for s in posts if s["id"] == sid), None)
             if post is None:
                 raise PersonaError("No such post.", 404)
+            state = (post.get("instagram") or {}).get("state")
+            if state in ("posting", "posted") or self.ig_posting(pid, sid):
+                raise PersonaError("It is on Instagram (or on its way) - the Hub cannot change it there." if state ==
+                                   "posted" else "It is being posted - wait for it.", 409)
             if fields.get("text") is not None:
                 text = str(fields["text"]).replace("\r", "").strip()
                 if not text or len(text) > MAX_TEXT:
@@ -445,7 +465,7 @@ class TaskJobs:
                     raise PersonaError("A post is a draft or approved.")
                 post["status"] = fields["status"]
             self._write_posts(pid, posts)
-        return {**post, "persona": self.face(pid)}
+        return {**post, "persona": self.post_face(pid)}
 
     async def delete_post(self, pid: str, sid: str) -> None:
         from .store import PersonaError
@@ -455,5 +475,7 @@ class TaskJobs:
             post = next((s for s in posts if s["id"] == sid), None)
             if post is None:
                 raise PersonaError("No such post.", 404)
+            if self.ig_posting(pid, sid) or (post.get("instagram") or {}).get("state") == "posting":
+                raise PersonaError("It is being posted - wait for it.", 409)
             self._drop_files(pid, post)
             self._write_posts(pid, [s for s in posts if s is not post])

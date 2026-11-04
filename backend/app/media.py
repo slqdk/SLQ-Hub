@@ -29,7 +29,7 @@ def _valid(secret: str, sha: str, exp: int, sig: str) -> bool:
     if exp < time.time():
         return False
     want = hmac.new(secret.encode(), f"{sha}:{exp}".encode(), hashlib.sha256).hexdigest()[:32]
-    return hmac.compare_digest(want, sig or "")
+    return hmac.compare_digest(want.encode(), (sig or "").encode())     # bytes: any text a caller sends
 
 
 @router.get("/hub/media/blob/{sha}")

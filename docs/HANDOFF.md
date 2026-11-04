@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.75.0, 2026-11-04)
+## State (0.76.0, 2026-11-04)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -987,6 +987,28 @@ Chromium against the dev server (its fake model makes a picture of itself and ha
 "Scheduled task"): a task made through the page, Make one now, the post with its picture made from the portrait,
 the review list, the text changed, approved, the task's chat, the phone (no sideways scroll); no page errors. NOT
 seen on the VM: item 95.
+0.75.0 on the VM, Søren: it worked, once Gemma 4 31B's context was lowered from 256K (its 10 global layers keep
+42.5 KiB a token at q8_0: 10.6 GiB at 256K, which did not fit beside the 17.4 GiB of weights). His screenshot: the
+news task done alone by Gemma 4 31B (U) - a picture of Laura and a Danish post in her voice, handed in and approved
+(part of item 95). 0.76.0, Søren: "Are there tools where i automatically can upload to
+platforms, like Instagram, tiktok ... when i approve the post?" - "have the Hub post there directly ... Post to
+TikTok by hand with Download for now", "the labling is done in the profile text". Persona posts on Instagram (DESIGN
+§8 "Persona posts on Instagram"): the owner's Meta app (ID and secret on a persona's Posts tab), the persona's account
+connected through Instagram's sign-in (the callback public, vouched for by its state), the token in
+data/personas/<id>/instagram.json and renewed by the schedule, Approve and post: the files made ready (JPEG 4:5 to
+1.91:1; a video re-encoded for Reels by ffmpeg in the sandbox) and fetched by Instagram through two-hour signed links,
+a post, a reel or a carousel - published once (the container kept before it is published and asked about when
+anything goes wrong after, also at the next start). Tests: tests/test_persona_instagram.py (11) against a fake of
+Instagram's API that fetches the links from the Hub. An independent review (a separate agent) found a post could be
+published twice (a stop or a lost answer after media_publish, then Post again), a renewal in flight undoing a
+disconnect, a 500 for a signed link with a non-ASCII signature (media.py had it too), reels under 3 s, /me possibly
+in a data list, edit lists in the reel and polling faster than Meta recommends: all fixed, each with a test that fails
+without the fix (the reel's length and edit lists checked with a real ffmpeg 6/7: 2 s and 1.5 s clips come out 3.27 s,
+no elst, moov first, 30 fps, AAC). In Chromium against the dev server (--public-url https://hub.test; Instagram's
+sign-in page stood in for by a redirect to the callback): the app saved, Connect and back to the Posts tab, Approve
+and post asks once more, Posting, On Instagram with its link, the phone (no sideways scroll), dark; no page errors.
+Søren also asked "What about facebook ?": answered (a Page, not a profile; the app must be Live or the posts are seen
+by its roles only); not built. NOT seen against Meta: item 96.
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
 host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU
@@ -1764,6 +1786,19 @@ the host if the VM ever stops by itself.
       converter's cases are ComfyUI 0.42.3's own templates; files from other sites (Civitai, OpenArt) are
       untried - an export is the way to see what went wrong. When COMFYUI_REF changes, the editor's format may
       too: tools/workflow_oracle/ (convert.js, compare.py) is how the converter was checked - run it again.
+96. **Persona posts on Instagram (0.76.0)** - none of it has run against Meta:
+    - **The setup in Meta's dashboard** (the menus' names may differ from the Posts tab's words): an app with
+      Instagram's API (Instagram login), Laura's account a professional one and an Instagram tester accepted in
+      Instagram, the return address `https://hub.slq.dk/hub/api/personas/instagram/callback`, the Instagram app ID
+      and secret given to the Hub. Does Standard Access really publish publicly for a tester's account in development
+      mode (Meta's docs say so for Instagram; for Facebook Pages it is not so)?
+    - **Connect**: does Instagram take `force_reauth` (the sign-in asks for Laura's account, not Søren's), does the
+      browser reach hub.slq.dk from where he connects (at home: NAT loopback or DNS), does `/me` answer flat?
+    - **Posting**: does Instagram fetch the two-hour signed link through Nginx Proxy Manager (no access list on
+      hub.slq.dk), are the containers FINISHED within the waits, does media_publish answer with an id, the permalink;
+      a carousel; a reel from a Wan clip (16 fps re-encoded to 30, a silent AAC track) - and the Hub log: no token in
+      it.
+    - **Renewal** after five days (the schedule, hourly look), and Instagram's rate limits on a new account.
 95. **Persona tasks and posts (0.75.0)** - none of it has run on the VM:
     - **The schedule on the real clock**: a task at the next whole minute or two (Change, then wait) - does it start
       by itself, at the household's time, and does the next time move a week on? The Hub's log says "persona
@@ -2010,7 +2045,7 @@ the host if the VM ever stops by itself.
 | `services/comfyui/nodes/slq_audio/` | The Hub's own ComfyUI nodes (0.18.0): ACE-Step timbre and cover source, the planner-free text encoder, Mel-Band RoFormer stems, Seed-VC voice conversion (README.md there; the image installs them with Seed-VC and MSST at pinned commits). |
 | `backend/app/rag/` | Libraries: extraction, indexing, search, the `library_search` tool. |
 | `backend/app/movies/`, `frontend/src/views/MoviesView.tsx` | Movies (0.72.0): series, cast, sets, episodes and their jobs (`studio.py`), the sound and the cut (`sound.py`, `cut.py`, `render_overlays.py`). |
-| `backend/app/personas/`, `backend/app/agent/tools/persona.py`, `frontend/src/views/PersonasView.tsx`, `frontend/src/views/PersonaTasks.tsx` | Personas (0.74.0): the personas and their files, memory, portraits and voice (`store.py`), their system prompt and condensing (`prompt.py`), the `remember` tool; the page, the player (`lib/personas.ts`). Tasks and posts (0.75.0): the schedule, a task's run and the posts (`tasks.py`), `post_draft`; the Tasks and Posts tabs and the review list (`PersonaTasks.tsx`). |
+| `backend/app/personas/`, `backend/app/agent/tools/persona.py`, `frontend/src/views/PersonasView.tsx`, `frontend/src/views/PersonaTasks.tsx` | Personas (0.74.0): the personas and their files, memory, portraits and voice (`store.py`), their system prompt and condensing (`prompt.py`), the `remember` tool; the page, the player (`lib/personas.ts`). Tasks and posts (0.75.0): the schedule, a task's run and the posts (`tasks.py`), `post_draft`; the Tasks and Posts tabs and the review list (`PersonaTasks.tsx`). Instagram (0.76.0): the app, the account, posting (`instagram.py`); the Posts tab's Instagram box and the cards' Approve and post. |
 | `backend/app/sandbox_job.py`, `backend/app/audio/clips.py` | A command in the sandbox for the Hub's own jobs (Movies' preview and cut, voice clips); a clip of a real voice as the speech models take it. |
 | `backend/app/cli.py` | `selftest`, `set-password`, `create-key`, `keys`. |
 | `frontend/src/` | The UI: `views/` (chat, project, libraries, settings), `components/`, `lib/turns.ts` (the turn view model for history and live runs). |

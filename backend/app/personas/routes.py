@@ -2,8 +2,11 @@
 owner's alone - a person's account gets 403 (the gate keeps people off these routes already)."""
 from __future__ import annotations
 
+import html
+from urllib.parse import quote
+
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from pydantic import BaseModel
 
 from .. import auth
@@ -12,6 +15,7 @@ from ..state import get_hub
 from .store import MAX_PICTURE, PersonaError
 
 router = APIRouter(prefix="/hub/api/personas")
+media_router = APIRouter()             # 0.76.0: /hub/media/persona/... - the files Instagram fetches, by signed link
 
 
 def _p(request: Request):
@@ -53,8 +57,44 @@ async def overview(request: Request):
 
 @router.get("/posts")
 async def all_posts(request: Request, status: str | None = None):
-    """0.75.0: the personas' posts, the newest first - status "draft": those waiting for the owner's review."""
+    """0.75.0: the personas' posts, the newest first - status "draft": those waiting for the owner's review;
+    "review" (0.76.0): those and the ones on their way to Instagram or that did not get there."""
     return {"posts": _p(request).posts(status=status)}
+
+
+class InstagramAppIn(BaseModel):
+    app_id: str | None = None
+    app_secret: str | None = None          # empty: the one kept stays
+
+
+@router.get("/instagram")
+async def instagram_app(request: Request):
+    """0.76.0: the owner's Meta app that posts the personas' posts - its ID, whether a secret is kept (never the
+    secret), the address Instagram sends the browser back to (to give Meta)."""
+    return _p(request).ig_info()
+
+
+@router.put("/instagram")
+async def set_instagram_app(body: InstagramAppIn, request: Request):
+    try:
+        return _p(request).set_ig_app(body.app_id, body.app_secret)
+    except PersonaError as exc:
+        _fail(exc)
+
+
+@router.get("/instagram/callback")
+async def instagram_callback(request: Request, code: str = "", state: str = "", error: str = "",
+                             error_description: str = ""):
+    """Instagram sends the browser back here after the sign-in - without the Hub's sign-in, perhaps (the address
+    on the internet, not the one at home): the state, made for a signed-in owner's Connect, vouches for it."""
+    store = get_hub(request).extras["personas"]
+    try:
+        pid, back, problem = await store.ig_callback(code, state, error, error_description)
+    except PersonaError as exc:
+        return HTMLResponse(f"<!doctype html><meta charset=utf-8><title>Instagram</title><p>{html.escape(str(exc))}"
+                            "</p><p><a href=\"/personas\">Back to the Hub</a></p>", status_code=400)
+    query = "instagram=connected" if not problem else f"instagram_error={quote(problem[:400])}"
+    return RedirectResponse(f"{back}/personas/{pid}?{query}", status_code=303)
 
 
 @router.post("")
@@ -268,6 +308,49 @@ async def delete_post(pid: str, sid: str, request: Request):
     except PersonaError as exc:
         _fail(exc)
     return {"ok": True}
+
+
+@router.post("/{pid}/instagram/connect")
+async def instagram_connect(pid: str, request: Request):
+    """Instagram's sign-in page for the persona's account: the page goes there, and comes back to where it was
+    opened (its origin)."""
+    try:
+        return {"url": _p(request).ig_connect_url(pid, request.headers.get("origin") or "")}
+    except PersonaError as exc:
+        _fail(exc)
+
+
+@router.delete("/{pid}/instagram")
+async def instagram_disconnect(pid: str, request: Request):
+    try:
+        await _p(request).ig_disconnect(pid)
+        return _p(request).detail(pid)
+    except PersonaError as exc:
+        _fail(exc)
+
+
+@router.post("/{pid}/posts/{sid}/instagram")
+async def post_to_instagram(pid: str, sid: str, request: Request):
+    """Approved, and posted to the persona's Instagram account (a job: the post says how it went)."""
+    try:
+        return await _p(request).ig_publish(pid, sid)
+    except PersonaError as exc:
+        _fail(exc)
+
+
+@media_router.get("/hub/media/persona/{pid}/{name}")
+async def instagram_file(pid: str, name: str, request: Request, exp: int = 0, sig: str = ""):
+    """A post's file made ready for Instagram, for its signed link (two hours) - Instagram's servers fetch it, with
+    no sign-in of the Hub's."""
+    store = get_hub(request).extras["personas"]
+    try:
+        if not store.ig_link_ok(pid, name, exp, sig):
+            raise PersonaError("No such file.", 404)
+        path = store.file(pid, f"posts/{name}")
+    except PersonaError:
+        raise HTTPException(404, "no such file") from None
+    return FileResponse(path, media_type="image/jpeg" if name.endswith(".jpg") else "video/mp4",
+                        headers={"Cache-Control": "private, max-age=3600", "X-Content-Type-Options": "nosniff"})
 
 
 @router.get("/{pid}/file")

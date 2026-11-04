@@ -20,7 +20,8 @@ from ..images import workflows as W
 from ..state import get_hub
 
 router = APIRouter()
-SECRET_SETTINGS = {("cloud", "api_key"), ("tokens", "huggingface"), ("tokens", "civitai")}   # shown masked
+SECRET_SETTINGS = {("cloud", "api_key"), ("tokens", "huggingface"), ("tokens", "civitai"),
+                   ("instagram", "app_secret")}                                         # shown masked
 
 
 # ---------------------------------------------------------------- queue + events

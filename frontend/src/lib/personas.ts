@@ -18,16 +18,27 @@ export interface PersonaTask {
   last_post: string; running: boolean;
 }
 export interface PostMedia { file: string; kind: "picture" | "video" }
+/** 0.76.0: how its trip to Instagram went. */
+export interface PostInstagram { state: "posting" | "posted" | "failed"; id?: string; permalink?: string; at?: number;
+  error?: string }
 export interface PersonaPost {
   id: string; task: string; title: string; text: string; media: PostMedia[]; status: "draft" | "approved";
-  made: number; chat: number | null; persona: { id: string; name: string; picture: string };
+  made: number; chat: number | null; instagram?: PostInstagram;
+  /** instagram: the account the post can go to now ("" when none). */
+  persona: { id: string; name: string; picture: string; instagram: string };
 }
+/** 0.76.0: the persona's Instagram account (never its token). */
+export interface PersonaInstagram { username: string; account_type: string; expires: number | null;
+  connected: number | null; problem: string }
+/** The owner's Meta app that posts the personas' posts (never its secret). */
+export interface InstagramApp { app_id: string; secret_set: boolean; redirect_uri: string; public_url: string;
+  ready: boolean }
 export interface Persona {
   id: string; name: string; role: string; personality: string; speech: string; examples: string; greeting: string;
   language: string; model: string; level: "quick" | "think"; look: string; lora: string; strength: number;
   picture: string; variants: PersonaVariant[]; voice: string; voice_clip: string; voice_clip_seconds: number;
   expressiveness: number; web: boolean; pictures: boolean; memory: boolean; read_aloud: boolean;
-  created: number; updated: number; tasks: PersonaTask[];
+  created: number; updated: number; tasks: PersonaTask[]; instagram: PersonaInstagram | null;
   notes: string; notes_max: number; chats: PersonaChat[]; audio: PersonaAudio;
   job: { what: string; value?: number; max?: number } | null; error: string;
 }

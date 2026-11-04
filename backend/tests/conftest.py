@@ -9,8 +9,8 @@ from app.config import Env, _networks
 from app.main import create_app
 from app.state import Transports
 
-from .mocks import (HostRouter, make_civitai, make_civitai_delivery, make_comfy, make_hf, make_llama, make_mcp_http,
-                    make_sandbox, make_searxng, make_speech, make_supervisor, make_trainer)
+from .mocks import (HostRouter, make_civitai, make_civitai_delivery, make_comfy, make_hf, make_instagram, make_llama,
+                    make_mcp_http, make_sandbox, make_searxng, make_speech, make_supervisor, make_trainer)
 
 CATALOG = Path(__file__).resolve().parents[1] / "app" / "catalog" / "models.json"
 
@@ -47,6 +47,7 @@ class Fakes:
         self.civitai = {}
         self.speech = {}
         self.trainer = {}
+        self.instagram = {}
 
 
 @pytest.fixture
@@ -71,6 +72,7 @@ def hub_env(tmp_path):
 
 @pytest.fixture
 def app(hub_env, fakes):
+    instagram = make_instagram(fakes.instagram)       # 0.76.0: one fake for both of Instagram's hosts
     router = HostRouter({
         "supervisor": make_supervisor(fakes.sup),
         "llm": make_llama(fakes.llama),
@@ -84,6 +86,8 @@ def app(hub_env, fakes):
         "delivery.civitai.test": make_civitai_delivery(fakes.civitai),
         "speech:7100": make_speech(fakes.speech),
         "trainer:7300": make_trainer(fakes.trainer),
+        "api.instagram.com": instagram,
+        "graph.instagram.com": instagram,
     })
     t = Transports(llm=router, runner=router, comfy=router, sandbox=router, web=router, speech=router,
                    trainer=router)

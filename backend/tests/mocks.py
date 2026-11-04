@@ -1034,3 +1034,136 @@ def make_trainer(state: dict) -> FastAPI:
         return {"ok": True}
 
     return app
+
+
+# ---------------------------------------------------------------- Instagram (0.76.0)
+
+def make_instagram(state: dict) -> FastAPI:
+    """The bits of Instagram's API the Hub uses, on api.instagram.com (the code swapped for a token) and
+    graph.instagram.com (the long-lived token, its renewal, the profile, containers, publishing). Scripted by
+    `state`: "fetch" (an async function: the test's way of fetching a signed link from the Hub, as Meta's servers
+    would), "statuses" (status_code answers for each container, in turn), "fail" ({"media": error, ...}: an answer
+    to give once), "refresh_error", "lost" (a publish goes through but its answer is an error), "delay"
+    ({"publish": seconds, "refresh": seconds}), "me_wrapped" (/me in a data list)."""
+    app = FastAPI()
+    state.setdefault("calls", [])
+    state.setdefault("containers", {})
+    state.setdefault("published", [])
+    state.setdefault("fetched", {})
+    n = {"c": 0, "m": 0}
+
+    def error(code: int, message: str, status: int = 400, **extra) -> JSONResponse:
+        return JSONResponse({"error": {"message": message, "type": "OAuthException" if code == 190 else
+                                       "GraphMethodException", "code": code, **extra, "fbtrace_id": "x"}}, status)
+
+    def failing(what: str):
+        f = (state.get("fail") or {}).pop(what, None)
+        return error(**f) if f else None
+
+    @app.post("/oauth/access_token")
+    async def code(request: Request):
+        form = dict(await request.form())
+        state["calls"].append(("code", form))
+        if form.get("code") != state.get("code", "CODE1") or form.get("client_secret") != "a1b2c3d4e5f6a7b8c9d0":
+            return JSONResponse({"error_type": "OAuthException", "code": 400,
+                                 "error_message": "Error validating verification code"}, 400)
+        return {"data": [{"access_token": "IGSHORT1", "user_id": "1020",
+                          "permissions": state.get("permissions",
+                                                   "instagram_business_basic,instagram_business_content_publish")}]}
+
+    @app.get("/access_token")
+    async def exchange(request: Request):
+        q = dict(request.query_params)
+        state["calls"].append(("exchange", q))
+        if q.get("grant_type") != "ig_exchange_token" or q.get("access_token") != "IGSHORT1":
+            return error(190, "Invalid OAuth access token.")
+        return {"access_token": "IGLONG1", "token_type": "bearer", "expires_in": 5183944}
+
+    @app.get("/refresh_access_token")
+    async def refresh(request: Request):
+        q = dict(request.query_params)
+        state["calls"].append(("refresh", q))
+        if (state.get("delay") or {}).get("refresh"):
+            import asyncio
+            await asyncio.sleep(state["delay"]["refresh"])
+        if state.get("refresh_error"):
+            return error(**state["refresh_error"])
+        return {"access_token": "IGLONG2", "token_type": "bearer", "expires_in": 5183944}
+
+    def token_ok(token: str | None) -> bool:
+        return token in ("IGLONG1", "IGLONG2") and not state.get("revoked")
+
+    @app.get("/v26.0/me")
+    async def me(request: Request):
+        q = dict(request.query_params)
+        state["calls"].append(("me", q))
+        if not token_ok(q.get("access_token")):
+            return error(190, "Error validating access token: Session has expired.")
+        me = {"user_id": "17841400001", "username": "laura.kolding", "account_type": "MEDIA_CREATOR", "id": "1020"}
+        return {"data": [me]} if state.get("me_wrapped") else me
+
+    @app.post("/v26.0/{ig}/media")
+    async def media(ig: str, request: Request):
+        form = dict(await request.form())
+        state["calls"].append(("media", {**form, "ig": ig}))
+        if not token_ok(form.get("access_token")):
+            return error(190, "Error validating access token: Session has expired.")
+        bad = failing("media")
+        if bad is not None:
+            return bad
+        url = form.get("image_url") or form.get("video_url")
+        if url and state.get("fetch"):
+            state["fetched"][url] = await state["fetch"](url)
+        n["c"] += 1
+        cid = f"1790000000{n['c']}"
+        state["containers"][cid] = {**form, "polls": 0}
+        return {"id": cid}
+
+    @app.post("/v26.0/{ig}/media_publish")
+    async def publish(ig: str, request: Request):
+        form = dict(await request.form())
+        state["calls"].append(("publish", form))
+        if (state.get("delay") or {}).get("publish"):
+            import asyncio
+            await asyncio.sleep(state["delay"]["publish"])
+        bad = failing("publish")
+        if bad is not None:
+            return bad
+        c = state["containers"].get(form.get("creation_id"))
+        if c is None or c.get("published"):
+            return error(9007, "The media is not ready for publishing, please wait for a moment.")
+        n["m"] += 1
+        mid = f"1800000000{n['m']}"
+        c["published"] = mid
+        state["published"].append({"id": mid, "container": c, "caption": c.get("caption", "")})
+        if state.pop("lost", False):
+            return error(1, "An unknown error occurred.", 500)
+        return {"id": mid}
+
+    @app.get("/v26.0/{ig}/media")
+    async def listed(ig: str, request: Request):
+        state["calls"].append(("list", dict(request.query_params)))
+        return {"data": [{"id": x["id"], "caption": x["caption"],
+                          "permalink": f"https://www.instagram.com/p/C{x['id'][-4:]}/"}
+                         for x in reversed(state["published"])][:10]}
+
+    @app.get("/v26.0/{node}")
+    async def node(node: str, request: Request):
+        q = dict(request.query_params)
+        state["calls"].append(("get", {**q, "node": node}))
+        if node in state["containers"]:
+            c = state["containers"][node]
+            script = state.get("statuses") or []
+            code = script[c["polls"]] if c["polls"] < len(script) else "FINISHED"
+            c["polls"] += 1
+            if c.get("published"):
+                code = "PUBLISHED"
+            out = {"status_code": code, "id": node}
+            if code == "ERROR":
+                out["status"] = "Error: Media upload has failed with error code 2207026"
+            return out
+        if any(p["id"] == node for p in state["published"]):
+            return {"permalink": f"https://www.instagram.com/p/C{node[-4:]}/", "id": node}
+        return error(100, "Unsupported get request.")
+
+    return app

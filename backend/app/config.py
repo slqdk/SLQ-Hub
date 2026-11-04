@@ -159,6 +159,10 @@ DEFAULTS: dict = {
         "base_url": "",                    # OpenAI-compatible base URL (DeepSeek, OpenRouter, ...)
         "max_tokens": 16000,
     },
+    "instagram": {                         # 0.76.0: the owner's Meta app, which posts personas' posts (instagram.py)
+        "app_id": "",                      # its Instagram app ID
+        "app_secret": "",                  # its Instagram app secret (masked, in no export)
+    },
     "tokens": {                            # sign-ins for model downloads (0.64.0, app/tokens.py); "" = .env's, if any
         "huggingface": "",                 # a read token: gated models (FLUX.2 klein 9B, its uncensored encoder)
         "civitai": "",                     # an API key: Civitai files that want a signed-in user

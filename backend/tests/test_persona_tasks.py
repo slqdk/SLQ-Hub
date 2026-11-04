@@ -101,12 +101,13 @@ async def test_a_task_at_its_time_makes_a_post_for_review(signed_in, app, fakes)
     d = await ok(await signed_in.get(f"{API}/{pid}"))
     t = d["tasks"][0]
     assert t["last_error"] == "" and t["last_post"] and t["last_run"] and not t["running"]
-    assert datetime.fromtimestamp(t["next_run"], CPH) == datetime.fromtimestamp(due, CPH).replace(day=when.day + 7)
+    nxt = datetime.fromtimestamp(t["next_run"], CPH)                      # a week on, at the same time of day
+    assert (nxt.date() - when.date()).days == 7 and (nxt.hour, nxt.minute) == (19, 0)
     review = await ok(await signed_in.get(f"{API}/posts", params={"status": "draft"}))
     assert len(review["posts"]) == 1
     post = review["posts"][0]
     assert post["text"] == "Mandagsløb ✅ 10 km langs havnen. #løb" and post["title"] == "Monday post"
-    assert post["persona"] == {"id": pid, "name": "Anna", "picture": ""} and post["status"] == "draft"
+    assert post["persona"] == {"id": pid, "name": "Anna", "picture": "", "instagram": ""} and post["status"] == "draft"
     assert [m["kind"] for m in post["media"]] == ["picture"]
     pic = await signed_in.get(f"{API}/{pid}/file", params={"path": post["media"][0]["file"]})
     assert pic.status_code == 200 and pic.content[:8] == b"\x89PNG\r\n\x1a\n"
