@@ -180,10 +180,12 @@ function InstagramBox({ p, onChange }: { p: Persona; onChange: () => Promise<voi
   const [editing, setEditing] = useState(false);
   const [appId, setAppId] = useState("");
   const [secret, setSecret] = useState("");
+  const [config, setConfig] = useState("");
   useEffect(() => {
     api<InstagramApp>("/hub/api/personas/instagram").then((a) => {
       setApp(a);
       setAppId(a.app_id);
+      setConfig(a.config_id);
     }).catch((e) => toast((e as Error).message, "fault"));
   }, [toast]);
   if (!app) return null;
@@ -192,7 +194,7 @@ function InstagramBox({ p, onChange }: { p: Persona; onChange: () => Promise<voi
   const saveApp = async () => {
     try {
       const a = await api<InstagramApp>("/hub/api/personas/instagram", { method: "PUT",
-        body: { app_id: appId.trim(), app_secret: secret.trim() } });
+        body: { app_id: appId.trim(), app_secret: secret.trim(), config_id: config.trim() } });
       setApp(a);
       setSecret("");
       setEditing(false);
@@ -225,26 +227,32 @@ function InstagramBox({ p, onChange }: { p: Persona; onChange: () => Promise<voi
         {app.ready && !editing && <button className="btn quiet small" onClick={() => setEditing(true)}>Meta app</button>}
       </div>
       {!app.ready || editing ? (<>
-        <p className="muted small" style={{ margin: 0 }}>Approved posts can go to {p.name}'s Instagram account, straight
-          from the Hub. Once, at developers.facebook.com: make an app with Instagram's API (Instagram login), add
-          {" "}{p.name}'s account - a professional one - as an Instagram tester and accept that in Instagram, and give
-          Meta this return address (OAuth redirect URI):</p>
+        <p className="muted small" style={{ margin: 0 }}>Approved posts can go to {p.name}'s Instagram account - a
+          professional one - straight from the Hub. Once, at developers.facebook.com: an app with the use case Manage
+          messaging &amp; content on Instagram. An app made since October 2026 has <b>Unified login</b>: it needs a
+          business portfolio, and under API setup with Unified login you create a configuration with this return
+          address as its Redirect URL - then give the Hub the app's ID and secret (App settings, Basic) and the
+          configuration's ID. An older app with Instagram login: its Instagram app ID and secret, this return address
+          under Business login settings, and no configuration ID.</p>
         {noAddress ? <div className="pe-ig-problem small">Instagram needs the Hub's address on the internet: set
           HUB_PUBLIC_URL (https://...) in /srv/slq-hub/.env.</div>
           : <div className="row pe-ig-uri"><code className="mono grow">{app.redirect_uri}</code>
             <button className="btn quiet small" onClick={async () => toast((await copyText(app.redirect_uri))
               ? "Copied" : "Copying failed", "run")}><Copy size={13} /> Copy</button></div>}
         <div className="form-grid">
-          <label className="field"><span>Instagram app ID</span><input className="input mono" value={appId}
+          <label className="field"><span>App ID</span><input className="input mono" value={appId}
             inputMode="numeric" autoComplete="off" onChange={(e) => setAppId(e.target.value)} /></label>
-          <label className="field"><span>Instagram app secret</span><input className="input mono" type="password"
+          <label className="field"><span>App secret</span><input className="input mono" type="password"
             value={secret} autoComplete="off" placeholder={app.secret_set ? "Kept - type a new one to change it" : ""}
             onChange={(e) => setSecret(e.target.value)} /></label>
+          <label className="field"><span>Configuration ID (Unified login)</span><input className="input mono"
+            value={config} inputMode="numeric" autoComplete="off" placeholder="Empty: Instagram login"
+            onChange={(e) => setConfig(e.target.value)} /></label>
         </div>
         <div className="row">
           <span className="grow" />
           {editing && <button className="btn quiet small" onClick={() => { setEditing(false); setSecret("");
-            setAppId(app.app_id); }}>Cancel</button>}
+            setAppId(app.app_id); setConfig(app.config_id); }}>Cancel</button>}
           <button className="btn primary small" disabled={!appId.trim() || (!secret.trim() && !app.secret_set)}
             onClick={saveApp}>Save</button>
         </div>
@@ -254,15 +262,17 @@ function InstagramBox({ p, onChange }: { p: Persona; onChange: () => Promise<voi
           {ig.problem ? <span className="grow pe-ig-problem small">{ig.problem}</span>
             : <span className="grow small">Approve and post puts a post on{" "}
               <a href={`https://www.instagram.com/${ig.username}/`} target="_blank" rel="noreferrer">@{ig.username}</a>
-              <span className="faint"> - the sign-in is renewed by itself.</span></span>}
+              {ig.login === "instagram" && <span className="faint"> - the sign-in is renewed by itself.</span>}
+              {ig.others > 0 && <span className="faint"> (Meta gave the Hub {ig.others + 1} accounts; to use another,
+                connect again and choose only that one.)</span>}</span>}
           {ig.problem && <button className="btn primary small" onClick={connect}>Connect again</button>}
           <ConfirmButton className="btn quiet small" confirmText="Disconnect?" onConfirm={disconnect}>
             Disconnect</ConfirmButton>
         </div>
       ) : (
         <div className="row pe-ig-acct">
-          <span className="grow muted small">Connect {p.name}'s account, and approved posts can go there. At Instagram,
-            sign in as {p.name} - not as yourself.</span>
+          <span className="grow muted small">Connect {p.name}'s account, and approved posts can go there. In Meta's
+            window, sign in and choose {p.name}'s Instagram account - not your own.</span>
           <button className="btn primary small" onClick={connect}><Send size={13} /> Connect Instagram</button>
         </div>
       )}

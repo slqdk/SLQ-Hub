@@ -160,8 +160,9 @@ DEFAULTS: dict = {
         "max_tokens": 16000,
     },
     "instagram": {                         # 0.76.0: the owner's Meta app, which posts personas' posts (instagram.py)
-        "app_id": "",                      # its Instagram app ID
-        "app_secret": "",                  # its Instagram app secret (masked, in no export)
+        "app_id": "",                      # its app ID (Unified login) - or its Instagram app ID (Instagram login)
+        "app_secret": "",                  # the matching secret (masked, in no export)
+        "config_id": "",                   # 0.76.1: Unified login's configuration ID ("": Instagram login)
     },
     "tokens": {                            # sign-ins for model downloads (0.64.0, app/tokens.py); "" = .env's, if any
         "huggingface": "",                 # a read token: gated models (FLUX.2 klein 9B, its uncensored encoder)

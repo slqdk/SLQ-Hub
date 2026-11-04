@@ -786,11 +786,11 @@ export const SECTIONS: HelpSection[] = [
           "Give them tasks (the Tasks tab): \"Mondays at 19:00: a post about your week's training, with a picture of "
             + "you\". At that time they write the post in their voice, make the picture or video - with their LoRA "
             + "when they are in it - and hand it in. The posts wait for you: Posts to review on the Personas page.",
-          "Post to Instagram (the Posts tab): once, make an app at developers.facebook.com with Instagram's API "
-            + "(Instagram login), add the persona's account - a professional one - as an Instagram tester and accept "
-            + "it in Instagram, give Meta the return address the Posts tab shows, and give the Hub the app's "
-            + "Instagram app ID and secret. Then Connect Instagram and sign in as the persona: Approve and post puts "
-            + "a post there.",
+          "Post to Instagram (the Posts tab): once, make an app at developers.facebook.com with the use case "
+            + "Manage messaging & content on Instagram. A new app has Unified login: give it a business portfolio, "
+            + "create a configuration under API setup with Unified login with the return address the Posts tab shows, "
+            + "and give the Hub the app's ID and secret and the configuration's ID. Then Connect Instagram and choose "
+            + "the persona's account (a professional one): Approve and post puts a post there.",
         ],
         tips: ["Their notes are on the Memory tab: read and correct what they remember.",
           "The web and pictures are off until you turn them on - a persona has only what you give them.",

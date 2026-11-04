@@ -1,15 +1,21 @@
 """Instagram (0.76.0, Søren: "Are there tools where i automatically can upload to platforms, like Instagram ... when i
-approve the post?" - "have the Hub post there directly").
+approve the post?" - "have the Hub post there directly"). 0.76.1: Unified login - Meta stopped offering Instagram
+login to new apps in October 2026 (his app, made on 4 November, had only "API setup with Unified login").
 
 A persona's post goes to its own Instagram account when the owner approves it, straight from the Hub: Meta's
 Instagram API with Instagram Login, through an app of the owner's own in Meta's developer dashboard. Its Instagram
 app ID and secret are kept like the download sign-ins (settings.json on the VM, section "instagram", masked, in no
 export); the app stays in development mode, for the professional accounts it lists as testers - no review.
 
-* Connecting: the owner signs in to the persona's account at instagram.com (force_reauth: not his own account the
-  browser is signed in with), Instagram sends the browser back to the Hub's address on the internet
-  (HUB_PUBLIC_URL) with a code, the Hub swaps it for a token good for 60 days and keeps it in
-  data/personas/<id>/instagram.json (never in persona.json, never shown) - and renews it every few days.
+* Connecting, with Unified login (an app made since October 2026: it belongs to a business portfolio, and a
+  configuration in its dashboard says what it asks for): Meta's sign-in dialog (facebook.com, config_id; the person
+  signs in with Instagram or Facebook and picks the account), the code swapped at graph.facebook.com for a Business
+  Integration System User token, the account found with /me/assigned_instagram_accounts; the API is then
+  graph.facebook.com's. With Instagram login (an older app: the setting has no configuration ID): instagram.com's
+  sign-in (force_reauth: not the account the browser is signed in with), the code swapped for a token good for 60
+  days that the schedule renews; the API is graph.instagram.com's. Either way Meta sends the browser back to the
+  Hub's address on the internet (HUB_PUBLIC_URL), and the account is kept in data/personas/<id>/instagram.json
+  (never in persona.json, never shown).
 * Posting: Instagram fetches the pictures and videos itself, from a public address. The Hub makes each ready (a
   JPEG between 4:5 and 1.91:1, at most 1440 wide; a video re-encoded by ffmpeg in the sandbox to what Reels take)
   and hands Instagram a signed link to it under /hub/media/persona/ that works for two hours. One picture or video
@@ -38,9 +44,11 @@ import httpx
 
 log = logging.getLogger(__name__)
 
-GRAPH = "https://graph.instagram.com"
+GRAPH = "https://graph.instagram.com"            # the API with Instagram login
+FB_GRAPH = "https://graph.facebook.com"          # the API with Unified login
 VERSION = "v26.0"
 AUTHORIZE = "https://www.instagram.com/oauth/authorize"
+DIALOG = "https://www.facebook.com/dialog/oauth"  # Unified login's sign-in
 CODE_URL = "https://api.instagram.com/oauth/access_token"
 SCOPES = "instagram_business_basic,instagram_business_content_publish"
 CALLBACK = "/hub/api/personas/instagram/callback"
@@ -58,7 +66,7 @@ CHECK_EVERY = 3600                     # how often the schedule looks at the tok
 POLL = {"picture": 3, "video": 15}     # seconds before the next look at a container Instagram is making ready,
 POLL_MAX = {"picture": 30, "video": 60}  # doubled each time up to this (Meta: not more than once a minute)
 WAIT = {"picture": 180, "video": 900}  # and the most it waits
-APP_ID_RE = re.compile(r"^\d{5,25}$")
+APP_ID_RE = re.compile(r"^\d{5,25}$")              # an app's ID, a configuration's ID
 APP_SECRET_RE = re.compile(r"^[A-Za-z0-9]{16,64}$")
 NAME_RE = re.compile(r"^s[0-9a-f]{8}-ig-\d{1,2}\.(?:jpg|mp4)$")      # what the signed links may name
 HASHTAG = re.compile(r"(?<![\w&])#\w+")
@@ -198,6 +206,10 @@ class InstagramJobs:
         s = self.hub.settings.get("instagram") or {}
         return str(s.get("app_id") or "").strip(), str(s.get("app_secret") or "").strip()
 
+    def ig_config(self) -> str:
+        """Unified login's configuration ID ("": the app uses Instagram login)."""
+        return str((self.hub.settings.get("instagram") or {}).get("config_id") or "").strip()
+
     def ig_redirect(self) -> str:
         base = (self.hub.env.public_url or "").rstrip("/")
         return f"{base}{CALLBACK}" if base.startswith("https://") else ""
@@ -205,23 +217,31 @@ class InstagramJobs:
     def ig_info(self) -> dict:
         app_id, secret = self.ig_app()
         redirect = self.ig_redirect()
-        return {"app_id": app_id, "secret_set": bool(secret), "redirect_uri": redirect,
+        config = self.ig_config()
+        return {"app_id": app_id, "secret_set": bool(secret), "config_id": config,
+                "login": "unified" if config else "instagram", "redirect_uri": redirect,
                 "public_url": self.hub.env.public_url or "", "ready": bool(app_id and secret and redirect)}
 
-    def set_ig_app(self, app_id: str | None, app_secret: str | None) -> dict:
+    def set_ig_app(self, app_id: str | None, app_secret: str | None, config_id: str | None = None) -> dict:
         from .store import PersonaError
         values = {}
         if app_id is not None:
             app_id = app_id.strip()
             if app_id and not APP_ID_RE.match(app_id):
-                raise PersonaError("The Instagram app ID is a number (Meta's dashboard: Instagram -> API setup with "
-                                   "Instagram login).")
+                raise PersonaError("The app ID is a number (Meta's dashboard: App settings -> Basic, or with "
+                                   "Instagram login the Instagram app ID).")
             values["app_id"] = app_id
         if app_secret is not None and app_secret.strip():           # empty: the one kept stays
             if not APP_SECRET_RE.match(app_secret.strip()):
-                raise PersonaError("That does not look like the Instagram app secret (letters and digits, from "
-                                   "Meta's dashboard, next to the app ID).")
+                raise PersonaError("That does not look like the app secret (letters and digits, from Meta's "
+                                   "dashboard, next to the app ID).")
             values["app_secret"] = app_secret.strip()
+        if config_id is not None:
+            config_id = config_id.strip()
+            if config_id and not APP_ID_RE.match(config_id):
+                raise PersonaError("The configuration ID is a number (Meta's dashboard: API setup with Unified "
+                                   "login -> the configuration).")
+            values["config_id"] = config_id
         if values:
             self.hub.settings.update("instagram", values)
         return self.ig_info()
@@ -248,6 +268,11 @@ class InstagramJobs:
             json.dump(data, fh)
         tmp.replace(d / "instagram.json")
 
+    @staticmethod
+    def ig_api(c: dict) -> str:
+        """The API the account's token is for, with its version."""
+        return f"{c.get('host') or GRAPH}/{VERSION}"
+
     def ig_public(self, pid: str) -> dict | None:
         """What the page shows of the account: its name, until when the sign-in holds, what is wrong with it."""
         c = self.ig_of(pid)
@@ -257,7 +282,8 @@ class InstagramJobs:
         if not problem and c.get("expires") and c["expires"] < time.time():
             problem = "The Instagram sign-in has run out - connect the account again."
         return {"username": c.get("username") or "", "account_type": c.get("account_type") or "",
-                "expires": c.get("expires"), "connected": c.get("connected"), "problem": problem}
+                "expires": c.get("expires"), "connected": c.get("connected"), "problem": problem,
+                "login": c.get("login") or "instagram", "others": int(c.get("others") or 0)}
 
     def ig_username(self, pid: str) -> str:
         """The account a post of the persona's can go to now ("" when none, or its sign-in needs doing again)."""
@@ -284,6 +310,10 @@ class InstagramJobs:
         self.ig_states = {k: v for k, v in self.ig_states.items() if v["exp"] > now}
         state = secrets.token_urlsafe(24)
         self.ig_states[state] = {"pid": pid, "back": back, "exp": now + STATE_TTL}
+        config = self.ig_config()
+        if config:                                     # Unified login: Instagram or Facebook, both offered (prompt)
+            return f"{DIALOG}?" + urlencode({"client_id": app_id, "config_id": config, "redirect_uri": redirect,
+                                             "response_type": "code", "state": state, "prompt": "login"})
         return f"{AUTHORIZE}?" + urlencode({"client_id": app_id, "redirect_uri": redirect, "response_type": "code",
                                             "scope": SCOPES, "state": state, "force_reauth": "true"})
 
@@ -298,6 +328,8 @@ class InstagramJobs:
         if error or not code:
             return pid, back, f"Instagram: {why or error or 'no code came back'}"
         app_id, secret = self.ig_app()
+        if self.ig_config():
+            return (pid, back, await self._ig_unified(pid, app_id, secret, code))
         try:
             short = await self._ig_call("POST", CODE_URL, data={
                 "client_id": app_id, "client_secret": secret, "grant_type": "authorization_code",
@@ -322,13 +354,47 @@ class InstagramJobs:
         try:
             async with self._lock(pid):
                 self.load(pid)                          # deleted meanwhile: nothing kept
-                self._ig_write(pid, {"user_id": str(me.get("user_id") or me.get("id")),
+                self._ig_write(pid, {"login": "instagram", "host": GRAPH,
+                                     "user_id": str(me.get("user_id") or me.get("id")),
                                      "username": me.get("username") or "", "account_type": me.get("account_type") or "",
                                      "token": token, "expires": now + int(long.get("expires_in") or 60 * 86400),
                                      "refreshed": now, "connected": now, "problem": ""})
         except PersonaError:
             return pid, back, "The persona was deleted meanwhile."
         return pid, back, ""
+
+    async def _ig_unified(self, pid: str, app_id: str, secret: str, code: str) -> str:
+        """Unified login: the code swapped for a Business Integration System User token at graph.facebook.com, the
+        account it was given found (/me/assigned_instagram_accounts) and kept -> what went wrong or ""."""
+        from .store import PersonaError
+        try:
+            r = await self._ig_call("GET", f"{FB_GRAPH}/{VERSION}/oauth/access_token", params={
+                "client_id": app_id, "client_secret": secret, "redirect_uri": self.ig_redirect(),
+                "code": code.split("#")[0]})
+            token = r.get("access_token")
+            if not token:
+                return "Meta's answer had no token in it."
+            found = await self._ig_call("GET", f"{FB_GRAPH}/{VERSION}/me/assigned_instagram_accounts", params={
+                "fields": "id,username", "access_token": token})
+        except InstagramError as exc:
+            return str(exc)
+        accounts = [a for a in found.get("data") or [] if isinstance(a, dict) and a.get("id")]
+        if not accounts:
+            return ("Meta gave the Hub no Instagram account - connect again and choose the persona's account in "
+                    "Meta's window.")
+        a = accounts[0]
+        now = int(time.time())
+        expires = int(r.get("expires_in") or 0)
+        try:
+            async with self._lock(pid):
+                self.load(pid)                          # deleted meanwhile: nothing kept
+                self._ig_write(pid, {"login": "unified", "host": FB_GRAPH, "user_id": str(a["id"]),
+                                     "username": str(a.get("username") or ""), "account_type": "", "token": token,
+                                     "expires": now + expires if expires > 0 else None, "refreshed": now,
+                                     "connected": now, "problem": "", "others": len(accounts) - 1})
+        except PersonaError:
+            return "The persona was deleted meanwhile."
+        return ""
 
     async def ig_disconnect(self, pid: str) -> None:
         """The Hub forgets the account (Instagram keeps the app among the account's apps until it is removed
@@ -371,7 +437,7 @@ class InstagramJobs:
                 await self._ig_update(pid, c["token"], problem="The Instagram sign-in has run out - connect the "
                                                                "account again.")
                 continue
-            if now - (c.get("refreshed") or 0) < max(REFRESH_AFTER, 86400):
+            if c.get("login") == "unified" or now - (c.get("refreshed") or 0) < max(REFRESH_AFTER, 86400):
                 continue
             try:
                 r = await self._ig_call("GET", f"{GRAPH}/refresh_access_token", params={
@@ -406,13 +472,13 @@ class InstagramJobs:
             raise _meta_error(body, r.status_code)
         return body
 
-    async def _ig_wait(self, container: str, token: str, kind: str) -> None:
+    async def _ig_wait(self, api: str, container: str, token: str, kind: str) -> None:
         """Until Instagram has made the container ready (it fetches the file, a video takes a while) - asked again
         after a pause that grows."""
         deadline = time.monotonic() + WAIT[kind]
         pause = POLL[kind]
         while True:
-            r = await self._ig_call("GET", f"{GRAPH}/{VERSION}/{container}",
+            r = await self._ig_call("GET", f"{api}/{container}",
                                     params={"fields": "status_code,status", "access_token": token})
             code = r.get("status_code")
             if code in ("FINISHED", "PUBLISHED"):
@@ -425,11 +491,11 @@ class InstagramJobs:
             await asyncio.sleep(pause)
             pause = min(pause * 2, POLL_MAX[kind])
 
-    async def _ig_status(self, container: str, token: str) -> str:
+    async def _ig_status(self, api: str, container: str, token: str) -> str:
         """A container's status_code: FINISHED (ready), PUBLISHED, IN_PROGRESS, ERROR, EXPIRED - "" when Instagram
         could not be asked."""
         try:
-            r = await self._ig_call("GET", f"{GRAPH}/{VERSION}/{container}",
+            r = await self._ig_call("GET", f"{api}/{container}",
                                     params={"fields": "status_code", "access_token": token})
         except InstagramError:
             return ""
@@ -528,12 +594,12 @@ class InstagramJobs:
             post = next((s for s in self.posts_of(pid) if s["id"] == sid), None)
             if c is None or post is None:
                 raise InstagramError("The account or the post went away meanwhile.")
-            ig, token, caption = c["user_id"], c["token"], post["text"]
+            ig, token, caption, api = c["user_id"], c["token"], post["text"], self.ig_api(c)
             container = (post.get("instagram") or {}).get("container") or ""
             if container:                              # made the time before: how did that end?
-                status = await self._ig_status(container, token)
+                status = await self._ig_status(api, container, token)
                 if status == "PUBLISHED":
-                    await self._ig_posted(pid, sid, ig, token, caption, "")
+                    await self._ig_posted(pid, sid, api, ig, token, caption, "")
                     return
                 if status != "FINISHED":
                     container = ""
@@ -550,17 +616,17 @@ class InstagramJobs:
                     await asyncio.to_thread(self._put, pid, rel, data)
                     made.append(rel)
                     items.append((m["kind"], self.ig_link(pid, rel)))
-                container = await self._ig_make(ig, token, caption, items)
+                container = await self._ig_make(api, ig, token, caption, items)
                 await self._ig_set(pid, sid, container=container)
             await self._ig_set(pid, sid, publishing=True)
             try:
-                media_id = str((await self._ig_call("POST", f"{GRAPH}/{VERSION}/{ig}/media_publish",
+                media_id = str((await self._ig_call("POST", f"{api}/{ig}/media_publish",
                                                     data={"creation_id": container, "access_token": token}))["id"])
             except InstagramError:
-                if await self._ig_status(container, token) != "PUBLISHED":
+                if await self._ig_status(api, container, token) != "PUBLISHED":
                     raise
                 media_id = ""                          # it went through all the same
-            await self._ig_posted(pid, sid, ig, token, caption, media_id)
+            await self._ig_posted(pid, sid, api, ig, token, caption, media_id)
         except InstagramError as exc:
             if exc.expired and token:
                 await self._ig_update(pid, token, problem=str(exc))
@@ -585,16 +651,16 @@ class InstagramJobs:
                     pass
             self.ig_jobs.pop(f"{pid}/{sid}", None)
 
-    async def _ig_make(self, ig: str, token: str, caption: str, items: list[tuple[str, str]]) -> str:
+    async def _ig_make(self, api: str, ig: str, token: str, caption: str, items: list[tuple[str, str]]) -> str:
         """The container Instagram publishes, ready: one picture or reel, or a carousel of them."""
-        media = f"{GRAPH}/{VERSION}/{ig}/media"
+        media = f"{api}/{ig}/media"
         if len(items) == 1:
             kind, url = items[0]
             fields = ({"image_url": url} if kind == "picture"
                       else {"media_type": "REELS", "video_url": url, "share_to_feed": "true"})
             container = (await self._ig_call("POST", media, data={**fields, "caption": caption,
                                                                    "access_token": token}))["id"]
-            await self._ig_wait(container, token, kind)
+            await self._ig_wait(api, container, token, kind)
             return str(container)
         children = []
         for kind, url in items:
@@ -602,27 +668,28 @@ class InstagramJobs:
             r = await self._ig_call("POST", media, data={**fields, "is_carousel_item": "true", "access_token": token})
             children.append((str(r["id"]), kind))
         for child, kind in children:
-            await self._ig_wait(child, token, kind)
+            await self._ig_wait(api, child, token, kind)
         container = (await self._ig_call("POST", media, data={
             "media_type": "CAROUSEL", "children": ",".join(x for x, _ in children), "caption": caption,
             "access_token": token}))["id"]
-        await self._ig_wait(str(container), token, "picture")
+        await self._ig_wait(api, str(container), token, "picture")
         return str(container)
 
-    async def _ig_posted(self, pid: str, sid: str, ig: str, token: str, caption: str, media_id: str) -> None:
+    async def _ig_posted(self, pid: str, sid: str, api: str, ig: str, token: str, caption: str,
+                         media_id: str) -> None:
         """On Instagram: its id kept at once, then its link. Without the id (published, but the answer was lost),
         both are looked for among the account's newest posts by the caption."""
         link = ""
         if media_id:
             await self._ig_set(pid, sid, id=media_id)
             try:
-                link = (await self._ig_call("GET", f"{GRAPH}/{VERSION}/{media_id}",
+                link = (await self._ig_call("GET", f"{api}/{media_id}",
                                             params={"fields": "permalink", "access_token": token})).get("permalink")
             except InstagramError as exc:
                 log.warning("instagram: no link for %s/%s: %s", pid, sid, exc)
         else:
             try:
-                r = await self._ig_call("GET", f"{GRAPH}/{VERSION}/{ig}/media", params={
+                r = await self._ig_call("GET", f"{api}/{ig}/media", params={
                     "fields": "id,caption,permalink", "limit": "10", "access_token": token})
                 hit = next((m for m in r.get("data") or [] if (m.get("caption") or "") == caption), {})
                 media_id, link = str(hit.get("id") or ""), str(hit.get("permalink") or "")
@@ -687,9 +754,9 @@ class InstagramJobs:
         for pid, sid, container, caption in todo:
             try:
                 c = self.ig_of(pid)
-                status = await self._ig_status(container, c["token"]) if c else ""
+                status = await self._ig_status(self.ig_api(c), container, c["token"]) if c else ""
                 if status == "PUBLISHED":
-                    await self._ig_posted(pid, sid, c["user_id"], c["token"], caption, "")
+                    await self._ig_posted(pid, sid, self.ig_api(c), c["user_id"], c["token"], caption, "")
                 elif status == "FINISHED":
                     await self._ig_set(pid, sid, state="failed", publishing=False,
                                        error="Stopped before it was posted - Post again posts it.")

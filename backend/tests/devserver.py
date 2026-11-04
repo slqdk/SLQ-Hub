@@ -854,7 +854,7 @@ def main() -> None:
                          "delivery.civitai.test": make_civitai_delivery(CIVITAI_DEMO),
                          "speech:7100": make_speech(fakes["speech"]), "cloud.test": make_llama(fakes["cloud"]),
                          "trainer:7300": make_trainer(fakes["trainer"]), "api.instagram.com": instagram,
-                         "graph.instagram.com": instagram},
+                         "graph.instagram.com": instagram, "graph.facebook.com": instagram},
                         streaming=("llm",))
     t = Transports(llm=router, runner=router, comfy=router, sandbox=None if a.sandbox else router, web=router,
                    speech=router, trainer=router)

@@ -75,8 +75,9 @@ def calls(fakes, kind: str) -> list[dict]:
 async def test_the_app_and_the_account_are_set_up_once(signed_in, app, fakes, caplog):
     caplog.set_level(logging.INFO, logger="httpx")
     info = await ok(await signed_in.get(f"{API}/instagram"))
-    assert info == {"app_id": "", "secret_set": False, "redirect_uri": "https://hub.test/hub/api/personas/instagram/"
-                    "callback", "public_url": "https://hub.test", "ready": False}
+    assert info == {"app_id": "", "secret_set": False, "config_id": "", "login": "instagram",
+                    "redirect_uri": "https://hub.test/hub/api/personas/instagram/callback",
+                    "public_url": "https://hub.test", "ready": False}
     for bad in ({"app_id": "12ab"}, {"app_id": "990602627938098", "app_secret": "not a secret!"}):
         assert (await signed_in.put(f"{API}/instagram", json=bad, headers=ORIGIN)).status_code == 400
     info = await ok(await signed_in.put(f"{API}/instagram", json=APP, headers=ORIGIN))
@@ -464,3 +465,56 @@ async def test_post_again_finds_a_post_that_went_through(signed_in, app, fakes, 
     s = await settled(store, pid, d["id"])
     assert s["instagram"]["state"] == "posted" and s["instagram"]["id"] == "18000000093"
     assert len(fakes.instagram["published"]) == 1 and not calls(fakes, "media") and not calls(fakes, "publish")
+
+
+async def test_unified_login_for_an_app_made_since_october_2026(signed_in, app, fakes, monkeypatch):
+    """0.76.1: Meta offers new apps only Unified login - its dialog with a configuration, a system-user token from
+    graph.facebook.com, the account given to the app, and posting on graph.facebook.com."""
+    monkeypatch.setattr(I, "POLL", {"picture": 0, "video": 0})
+    meta = {"app_id": "1093705243490654", "app_secret": APP["app_secret"], "config_id": "abc"}
+    assert (await signed_in.put(f"{API}/instagram", json=meta, headers=ORIGIN)).status_code == 400
+    info = await ok(await signed_in.put(f"{API}/instagram", json={**meta, "config_id": "1234567890123"},
+                                        headers=ORIGIN))
+    assert info["login"] == "unified" and info["config_id"] == "1234567890123" and info["ready"]
+    p = await anna(signed_in)
+    pid = p["id"]
+    url = (await ok(await signed_in.post(f"{API}/{pid}/instagram/connect", headers=ORIGIN)))["url"]
+    u = urlparse(url)
+    q = {k: v[0] for k, v in parse_qs(u.query).items()}
+    assert f"{u.scheme}://{u.netloc}{u.path}" == "https://www.facebook.com/dialog/oauth"
+    assert q["client_id"] == "1093705243490654" and q["config_id"] == "1234567890123" and q["prompt"] == "login"
+    assert q["response_type"] == "code" and q["redirect_uri"] == "https://hub.test/hub/api/personas/instagram/callback"
+    assert "scope" not in q                                                   # the configuration says what it asks
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="https://hub.test") as outside:
+        r = await outside.get(f"{API}/instagram/callback", params={"code": "CODE1", "state": q["state"]})
+    assert r.status_code == 303 and r.headers["location"].endswith("instagram=connected"), r.headers["location"]
+    code = calls(fakes, "unified_code")[0]
+    assert code["client_id"] == "1093705243490654" and code["client_secret"] == APP["app_secret"]
+    assert not calls(fakes, "code") and not calls(fakes, "exchange")          # nothing of Instagram login's
+    store = app.state.hub.extras["personas"]
+    c = store.ig_of(pid)
+    assert c["login"] == "unified" and c["host"] == "https://graph.facebook.com" and c["token"] == "EAAUNI1"
+    assert c["expires"] is None and c["user_id"] == "17841400001"
+    d = await ok(await signed_in.get(f"{API}/{pid}"))
+    assert d["instagram"]["username"] == "laura.kolding" and d["instagram"]["login"] == "unified"
+    # its token is not renewed with Instagram login's refresh
+    c["refreshed"] -= 30 * 86400
+    store._ig_write(pid, c)
+    assert await store.ig_tick(force=True) == [] and not calls(fakes, "refresh")
+    # posting: the same containers and publishing, on graph.facebook.com
+    fakes.instagram["fetch"] = fetcher(app)
+    post = make_post(store, pid, [("picture", _png((832, 1216), (200, 120, 60, 255)))])
+    await ok(await signed_in.post(f"{API}/{pid}/posts/{post['id']}/instagram", headers=ORIGIN))
+    s = await settled(store, pid, post["id"])
+    assert s["instagram"]["state"] == "posted", s["instagram"]
+    assert calls(fakes, "media")[0]["host"] == "graph.facebook.com" and calls(fakes, "media")[0]["ig"] == "17841400001"
+    # no account given: said so
+    fakes.instagram["assigned"] = []
+    url = (await ok(await signed_in.post(f"{API}/{pid}/instagram/connect", headers=ORIGIN)))["url"]
+    state = parse_qs(urlparse(url).query)["state"][0]
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="https://hub.test") as outside:
+        r = await outside.get(f"{API}/instagram/callback", params={"code": "CODE1", "state": state})
+    assert "instagram_error=" in r.headers["location"] and "no%20Instagram%20account" in r.headers["location"]
+    # without the configuration ID: Instagram login again
+    info = await ok(await signed_in.put(f"{API}/instagram", json={"config_id": ""}, headers=ORIGIN))
+    assert info["login"] == "instagram"

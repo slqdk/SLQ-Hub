@@ -1040,7 +1040,9 @@ def make_trainer(state: dict) -> FastAPI:
 
 def make_instagram(state: dict) -> FastAPI:
     """The bits of Instagram's API the Hub uses, on api.instagram.com (the code swapped for a token) and
-    graph.instagram.com (the long-lived token, its renewal, the profile, containers, publishing). Scripted by
+    graph.instagram.com (the long-lived token, its renewal, the profile, containers, publishing) - and on
+    graph.facebook.com with Unified login (0.76.1: the code swapped for a system-user token, the account given,
+    the same containers and publishing). Scripted by
     `state`: "fetch" (an async function: the test's way of fetching a signed link from the Hub, as Meta's servers
     would), "statuses" (status_code answers for each container, in turn), "fail" ({"media": error, ...}: an answer
     to give once), "refresh_error", "lost" (a publish goes through but its answer is an error), "delay"
@@ -1091,7 +1093,23 @@ def make_instagram(state: dict) -> FastAPI:
         return {"access_token": "IGLONG2", "token_type": "bearer", "expires_in": 5183944}
 
     def token_ok(token: str | None) -> bool:
-        return token in ("IGLONG1", "IGLONG2") and not state.get("revoked")
+        return token in ("IGLONG1", "IGLONG2", "EAAUNI1") and not state.get("revoked")
+
+    @app.get("/v26.0/oauth/access_token")                  # graph.facebook.com: Unified login's code
+    async def unified_code(request: Request):
+        q = dict(request.query_params)
+        state["calls"].append(("unified_code", q))
+        if q.get("code") != state.get("code", "CODE1") or q.get("client_secret") != "a1b2c3d4e5f6a7b8c9d0":
+            return error(100, "Invalid verification code format.")
+        return {"access_token": "EAAUNI1", "token_type": "bearer"}
+
+    @app.get("/v26.0/me/assigned_instagram_accounts")
+    async def assigned(request: Request):
+        q = dict(request.query_params)
+        state["calls"].append(("assigned", q))
+        if not token_ok(q.get("access_token")):
+            return error(190, "Error validating access token: Session has expired.")
+        return {"data": state.get("assigned", [{"id": "17841400001", "username": "laura.kolding"}])}
 
     @app.get("/v26.0/me")
     async def me(request: Request):
@@ -1105,7 +1123,7 @@ def make_instagram(state: dict) -> FastAPI:
     @app.post("/v26.0/{ig}/media")
     async def media(ig: str, request: Request):
         form = dict(await request.form())
-        state["calls"].append(("media", {**form, "ig": ig}))
+        state["calls"].append(("media", {**form, "ig": ig, "host": request.url.hostname}))
         if not token_ok(form.get("access_token")):
             return error(190, "Error validating access token: Session has expired.")
         bad = failing("media")

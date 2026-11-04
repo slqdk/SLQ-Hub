@@ -88,6 +88,7 @@ def app(hub_env, fakes):
         "trainer:7300": make_trainer(fakes.trainer),
         "api.instagram.com": instagram,
         "graph.instagram.com": instagram,
+        "graph.facebook.com": instagram,              # 0.76.1: Unified login
     })
     t = Transports(llm=router, runner=router, comfy=router, sandbox=router, web=router, speech=router,
                    trainer=router)

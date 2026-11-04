@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.76.1 - 2026-11-04
+
+- **Instagram with Unified login.** Meta no longer gives new apps "Instagram
+  login" - an app made now has "Unified login" only. The Hub connects through
+  it: give it the app's ID and secret and the login configuration's ID
+  (Posts -> Instagram -> Meta app). Its sign-in does not run out. Apps from
+  before keep working as they did.
+
 ## 0.76.0 - 2026-11-04
 
 - **Post to Instagram when you approve.** Connect a persona's Instagram

@@ -65,6 +65,7 @@ async def all_posts(request: Request, status: str | None = None):
 class InstagramAppIn(BaseModel):
     app_id: str | None = None
     app_secret: str | None = None          # empty: the one kept stays
+    config_id: str | None = None           # 0.76.1: Unified login's configuration ("": Instagram login)
 
 
 @router.get("/instagram")
@@ -77,7 +78,7 @@ async def instagram_app(request: Request):
 @router.put("/instagram")
 async def set_instagram_app(body: InstagramAppIn, request: Request):
     try:
-        return _p(request).set_ig_app(body.app_id, body.app_secret)
+        return _p(request).set_ig_app(body.app_id, body.app_secret, body.config_id)
     except PersonaError as exc:
         _fail(exc)
 

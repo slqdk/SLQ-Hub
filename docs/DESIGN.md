@@ -2971,6 +2971,22 @@ done in the profile text". `app/personas/instagram.py` (a mixin of `Personas`).
   cards stop offering to post. A renewal or a failure that took a while writes
   only if the account still holds the token it had: it never brings back an
   account the owner disconnected meanwhile.
+- **Unified login (0.76.1)**: in October 2026 Meta stopped offering
+  Instagram login to new apps ("API setup with Instagram login is not
+  available for newer apps") - Søren's app, made on 4 November, had only
+  "API setup with Unified login". Such an app belongs to a business portfolio
+  and has a configuration (Facebook Login for Business; his: a system-user
+  access token that never expires, an Instagram account as its asset,
+  instagram_basic and instagram_content_publish among its permissions). With a
+  configuration ID in the settings the Hub signs in through Meta's dialog
+  (`www.facebook.com/dialog/oauth`: the app's ID - not an Instagram app ID -,
+  `config_id`, `prompt=login`: Instagram or Facebook), swaps the code at
+  graph.facebook.com with the app's ID and secret for the system-user token,
+  finds the account with `/me/assigned_instagram_accounts` (the first, when
+  there are several - the box says so) and posts through graph.facebook.com:
+  the same containers and publishing. That token is not renewed (it does not
+  run out); a withdrawn one says to connect again. Without a configuration ID
+  the Hub uses Instagram login as in 0.76.0 (apps from before October 2026).
 - **Posting**: Approve and post (or Post to Instagram on an approved post -
   each asks once more) approves the post and starts a job. Instagram fetches
   the files itself, from a public address: a picture is made a JPEG between

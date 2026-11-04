@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.76.0, 2026-11-04)
+## State (0.76.1, 2026-11-04)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -1009,6 +1009,19 @@ sign-in page stood in for by a redirect to the callback): the app saved, Connect
 and post asks once more, Posting, On Instagram with its link, the phone (no sideways scroll), dark; no page errors.
 Søren also asked "What about facebook ?": answered (a Page, not a profile; the app must be Live or the posts are seen
 by its roles only); not built. NOT seen against Meta: item 96.
+0.76.1: setting up his Meta app (made 4 November), Søren's dashboard said "API setup with Instagram login is not
+available for newer apps - Your app uses API setup with Unified login instead" - 0.76.0's sign-in could not work for
+it. Unified login (DESIGN §8, "Unified login (0.76.1)"), after Meta's "Get started with the Instagram API with Unified
+Login" page: with a configuration ID in the settings, Meta's dialog (config_id, prompt=login), the code swapped at
+graph.facebook.com for a system-user token, /me/assigned_instagram_accounts, posting through graph.facebook.com; no
+renewal for that token. Seen on his screenshot of the dashboard: the configuration's token is a "System-user access
+token (SUAT)", expiration "Never", assets an Instagram account (an ad account optional), permissions ads_management,
+ads_read, instagram_basic, instagram_manage_messages, instagram_manage_comments, instagram_content_publish; the
+redirect URL https://hub.slq.dk/hub/api/personas/instagram/callback saved. Tests: tests/test_persona_instagram.py (12);
+in Chromium against the dev server the same check as 0.76.0's with a configuration ID (the dialog stood in for). Not
+reviewed by a separate agent (the posting is 0.76.0's, reviewed; the new part is the sign-in and the API's host).
+tests/test_training.py::test_the_trainer_stops_a_job failed in two full runs that day and passes on its own (three
+runs of the file): the fake ai-toolkit was still "stopping" 10 s after SIGINT under the suite's load - not looked into.
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
 host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU
@@ -1786,7 +1799,12 @@ the host if the VM ever stops by itself.
       converter's cases are ComfyUI 0.42.3's own templates; files from other sites (Civitai, OpenArt) are
       untried - an export is the way to see what went wrong. When COMFYUI_REF changes, the editor's format may
       too: tools/workflow_oracle/ (convert.js, compare.py) is how the converter was checked - run it again.
-96. **Persona posts on Instagram (0.76.0)** - none of it has run against Meta:
+96. **Persona posts on Instagram (0.76.0, Unified login 0.76.1)** - none of it has run against Meta:
+    - **Unified login** (his app has only that): does Meta's dialog take `state` and send it back (Meta's page lists
+      client_id, config_id, redirect_uri, response_type, display, prompt), does the code exchange take the
+      `redirect_uri` the Hub sends with it, must Laura's account be an Instagram Tester (the dashboard says so for its
+      own token generation), does /me/assigned_instagram_accounts list her account, and do the containers and
+      media_publish work on graph.facebook.com with the system-user token?
     - **The setup in Meta's dashboard** (the menus' names may differ from the Posts tab's words): an app with
       Instagram's API (Instagram login), Laura's account a professional one and an Instagram tester accepted in
       Instagram, the return address `https://hub.slq.dk/hub/api/personas/instagram/callback`, the Instagram app ID
