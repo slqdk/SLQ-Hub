@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.78.0, 2026-11-04)
+## State (0.79.0, 2026-11-04)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -1080,6 +1080,16 @@ result). Tests: tests/test_media_check.py (a persona chat at At once with the sw
 again, the second shown with its seed; off: not checked), tests/test_loras.py (the line's seeds); each part failed
 without it (4 mutations). In Chromium against the dev server: the switch in the Who tab, saved; "Made with Qwen-Image
 2.1 Turbo · seed 1971709615"; no console errors. NOT seen on the VM: item 98.
+0.79.0, Søren: "should i train my lora on base instead ?" (it is: every klein 9B training uses klein 9B base), then
+"can we add a second lora to the tasks ? If i want to add filter or something like that". A task's own LoRAs (DESIGN
+§8 "A task's own LoRAs"): up to three with their strength, on every new picture its chat makes after the persona's
+LoRA (agent/tools/images.py `_task_loras`; personas/tasks.py `_task_loras` checks them). Tests:
+tests/test_persona_tasks.py (refused: an unknown LoRA, four, a strength that is no number; kept once each and in
+range; kept when a change does not send them; the task's run: her picture with her LoRA and then the task's, both
+trigger words, a picture without her with the task's, the model told; her chat outside the task without it), each
+part failing without it (6 mutations). In Chromium against the dev server (its LoRAs Far and Tegneserie, Far hers):
+the form offers Tegneserie alone, the strength, Save; the card's "Tegneserie ×0.5", desktop light and phone dark; no
+console errors. NOT seen on the VM: item 99.
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
 host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU
@@ -1857,6 +1867,11 @@ the host if the VM ever stops by itself.
       converter's cases are ComfyUI 0.42.3's own templates; files from other sites (Civitai, OpenArt) are
       untried - an export is the way to see what went wrong. When COMFYUI_REF changes, the editor's format may
       too: tools/workflow_oracle/ (convert.js, compare.py) is how the converter was checked - run it again.
+99. **A task's own LoRAs (0.79.0)** - with a real style LoRA for klein 9B (one he trains as a style, or uploads):
+    - **The look**: does a filter-like LoRA at 0.5-1 change the colours and grain without changing her face (her LoRA
+      and the style together - the strengths may need lowering, hers or the style's)? The line under the picture in
+      the task's chat says what was used.
+    - **With the check on**: does a heavy style make the check call a right picture wrong?
 98. **Check pictures for a persona (0.78.0)** - turn it on for Laura (Personas -> Laura -> Who -> What they can do):
     - **Her task's post**: does the post's picture come checked - in the task's chat (Its chat) the note under the
       picture ("Checked by gemma 4 31B (U): ...") and any try thrown away - and how much longer a post takes (a look,

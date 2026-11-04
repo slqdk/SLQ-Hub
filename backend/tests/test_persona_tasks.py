@@ -444,3 +444,68 @@ async def test_no_picture_of_itself_where_it_cannot_be_made(signed_in, app, fake
     req = fakes.llama["requests"][0]
     assert "made from your portrait" not in req["messages"][0]["content"]
     assert "me" not in schema_of(req, "image_generate")["properties"]
+
+
+async def test_a_task_puts_its_own_loras_on_its_pictures(signed_in, app, fakes):
+    """0.79.0, Søren: "can we add a second lora to the tasks ? If i want to add filter or something like that"."""
+    p, lid = await with_lora(signed_in, app)
+    pid, store = p["id"], app.state.hub.extras["personas"]
+
+    async def lora(name: str, trigger: str, keys=KLEIN) -> str:
+        return (await ok(await signed_in.post("/hub/api/loras", files={"file": (f"{name}.safetensors",
+                                                                                 safetensors(keys), "x")},
+                                              data={"trigger": trigger}, headers=ORIGIN)))["id"]
+    film, grain, warm, cool = [await lora(n, t) for n, t in (("film", "filmlook"), ("grain", "grainy"),
+                                                             ("warm", "warmtone"), ("cool", "cooltone"))]
+    opts = (await ok(await signed_in.get(API)))["options"]["loras"]
+    assert {x["id"]: x["slider"] for x in opts}[film] is False                 # the page's strength range
+    url = f"{API}/{pid}/tasks"
+    for bad in ([{"id": "nope"}], [{"id": film}, {"id": grain}, {"id": warm}, {"id": cool}],
+                [{"id": film, "strength": "much"}]):
+        r = await signed_in.post(url, json={**MONDAY_POST, "loras": bad}, headers=ORIGIN)
+        assert r.status_code in (400, 422), (bad, r.text)
+    d = await ok(await signed_in.post(url, json={**MONDAY_POST, "loras": [
+        {"id": film, "strength": 0.6}, {"id": film, "strength": 1.5}, {"id": grain, "strength": 5}]}, headers=ORIGIN))
+    t = d["tasks"][0]
+    assert t["loras"] == [{"id": film, "strength": 0.6}, {"id": grain, "strength": 2.0}]   # once each, in range
+    tid = t["id"]
+    d = await ok(await signed_in.patch(f"{url}/{tid}", json={"loras": [{"id": film, "strength": 0.6}]}, headers=ORIGIN))
+    assert d["tasks"][0]["loras"] == [{"id": film, "strength": 0.6}]
+    assert (await ok(await signed_in.patch(f"{url}/{tid}", json={"title": "Mandag"}, headers=ORIGIN))
+            )["tasks"][0]["loras"] == [{"id": film, "strength": 0.6}]         # kept when not sent
+
+    app.state.hub.settings.update("images", {"model": "flux2-klein-4b"})    # as his: klein, like the LoRAs
+    fakes.llama["requests"].clear()
+    fakes.llama["replies"] = [
+        {"tool_calls": [{"name": "image_generate", "arguments": {
+            "prompt": "A woman running along the harbour at sunset", "me": True, "save_as": "run.png"}}]},
+        {"tool_calls": [{"name": "image_generate", "arguments": {"prompt": "Rye bread on a table"}}]},
+        {"tool_calls": [{"name": "post_draft", "arguments": {"text": "Mandagsløb", "media": ["run.png"]}}]},
+        {"content": "Lagt klar."},
+    ]
+    before = len(fakes.comfy["prompts"])
+    due = store.get(pid)["tasks"][0]["next_run"]
+    assert await store.tick(now=due + 60) == [f"{pid}/{tid}"]
+    await done(app, pid, tid)
+    her, bread = fakes.comfy["prompts"][before:]
+
+    def loras_of(graph):
+        return [(n["inputs"]["lora_name"], n["inputs"].get("strength_model")) for n in graph.values()
+                if "lora_name" in n["inputs"]]
+    assert loras_of(her) == [(f"hub/{lid}.safetensors", 0.9), (f"hub/{film}.safetensors", 0.6)]   # hers, then its
+    assert "annaxv" in json.dumps(her) and "filmlook" in json.dumps(her)       # both trigger words
+    assert loras_of(bread) == [(f"hub/{film}.safetensors", 0.6)]               # a picture without her gets it too
+    desc = next(x["function"]["description"] for x in fakes.llama["requests"][0]["tools"]
+                if x["function"]["name"] == "image_generate")
+    assert "This task's pictures also get the LoRA film: leave its look out of the prompt." in desc
+    # her chats outside the task (pictures on): no task, no task LoRA
+    await ok(await signed_in.patch(f"{API}/{pid}", json={"pictures": True}, headers=ORIGIN))
+    c = await chat_with(signed_in, pid)
+    fakes.llama["requests"].clear()
+    fakes.llama["replies"] = [
+        {"tool_calls": [{"name": "image_generate", "arguments": {"prompt": "jogging", "me": True}}]},
+        {"content": "Her."}, {"content": "Jogging"}]
+    n = len(fakes.comfy["prompts"])
+    await finish(app, await send(signed_in, c["id"], "Send et billede af dig"))
+    assert len(fakes.comfy["prompts"]) == n + 1
+    assert loras_of(fakes.comfy["prompts"][-1]) == [(f"hub/{lid}.safetensors", 0.9)]

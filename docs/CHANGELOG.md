@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.79.0 - 2026-11-04
+
+- New: a persona's task can have LoRAs of its own - up to three, each with
+  its strength (the task's form, "LoRAs on its pictures"). They go on every
+  new picture the task makes, after the persona's own LoRA: a style or a
+  filter for that task's posts.
+
 ## 0.78.0 - 2026-11-04
 
 - New: a persona's "Check pictures" switch (its Who tab, What they can do).

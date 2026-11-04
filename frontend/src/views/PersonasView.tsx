@@ -199,7 +199,7 @@ function PersonaPage({ p, options, act, reload }: { p: Persona; options: Persona
       {tab === "who" && <WhoTab p={p} options={options} save={save} />}
       {tab === "look" && <LookTab p={p} options={options} act={act} save={save} />}
       {tab === "memory" && <MemoryTab p={p} act={act} save={save} reload={reload} />}
-      {tab === "tasks" && <TasksTab p={p} act={act} />}
+      {tab === "tasks" && <TasksTab p={p} act={act} loras={options.loras} />}
       {tab === "posts" && <PostsTab p={p} reload={reload} />}
       {tab === "chats" && <ChatsTab p={p} />}
     </>

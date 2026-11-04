@@ -389,7 +389,8 @@ class Personas(TaskJobs, InstagramJobs):
         cat = self.hub.catalog
         models = [{"id": e["id"], "name": Catalog.label(e)} for e in cat.llm_models() if cat.installed(e)]
         pipe, store = self.hub.extras.get("images"), self.hub.extras.get("loras")
-        loras = [{k: x.get(k) for k in ("id", "name", "base", "base_label", "trigger", "category", "strength")}
+        loras = [{k: x.get(k) for k in ("id", "name", "base", "base_label", "trigger", "category", "strength",
+                                         "slider")}
                  for x in (store.list() if store else [])]
         return {"models": models, "default_model": self.hub.settings.get("models", "default") or "",
                 "languages": sorted(LANGUAGE_NAMES.values()), "loras": loras,

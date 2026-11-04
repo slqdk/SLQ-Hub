@@ -234,6 +234,11 @@ async def sample(pid: str, request: Request):
         _fail(exc)
 
 
+class TaskLoraIn(BaseModel):
+    id: str
+    strength: float | None = None            # None: the LoRA's own
+
+
 class TaskIn(BaseModel):
     title: str | None = None
     instruction: str | None = None
@@ -241,6 +246,7 @@ class TaskIn(BaseModel):
     time: str | None = None                # "19:00", the household's time
     media: str | None = None               # picture, video, either, none
     web: bool | None = None
+    loras: list[TaskLoraIn] | None = None    # 0.79.0: on its pictures, after the persona's own
     enabled: bool | None = None
 
 

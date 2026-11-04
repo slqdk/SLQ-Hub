@@ -38,8 +38,9 @@ LIMIT = {"picture": 50 * 1024 * 1024, "video": 500 * 1024 * 1024}
 KINDS = {".png": ("picture", "png"), ".jpg": ("picture", "jpg"), ".jpeg": ("picture", "jpg"),
          ".webp": ("picture", "webp"), ".gif": ("picture", "gif"), ".mp4": ("video", "mp4"),
          ".webm": ("video", "webm")}
+MAX_TASK_LORAS = 3               # a task's own LoRAs (0.79.0), after the persona's
 TASK_DEFAULTS = {"title": "", "instruction": "", "days": [], "time": "19:00", "media": "picture", "web": False,
-                 "enabled": True, "chat_id": None, "next_run": None, "last_run": None, "last_error": "",
+                 "loras": [], "enabled": True, "chat_id": None, "next_run": None, "last_run": None, "last_error": "",
                  "last_post": ""}
 WEEKDAY = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
 MONTH = ("January", "February", "March", "April", "May", "June", "July", "August", "September", "October",
@@ -124,6 +125,8 @@ class TaskJobs:
         for key in ("web", "enabled"):
             if fields.get(key) is not None:
                 t[key] = bool(fields[key])
+        if fields.get("loras") is not None:
+            t["loras"] = self._task_loras(fields["loras"])
         if not t["title"]:
             raise PersonaError("Give the task a title.")
         if not t["instruction"]:
@@ -131,6 +134,36 @@ class TaskJobs:
         if not t["days"]:
             raise PersonaError("Choose at least one day.")
         return t
+
+    def _task_loras(self, raw) -> list[dict]:
+        """A task's own LoRAs (0.79.0, Søren: "can we add a second lora to the tasks ? If i want to add filter or
+        something like that"): a style or a filter on every new picture its posts get, after the persona's own LoRA
+        (agent/tools/images.py). Each one in the Hub's LoRAs, once; its strength in its range, or None for its
+        own. One that does not fit the picture model is left out at the picture, with a note (images/loras.py)."""
+        from ..images.loras import strength_range
+        from .store import PersonaError
+        if not isinstance(raw, list):
+            raise PersonaError("The task's LoRAs are a list.")
+        store = self.hub.extras.get("loras")
+        out: list[dict] = []
+        for x in raw:
+            lid = x.get("id") if isinstance(x, dict) else None
+            lora = store.get(lid) if store is not None and isinstance(lid, str) and lid else None
+            if lora is None:
+                raise PersonaError("That LoRA is not there (Settings -> Models -> LoRAs).")
+            if any(y["id"] == lid for y in out):
+                continue
+            strength = x.get("strength")
+            if strength is not None:
+                lo, hi = strength_range(bool(lora.get("slider")))
+                try:
+                    strength = round(max(lo, min(hi, float(strength))), 2)
+                except (TypeError, ValueError):
+                    raise PersonaError("A LoRA's strength is a number.") from None
+            out.append({"id": lid, "strength": strength})
+        if len(out) > MAX_TASK_LORAS:
+            raise PersonaError(f"A task has at most {MAX_TASK_LORAS} LoRAs of its own.")
+        return out
 
     def media_missing(self, media: str) -> str:
         """Why the Hub cannot make what a task's post has ("" when it can)."""

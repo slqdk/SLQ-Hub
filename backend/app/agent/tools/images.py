@@ -242,6 +242,18 @@ def _loras(ctx: ToolContext) -> list[dict]:
             if isinstance(x, str)]
 
 
+def _task_loras(ctx: ToolContext) -> list[dict]:
+    """In a persona task's chat, the task's own LoRAs (0.79.0, personas/tasks.py): a style or a filter on each new
+    picture, after the persona's LoRA and the chat's. [] anywhere else."""
+    store = ctx.hub.extras.get("personas")
+    if store is None or not _admins_turn(ctx):
+        return []
+    p = store.of_chat(ctx.chat)
+    t = store.task_of(p, ctx.chat) if p is not None else None
+    return [{"id": x["id"], "strength": x.get("strength")} for x in (t or {}).get("loras") or []
+            if isinstance(x, dict) and isinstance(x.get("id"), str)]
+
+
 def _lora_text(item: dict) -> str:
     used = f" with the LoRA{'s' if len(item.get('loras') or []) > 1 else ''} {', '.join(item['loras'])}" \
         if item.get("loras") else ""
@@ -297,12 +309,15 @@ async def image_generate(ctx: ToolContext, args: dict) -> ToolResult:
                 portrait = store.file(p["id"], p["picture"]).read_bytes()
         except PersonaError as exc:
             return ToolResult(f"A picture of you cannot be made: {exc}", is_error=True)
+    task_loras = _task_loras(ctx)           # a task's style or filter, after (the store skips one given twice)
+    loras = [*loras, *task_loras]
 
     async def make(count: int, seed=None, label: str = "") -> list[dict]:
         if portrait is not None:
             return await pipe.edit(f"The person in the picture, with the same face, hair and build: {prompt}",
                                    [portrait], seed=seed, fast=bool(args.get("fast")), ticket=ctx.ticket,
-                                   on_progress=await _progress(ctx, label), count=count)
+                                   on_progress=await _progress(ctx, label), count=count,
+                                   loras=task_loras or None)
         return await pipe.generate(prompt, width, height, count=count, seed=seed, fast=bool(args.get("fast")),
                                    model=model, negative=args.get("negative") or "", ticket=ctx.ticket,
                                    on_progress=await _progress(ctx, label), loras=loras)
@@ -492,9 +507,13 @@ def _generate_dynamic(ctx: ToolContext) -> tuple[str, dict]:
         p = me[1]
         how = "its LoRA keeps you looking like yourself" if me[2] == "lora" else "it is made from your portrait"
         look = f" You look like this: {p['look']}" if p.get("look") else ""
+        styles = [x for x in (ctx.hub.extras["loras"].get(t["id"]) if ctx.hub.extras.get("loras") else None
+                              for t in _task_loras(ctx)) if x is not None]
+        style = (f" This task's pictures also get the LoRA{'s' if len(styles) > 1 else ''} "
+                 f"{', '.join(x['name'] for x in styles)}: leave its look out of the prompt." if styles else "")
         return (f"Make a picture from a description: write a detailed English prompt - subject, setting, light, "
                 f"composition. me: true when you are in the picture yourself ({how}); leave it out for a picture "
-                f"without you.{look} Takes 15-90 s.", _generate_params(True))
+                f"without you.{look}{style} Takes 15-90 s.", _generate_params(True))
     if chosen is None:
         return GENERATE_TEXT, _generate_params()
     return (f"Generate images from a text prompt with {Catalog.label(chosen)}, this chat's picture model. The user "

@@ -12,8 +12,11 @@ export interface PersonaAudio { language: string; speech: string; voices: { id: 
 export interface PersonaChat { id: number; title: string; updated_at: string; created_at: string; archived: number }
 /** 0.75.0: a task - at its days and time the persona makes a post for the owner's review. */
 export type TaskMedia = "picture" | "video" | "either" | "none";
+/** 0.79.0: a LoRA of the task's own - a style or a filter - on its pictures; strength null for the LoRA's own. */
+export interface TaskLora { id: string; strength: number | null }
 export interface PersonaTask {
   id: string; title: string; instruction: string; days: number[]; time: string; media: TaskMedia; web: boolean;
+  loras: TaskLora[];
   enabled: boolean; chat_id: number | null; next_run: number | null; last_run: number | null; last_error: string;
   last_post: string; running: boolean;
 }
@@ -45,7 +48,7 @@ export interface Persona {
   job: { what: string; value?: number; max?: number } | null; error: string;
 }
 export interface PersonaLora { id: string; name: string; base: string; base_label: string; trigger: string;
-  category: string; strength: number }
+  category: string; strength: number; slider?: boolean }
 export interface PersonaOptions { models: { id: string; name: string }[]; default_model: string; languages: string[];
   loras: PersonaLora[]; pictures: boolean; speech: boolean }
 

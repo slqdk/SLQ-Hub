@@ -2945,6 +2945,19 @@ downloads, and posts it himself. `app/personas/tasks.py` (a mixin of
   prompt. The prompt says when to leave it out (a breakfast table, a view),
   and for a video of itself: the picture first, then the video from it. The
   Hub's list of LoRAs for the assistant stays out of a persona's prompt.
+- **A task's own LoRAs** (0.79.0, Søren: "can we add a second lora to the
+  tasks ? If i want to add filter or something like that"): up to three per
+  task (`loras`: `[{id, strength}]`, strength in the LoRA's range or null for
+  its own; each once; one not in the Hub's LoRAs refused). They go on every
+  new picture the task's chat makes, after the persona's LoRA - pictures of
+  her and the breakfast table alike, through the same `loras` the picture
+  menu uses, so their trigger words join the prompt and one of another
+  family is left out with a note under the picture. A picture of her made
+  from her portrait (an edit) gets them too; an `image_edit` of a picture
+  does not (it has the look already). The image tool's text tells the model
+  the task's pictures get them, and to leave their look out of the prompt.
+  The task form lists the LoRAs of the persona's LoRA's kind (all, when it
+  has none), with their strength; the task's card shows them.
 - **The review**: the Personas page lists the drafts of every persona ("Posts
   to review"), each persona's Posts tab all of its posts. A post shows its
   pictures or video and its text: change the text, Approve (or back to

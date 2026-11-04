@@ -4,11 +4,11 @@
 // posts an approved one to the persona's Instagram account when it is connected ("Approve and post").
 import { useCallback, useEffect, useState } from "react";
 import { Check, Copy, Download, ExternalLink, MessageSquare, Pencil, Play, Plus, RotateCcw, Send,
-  Trash2 } from "lucide-react";
+  Trash2, X } from "lucide-react";
 import { api } from "../lib/api";
 import { copyText } from "../lib/clipboard";
-import { DAYS, personaFile, scheduleText, whenText, type InstagramApp, type Persona, type PersonaPost,
-  type PersonaTask, type TaskMedia } from "../lib/personas";
+import { DAYS, personaFile, scheduleText, whenText, type InstagramApp, type Persona, type PersonaLora,
+  type PersonaPost, type PersonaTask, type TaskLora, type TaskMedia } from "../lib/personas";
 import { linkProps } from "../lib/router";
 import { useApp } from "../state";
 import { Avatar } from "../components/Avatar";
@@ -21,12 +21,21 @@ const MEDIA: { id: TaskMedia; label: string }[] = [
   { id: "either", label: "A picture or a video" }, { id: "none", label: "Text only" }];
 const mediaLabel = (m: TaskMedia) => MEDIA.find((x) => x.id === m)?.label ?? m;
 
-type TaskDraft = Pick<PersonaTask, "title" | "instruction" | "days" | "time" | "media" | "web">;
-const NEW_TASK: TaskDraft = { title: "", instruction: "", days: [0], time: "19:00", media: "picture", web: false };
+type TaskDraft = Pick<PersonaTask, "title" | "instruction" | "days" | "time" | "media" | "web" | "loras">;
+const NEW_TASK: TaskDraft = { title: "", instruction: "", days: [0], time: "19:00", media: "picture", web: false,
+  loras: [] };
+const TASK_LORAS = 3;
+
+/** The LoRAs a task can add (0.79.0): not the persona's own, and of its kind when it has one (a klein 9B LoRA for
+ *  pictures of her made with klein 9B) - one of another kind would be left out at the picture. */
+function taskLoraChoices(p: Persona, loras: PersonaLora[]): PersonaLora[] {
+  const own = loras.find((l) => l.id === p.lora);
+  return loras.filter((l) => l.id !== p.lora && (!own || l.base === own.base));
+}
 
 // ---------------------------------------------------------------- tasks
 
-export function TasksTab({ p, act }: { p: Persona; act: Act }) {
+export function TasksTab({ p, act, loras }: { p: Persona; act: Act; loras: PersonaLora[] }) {
   const [editing, setEditing] = useState<string | null>(null);        // a task's id, or "new"
   const base = `/hub/api/personas/${p.id}/tasks`;
   return (
@@ -36,12 +45,12 @@ export function TasksTab({ p, act }: { p: Persona; act: Act }) {
         is published.</p>
       {p.tasks.length === 0 && editing !== "new" && <Empty>No tasks yet.</Empty>}
       {p.tasks.map((t) => (editing === t.id
-        ? <TaskForm key={t.id} initial={t} onCancel={() => setEditing(null)} onSave={async (d) => {
+        ? <TaskForm key={t.id} p={p} loras={loras} initial={t} onCancel={() => setEditing(null)} onSave={async (d) => {
           if (await act(() => api(`${base}/${t.id}`, { method: "PATCH", body: d }), "Saved")) setEditing(null);
         }} />
-        : <TaskRow key={t.id} p={p} t={t} act={act} onEdit={() => setEditing(t.id)} />))}
+        : <TaskRow key={t.id} p={p} t={t} act={act} loras={loras} onEdit={() => setEditing(t.id)} />))}
       {editing === "new"
-        ? <TaskForm initial={NEW_TASK} onCancel={() => setEditing(null)} onSave={async (d) => {
+        ? <TaskForm p={p} loras={loras} initial={NEW_TASK} onCancel={() => setEditing(null)} onSave={async (d) => {
           if (await act(() => api(base, { body: d }), "The task is set")) setEditing(null);
         }} />
         : <div className="row"><button className="btn" onClick={() => setEditing("new")}><Plus size={15} /> New task</button></div>}
@@ -49,7 +58,8 @@ export function TasksTab({ p, act }: { p: Persona; act: Act }) {
   );
 }
 
-function TaskRow({ p, t, act, onEdit }: { p: Persona; t: PersonaTask; act: Act; onEdit: () => void }) {
+function TaskRow({ p, t, act, loras, onEdit }: { p: Persona; t: PersonaTask; act: Act; loras: PersonaLora[];
+  onEdit: () => void }) {
   const base = `/hub/api/personas/${p.id}/tasks/${t.id}`;
   return (
     <div className="pe-task">
@@ -64,6 +74,11 @@ function TaskRow({ p, t, act, onEdit }: { p: Persona; t: PersonaTask; act: Act; 
         {t.running ? <span className="row" style={{ gap: 6 }}><Lamp state="run" size="sm" pulse /> Making a post now</span>
           : <span className="faint">{t.enabled && t.next_run ? `Next: ${whenText(t.next_run)}` : "Off"}</span>}
         <span className="faint">{mediaLabel(t.media)}{t.web ? " · looks things up" : ""}</span>
+        {(t.loras ?? []).map((l) => {
+          const meta = loras.find((x) => x.id === l.id);
+          return <span key={l.id} className="tag" title="A LoRA of this task's own, on its pictures">
+            {meta?.name ?? `${l.id} (gone)`} ×{l.strength ?? meta?.strength ?? 1}</span>;
+        })}
         {t.last_error && !t.running && <span className="warn-text">{t.last_error}</span>}
       </div>
       <div className="row pe-task-acts">
@@ -82,10 +97,11 @@ function TaskRow({ p, t, act, onEdit }: { p: Persona; t: PersonaTask; act: Act; 
   );
 }
 
-function TaskForm({ initial, onSave, onCancel }: { initial: TaskDraft; onSave: (d: TaskDraft) => unknown;
-  onCancel: () => void }) {
+function TaskForm({ p, loras, initial, onSave, onCancel }: { p: Persona; loras: PersonaLora[]; initial: TaskDraft;
+  onSave: (d: TaskDraft) => unknown; onCancel: () => void }) {
   const [d, setD] = useState<TaskDraft>({ title: initial.title, instruction: initial.instruction,
-    days: [...initial.days], time: initial.time, media: initial.media, web: initial.web });
+    days: [...initial.days], time: initial.time, media: initial.media, web: initial.web,
+    loras: (initial.loras ?? []).map((l) => ({ ...l })) });
   const set = (change: Partial<TaskDraft>) => setD((x) => ({ ...x, ...change }));
   const toggle = (day: number) => set({ days: d.days.includes(day) ? d.days.filter((x) => x !== day)
     : [...d.days, day].sort() });
@@ -119,11 +135,52 @@ function TaskForm({ initial, onSave, onCancel }: { initial: TaskDraft; onSave: (
         <Switch checked={d.web} onChange={(v) => set({ web: v })} label="Looks things up" />
         <span className="small">Looks things up on the web - for the news, a date, a place</span>
       </div>
+      {d.media !== "none" && <TaskLoras p={p} loras={loras} value={d.loras} onChange={(v) => set({ loras: v })} />}
       <div className="row">
         <span className="grow" />
         <button className="btn quiet small" onClick={onCancel}>Cancel</button>
         <button className="btn primary small" disabled={!ready} onClick={() => onSave(d)}>Save</button>
       </div>
+    </div>
+  );
+}
+
+/** A task's own LoRAs (0.79.0, Søren: "can we add a second lora to the tasks ? If i want to add filter or something
+ *  like that"): up to three, each with its strength, on every new picture the task makes - after the persona's. */
+function TaskLoras({ p, loras, value, onChange }: { p: Persona; loras: PersonaLora[]; value: TaskLora[];
+  onChange: (v: TaskLora[]) => void }) {
+  const choices = taskLoraChoices(p, loras);
+  const meta = (id: string) => loras.find((l) => l.id === id);
+  const free = choices.filter((c) => !value.some((v) => v.id === c.id));
+  const change = (i: number, x: Partial<TaskLora>) => onChange(value.map((v, j) => (j === i ? { ...v, ...x } : v)));
+  return (
+    <div className="field"><span>LoRAs on its pictures</span>
+      {value.map((v, i) => {
+        const m = meta(v.id);
+        const [lo, hi] = m?.slider ? [-10, 10] : [0, 2];
+        return (
+          <div key={i} className="row" style={{ gap: 8, marginBottom: 6 }}>
+            <select className="select grow" value={v.id} aria-label="LoRA"
+              onChange={(e) => change(i, { id: e.target.value, strength: meta(e.target.value)?.strength ?? 1 })}>
+              {!m && <option value={v.id}>{v.id} - no longer there</option>}
+              {choices.filter((c) => c.id === v.id || !value.some((x) => x.id === c.id))
+                .map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+            <input className="input" type="number" step={0.05} min={lo} max={hi} style={{ width: 84 }}
+              aria-label="Strength" value={v.strength ?? m?.strength ?? 1}
+              onChange={(e) => change(i, { strength: e.target.value === "" ? null : Number(e.target.value) })} />
+            <button type="button" className="icon-btn" aria-label="Remove the LoRA"
+              onClick={() => onChange(value.filter((_, j) => j !== i))}><X size={15} /></button>
+          </div>
+        );
+      })}
+      {value.length < TASK_LORAS && free.length > 0 && (
+        <div className="row"><button type="button" className="btn quiet small"
+          onClick={() => onChange([...value, { id: free[0].id, strength: free[0].strength ?? 1 }])}>
+          <Plus size={13} /> Add a LoRA</button></div>)}
+      <small>{choices.length === 0
+        ? `No other LoRA ${p.lora ? `of the same kind as ${p.name}'s ` : ""}is there yet (Settings, Models, LoRAs).`
+        : `A style or a filter on every new picture this task makes, after ${p.name}'s own LoRA. Strength 1 is the LoRA as trained.`}</small>
     </div>
   );
 }
