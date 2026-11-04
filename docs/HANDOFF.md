@@ -1042,6 +1042,10 @@ the decode for the same graph with the decode changed. Tests: tests/test_video.p
 prompt and checks a LoadImage's file is still there), each part failing without the fix. NOT seen on the card: that the
 second try decodes (the cache and the room after the unloading), and how long a 256-px decode takes; why ComfyUI stopped
 answering after an OOM (item 56's question again).
+Seen on the card 2026-11-04 17:17-17:19 (0.79.0, ComfyUI's log from the System tab's Download): Lørdag aften's 2-s clip
+sampled its 4 steps in 10 s, the 512-px decode ran out of memory as before (7,247,757,312 bytes, 6.4 GiB free), and the
+Hub's second graph 3 s later loaded only the VAE ("16752.00 MB usable") and decoded in 256-px tiles: "Prompt executed
+in 79.33 seconds" - the cache held, the clip was made. ComfyUI answered at once after the OOM this time.
 0.77.0, Søren (to "I can also add ComfyUI's log to the System tab next to "main", so you don't need SSH next time"):
 "yes do that". ComfyUI's log in Settings -> System -> Logs, with Download (DESIGN §12 "ComfyUI's log"): its container runs
 ComfyUI under services/comfyui/logpump.py (PID 1, ComfyUI its child), which passes all of its output on to docker logs
@@ -1879,7 +1883,9 @@ the host if the VM ever stops by itself.
     - **What it misses and what it invents**: the subtle ones (a glass grown into another, a door onto a window) as
       against a third hand; a right picture called wrong costs a try. The tries thrown away show under the picture.
     - **The seed line**: "Made with ... · seed N" under each picture, also after a new try (the shown picture's seed).
-97. **ComfyUI's log (0.77.0)** - none of it has run in the real container:
+97. **ComfyUI's log (0.77.0)** - seen working on 2026-11-04 (his Download of 17:50, 615 lines over three runs):
+    stamped lines, the start lines with the flags, "===== stopped by SIGTERM" at both updates (so docker's stop
+    reached ComfyUI through the pump), the C++ HIPCachingAllocator lines in their place. Still to see:
     - **After the update**: `/srv/slq-hub/data/logs/comfyui` exists, owned by uid 1000 (the updater makes it before the
       start), and Settings -> System -> Logs -> ComfyUI shows ComfyUI's start - "===== start: python main.py ...
       --reserve-vram 6" and its first lines. If it says "No ComfyUI log yet", `sudo bash /opt/slq-hub/update.sh compose
@@ -1991,7 +1997,8 @@ the host if the VM ever stops by itself.
       the same prompts and seeds in a chat with it chosen in the picture menu. Its time per picture (40
       model passes at 1 MP) and memory with the 8 GB text encoder; a person LoRA trained on klein 9B on it.
       Seen on 2026-11-04 (0.78.0's paragraph): downloaded, it ran with Laura's LoRA - one picture, the glass the
-      4-step model broke right, a third hand instead. Its time per picture still not noted.
+      4-step model broke right, a third hand instead. Time on the card (ComfyUI's log, 6 pictures at about
+      1 MP): 20 steps in 34-46 s (1.74-2.30 s/it), the whole prompt 68-86 s with loading and the decode.
     - **The look at the bodies**: does Qwen3.8 27B notice an extra arm in its own picture, and does it then offer
       a new seed instead of calling the picture fine? An export of such a turn shows it.
 87. **hub3d (0.67.1)** - none of it has run on the VM:
