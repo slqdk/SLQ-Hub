@@ -1,6 +1,6 @@
 // Settings: models, the queue, apps and keys, the agent, memory, MCP, cloud, system (skills have their own page).
 import { LEVEL_OPTIONS } from "../lib/effort";
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ChevronDown, ChevronUp, Copy, Download, Menu, Plus, RefreshCw, Upload, X } from "lucide-react";
 import { api, type ApiKey, type Person, type HFLookup, type HFSearchHit, type ImageLookup, type McpServerConfig, type McpStatus,
   type MemoryFile, type ModelEntry, type Sampling, type SdxlChoices, type SdxlSettings, type Settings, type UsageData,
@@ -1866,10 +1866,19 @@ function speechDetail(h?: { threads?: number; cpu?: string; loaded?: string[]; b
   return `${h.threads ?? "?"} CPU threads${h.cpu ? ` on ${h.cpu}` : ""}, ${loaded}${h.busy ? ", speaking" : ""}`;
 }
 
+/** A log in a box that opens at its end - the newest lines are what one looks for. */
+function LogText({ text }: { text: string }) {
+  const ref = useRef<HTMLPreElement>(null);
+  useEffect(() => {
+    if (ref.current) ref.current.scrollTop = ref.current.scrollHeight;
+  }, [text]);
+  return <pre ref={ref} className="code-line" style={{ maxHeight: "65vh", whiteSpace: "pre-wrap" }}>{text || "(empty)"}</pre>;
+}
+
 function SystemTab() {
   const { toast, theme, setTheme, auth, refreshAuth } = useApp();
   const [sys, setSys] = useState<SystemData | null>(null);
-  const [log, setLog] = useState<{ name: string; text: string } | null>(null);
+  const [log, setLog] = useState<{ title: string; text: string; download?: string } | null>(null);
   const [pw, setPw] = useState({ current: "", next: "" });
   const load = useCallback(async () => {
     try {
@@ -1885,7 +1894,16 @@ function SystemTab() {
   const showLog = async (name: string) => {
     try {
       const r = await api<{ text: string }>(`/hub/api/system/logs/${name}`, { query: { tail: 400 } });
-      setLog({ name, text: r.text });
+      setLog({ title: `Log: ${name}`, text: r.text });
+    } catch (e) {
+      toast((e as Error).message, "fault");
+    }
+  };
+  // ComfyUI's (0.77.0): the file its container writes, so it can be read while ComfyUI does not answer
+  const showComfyLog = async () => {
+    try {
+      const r = await api<{ text: string; exists: boolean }>("/hub/api/system/comfyui-log", { query: { tail: 400 } });
+      setLog({ title: "Log: ComfyUI", text: r.text, download: r.exists ? "/hub/api/system/comfyui-log?download=1" : undefined });
     } catch (e) {
       toast((e as Error).message, "fault");
     }
@@ -1932,6 +1950,7 @@ function SystemTab() {
       <h3>Logs</h3>
       <div className="row wrap" style={{ marginBottom: 20 }}>
         {(procs.length ? procs : ["main"]).map((p) => <button key={p} className="btn small" onClick={() => showLog(p)}>{p}</button>)}
+        <button className="btn small" onClick={showComfyLog}>ComfyUI</button>
       </div>
       <h3>Look</h3>
       <div className="row" style={{ marginBottom: 20 }}>
@@ -1951,8 +1970,10 @@ function SystemTab() {
         <button className="btn quiet" onClick={signOut}>Sign out {auth?.user?.username}</button>
       </div>
       <p className="faint small" style={{ marginTop: 24 }}>SLQ Hub {sys?.version ?? auth?.version}</p>
-      {log && <Modal title={`Log: ${log.name}`} onClose={() => setLog(null)} wide>
-        <pre className="code-line" style={{ maxHeight: "65vh", whiteSpace: "pre-wrap" }}>{log.text || "(empty)"}</pre>
+      {log && <Modal title={log.title} onClose={() => setLog(null)} wide footer={log.download ? <>
+        <span className="faint small grow">The last 400 lines. Download has all of it, to send when something failed.</span>
+        <a className="btn small" href={log.download} download><Download size={14} /> Download</a></> : undefined}>
+        <LogText text={log.text} />
       </Modal>}
     </div>
   );

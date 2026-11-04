@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.77.0 - 2026-11-04
+
+- New: ComfyUI's log in Settings → System → Logs, next to the model server's -
+  the last 400 lines, and Download for all of it. It holds everything ComfyUI
+  prints (also the memory errors from below Python's own logging), each line
+  with its time, and keeps the run before a crash or an update. It starts
+  with this update: update.sh rebuilds ComfyUI's image.
+
 ## 0.76.3 - 2026-11-04
 
 - Fixed: videos made from a picture could fail at the very end ("out of

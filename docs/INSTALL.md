@@ -423,6 +423,7 @@ All commands run in the VM from `/opt/slq-hub`:
 | Follow the Hub's log | `sudo bash /opt/slq-hub/update.sh compose logs -f hub` |
 | A model server's log | `sudo bash /opt/slq-hub/update.sh compose logs -f llm` |
 | The speech service's log | `sudo bash /opt/slq-hub/update.sh compose logs -f speech` |
+| ComfyUI's log (pictures, sound, video) | Settings → System → Logs → ComfyUI, with Download (0.77.0; the file is `/srv/slq-hub/data/logs/comfyui/comfyui.log`), or `sudo bash /opt/slq-hub/update.sh compose logs -f comfyui` |
 | Backups / roll back | `sudo bash /opt/slq-hub/update.sh backups` / `... rollback` |
 | Run the self-test again | `sudo bash /opt/slq-hub/update.sh compose exec hub python -m app.cli selftest` |
 | More language models | Settings → Models → Add from Hugging Face (GGUF repositories; gated ones need a Hugging Face token: Settings → Models → Sign-ins for downloads, or `HF_TOKEN` in `.env`) |

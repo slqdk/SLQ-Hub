@@ -1044,7 +1044,8 @@ export const SECTIONS: HelpSection[] = [
         id: "trouble",
         title: "When something goes wrong",
         what: "Export the chat for troubleshooting (the ⋯ menu) and send the ZIP. Settings, System shows the "
-          + "services, the card's memory and the logs.",
+          + "services, the card's memory and the logs - the model server's and ComfyUI's, which pictures, sound and "
+          + "video go through; its Download has all of it, to send along.",
         owner: true,
       },
       {

@@ -351,7 +351,7 @@ stage_gpu() {
 stage_build() {
     section "Folders and container images"
     mkdir -p "$HUB_ROOT"/{data,backups} \
-             "$HUB_ROOT"/data/{workspace/projects,workspace/chats,sandbox-home,logs/llm} \
+             "$HUB_ROOT"/data/{workspace/projects,workspace/chats,sandbox-home,logs/llm,logs/comfyui} \
              "$HUB_ROOT"/models/{llm,speech} \
              "$HUB_ROOT"/models/comfy/{diffusion_models,text_encoders,vae,loras,checkpoints,upscale_models,model_patches} \
              "$HUB_ROOT"/comfy/{input,output,user}

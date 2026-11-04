@@ -104,6 +104,8 @@ services:
       - ${HUB_ROOT:-/srv/slq-hub}/comfy/input:/opt/ComfyUI/input
       - ${HUB_ROOT:-/srv/slq-hub}/comfy/output:/opt/ComfyUI/output
       - ${HUB_ROOT:-/srv/slq-hub}/comfy/user:/opt/ComfyUI/user
+      # its output as docker logs has it, for Settings -> System in the Hub (services/comfyui/logpump.py, 0.77.0)
+      - ${HUB_ROOT:-/srv/slq-hub}/data/logs/comfyui:/logs
     ports:
       - "127.0.0.1:8188:8188"   # maintenance only: ssh -L 8188:127.0.0.1:8188 <vm>
     networks:

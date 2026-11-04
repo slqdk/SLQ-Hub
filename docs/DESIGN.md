@@ -3378,6 +3378,40 @@ Assistant → Sound plays them.
 **Logs.** `update.sh compose logs -f <service>`. The Hub keeps an error log
 and per-model llama-server logs, viewable in Settings → System.
 
+**ComfyUI's log** (0.77.0, Søren: "There are no ComfyUI log ?" - until then
+it took SSH and `docker logs`, before an update restarted ComfyUI and lost
+it). Its container runs ComfyUI under `services/comfyui/logpump.py`, which
+passes everything ComfyUI prints on to docker logs and writes it to
+`data/logs/comfyui/comfyui.log` (mounted at `/logs`): each line with the time
+it began, a line at each start (with ComfyUI's flags) and exit (its code or
+signal), and past 10 MB the file becomes `comfyui.log.1`. Settings → System →
+Logs → ComfyUI shows the last 400 lines across both files, ComfyUI's colour
+codes left out and a progress bar as it ended (`app/gpu/comfy_log.py`);
+Download hands out all of it (`GET /hub/api/system/comfyui-log?download=1`,
+the owner's like the rest of the System tab).
+- *All of the output, not ComfyUI's own log file.* `--verbose LEVEL FILE`
+  writes only Python's logging records. The lines that explained the decode
+  of 2026-11-04 - `HIPCachingAllocator.cpp:3935] memory allocation failed
+  with OOM ... 7247757312 bytes` - are PyTorch's C++ writing to stderr, and
+  faulthandler's dump of a crash goes there too. ComfyUI's `/internal/logs`
+  keeps 300 entries in memory, is gone after a restart and does not answer
+  while ComfyUI does not (item 56's 300 s).
+- *A file, read by the Hub.* It can be read while ComfyUI hangs, and it
+  keeps the run before a crash or an update.
+- *The pump is the container's first process, ComfyUI its child.* A reader
+  beside ComfyUI as PID 1 (bash's `exec > >(tee ...)`) is killed with it when
+  ComfyUI dies, perhaps before it read the last lines. As the parent it
+  reads the pipe to the end, then leaves with ComfyUI's code, so docker's
+  restart policy sees what it saw before. It stops reading 2 s after the
+  output stops, or after 10 s, when something ComfyUI started still holds
+  the pipe. The signals docker sends (TERM, INT, HUP, QUIT, USR1, USR2) are
+  passed on. PID 1 gets only the signals it has a handler for
+  (pid_namespaces(7)), and ComfyUI sets none for SIGTERM, so `docker stop`
+  waited its 10 s and killed it. Now the SIGTERM reaches ComfyUI, which stops
+  at once - read from the kernel's rules, not timed on the VM. A file that
+  cannot be written (no folder mounted, a full disk) costs only the file,
+  tried again after a minute; docker logs gets everything.
+
 **A chat that behaves strangely.** Its ⋯ menu exports a troubleshooting ZIP
 (`app/chats/export.py`): every stored message block and run (steps, timings,
 tokens, errors), the live event log of runs still in memory (streamed pieces

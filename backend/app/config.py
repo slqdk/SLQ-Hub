@@ -66,6 +66,11 @@ class Env:
         """The Hub's view of the shared workspace (projects and chat folders)."""
         return self.data_dir / "workspace"
 
+    @property
+    def comfy_log(self) -> Path:
+        """ComfyUI's output as its container writes it (services/comfyui/logpump.py, 0.77.0)."""
+        return self.data_dir / "logs" / "comfyui" / "comfyui.log"
+
     sandbox_workspace: str = "/workspace"   # the sandbox's view of the same folder
 
 

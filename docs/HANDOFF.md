@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.76.3, 2026-11-04)
+## State (0.77.0, 2026-11-04)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -1042,6 +1042,29 @@ the decode for the same graph with the decode changed. Tests: tests/test_video.p
 prompt and checks a LoadImage's file is still there), each part failing without the fix. NOT seen on the card: that the
 second try decodes (the cache and the room after the unloading), and how long a 256-px decode takes; why ComfyUI stopped
 answering after an OOM (item 56's question again).
+0.77.0, Søren (to "I can also add ComfyUI's log to the System tab next to "main", so you don't need SSH next time"):
+"yes do that". ComfyUI's log in Settings -> System -> Logs, with Download (DESIGN §12 "ComfyUI's log"): its container runs
+ComfyUI under services/comfyui/logpump.py (PID 1, ComfyUI its child), which passes all of its output on to docker logs
+and writes it, each line stamped, to data/logs/comfyui/comfyui.log (.1 past 10 MB); the Hub reads the file
+(app/gpu/comfy_log.py). All of the output and not ComfyUI's `--verbose LEVEL FILE` log, because his log of 13:15-13:17
+showed the decisive lines - `HIPCachingAllocator.cpp:3935 ... OOM` - are not logging records (read in ComfyUI
+v0.42.3's app/logger.py and main.py at the tag). The folder: install.sh and the updater's FOLDERS (uid 1000, before
+the containers start); the compose mount; the image copies logpump.py, so update.sh's build makes a new ComfyUI image
+(its last layers). Tests: tests/test_comfy_log.py (11) - the pump run for real with a stand-in ComfyUI (colour, a bar
+redrawn with carriage returns, a C++-style line to fd 2): docker logs gets all of it in order and the exit code is
+ComfyUI's; a crash's last lines (3000 lines, then abort) are all in the file with "stopped by SIGABRT"; SIGTERM
+reaches ComfyUI, also with the pump as PID 1 in its own PID namespace (`unshare --pid`); something left holding the
+pipe does not keep it up (out in about 2 s); a log that cannot be written (no folder; /dev/full) costs only the file;
+the cap and the reading across both files; the route (none yet, the last lines, the download, a person refused); a
+link or a pipe put in the folder is not read, nor more than 16 MB of a file. Each part failed without it (10
+mutations). A separate agent reviewed it (and ran the pump as PID 1, with a full disk, a root-owned /logs, a 13 MB
+line): one finding - the reader followed links, so code inside ComfyUI could have put one to the Hub's
+/proc/self/environ into a download - fixed (O_NOFOLLOW, plain files only, 16 MB at most). The real start.sh run here
+as PID 1 (`unshare`) with a stand-in main.py: the flags with COMFY_ARGS reach it, its exit code comes back, the log as
+above. In Chromium against the dev server (his log replayed through
+the pump, both files): the button beside "main", the box opening at its end, Download (a .log of both files,
+688 lines), no Download before there is a log, desktop dark and phone light; no console errors. NOT seen on the VM:
+item 97.
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
 host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU
@@ -1819,6 +1842,18 @@ the host if the VM ever stops by itself.
       converter's cases are ComfyUI 0.42.3's own templates; files from other sites (Civitai, OpenArt) are
       untried - an export is the way to see what went wrong. When COMFYUI_REF changes, the editor's format may
       too: tools/workflow_oracle/ (convert.js, compare.py) is how the converter was checked - run it again.
+97. **ComfyUI's log (0.77.0)** - none of it has run in the real container:
+    - **After the update**: `/srv/slq-hub/data/logs/comfyui` exists, owned by uid 1000 (the updater makes it before the
+      start), and Settings -> System -> Logs -> ComfyUI shows ComfyUI's start - "===== start: python main.py ...
+      --reserve-vram 6" and its first lines. If it says "No ComfyUI log yet", `sudo bash /opt/slq-hub/update.sh compose
+      logs comfyui | grep logpump` says why ("cannot write ...").
+    - **docker logs unchanged**: `compose logs comfyui` still shows everything, progress bars included.
+    - **A stop**: an update's `compose up` (or `compose restart comfyui`) should stop ComfyUI at once, not after 10 s
+      (the log's "===== stopped by SIGTERM").
+    - **A crash or a hang**: its last lines in the log after the restart (the run before stays in the file). For item
+      56's hang: with `--debug-hang` added to COMFY_ARGS in `.env`, `sudo docker kill -s INT slq-hub-comfyui` makes
+      ComfyUI dump every thread's stack into the log before it stops - unless its main thread is stuck where Python
+      cannot run its handler (then faulthandler registered on SIGUSR1 by a node would be the next step; not built).
 96. **Persona posts on Instagram (0.76.0, Unified login 0.76.1)** - none of it has run against Meta:
     - **Unified login** (his app has only that): does Meta's dialog take `state` and send it back (Meta's page lists
       client_id, config_id, redirect_uri, response_type, display, prompt), does the code exchange take the

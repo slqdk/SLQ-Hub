@@ -5,10 +5,11 @@ import asyncio
 import json
 import re
 import shutil
+import time
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
 from .. import auth, hf, tokens
@@ -792,3 +793,19 @@ def _home_network(env) -> str:
 @router.get("/hub/api/system/logs/{name}")
 async def logs(name: str, request: Request, tail: int = 300):
     return {"name": name, "text": await get_hub(request).runner.logs(name, tail)}
+
+
+@router.get("/hub/api/system/comfyui-log")
+async def comfyui_log(request: Request, tail: int = 400, download: bool = False):
+    """ComfyUI's log (0.77.0, gpu/comfy_log.py): its last lines, or all of it as a file to send."""
+    from ..gpu import comfy_log
+    path = get_hub(request).env.comfy_log
+    if download:
+        text = await asyncio.to_thread(comfy_log.whole, path)
+        if text is None:
+            raise HTTPException(404, "There is no ComfyUI log yet.")
+        name = time.strftime("comfyui-%Y-%m-%d-%H%M.log")
+        return Response(text, media_type="text/plain; charset=utf-8",
+                        headers={"Content-Disposition": f'attachment; filename="{name}"'})
+    text = await asyncio.to_thread(comfy_log.tail, path, max(1, min(5000, tail)))
+    return {"name": "comfyui", "text": comfy_log.NONE_YET if text is None else text, "exists": text is not None}

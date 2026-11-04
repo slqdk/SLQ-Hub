@@ -67,7 +67,8 @@ COPY nodes/slq_audio /opt/ComfyUI/custom_nodes/slq_audio
 RUN mkdir -p /opt/ComfyUI/models /opt/ComfyUI/input /opt/ComfyUI/output /opt/ComfyUI/user \
     && chown -R 1000:1000 /opt/ComfyUI
 
-COPY start.sh /opt/start.sh
+# logpump.py (0.77.0): ComfyUI runs under it, its output going on to docker logs and to the log the Hub shows
+COPY start.sh logpump.py /opt/
 RUN chmod 755 /opt/start.sh
 
 USER 1000:1000
