@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## State (0.79.0, 2026-11-04)
+## State (0.79.1, 2026-11-04)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -1094,6 +1094,18 @@ trigger words, a picture without her with the task's, the model told; her chat o
 part failing without it (6 mutations). In Chromium against the dev server (its LoRAs Far and Tegneserie, Far hers):
 the form offers Tegneserie alone, the strength, Save; the card's "Tegneserie ×0.5", desktop light and phone dark; no
 console errors. NOT seen on the VM: item 99.
+0.79.1, Søren: "I could not make the bed picture" - his ComfyUI log (Download, 17:50) and chat 292's export. ComfyUI
+made the picture both times (klein 9B base, 17:07 and 17:46, no error); the post was never handed in. Gemma 4 31B's
+call `image_generate` had `save_as`: 'sunday_morning_news_vibe.jpg`}<tool_call|><|tool_call>call:post_draft{media:['
+(a backtick where Gemma 4 closes a string with <|"|>, so llama-server read on into the next call); the picture was saved
+under that name, post_draft asked for sunday_morning_news_vibe.jpg three times, the loop guard ended the turn. The
+16:46 run, with the 16:07 call in its history, made the same slip with the same text (its context.json carries both).
+The ten runs before, 09:35-12:03 UTC in the same chat, were right. Fix (DESIGN §6 "Another call's start leaked into an
+argument"): cut at Gemma 4's markers in what the model sends, and in the history it is sent. Tests:
+tests/test_leaked_calls.py (his strings; the run of chat 292 again hands in its post; the stored chat's history comes
+back clean), each part failing without it (4 mutations). NOT seen on the card: the next run of that task (in chat
+292, whose history still holds the two broken calls - sent clean now); whether Gemma 4 slips like this elsewhere - the
+model server's log says "a call's start leaked into its arguments - cut" each time.
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
 host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU

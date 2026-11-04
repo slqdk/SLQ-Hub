@@ -9,8 +9,46 @@ content, in either the XML form or Hermes-style JSON.
 from __future__ import annotations
 
 import json
+import logging
 import re
 import secrets
+
+log = logging.getLogger("hub.llm")
+
+# Gemma 4 writes a call as <|tool_call>call:name{key:<|"|>text<|"|>,...}<tool_call|>. Its slip, seen twice in a row on
+# 2026-11-04 (0.79.1, chat 292, Gemma 4 31B): a string closed with a backtick instead of <|"|>, so llama-server read on
+# into the next call - the picture's save_as became 'x.jpg`}<tool_call|><|tool_call>call:post_draft{media:[', the
+# picture was saved under that name, and post_draft found no x.jpg three times. Kept in the chat, the broken call was
+# copied in the next run: the history the model is sent leaves it out too.
+LEAK = re.compile(r"<tool_call\|>|<\|tool_call>")
+LEAK_IN_TEXT = re.compile(r"[`'\"]*\}*\s*(?:<tool_call\|>\s*)?<\|tool_call>call:\w+\{\S*")
+
+
+def cut_leak(value: str) -> str:
+    """A string argument without the start of another call that leaked into it, nor the junk the slip left."""
+    m = LEAK.search(value)
+    if m is None:
+        return value
+    return value[:m.start()].rstrip().rstrip("`'\"}]),;").rstrip()
+
+
+def clean_arguments(args):
+    """(the arguments with cut_leak on every string in them, whether any was cut)."""
+    if isinstance(args, str):
+        out = cut_leak(args)
+        return out, out != args
+    if isinstance(args, list):
+        pairs = [clean_arguments(v) for v in args]
+        return [v for v, _ in pairs], any(c for _, c in pairs)
+    if isinstance(args, dict):
+        pairs = {k: clean_arguments(v) for k, v in args.items()}
+        return {k: v for k, (v, _) in pairs.items()}, any(c for _, c in pairs.values())
+    return args, False
+
+
+def clean_result_text(text: str) -> str:
+    """A tool's result as the model sees it again, without a leaked call (a file name the slip had spoilt)."""
+    return LEAK_IN_TEXT.sub("", text) if "<|tool_call>" in text else text
 
 
 def new_call_id() -> str:
@@ -69,6 +107,18 @@ class Accumulator:
             content, calls = parse_text_tool_calls(content)
             if calls:
                 self.finish_reason = "tool_calls"
+        for c in calls:
+            if "tool_call" not in (c.get("arguments") or ""):
+                continue
+            try:
+                args = json.loads(c["arguments"])
+            except (TypeError, ValueError):
+                continue
+            args, cut = clean_arguments(args)
+            if cut:                                  # the start of another call leaked into an argument
+                log.warning("%s: a call's start leaked into its arguments - cut: %s", c.get("name"),
+                            c["arguments"][-160:])
+                c["arguments"] = json.dumps(args, ensure_ascii=False)
         return {"content": content, "reasoning": self.reasoning, "tool_calls": calls,
                 "finish_reason": self.finish_reason or ("tool_calls" if calls else "stop"),
                 "usage": self.usage, "timings": self.timings}
@@ -141,10 +191,12 @@ def valid_arguments(raw: str | dict | None) -> str:
     JSON. llama-server parses every earlier call of the conversation and refuses the whole request over one it
     cannot (chat 21: a call the context's end had cut off, sent back at the next step)."""
     if isinstance(raw, dict):
-        return json.dumps(raw, ensure_ascii=False)
+        return json.dumps(clean_arguments(raw)[0], ensure_ascii=False)
     try:
-        if isinstance(json.loads(raw or "{}"), dict):
-            return raw or "{}"
+        val = json.loads(raw or "{}")
+        if isinstance(val, dict):
+            val, cut = clean_arguments(val)          # a call stored before 0.79.1 with another's start in it
+            return json.dumps(val, ensure_ascii=False) if cut else (raw or "{}")
     except (TypeError, ValueError):
         pass
     try:

@@ -618,6 +618,24 @@ can, else `{"_not_valid_json": "<their first 300 characters>..."}` - within a
 turn and from a stored chat alike. The stored blocks keep what the model sent,
 for the UI and the export.
 
+**Another call's start leaked into an argument** (0.79.1, chat 292: Laura's
+task "Søndag morgen sengefoto" handed in nothing, twice in a row). Gemma 4
+writes a call as `<|tool_call>call:name{key:<|"|>text<|"|>,...}<tool_call|>`.
+Gemma 4 31B closed a `save_as` string with a backtick instead of `<|"|>`, so
+llama-server read on into the next call, and the picture was saved as
+``sunday_morning_news_vibe.jpg`}<tool_call|><|tool_call>call:post_draft{media:[``.
+post_draft asked for sunday_morning_news_vibe.jpg three times and the loop
+guard ended the turn. The next run, with that call in the chat's history,
+made the same slip with the same text. Now `stream.Accumulator.result`
+cuts every string argument at Gemma 4's `<|tool_call>` or `<tool_call|>`,
+with the backtick, quote or brace the slip left before it (`cut_leak`; the
+model server's log says so), so the call runs with the name meant; the
+second call is lost, and the model makes it at its next step, as it did.
+The history a model is sent leaves the leak out of calls stored before
+(`valid_arguments`) and out of their results (`clean_result_text`), so a
+chat that has one stops teaching it. Qwen's markers are not touched: not
+seen.
+
 **A part that would replace the file** (0.21.0). Chat 21's next turn wrote the
 game in parts, and twice sent the next part without `append: true`: the part
 replaced the 18 KB written so far, and the model spent 12 of its 60 steps

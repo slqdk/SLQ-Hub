@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.79.1 - 2026-11-04
+
+- Fixed: a persona task could make its picture and then hand in nothing,
+  run after run ("There is no file ... in your folder"). The chat model had
+  run two of its tool calls together, so the picture got a broken file name;
+  the Hub now separates them, and a chat that had it no longer repeats it.
+
 ## 0.79.0 - 2026-11-04
 
 - New: a persona's task can have LoRAs of its own - up to three, each with

@@ -7,7 +7,7 @@ import re
 
 from ..chats import store as chats
 from ..llm.messages import image_part
-from ..llm.stream import valid_arguments
+from ..llm.stream import clean_result_text, valid_arguments
 from ..projects import blobs
 from .prompt import sent_stamp
 
@@ -183,7 +183,7 @@ def to_model_messages(rows: list[dict], current_run: str | None = None, keep_ima
                 if cid not in open_calls:
                     continue                  # a result without its call: drop it
                 open_calls.remove(cid)
-                text = b.get("text") or ""
+                text = clean_result_text(b.get("text") or "")
                 if b.get("is_error") and not text.startswith("Error"):
                     text = "Error: " + text
                 if r["id"] < keep_results_from and len(text) > OLD_RESULT_CHARS:
