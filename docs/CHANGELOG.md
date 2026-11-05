@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.80.3 - 2026-11-05
+
+- A task's pictures now keep out what a post may not show. The chat model wrote
+  "no nipples" in its prompts, and a picture model draws every word it reads.
+  In a task that clause is now cut, and nipples and see-through fabric go in
+  the negative prompt. FLUX.2 klein 9B base uses it; the fast klein models
+  have no negative prompt, so there only the word goes.
+- A persona now knows that words after "no" get drawn too, and puts what must
+  not show in the negative prompt.
+
 ## 0.80.2 - 2026-11-05
 
 - Fixed: a task's pictures kept the same pose, because the chat model copied

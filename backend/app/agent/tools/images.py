@@ -213,6 +213,11 @@ def _written_size(prompt: str) -> tuple[str, tuple[int, int] | None]:
     return f"{rest}.", (int(m[1]), int(m[2]))
 
 
+def _kept_out(prompt: str) -> str:
+    """A task's picture prompt without what a post may not show: the whole clause that names it."""
+    return KEEP_OUT.sub("", prompt).strip(" ,;:") or prompt
+
+
 def _with_legs(prompt: str) -> str:
     """A persona under a duvet, in a prompt that does not say where its legs are, has them shown."""
     m = COVERED.search(prompt)
@@ -373,6 +378,9 @@ async def image_generate(ctx: ToolContext, args: dict) -> ToolResult:
     prompt, width, height = _picture_size(ctx, args, prompt, model, me is not None)
     if me is not None:
         prompt = _with_legs(prompt)
+    negative = args.get("negative") or ""
+    if _task(ctx) is not None:
+        prompt, negative = _kept_out(prompt), ", ".join(x for x in (negative, POST_NEGATIVE) if x)
 
     async def make(count: int, seed=None, label: str = "") -> list[dict]:
         if portrait is not None:
@@ -381,7 +389,7 @@ async def image_generate(ctx: ToolContext, args: dict) -> ToolResult:
                                    on_progress=await _progress(ctx, label), count=count,
                                    loras=task_loras or None)
         return await pipe.generate(prompt, width, height, count=count, seed=seed, fast=bool(args.get("fast")),
-                                   model=model, negative=args.get("negative") or "", ticket=ctx.ticket,
+                                   model=model, negative=negative, ticket=ctx.ticket,
                                    on_progress=await _progress(ctx, label), loras=loras)
     try:
         items = await make(int(args.get("count") or 1), args.get("seed"))
@@ -622,11 +630,18 @@ GENERATE_TEXT = ("Generate images from a text prompt with the model chosen for t
 POSES = ("Say plainly how you stand, sit or lie, where your legs are and what each hand does - in bed too: knees drawn "
          "up under the duvet, or legs stretched out with their shape showing under it. Bodies and hands come out best "
          "in simple poses: standing or walking rather than sitting, a hand at your side, in a pocket or on a strap "
-         "rather than both hands round one thing.")
+         "rather than both hands round one thing. A picture model draws every word it reads, also after no or "
+         "without: say what is there instead, and put what must not show in negative.")
 # 0.80.2: a body under a cover, and no word of what is under it. klein then draws a torso rising from a flat duvet.
 COVERED = re.compile(r"\b(?:covered|wrapped|draped|tucked|under|beneath)\b[^.]*?\b(duvet|blanket|quilt|comforter|"
                      r"sheets?|covers)\b", re.I)
 LEGS = re.compile(r"\b(?:legs?|knees?|thighs?|feet|foot|hips?)\b", re.I)
+# 0.80.3, Søren: nipples showing through the fabric, off-centre. His task says "no nipples" and Instagram takes none, but
+# a picture model reads no "no": all 14 of chat 292's prompts since he wrote that held the word ("ensuring no nipples are
+# visible"), none of the 22 used negative, and klein 9B base, at CFG 5, is the one that would have honoured it. Where
+# they sit cannot be asked for; that they do not show can. A task's picture loses the clause, and has them in negative.
+KEEP_OUT = re.compile(r"[^,.;:]*\b(?:nipples?|areolas?|areolae)\b[^,.;:]*[,.;:]?", re.I)
+POST_NEGATIVE = "nipples, areolas, nipples showing through fabric, see-through fabric, sheer fabric, nudity"
 # 0.68.0 (Søren: FLUX.2 klein 9B "often ... makes 3 arms, or a hand is missing"): the assistant sees each picture it
 # makes, so it looks at the bodies and says what is wrong instead of handing a broken one over as it is.
 BODIES = ("\nBefore you answer, look at the people in them: arms, hands and legs - if one is extra, missing or "

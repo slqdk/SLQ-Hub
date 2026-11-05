@@ -4,17 +4,17 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## Next session - start here (written 2026-11-05, at 0.80.2)
+## Next session - start here (written 2026-11-05, at 0.80.3)
 
-The chat of 2026-10-31 to 2026-11-04 built 0.75.0-0.79.1, the one of 2026-11-04/05 0.80.0-0.80.2; each version's
-paragraph under "State" says what and why. On VM 222 the Hub ran 0.80.1 at 10:55 on 2026-11-05; **0.80.2 is pushed, not
-yet installed** (`sudo bash /opt/slq-hub/update.sh`). How Søren works: Danish or English, short technical answers; he
+The chat of 2026-10-31 to 2026-11-04 built 0.75.0-0.79.1, the one of 2026-11-04/05 0.80.0-0.80.3; each version's
+paragraph under "State" says what and why. On VM 222 the Hub ran 0.80.2 at 11:49 on 2026-11-05 and he called its bed
+picture "much better"; **0.80.3 is pushed, not yet installed** (`sudo bash /opt/slq-hub/update.sh`). How Søren works: Danish or English, short technical answers; he
 sends screenshots, chat exports (⋯ → Export for troubleshooting) and now ComfyUI's log (Settings → System → Logs →
 ComfyUI → Download) - ask for those before theorising.
 
 Waiting for his result on the card, newest first:
-1. **0.80.2** - her legs and the copied prompts (item 100). A task's next run should write a new prompt with a new pose;
-   a duvet with her legs' shape under it. Chat 288 and 292 hold all the old calls, shown without their prompts.
+1. **0.80.3** - nothing showing through her top in a task's picture (item 100), on klein 9B base.
+   **0.80.2** - seen 11:49: bare legs and a new pose in the bed picture, "Much better". No export of it has reached here.
 2. **0.80.1** - the check on Laura's hands (item 100). Check pictures is on since that morning; 0.80.1 got chat 292 its
    post. No export of a run with the raw `answer` has reached here yet (chat 288's run was still going when exported):
    each `check` step has what the model counted for each hand.
@@ -42,7 +42,7 @@ finds them and fingers still come out wrong). Decided: no Facebook posting (he c
 
 Known flake: tests/test_training.py::test_the_trainer_stops_a_job fails now and then in a full run and passes alone.
 
-## State (0.80.2, 2026-11-05)
+## State (0.80.3, 2026-11-05)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -1206,6 +1206,14 @@ asks for them, the check's list has a body that ends too soon. Tests: tests/test
 prompt gone, the post's words there, its own turn's kept, context.json the same; which calls; the placeholder refused;
 the sentence, of her only, and when it stays out), tests/test_media_check.py; each part failing without it (12
 mutations). Not reviewed by a separate agent. NOT seen on the card: item 100.
+0.80.3, Søren, of 0.80.2's bed picture: "Much better... Can we do anything about her nipples that are visible though the
+fabric ... They are slightly of center." Read from chat 292's export of that morning (none of the 11:49 run): all 14
+prompts since run 9 hold the word, because the task says "no nipples"; none of the 22 passed `negative`. So the answer
+given was that they should not show at all, as his task and Instagram say; placement is not a thing a prompt controls.
+Built (DESIGN §8 "What a post may not show"): a task's picture loses the clause and has `POST_NEGATIVE`, `POSES` says
+what must not show goes in negative. Tests: tests/test_persona_tasks.py (the clause gone, the negative in klein 9B
+base's graph, the model's own kept, a chat untouched; the cut); each part failing without it (7 mutations). Not
+reviewed by a separate agent. NOT seen on the card: item 100.
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
 host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU
@@ -2002,8 +2010,11 @@ the host if the VM ever stops by itself.
       boxes give the place; not built.
     - **A task's post**: seen 2026-11-05, 0.80.1 brought chat 292's post at 10:52. With every try flagged it should
       still come, with the note on its card.
-    - **Legs (0.80.2)**: does a duvet now show her legs? Does a task's prompt change from run to run, and does the pose
-      follow? Does "a body that ends too soon" flag right pictures of someone in bed (a false alarm costs two tries
+    - **What a post may not show (0.80.3)**: does `POST_NEGATIVE` at CFG 5 keep them from showing through the fabric?
+      Does it make the fabric or the picture worse (a real negative replaces the empty one the template has)? On a
+      distilled klein it does nothing.
+    - **Legs (0.80.2)**: seen once, 11:49: bare legs and a new pose. Does a task's prompt change from run to run, and
+      does the pose follow? Does "a body that ends too soon" flag right pictures of someone in bed (a false alarm costs two tries
       and a warning on the post; if it does, take it out of MISTAKES)? `PROMPT_LEFT_OUT` copied into a call would show as
       an error step.
 99. **A task's own LoRAs (0.79.0)** - with a real style LoRA for klein 9B (one he trains as a style, or uploads):

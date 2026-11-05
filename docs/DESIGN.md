@@ -2241,6 +2241,16 @@ files afterwards.
   clearly under the duvet." to a picture of the persona under a cover (`COVERED`)
   whose prompt names no legs, knees, thighs, feet or hips (`LEGS`) - a model
   cannot be relied on to read. The check's list has "a body that ends too soon".
+- **What a post may not show** (0.80.3). Søren: nipples through the fabric, off
+  centre. His task says "no nipples", Instagram takes none, and a picture
+  model reads no "no": all 14 of chat 292's prompts since he wrote that held
+  the word ("ensuring no nipples are visible"), and none of its 22 used
+  `negative`. Where they sit cannot be asked of a model; that they do not
+  show can. So a task's picture (`images._task`, not a chat) loses the clause
+  that names them (`KEEP_OUT`, `_kept_out`) and always has `POST_NEGATIVE`
+  after the model's own negative. klein 9B base honours it at CFG 5; at CFG 1
+  the distilled models ignore a negative, so there only the word goes.
+  `POSES` tells the persona that words after no get drawn too.
 - **A picture with room for its hands** (0.80.0). `image_generate` takes the
   size from the call, else from the very end of the prompt (`WRITTEN_SIZE`;
   chat 288's Gemma 4 ended its prompts "... high quality. 1024x1280

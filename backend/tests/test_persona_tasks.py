@@ -12,6 +12,7 @@ import zipfile
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+from app.agent.tools import images as I
 from app.chats import store as chats
 from app.personas import tasks as T
 from app.personas.store import PersonaError
@@ -758,3 +759,47 @@ def test_a_cover_with_no_word_of_the_legs_under_it():
                  "A woman making the bed"):
         assert legs(kept) == kept
     assert "where your legs are" in POSES and "knees drawn up under the duvet" in POSES
+
+
+async def test_a_post_keeps_out_what_it_may_not_show(signed_in, app, fakes):
+    """0.80.3: his task says "no nipples" and all of chat 292's prompts since then held the word, which a picture model
+    draws. In a task the clause goes, and they go in the negative - which klein 9B base, at CFG 5, honours."""
+    app.state.fakes = fakes
+    _install(app.state.hub, "flux2-klein-9b-base")
+    p = await anna(signed_in)
+    await ok(await signed_in.patch(f"{API}/{p['id']}", json={"pictures": True}, headers=ORIGIN))
+    tid = (await ok(await signed_in.post(f"{API}/{p['id']}/tasks", json=MONDAY_POST, headers=ORIGIN)))["tasks"][0]["id"]
+    app.state.hub.settings.update("images", {"model": "flux2-klein-9b-base"})
+    said = "A woman in a soft top that shows her cleavage, but ensures no nipples are visible, in golden light"
+    bare, own = await task_makes(app, p, tid, {"prompt": said}, {"prompt": said, "negative": "blurry"})
+    assert "nipples are visible" not in json.dumps({k: v for k, v in bare.items() if k != "6"})
+    assert any(n["class_type"] == "CLIPTextEncode" and n["inputs"]["text"].startswith(
+        "A woman in a soft top that shows her cleavage, in golden light") for n in bare.values())
+    assert bare["6"]["inputs"]["text"] == I.POST_NEGATIVE and "see-through fabric" in I.POST_NEGATIVE
+    assert own["6"]["inputs"]["text"] == f"blurry, {I.POST_NEGATIVE}"       # the model's own stays
+
+
+async def test_a_chat_is_no_post(signed_in, app, fakes):
+    _install(app.state.hub, "flux2-klein-9b-base")
+    p = await anna(signed_in)
+    await ok(await signed_in.patch(f"{API}/{p['id']}", json={"pictures": True}, headers=ORIGIN))
+    app.state.hub.settings.update("images", {"model": "flux2-klein-9b-base"})
+    c = await chat_with(signed_in, p["id"])
+    said = "A woman in a soft top, but ensures no nipples are visible, in golden light"
+    fakes.llama["replies"] = [{"tool_calls": [{"name": "image_generate", "arguments": {"prompt": said}}]},
+                              {"content": "Her."}, {"content": "Titel"}]
+    await finish(app, await send(signed_in, c["id"], "Send et billede"))
+    graph = fakes.comfy["prompts"][-1]
+    assert "nipples are visible" in json.dumps(graph) and graph["6"]["inputs"]["text"] == ""
+
+
+def test_the_clause_that_names_what_a_post_may_not_show_goes():
+    kept = I._kept_out
+    assert kept("A cozy room, her cleavage, but ensures no nipples are visible, with golden light.") == (
+        "A cozy room, her cleavage, with golden light.")
+    assert kept("Cream duvet, pulled up to cover her nipples.") == "Cream duvet"
+    assert kept("A top. It covers her nipples. Soft light.") == "A top. Soft light."
+    assert kept("Her areola must not show; a warm room") == "a warm room"
+    assert kept("A plain top in soft light.") == "A plain top in soft light."
+    assert kept("no nipples") == "no nipples"                               # nothing left: the call stands
+    assert "put what must not show in negative" in I.POSES
