@@ -509,3 +509,96 @@ async def test_a_task_puts_its_own_loras_on_its_pictures(signed_in, app, fakes):
     await finish(app, await send(signed_in, c["id"], "Send et billede af dig"))
     assert len(fakes.comfy["prompts"]) == n + 1
     assert loras_of(fakes.comfy["prompts"][-1]) == [(f"hub/{lid}.safetensors", 0.9)]
+
+
+def size_of(graph: dict) -> tuple[int, int]:
+    latent = next(n for n in graph.values() if n["class_type"] in ("EmptyFlux2LatentImage", "EmptyLatentImage"))
+    return latent["inputs"]["width"], latent["inputs"]["height"]
+
+
+async def task_makes(app, p: dict, tid: str, *calls: dict) -> list[dict]:
+    """A run of the task whose model makes these pictures: their graphs."""
+    fakes_llama, comfy = app.state.fakes.llama, app.state.fakes.comfy
+    fakes_llama["replies"] = [*({"tool_calls": [{"name": "image_generate", "arguments": a}]} for a in calls),
+                              {"content": "Lagt klar."}]
+    before = len(comfy["prompts"])
+    store = app.state.hub.extras["personas"]
+    assert await store.tick(now=store.get(p["id"])["tasks"][0]["next_run"] + 60) == [f"{p['id']}/{tid}"]
+    await done(app, p["id"], tid)
+    return comfy["prompts"][before:]
+
+
+async def test_a_post_picture_comes_out_in_shape_and_with_pixels_for_its_hands(signed_in, app, fakes):
+    """0.80.0, Søren: "way to many anatomi errors". His chat 288: Gemma 4 ended its prompts with "1024x1280 portrait."
+    and gave no width or height, so the pictures were 1024x1024 with a hand some 200 px across."""
+    app.state.fakes = fakes
+    p, _ = await with_lora(signed_in, app)
+    url = f"{API}/{p['id']}/tasks"
+    tid = (await ok(await signed_in.post(url, json=MONDAY_POST, headers=ORIGIN)))["tasks"][0]["id"]
+    app.state.hub.settings.update("images", {"model": "flux2-klein-4b"})
+
+    written, wide, bare, square, big, without = await task_makes(
+        app, p, tid,
+        {"prompt": "A woman on a sofa with a mug, high quality. 1024x1280 portrait.", "me": True},
+        {"prompt": "A woman on the harbour wall. 1536x1024 landscape.", "me": True},
+        {"prompt": "A woman running along the harbour", "me": True},
+        {"prompt": "A woman stretching", "me": True, "width": 1024, "height": 1024},
+        {"prompt": "A woman on a bridge", "me": True, "width": 1536, "height": 1920},
+        {"prompt": "Rye bread on a table"})
+    assert size_of(written) == (1280, 1600) and size_of(bare) == (1280, 1600)      # 4:5, about 2 MP
+    assert size_of(wide) == (1760, 1168)                                           # the shape written, at that size
+    assert size_of(square) == (1424, 1424)                                         # the shape asked for
+    assert size_of(big) == (1536, 1920)                                            # never made smaller
+    assert size_of(without) == (1280, 1600)                                        # a post's picture all the same
+    assert not [n for n in written.values() if n["class_type"] == "Flux2Scheduler"]   # the shift kept (test_loras.py)
+    assert next(n for n in written.values() if n["class_type"] == "ManualSigmas")
+    text = json.dumps(written)
+    assert "A woman on a sofa with a mug, high quality." in text and "1024x1280" not in text
+
+    req = fakes.llama["requests"][-1]
+    system, desc = req["messages"][0]["content"], next(x["function"]["description"] for x in req["tools"]
+                                                       if x["function"]["name"] == "image_generate")
+    assert "1024x1280" not in system and "never write a size in the prompt" in system
+    assert "what each hand does" in desc and "both hands round one thing" in desc
+
+
+async def test_a_picture_of_a_persona_has_the_pixels_in_her_chats_too(signed_in, app, fakes):
+    p, _ = await with_lora(signed_in, app)
+    await ok(await signed_in.patch(f"{API}/{p['id']}", json={"pictures": True}, headers=ORIGIN))
+    app.state.hub.settings.update("images", {"model": "flux2-klein-4b"})
+    c = await chat_with(signed_in, p["id"])
+    fakes.llama["replies"] = [
+        {"tool_calls": [{"name": "image_generate", "arguments": {"prompt": "jogging", "me": True, "width": 1024,
+                                                                 "height": 1280}}]},
+        {"tool_calls": [{"name": "image_generate", "arguments": {"prompt": "a harbour at dusk"}}]},
+        {"content": "Her."}, {"content": "Jogging"}]
+    n = len(fakes.comfy["prompts"])
+    await finish(app, await send(signed_in, c["id"], "Send et billede af dig"))
+    her, view = fakes.comfy["prompts"][n:]
+    assert size_of(her) == (1280, 1600)
+    assert size_of(view) == (1024, 1024)                                           # not of her, not a post
+
+
+async def test_only_klein_is_made_bigger(signed_in, app, fakes):
+    """SDXL and the others have a size of their own to keep to: the shape, at the size asked for."""
+    app.state.fakes = fakes
+    _install(app.state.hub, "qwen-image-2.1")
+    p = await anna(signed_in)
+    tid = (await ok(await signed_in.post(f"{API}/{p['id']}/tasks", json=MONDAY_POST, headers=ORIGIN)))["tasks"][0]["id"]
+    app.state.hub.settings.update("images", {"model": "qwen-image-2.1"})
+    graph, = await task_makes(app, p, tid, {"prompt": "Rye bread on a table"})
+    assert size_of(graph) == (1024, 1280)
+
+
+def test_a_size_written_at_the_end_of_a_prompt():
+    from app.agent.tools.images import _enough_pixels, _written_size as w
+    assert w("Soft light, high quality. 1024x1280 portrait.") == ("Soft light, high quality.", (1024, 1280))
+    assert w("Soft light. 1024 x 1280 px") == ("Soft light.", (1024, 1280))
+    assert w("Soft light, 1536×1024 landscape format") == ("Soft light.", (1536, 1024))
+    assert w("Soft light (832x1216)") == ("Soft light.", (832, 1216))
+    for kept in ("A monitor showing 1920x1080 on a desk in soft light.", "A 4x6 print", "1024x1280", "A 10x10 grid",
+                 "A sign saying 9999x9999"):
+        assert w(kept) == (kept, None)
+    assert _enough_pixels(1024, 1280) == (1280, 1600) and _enough_pixels(1024, 1024) == (1424, 1424)
+    assert _enough_pixels(1280, 1600) == (1280, 1600) and _enough_pixels(2048, 2048) == (2048, 2048)
+    assert _enough_pixels(1280, 720) == (1904, 1072)

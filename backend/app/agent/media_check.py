@@ -19,6 +19,13 @@ A persona's pictures are checked the same way when it has "Check pictures" on (0
 Laura's pictures: "There are something in almost all pictures that is not correct"): in its chats and in its tasks,
 whatever its Answers setting - a persona answers at once or thinks first, never at Extra.
 
+The hands get a look of their own (0.80.0, Søren: "way to many anatomi errors" - five fingers lined up on a mug). A
+vision model sees a whole picture coarsely: llama.cpp gives Gemma 4 one token for every 48x48 px (patches of 16,
+pooled by 3), so a hand 200 px across is four tokens wide and a finger half of one - enough for a third hand, not for
+fingers. So the first look also says where the hands are, and a picture it finds nothing wrong with goes on to a
+second request with each hand enlarged, finger by finger: about two tokens to a finger. The crops show under the
+picture.
+
 The check runs on the turn's model (in the cloud when the turn runs there): the card switches back to it after the
 picture anyway, so a picture without mistakes costs only the check; each new try costs a switch to ComfyUI and back.
 A model that cannot see pictures cannot check: the result says so, and the model is asked to look itself. A call
@@ -49,6 +56,12 @@ FRAMES = 6                          # a video's frames that are checked: across 
 FRAME_SIDE = 896                    # each frame's long side for the check (a 720p frame is 1280 wide)
 MAX_TOKENS = 1200                   # 8 figures and 8 mistakes fit in about 600
 SHOWN = 3                           # small things named in the result
+HANDS_AT = 6                        # hands the first look gives the place of
+HANDS_LOOKED_AT = 4                 # crops in the close look, the biggest hands first
+HAND_SIDE = 768                     # each crop's side for the close look
+HAND_MIN = 0.2                      # a crop's side at least, of the picture's short side: a model's boxes are rough
+HAND_ROOM = 1.6                     # a crop's side, of the hand's longer side
+HAND_SAME = 0.6                     # two crops overlapping this much are one (both hands round a mug)
 
 MISTAKES = """- People and animals: a part too many (a third arm, a second head, six fingers) or one missing where
   it should show (an arm that stops at the shoulder, a hand missing at the wrist); a limb that grows from the
@@ -70,6 +83,9 @@ PICTURE = """You check a picture an image model just made, before the user sees 
 First list every person and animal in it (at most the 8 biggest) with the heads, arms, hands and legs you count -
 what is drawn, not what should be there.
 
+Then say where the hands you can see are (at most {hands_at}, the biggest first), each as [ymin, xmin, ymax, xmax] on
+a scale of 0 to 1000 across the picture.
+
 Then list its mistakes - only what you can see:
 {mistakes}
 What the description asks for is not a mistake (a six-legged robot, a melting clock in a surreal painting).
@@ -79,8 +95,35 @@ small things. verdict: "ok" when nothing serious is wrong, otherwise "mistakes".
 
 Answer with JSON only:
 {{"figures": [{{"what": "<who, where>", "heads": <n>, "arms": <n>, "hands": <n>, "legs": <n>}}, ...],
+ "hands_at": [[<ymin>, <xmin>, <ymax>, <xmax>], ...],
  "mistakes": [{{"what": "<what is wrong, and where>", "serious": <true|false>}}, ...],
  "verdict": "<ok|mistakes>"}}"""
+
+# The first line is how the tests find these requests too. Vision models answer five for a hand with six ("Vision
+# Language Models are Biased", Vo et al., 2025): hence finger by finger, and what is drawn.
+HANDS = """You check the hands in a picture an image model just made, before the user sees it: {n} enlarged crop(s)
+of it, each with its number.
+
+It was made from this description:
+\"\"\"
+{prompt}
+\"\"\"
+
+Go through every hand in the crops finger by finger and count the fingers and the thumb you can see, each nail as one
+finger - what is drawn, not what a hand should have. Do not answer five because hands have five.
+
+Then say what is wrong with that hand - only what you can see:
+- more than five fingers and thumb together; two fingers grown into one; a finger with a joint too many, bent the wrong
+  way or growing from the wrong place; a thumb on the wrong side of the hand; fingers melted into what they hold or
+  into the other hand.
+A finger hidden behind something or cut off by the edge of the crop is not missing. A hand out of focus or in motion
+is not a mistake.
+
+serious: true when someone would notice it looking at that hand in the picture, false for small things.
+
+Answer with JSON only, one entry for each hand:
+{{"hands": [{{"crop": <its number>, "digits": <the fingers and thumb you count>, "mistake": "<what is wrong, or empty>",
+ "serious": <true|false>}}, ...]}}"""
 
 VIDEO = """You check a video a video model just made, before the user sees it: {n} frames from across it, in
 order, each with its time.
@@ -118,8 +161,14 @@ PICTURE_SCHEMA = {"type": "object", "properties": {
         "what": {"type": "string"}, "heads": {"type": "integer"}, "arms": {"type": "integer"},
         "hands": {"type": "integer"}, "legs": {"type": "integer"}},
         "required": ["what", "heads", "arms", "hands", "legs"]}},
+    "hands_at": {"type": "array", "maxItems": HANDS_AT, "items": {
+        "type": "array", "minItems": 4, "maxItems": 4, "items": {"type": "integer"}}},
     "mistakes": {"type": "array", "maxItems": 8, "items": _MISTAKE},
-    "verdict": _VERDICT}, "required": ["figures", "mistakes", "verdict"]}
+    "verdict": _VERDICT}, "required": ["figures", "hands_at", "mistakes", "verdict"]}
+HANDS_SCHEMA = {"type": "object", "properties": {"hands": {"type": "array", "maxItems": 8, "items": {
+    "type": "object", "properties": {"crop": {"type": "integer"}, "digits": {"type": "integer"},
+                                     "mistake": {"type": "string"}, "serious": {"type": "boolean"}},
+    "required": ["crop", "digits", "mistake", "serious"]}}}, "required": ["hands"]}
 VIDEO_SCHEMA = {"type": "object", "properties": {
     "mistakes": {"type": "array", "maxItems": 8, "items": {
         "type": "object", "properties": {**_MISTAKE["properties"], "frame": {"type": "integer"}},
@@ -194,6 +243,8 @@ class Verdict:
     serious: list[str] = field(default_factory=list)
     minor: list[str] = field(default_factory=list)
     figures: int = 0
+    hands: list[tuple] = field(default_factory=list)   # where the hands are: (left, top, right, bottom), parts of 1
+    crops: list[bytes] = field(default_factory=list)   # the hands as the close look saw them
 
     @property
     def bad(self) -> bool:
@@ -208,17 +259,38 @@ def _grave(value) -> bool:
     return not (value is False or str(value).strip().lower() in ("false", "no", "0"))
 
 
-def parse(text: str, frames: list[float] | None = None) -> Verdict:
-    """The check's answer: JSON, alone or in a code fence or among words. A mistake without serious counts as
-    serious; a verdict "mistakes" with nothing listed is no clear answer. frames: a video's frame times, to name
-    the frame a mistake is in."""
+def _json(text: str) -> dict | None:
+    """The JSON object in an answer: alone, in a code fence or among words."""
     raw = text or ""
     start, end = raw.find("{"), raw.rfind("}")
     try:
         data = json.loads(raw[start:end + 1]) if 0 <= start < end else None
     except ValueError:
-        data = None
-    if not isinstance(data, dict):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _box(value) -> tuple | None:
+    """[ymin, xmin, ymax, xmax] on a scale of 1000 (of 1 from a model that took it so) as (left, top, right, bottom),
+    parts of the picture; None when it is no box, or covers half the picture and so shows no hand."""
+    if not isinstance(value, (list, tuple)) or len(value) != 4:
+        return None
+    try:
+        y0, x0, y1, x1 = [float(v) for v in value]
+    except (TypeError, ValueError):
+        return None
+    scale = 1.0 if max(y0, x0, y1, x1) <= 1 else 1000.0
+    left, right = sorted(max(0.0, min(1.0, v / scale)) for v in (x0, x1))
+    top, bottom = sorted(max(0.0, min(1.0, v / scale)) for v in (y0, y1))
+    wide, high = right - left, bottom - top
+    return (left, top, right, bottom) if wide > 0 and high > 0 and wide * high <= 0.5 else None
+
+
+def parse(text: str, frames: list[float] | None = None) -> Verdict:
+    """The check's answer. A mistake without serious counts as serious; a verdict "mistakes" with nothing listed is
+    no clear answer. frames: a video's frame times, to name the frame a mistake is in."""
+    data = _json(text)
+    if data is None:
         return Verdict("unclear")
     serious: list[str] = []
     minor: list[str] = []
@@ -238,7 +310,28 @@ def parse(text: str, frames: list[float] | None = None) -> Verdict:
     figures = data.get("figures") if isinstance(data.get("figures"), list) else []
     said = str(data.get("verdict") or "").strip().lower()
     state = "mistakes" if serious else "unclear" if said == "mistakes" and not minor else "ok"
-    return Verdict(state, serious[:8], minor[:8], len(figures))
+    at = data.get("hands_at") if isinstance(data.get("hands_at"), list) else []
+    return Verdict(state, serious[:8], minor[:8], len(figures), [b for b in map(_box, at) if b])
+
+
+def parse_hands(text: str) -> tuple[list[str], list[str]]:
+    """The close look's answer: (serious mistakes, small ones). More than five is serious whatever the model calls it;
+    five or fewer is no mistake by itself - a finger can be hidden."""
+    serious: list[str] = []
+    minor: list[str] = []
+    for h in (_json(text) or {}).get("hands") or []:
+        if not isinstance(h, dict):
+            continue
+        what = " ".join(str(h.get("mistake") or "").split())[:300]
+        if what.strip(" .").lower() in ("", "none", "no", "nothing", "ok", "n/a"):
+            what = ""
+        digits = h.get("digits")
+        many = isinstance(digits, int) and digits > 5
+        if many and not what:
+            what = f"a hand with {digits} fingers"
+        if what:
+            (serious if many or _grave(h.get("serious", True)) else minor).append(what)
+    return serious, minor
 
 
 async def ask(ctx, content: list[dict], schema: dict) -> str:
@@ -301,11 +394,64 @@ async def look(ctx, sha: str, prompt: str, edit: bool = False, loras: list[str] 
     """One picture checked."""
     from ..llm.messages import image_part
     t0 = time.monotonic()
-    text = PICTURE.format(source=SOURCE[edit], prompt=prompt.strip()[:4000], mistakes=MISTAKES,
+    text = PICTURE.format(source=SOURCE[edit], prompt=prompt.strip()[:4000], mistakes=MISTAKES, hands_at=HANDS_AT,
                           loras=LORAS.format(names=", ".join(loras)) if loras else "")
     verdict = parse(await ask(ctx, [{"type": "text", "text": text}, image_part(blobs.read(sha))], PICTURE_SCHEMA))
     _step(ctx, "picture", verdict, t0)
+    if verdict.hands and not verdict.bad:
+        try:
+            await look_closer(ctx, sha, prompt, verdict)
+        except Exception as exc:  # noqa: BLE001 - the first look stands
+            log.warning("the close look at the hands stopped: %s", exc)
     return verdict
+
+
+def _overlap(a: tuple, b: tuple) -> float:
+    """How much of the smaller of two crops (left, top, right, bottom) lies in the other."""
+    wide = min(a[2], b[2]) - max(a[0], b[0])
+    high = min(a[3], b[3]) - max(a[1], b[1])
+    return max(0, wide) * max(0, high) / min((a[2] - a[0]) * (a[3] - a[1]), (b[2] - b[0]) * (b[3] - b[1]))
+
+
+def hand_crops(data: bytes, hands: list[tuple]) -> list[bytes]:
+    """Each hand enlarged: a square round it with some of what it touches, inside the picture. Two hands in one
+    square (round a mug) are one crop."""
+    with Image.open(io.BytesIO(data)) as img:
+        im = ImageOps.exif_transpose(img).convert("RGB")
+    w, h = im.size
+    squares: list[tuple] = []
+    for left, top, right, bottom in hands:
+        side = int(min(min(w, h), max(HAND_MIN * min(w, h), HAND_ROOM * max((right - left) * w, (bottom - top) * h))))
+        x = int(max(0, min(w - side, (left + right) / 2 * w - side / 2)))
+        y = int(max(0, min(h - side, (top + bottom) / 2 * h - side / 2)))
+        square = (x, y, x + side, y + side)
+        if not any(_overlap(square, s) >= HAND_SAME for s in squares):
+            squares.append(square)
+    out = []
+    for square in squares[:HANDS_LOOKED_AT]:
+        buf = io.BytesIO()
+        im.crop(square).resize((HAND_SIDE, HAND_SIDE), Image.LANCZOS).save(buf, "JPEG", quality=92)
+        out.append(buf.getvalue())
+    return out
+
+
+async def look_closer(ctx, sha: str, prompt: str, verdict: Verdict) -> None:
+    """The hands enlarged, in a request of their own: what is found joins the verdict."""
+    from ..llm.messages import image_part
+    t0 = time.monotonic()
+    crops = hand_crops(blobs.read(sha), verdict.hands)
+    if not crops:
+        return
+    content: list[dict] = [{"type": "text", "text": HANDS.format(n=len(crops), prompt=prompt.strip()[:4000])}]
+    for k, data in enumerate(crops):
+        content += [{"type": "text", "text": f"Crop {k + 1}:"}, image_part(data)]
+    serious, minor = parse_hands(await ask(ctx, content, HANDS_SCHEMA))
+    verdict.crops = crops
+    verdict.serious = [*verdict.serious, *serious][:8]
+    verdict.minor = [*verdict.minor, *minor][:8]
+    if serious:
+        verdict.state = "mistakes"
+    _step(ctx, "hands", verdict, t0)
 
 
 # ---------------------------------------------------------------- pictures
@@ -384,9 +530,10 @@ async def pictures(ctx, items: list[dict], make: Make, prompt: str, *, edit: boo
     record = {"by": by, "seconds": round(time.monotonic() - t0, 1),
               "pictures": [{"state": s.verdict.state if s.verdict else "unchecked", "tries": s.tries, "try": s.at,
                             "mistakes": s.verdict.serious if s.verdict else [],
-                            "minor": s.verdict.minor if s.verdict else []} for s in slots],
+                            "minor": s.verdict.minor if s.verdict else [],
+                            **_hands_shown(s.verdict)} for s in slots],
               "rejected": [{"sha": it["sha"], "seed": it.get("seed"), "picture": n + 1, "try": at,
-                            "mistakes": v.serious or v.minor or ["no clear answer"]}
+                            "mistakes": v.serious or v.minor or ["no clear answer"], **_hands_shown(v)}
                            for n, s in enumerate(slots) for at, it, v in s.thrown]}
     if seeded:
         record["seeded"] = True
@@ -395,6 +542,15 @@ async def pictures(ctx, items: list[dict], make: Make, prompt: str, *, edit: boo
     if stopped:
         record["stopped"] = stopped
     return Outcome([s.item for s in slots], record, picture_text(slots, by, seeded, allowed, stopped))
+
+
+def _hands_shown(verdict: Verdict | None) -> dict:
+    """For the record: the crops the close look saw, on one sheet - to see whether it was right."""
+    if verdict is None or not verdict.crops:
+        return {}
+    from ..chats import store as chats
+    made = sheet([(0.0, c) for c in verdict.crops], labels=[f"crop {k + 1}" for k in range(len(verdict.crops))])
+    return {"hands": chats.save_upload(made, "checked-hands.jpg", "image/jpeg")["sha"]}
 
 
 def picture_text(slots: list[Slot], by: str, seeded: bool, allowed: int, stopped: str) -> str:
@@ -470,8 +626,9 @@ async def grab(ctx, rel: str, times: list[float]) -> list[tuple[float, bytes]]:
     return out
 
 
-def sheet(frames: list[tuple[float, bytes]], width: int = 320) -> bytes:
-    """The frames side by side, three to a row, each with its number and time: what was checked, for the user."""
+def sheet(frames: list[tuple[float, bytes]], width: int = 320, labels: list[str] | None = None) -> bytes:
+    """The frames side by side, three to a row, each with its number and time (or its label): what was checked, for
+    the user."""
     cells = []
     for _, data in frames:
         with Image.open(io.BytesIO(data)) as img:
@@ -486,7 +643,7 @@ def sheet(frames: list[tuple[float, bytes]], width: int = 320) -> bytes:
     for k, (c, (t, _)) in enumerate(zip(cells, frames)):
         x, y = (k % cols) * (w + 4), (k // cols) * (h + 4)
         out.paste(c, (x, y))
-        label = f"{k + 1} - {t:g} s"
+        label = labels[k] if labels else f"{k + 1} - {t:g} s"
         draw.rectangle((x, y, x + 8 + 7 * len(label), y + 16), fill=(0, 0, 0))
         draw.text((x + 4, y + 3), label, fill=(255, 255, 255))
     buf = io.BytesIO()
@@ -583,8 +740,12 @@ def summary(record: dict) -> str:
 
 def shown_shas(record: dict) -> list[tuple[str, str]]:
     """(sha, caption) of the pictures the check keeps beside the result: the tries thrown away, a video's frames."""
+    thrown = [r for r in record.get("rejected") or [] if isinstance(r, dict)]
     out = [(r["sha"], f"try {r.get('try') or '?'}, thrown away: {'; '.join(r.get('mistakes') or [])}")
-           for r in record.get("rejected") or [] if isinstance(r, dict) and r.get("sha")]
+           for r in thrown if r.get("sha")]
+    out += [(r["hands"], f"try {r.get('try') or '?'}: the hands it looked at") for r in thrown if r.get("hands")]
+    out += [(p["hands"], "the hands it looked at") for p in record.get("pictures") or []
+            if isinstance(p, dict) and p.get("hands")]
     if record.get("sheet"):
         out.append((record["sheet"], "the frames that were checked"))
     return out

@@ -184,11 +184,13 @@ export function blobKeys(blocks: Block[]): string[] {
 }
 
 /** A tool result's pictures: those it showed, and those Extra's check keeps beside it (0.71.0: the tries it threw
- * away, a video's frames) - kept on the device with the chat, never sent back to the Hub. */
+ * away, a video's frames; 0.80.0: the hands it looked at) - kept on the device with the chat, never sent back to the
+ * Hub. */
 export function toolBlobs(b: { images?: ImageRef[]; display?: Display | null }): ImageRef[] {
   const c = b.display?.checked;
+  const sheets = [c?.sheet, ...(c?.rejected ?? []).map((r) => r.hands), ...(c?.pictures ?? []).map((p) => p.hands)];
   return [...(b.images ?? []), ...(c?.rejected ?? []).map((r) => ({ sha: r.sha, mime: "image/png" })),
-    ...(c?.sheet ? [{ sha: c.sheet, mime: "image/jpeg" }] : [])];
+    ...sheets.flatMap((sha) => (sha ? [{ sha, mime: "image/jpeg" }] : []))];
 }
 
 export function newKey(): string {

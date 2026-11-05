@@ -1965,7 +1965,22 @@ files afterwards.
     the base model anyway - with its sampling in the catalog entry's
     `settings` (`pipeline.klein_sampling`); at CFG 5 each step runs the
     model twice, so 40 passes against 4-8. Not measured on the card: how
-    many broken bodies each setting gives.
+    many broken bodies each setting gives. Since 0.80.0 its steps are a
+    setting of their own, `klein_base_steps` (20): chat 288's Hub had
+    `klein_steps` at 30, which never reached the base model.
+    **The shift above 1.1 MP** (0.80.0). `Flux2Scheduler` is BFL's
+    `compute_empirical_mu`: up to 4300 tokens (16x16 px each) the shift is
+    raised for few steps, past that it is not - at 20 steps mu is 2.20 at
+    1024x1024, 1.18 just past the edge, 1.32 at 1024x1280, 1.81 at
+    1280x1600; at 4 steps the sigmas of 1024x1280 are 0.92, 0.79, 0.56 where
+    1024x1024 has 0.97, 0.91, 0.77. A bigger picture so spent fewer steps at
+    high noise, where bodies are decided (a Reddit thread on klein's anatomy,
+    May 2026, advises a higher shift for that reason), and Laura's 4:5
+    pictures ran at 1.32. `workflows.klein_sigmas`: above the edge the
+    picture keeps at least the shift of the edge (its own once that is more,
+    about 2.7 MP) through `ManualSigmas`; at or under the edge the graph
+    keeps `Flux2Scheduler`. Changes (`klein_edit`) work at 1 MP and are not
+    touched. Not measured on the card.
   - **ERNIE-Image and ERNIE-Image Turbo** (Baidu, 8B, Apache 2.0) are
     optional too: photorealistic, generation only (an edit with ERNIE chosen
     goes to Qwen-Image or FLUX.2 klein). Files from `Comfy-Org/ERNIE-Image`:
@@ -2173,6 +2188,41 @@ files afterwards.
   mistake is made again before the post is handed in. Not on: the post
   shows no note of the check; the task's chat (Its chat) has it under the
   picture.
+- **The hands up close** (0.80.0). Søren: "way to many anatomi errors" -
+  chat 288's last picture had five fingers in a row on a mug, and a thumb.
+  A vision model sees a whole picture coarsely (llama.cpp b11783 gives Gemma
+  4 one token for every 48x48 px: patches of 16, pooled by 3, at most 1120
+  tokens - tools/mtmd), so a hand 200 px across is four tokens wide and a
+  finger half of one: enough for a third hand, not for fingers. The first
+  look now also says
+  where the hands are (`hands_at`, [ymin, xmin, ymax, xmax] of 1000, no local
+  detector and nothing new on the card), and a picture it finds nothing
+  wrong with goes on to a request of its own (`HANDS`, `HANDS_SCHEMA`): up to
+  four squares round the hands, each enlarged to 768 px (about two tokens
+  to a finger), gone through finger by finger. More than five is serious whatever the model calls it; five
+  or fewer is no mistake by itself, a finger can be hidden. A close look
+  that stops leaves the first look's verdict. The crops are kept on a sheet
+  (`pictures[].hands`, `rejected[].hands`), shown under the picture and in
+  the export, so what it saw can be judged. It counts on a model that can
+  count: vision models tend to answer five for a hand with six (Vo et al.,
+  "Vision Language Models are Biased", 2025), hence "what is drawn, not what
+  a hand should have".
+- **A picture with room for its hands** (0.80.0). `image_generate` takes the
+  size from the call, else from the very end of the prompt (`WRITTEN_SIZE`;
+  chat 288's Gemma 4 ended its prompts "... high quality. 1024x1280
+  portrait." and gave no size, so its pictures were 1024x1024 and the words
+  went to the picture model), else a post's shape in a task's chat (4:5,
+  `POST_SIZE`) and 1024x1024 elsewhere. On FLUX.2 klein a picture of the
+  persona itself (`me: true`) or any picture of a task is then made at about
+  2 MP in that shape (`PEOPLE_PIXELS`, 1280x1600): a hand gets twice the
+  latents, for twice the time, which nobody waits for in a task. klein goes
+  to 4 MP; other families keep the size asked for (SDXL has a size of its
+  own). The persona's description of `image_generate` had dropped the
+  families' hint about hands: it now says to give what each hand does and
+  that simple poses come out best (`POSES`). Instagram takes up to 1440 wide.
+  The Strength field says 0.5-0.8 is usually enough; above 1 it warns
+  (notes on klein on the web put the sweet spot at 0.4-0.75 and say coherence
+  goes above 1; chat 288's worst hand was at ×1.1).
 - **The seeds under a picture** (0.78.0, Søren: "where are no seed
   information" - only the call's result had them, behind the step's arrow).
   `display.made_with.seeds`: the seeds of the pictures shown (after any new
@@ -3062,7 +3112,7 @@ done in the profile text". `app/personas/instagram.py` (a mixin of `Personas`).
   it off the Hub only (Instagram's API cannot delete a post).
 - **Checked before**: a caption of at most 2,200 characters (in UTF-16, as
   Instagram counts), 30 hashtags and 20 @names; a picture or video. A task's
-  prompt asks for 1024x1280 pictures and those limits.
+  prompt gives those limits; its pictures are 4:5 by themselves (0.80.0).
 - The review list on the Personas page has the drafts and the posts on their
   way to Instagram or that did not get there (`?status=review`).
 - httpx writes each request's address to the log, and Instagram's GET

@@ -48,9 +48,10 @@ This is the chat of a task {user} gave you. Messages that start with "Scheduled 
 not from {user} typing: nobody is there to answer questions, so do it on your own. Make what the post needs - look \
 things up, make the picture or the video - then hand it in with post_draft: the post's text exactly as it is to be \
 posted, in your voice and language (hashtags if they fit), and the picture or video. Social media cut pictures to \
-their shape: make a post's picture 1024x1280 (portrait, 4:5) unless it is better square, and keep the text under \
-2,200 characters and 30 hashtags. {user} reviews every post before it goes anywhere. Your earlier posts for this \
-task are above: say something new each time. Once it is handed in, answer with one short line."""
+their shape: a picture comes out portrait (4:5) by itself - give image_generate width and height only for another \
+shape, and never write a size in the prompt. Keep the text under 2,200 characters and 30 hashtags. {user} reviews \
+every post before it goes anywhere. Your earlier posts for this task are above: say something new each time. Once it \
+is handed in, answer with one short line."""
 
 
 CONDENSE = """Condense the conversation above between {user} and {name} into the notes {name} goes on from without \

@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.80.0 - 2026-11-05
+
+- Fewer broken hands in a persona's pictures. A post's picture now comes out
+  4:5 by itself - Laura's were square, because the chat model wrote the size
+  in the prompt - and a picture of a persona, or for a task, is made at about
+  2 megapixels on FLUX.2 klein: twice the pixels for the hands, and about
+  twice the time.
+- A persona now says what each hand does in its picture prompts, and keeps to
+  simple poses where it can.
+- FLUX.2 klein pictures above 1.1 megapixels keep their steps at high noise,
+  where bodies are decided (the scheduler gave them far fewer than a 1024x1024
+  picture).
+- Check pictures (and Effort Extra) now also looks at each hand up close,
+  finger by finger. Show under the picture has what it looked at.
+- New: Settings → Images → Steps for FLUX.2 klein 9B base. It was always 20,
+  whatever the klein steps said.
+- A persona's Strength now says what is usually enough, and warns above 1.
+
 ## 0.79.1 - 2026-11-04
 
 - Fixed: a persona task could make its picture and then hand in nothing,

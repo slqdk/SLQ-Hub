@@ -4,6 +4,8 @@ its tensor names; one works only with models of its family; ComfyUI gets a loade
 from __future__ import annotations
 
 import json
+import math
+import re
 import struct
 
 import pytest
@@ -349,6 +351,10 @@ async def test_klein_9b_base_draws_with_cfg_and_a_negative_and_the_steps_are_a_s
                                                              "flux-2-klein-base-9b-fp8.safetensors", 9567278472)
     assert {f["dest"] for f in base["files"]} - {f["dest"] for f in nine["files"]} == {model["dest"]}
     assert klein_sampling(base, {}) == (20, 5.0) and klein_sampling(nine, {}) == (4, 1.0)
+    assert klein_sampling(base, {"klein_base_steps": 30, "klein_steps": 4}) == (30, 5.0)     # its own setting (0.80.0)
+    assert klein_sampling(base, {"klein_steps": 30}) == (20, 5.0)
+    assert klein_sampling(base, {"klein_base_steps": "many"}) == (20, 5.0)
+    assert klein_sampling(nine, {"klein_base_steps": 30}) == (4, 1.0)
     assert klein_sampling(nine, {"klein_steps": 6}) == (6, 1.0) and klein_sampling(nine, {"klein_steps": 999}) == (50, 1.0)
     assert klein_sampling(nine, {"klein_steps": "many"}) == (4, 1.0)
     assert "20 steps" in prompt_hint(base) and "negative says what to avoid" in prompt_hint(base)
@@ -407,3 +413,28 @@ async def test_the_assistant_looks_at_the_bodies_it_drew(signed_in, app, fakes):
     result = next(m for m in fakes.llama["requests"][1]["messages"] if m["role"] == "tool")
     text = result["content"] if isinstance(result["content"], str) else json.dumps(result["content"])
     assert "look at the people in them: arms, hands and legs" in text and "another seed" in text
+
+
+def test_a_bigger_klein_picture_keeps_its_steps_at_high_noise():
+    """0.80.0. BFL's shift (ComfyUI's Flux2Scheduler, compute_empirical_mu) falls by half past 4300 tokens. Worked out
+    here as ComfyUI does: the numbers on the left of each comment are what its node gives."""
+    def shift(sigmas: str) -> float:
+        values = [float(v) for v in sigmas.split(",")]
+        t, s = 1 - 1 / (len(values) - 1), values[1]             # s = e^mu / (e^mu + 1/t - 1)
+        return math.log(s / (1 - s) * (1 / t - 1))
+
+    assert W.klein_sigmas(20, 1024, 1024) is None               # up to the edge: Flux2Scheduler's own
+    assert W.klein_sigmas(20, 1168, 936) is None                # 4271 tokens
+    g = W.klein_t2i("x", 1024, 1024, 1, steps=20)
+    assert _node(g, "Flux2Scheduler")[0]["inputs"] == {"steps": 20, "width": 1024, "height": 1024}
+    for size, steps, mu in (((1024, 1280), 20, 2.2167), ((1280, 1600), 20, 2.2167), ((1280, 1600), 30, 2.1594),
+                            ((1024, 1280), 4, 2.3085)):
+        assert abs(shift(W.klein_sigmas(steps, *size)) - mu) < 0.001, size    # 1.32 and 1.81 from the node
+    assert abs(shift(W.klein_sigmas(20, 2048, 2048)) - 3.2300) < 0.001       # the size's own, once it is more
+    sigmas = [float(v) for v in W.klein_sigmas(20, 1280, 1600).split(",")]
+    assert len(sigmas) == 21 and sigmas[0] == 1 and sigmas[-1] == 0 and sigmas == sorted(sigmas, reverse=True)
+    assert sum(s > 0.7 for s in sigmas[:-1]) == 16                            # as 1024x1024; 15 from the node
+    g = W.klein_t2i("x", 1280, 1600, 1, steps=20)
+    assert _node(g, "ManualSigmas")[0]["inputs"]["sigmas"] == W.klein_sigmas(20, 1280, 1600)
+    assert g["14"]["inputs"]["sigmas"] == ["13", 0]
+    assert len(re.findall(r"[-+]?(?:\d*\.*\d+)", _node(g, "ManualSigmas")[0]["inputs"]["sigmas"])) == 21   # its parser

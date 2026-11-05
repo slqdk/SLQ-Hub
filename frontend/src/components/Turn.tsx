@@ -348,8 +348,9 @@ function CheckLine({ check }: { check: MediaCheck }) {
   const { text, bad } = checkText(check);
   const thrown = check.rejected ?? [];
   const several = (check.pictures?.length ?? 0) > 1;
+  const hands = (check.pictures ?? []).flatMap((p) => (p.hands ? [p.hands] : []));
   const what = thrown.length ? (thrown.length === 1 ? "the try it threw away" : `the ${thrown.length} tries it threw away`)
-    : check.sheet ? "the frames it checked" : "";
+    : check.sheet ? "the frames it checked" : hands.length ? "the hands it looked at" : "";
   return (
     <div className="check-line small">
       <span className={bad ? "warn-text" : undefined}>{text}</span>
@@ -361,7 +362,13 @@ function CheckLine({ check }: { check: MediaCheck }) {
             <a href={mediaUrl(r.sha)} target="_blank" rel="noreferrer">
               <img src={mediaUrl(r.sha)} alt={`Try ${r.try ?? ""}, thrown away`} loading="lazy" /></a>
             <figcaption>{several ? `Picture ${r.picture}, try` : "Try"} {r.try ?? "?"}: {r.mistakes.join("; ")}</figcaption>
+            {r.hands && <a href={mediaUrl(r.hands)} target="_blank" rel="noreferrer">
+              <img className="sheet" src={mediaUrl(r.hands)} alt="The hands it looked at in this try" loading="lazy" /></a>}
           </figure>))}
+      </div>}
+      {open && hands.length > 0 && <div className="tool-images check-thrown">
+        {hands.map((sha) => <a key={sha} href={mediaUrl(sha)} target="_blank" rel="noreferrer">
+          <img className="sheet" src={mediaUrl(sha)} alt="The hands it looked at" loading="lazy" /></a>)}
       </div>}
       {open && !thrown.length && check.sheet && <div className="tool-images check-thrown">
         <a href={mediaUrl(check.sheet)} target="_blank" rel="noreferrer">

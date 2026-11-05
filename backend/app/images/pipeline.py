@@ -72,17 +72,18 @@ KLEIN_BASE_HINT = ("klein 9B undistilled: slower (20 steps), fewer broken bodies
 
 
 def klein_sampling(entry: dict, settings: dict) -> tuple[int, float]:
-    """(steps, cfg) of a klein model's new pictures: the base model's own (catalog "settings": 20 and CFG 5), the
-    distilled ones' Settings -> Images "klein_steps" at CFG 1 - 4, klein's own (8 in 0.68.0-0.69.0, which did not
-    give fewer broken bodies on Søren's card)."""
+    """(steps, cfg) of a klein model's new pictures: the base model's CFG (catalog "settings": 5) with Settings ->
+    Images "klein_base_steps" (0.80.0 - its own 20 before, whatever "klein_steps" said: chat 288's Hub had that at 30),
+    the distilled ones' "klein_steps" at CFG 1 - 4, klein's own (8 in 0.68.0-0.69.0, which did not give fewer broken
+    bodies on Søren's card)."""
     own = entry.get("settings") or {}
-    if own.get("cfg"):
-        return int(own.get("steps") or 20), float(own["cfg"])
+    base = bool(own.get("cfg"))
+    fallback = int(own.get("steps") or 20) if base else 4
     try:
-        steps = int(settings.get("klein_steps") or 4)
+        steps = int(settings.get("klein_base_steps" if base else "klein_steps") or fallback)
     except (TypeError, ValueError):
-        steps = 4
-    return max(1, min(50, steps)), 1.0
+        steps = fallback
+    return max(1, min(50, steps)), float(own["cfg"]) if base else 1.0
 
 
 def prompt_hint(entry: dict) -> str:

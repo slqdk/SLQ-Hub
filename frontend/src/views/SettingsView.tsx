@@ -1506,8 +1506,10 @@ function AgentTab({ s }: { s: S }) {
           help: "The turbo models: Qwen-Image Turbo, ERNIE-Image Turbo, Z-Image Turbo." },
         { key: "klein_steps", label: "Steps for FLUX.2 klein", type: "number", min: 2, max: 20,
           help: "New pictures with klein 4B, 9B and 9B uncensored. klein is made for 4 - 8 was tried here and gave no " +
-            "fewer extra arms or missing hands, in twice the time. Changes to a picture keep 4. klein 9B base has its " +
-            "own 20." },
+            "fewer extra arms or missing hands, in twice the time. Changes to a picture keep 4." },
+        { key: "klein_base_steps", label: "Steps for FLUX.2 klein 9B base", type: "number", min: 8, max: 50,
+          help: "New pictures with klein 9B base. ComfyUI's own template has 20; each step costs two passes of the " +
+            "model, so 30 takes half as long again." },
         { key: "default_size", label: "Default size (pixels, the long side)", type: "number", min: 512, max: 2048, step: 64 },
         { key: "enhance_prompts", label: "ERNIE-Image: let its prompt enhancer expand the prompt", type: "bool",
           help: "A 3B model in the image workflow turns the prompt into a detailed description first. The chat shows what it wrote." },

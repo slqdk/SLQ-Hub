@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import io
+import math
 import re
 import shlex
 import time
@@ -189,6 +190,52 @@ def _saved_text(paths: list[str]) -> str:
     return f" Saved as {', '.join(paths)} - to change a picture further, edit {which}."
 
 
+# A post's shape when the call gives no size (Instagram's 4:5), and what a picture of a persona or for a post is made
+# at on FLUX.2 klein (0.80.0, Søren: "way to many anatomi errors"): at about 1 MP a hand is some 200 px, a few latents
+# for five fingers; twice the pixels cost twice the time on the card, which nobody waits for in a task. klein goes to
+# 4 MP; SDXL and the others stay at the size asked for.
+POST_SIZE = (1024, 1280)
+PEOPLE_PIXELS = 1280 * 1600
+# A size written at the very end of a prompt instead of in width and height: chat 288's Gemma 4 ended its prompts with
+# "... high quality. 1024x1280 portrait." - the picture came out 1024x1024 and the words went to the picture model.
+WRITTEN_SIZE = re.compile(r"[\s,.;:(-]*\b(\d{3,4})\s*[x×]\s*(\d{3,4})\b(?:\s*(?:px|pixels?))?"
+                          r"(?:\s+(?:portrait|landscape|square|vertical|horizontal|format|resolution|image|photo))*"
+                          r"[\s.,;:)!-]*$", re.I)
+
+
+def _written_size(prompt: str) -> tuple[str, tuple[int, int] | None]:
+    """The prompt without a size written at its end, and that size (None: no such size)."""
+    m = WRITTEN_SIZE.search(prompt)
+    rest = prompt[:m.start()].strip() if m else ""
+    if m is None or not rest or not all(256 <= int(v) <= 4096 for v in m.groups()):
+        return prompt, None
+    return f"{rest}.", (int(m[1]), int(m[2]))
+
+
+def _enough_pixels(width: int, height: int) -> tuple[int, int]:
+    """The same shape at PEOPLE_PIXELS, when it is smaller; on klein's grid of 16."""
+    from ...images.workflows import snap
+    scale = math.sqrt(PEOPLE_PIXELS / (width * height))
+    return (width, height) if scale <= 1 else (snap(round(width * scale), 16), snap(round(height * scale), 16))
+
+
+def _picture_size(ctx: ToolContext, args: dict, prompt: str, model: str | None, me: bool) -> tuple[str, int, int]:
+    """(the prompt, width, height) of a new picture: the call's size, else one written at the end of the prompt, else
+    a post's shape in a task's chat and 1024x1024 elsewhere - at PEOPLE_PIXELS on klein when it is of the persona
+    itself or for a task."""
+    from ...images.pipeline import family
+    from ...images.workflows import KLEIN_FILES
+    pipe, task = _pipeline(ctx), _task(ctx)
+    width, height = args.get("width"), args.get("height")
+    if not width and not height:
+        prompt, written = _written_size(prompt)
+        width, height = written or (POST_SIZE if task is not None else (1024, 1024))
+    width, height = int(width or 1024), int(height or 1024)
+    if (me or task is not None) and family(pipe.entry(pipe.chosen(model))) in KLEIN_FILES:
+        width, height = _enough_pixels(width, height)
+    return prompt, width, height
+
+
 def _pipeline(ctx: ToolContext):
     return ctx.hub.extras.get("images")
 
@@ -242,15 +289,19 @@ def _loras(ctx: ToolContext) -> list[dict]:
             if isinstance(x, str)]
 
 
+def _task(ctx: ToolContext) -> dict | None:
+    """The persona task this chat is the chat of. None anywhere else."""
+    store = ctx.hub.extras.get("personas")
+    if store is None or not _admins_turn(ctx):
+        return None
+    p = store.of_chat(ctx.chat)
+    return store.task_of(p, ctx.chat) if p is not None else None
+
+
 def _task_loras(ctx: ToolContext) -> list[dict]:
     """In a persona task's chat, the task's own LoRAs (0.79.0, personas/tasks.py): a style or a filter on each new
     picture, after the persona's LoRA and the chat's. [] anywhere else."""
-    store = ctx.hub.extras.get("personas")
-    if store is None or not _admins_turn(ctx):
-        return []
-    p = store.of_chat(ctx.chat)
-    t = store.task_of(p, ctx.chat) if p is not None else None
-    return [{"id": x["id"], "strength": x.get("strength")} for x in (t or {}).get("loras") or []
+    return [{"id": x["id"], "strength": x.get("strength")} for x in (_task(ctx) or {}).get("loras") or []
             if isinstance(x, dict) and isinstance(x.get("id"), str)]
 
 
@@ -296,7 +347,6 @@ async def image_generate(ctx: ToolContext, args: dict) -> ToolResult:
     if not prompt:
         return ToolResult("prompt is required", is_error=True)
     from ...images.pipeline import ImageError
-    width, height = int(args.get("width") or 1024), int(args.get("height") or 1024)
     model, loras, portrait = _picture_model(ctx), _loras(ctx), None
     me = _persona_me(ctx) if args.get("me") else None
     if me is not None:                       # a persona's picture of itself (0.75.0): its LoRA, else its portrait
@@ -311,6 +361,7 @@ async def image_generate(ctx: ToolContext, args: dict) -> ToolResult:
             return ToolResult(f"A picture of you cannot be made: {exc}", is_error=True)
     task_loras = _task_loras(ctx)           # a task's style or filter, after (the store skips one given twice)
     loras = [*loras, *task_loras]
+    prompt, width, height = _picture_size(ctx, args, prompt, model, me is not None)
 
     async def make(count: int, seed=None, label: str = "") -> list[dict]:
         if portrait is not None:
@@ -442,7 +493,9 @@ register(Tool("image_ocr", "Read the text in an image with Tesseract OCR (defaul
 def _generate_params(me: bool = False) -> dict:
     """No model and no LoRAs (0.59.0): the chat's picture menu chooses them. me (0.75.0): a persona's picture of
     itself."""
-    params = {"prompt": {"type": "string"}, "width": {"type": "integer"}, "height": {"type": "integer"},
+    size = "Pixels. A size goes here, never in the prompt."
+    params = {"prompt": {"type": "string"}, "width": {"type": "integer", "description": size},
+              "height": {"type": "integer", "description": size},
               "count": {"type": "integer", "description": "1-4, default 1. More only when the user asks for "
                                                            "several pictures or for options."},
               "seed": {"type": "integer"},
@@ -512,8 +565,8 @@ def _generate_dynamic(ctx: ToolContext) -> tuple[str, dict]:
         style = (f" This task's pictures also get the LoRA{'s' if len(styles) > 1 else ''} "
                  f"{', '.join(x['name'] for x in styles)}: leave its look out of the prompt." if styles else "")
         return (f"Make a picture from a description: write a detailed English prompt - subject, setting, light, "
-                f"composition. me: true when you are in the picture yourself ({how}); leave it out for a picture "
-                f"without you.{look}{style} Takes 15-90 s.", _generate_params(True))
+                f"composition. {POSES} me: true when you are in the picture yourself ({how}); leave it out for a "
+                f"picture without you.{look}{style} Takes 1-3 minutes.", _generate_params(True))
     if chosen is None:
         return GENERATE_TEXT, _generate_params()
     return (f"Generate images from a text prompt with {Catalog.label(chosen)}, this chat's picture model. The user "
@@ -547,6 +600,11 @@ def _edit_dynamic(ctx: ToolContext) -> tuple[str, dict]:
 GENERATE_TEXT = ("Generate images from a text prompt with the model chosen for this chat (Settings -> Assistant -> "
                  "Images by default). Write a detailed English prompt: subject, style, composition, lighting, any "
                  "exact text in quotes. Takes 15-90 s per image.")
+# 0.80.0: chat 288's prompts never said what the hands do, and two of its three pictures had both round a mug, seated -
+# what klein draws worst. The picture models' own hint (pipeline.HINTS) did not reach a persona's description.
+POSES = ("Say plainly how you stand or sit and what each hand does. Bodies and hands come out best in simple poses: "
+         "standing or walking rather than sitting, a hand at your side, in a pocket or on a strap rather than both "
+         "hands round one thing.")
 # 0.68.0 (Søren: FLUX.2 klein 9B "often ... makes 3 arms, or a hand is missing"): the assistant sees each picture it
 # makes, so it looks at the bodies and says what is wrong instead of handing a broken one over as it is.
 BODIES = ("\nBefore you answer, look at the people in them: arms, hands and legs - if one is extra, missing or "

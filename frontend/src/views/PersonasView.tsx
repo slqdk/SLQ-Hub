@@ -255,9 +255,9 @@ function WhoTab({ p, options, save }: { p: Persona; options: PersonaOptions; sav
         Makes pictures in the chat when you ask{options.pictures ? "" : " (no picture model is downloaded)"}.</SwitchRow>
       <SwitchRow checked={p.check_pictures} onChange={(v) => save({ check_pictures: v })} title="Check pictures">
         Before a picture reaches you - in a chat or a task's post - the chat model looks at it for extra, missing or
-        grown-together arms, hands and legs and things that could not exist, and a picture with a serious mistake is
-        made again with a new seed (Settings, Assistant says how often). What it found shows under the picture. A
-        video is looked at, not made again. Slower; the chat model must see pictures.</SwitchRow>
+        grown-together arms, hands and legs and things that could not exist, then at each hand up close, and a picture
+        with a serious mistake is made again with a new seed (Settings, Assistant says how often). What it found shows
+        under the picture. A video is looked at, not made again. Slower; the chat model must see pictures.</SwitchRow>
       <SwitchRow checked={p.read_aloud} onChange={(v) => save({ read_aloud: v })} title="Read the answers aloud"
         disabled={!options.speech && !p.read_aloud}>
         Each answer is read aloud in their voice as it comes{options.speech ? "" : " (no speech model is downloaded)"};
@@ -290,7 +290,7 @@ function LookTab({ p, options, act, save }: { p: Persona; options: PersonaOption
               placeholder="About 38, short blond hair, freckles, a red running jacket. A photo, natural light."
               onSave={(v) => save({ look: v })} />
             <small>Their age, hair, clothes - and the style: a photo, a painting, a cartoon.</small></label>
-          {options.loras.length > 0 && (
+          {options.loras.length > 0 && (<>
             <div className="row mv-lora-row">
               <label className="field grow"><span>LoRA</span>
                 <select className="select" value={p.lora} onChange={(e) => save({ lora: e.target.value })}>
@@ -302,7 +302,9 @@ function LookTab({ p, options, act, save }: { p: Persona; options: PersonaOption
               <label className="field mv-strength"><span>Strength</span>
                 <NumberDraft value={p.strength} min={0} max={2} step={0.05} onSave={(v) => save({ strength: v })} /></label>
             </div>
-          )}
+            {p.lora && <small className={p.strength > 1 ? "warn-text" : "muted"}>
+              0.5-0.8 is usually enough for a person. Above 1, hands and bodies break more often.</small>}
+          </>)}
           <div className="row" style={{ flexWrap: "wrap" }}>
             <button className="btn small" disabled={!!job || !options.pictures}
               title={options.pictures ? "Four portraits with the picture model" : "No picture model is downloaded (Settings, Models)"}

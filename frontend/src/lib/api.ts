@@ -154,8 +154,8 @@ export interface MediaCheck {
   by?: string;                         // the model that checked
   seconds?: number;
   stopped?: string;
-  pictures?: { state: string; tries: number; try?: number; mistakes: string[]; minor: string[] }[];
-  rejected?: { sha: string; seed?: number; picture: number; try?: number; mistakes: string[] }[];
+  pictures?: { state: string; tries: number; try?: number; mistakes: string[]; minor: string[]; hands?: string }[];
+  rejected?: { sha: string; seed?: number; picture: number; try?: number; mistakes: string[]; hands?: string }[];
   seeded?: boolean;                    // not made again: the call gave a seed
   only?: boolean;                      // not made again: Settings, check only
   // a video: its frames' times, a picture of them, and what was found

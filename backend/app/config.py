@@ -190,6 +190,7 @@ DEFAULTS: dict = {
         "turbo_steps": 8,
         "klein_steps": 4,                  # FLUX.2 klein's new pictures (0.68.0); 8 by default in 0.68.0-0.69.0,
                                            # back to its own 4 in 0.69.1: 8 did not help on Søren's card
+        "klein_base_steps": 20,            # klein 9B base (0.80.0): ComfyUI's template has 20
         "enhance_prompts": True,           # ERNIE-Image: let its own prompt enhancer expand the prompt
         "cfg": 1.0,
         "default_size": 1024,

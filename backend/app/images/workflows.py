@@ -38,6 +38,7 @@ KLEIN_9B = {"unet": "flux-2-klein-9b-fp8.safetensors", "clip": "qwen_3_8b_fp8mix
 KLEIN_FILES = {"flux2-klein": KLEIN, "flux2-klein-9b": KLEIN_9B}       # by catalog family
 # The loaders' folders under the models root, as the catalog's "dest" names them.
 KLEIN_FOLDERS = {"unet": "comfy/diffusion_models/", "clip": "comfy/text_encoders/", "vae": "comfy/vae/"}
+KLEIN_EDGE = 4300                   # tokens (16x16 px each): where BFL's shift stops allowing for few steps
 
 
 def klein_files(entry: dict) -> dict:
@@ -152,6 +153,30 @@ def _klein_negative(g: dict, cfg: float, negative: str | None) -> None:
         g["6"] = {"class_type": "CLIPTextEncode", "inputs": {"clip": ["3", 0], "text": (negative or "").strip()}}
 
 
+def klein_sigmas(steps: int, width: int, height: int) -> str | None:
+    """The sigmas of a klein picture above about 1.1 MP, or None to leave them to Flux2Scheduler. Its shift (BFL's
+    compute_empirical_mu, in ComfyUI's nodes_flux.py) is raised for few steps only up to 4300 tokens: at 20 steps mu is
+    2.20 at 1024x1024, 1.18 just past the edge, 1.32 at 1024x1280, 1.81 at 1280x1600 - and at 4 steps the sigmas of
+    1024x1280 are 0.92, 0.79, 0.56 where 1024x1024 has 0.97, 0.91, 0.77. So a bigger picture spent fewer steps at high
+    noise, where bodies are decided. Here it keeps at least the shift of the edge (0.80.0), until the size's own passes
+    it (about 2.7 MP)."""
+    tokens = round(width * height / (16 * 16))
+    if tokens <= KLEIN_EDGE:
+        return None
+    low, many = 8.73809524e-05 * KLEIN_EDGE + 1.89833333, 0.00016927 * KLEIN_EDGE + 0.45666666    # 10 and 200 steps
+    a = (many - low) / 190.0
+    mu = max(0.00016927 * tokens + 0.45666666, a * steps + many - 200.0 * a)
+    times = [1 - i / steps for i in range(steps)]
+    return ", ".join([f"{math.exp(mu) / (math.exp(mu) + 1 / t - 1):.6f}" for t in times] + ["0"])
+
+
+def _klein_scheduler(steps: int, width: int, height: int) -> dict:
+    sigmas = klein_sigmas(steps, width, height)
+    if sigmas is not None:
+        return {"class_type": "ManualSigmas", "inputs": {"sigmas": sigmas}}
+    return {"class_type": "Flux2Scheduler", "inputs": {"steps": int(steps), "width": width, "height": height}}
+
+
 def klein_t2i(prompt: str, width: int, height: int, seed: int, steps: int = 4, prefix: str = "hub",
               files: dict = KLEIN, cfg: float = 1.0, negative: str | None = None) -> dict:
     """FLUX.2 klein, 4B or 9B (`files`: the model's own, klein_files); `cfg` above 1 for klein 9B base."""
@@ -164,7 +189,7 @@ def klein_t2i(prompt: str, width: int, height: int, seed: int, steps: int = 4, p
     g["11"] = {"class_type": "KSamplerSelect", "inputs": {"sampler_name": "euler"}}
     g["12"] = {"class_type": "CFGGuider", "inputs": {"model": ["1", 0], "positive": ["5", 0], "negative": ["6", 0],
                                                      "cfg": float(cfg)}}
-    g["13"] = {"class_type": "Flux2Scheduler", "inputs": {"steps": int(steps), "width": w, "height": h}}
+    g["13"] = _klein_scheduler(int(steps), w, h)
     g["14"] = {"class_type": "SamplerCustomAdvanced",
                "inputs": {"noise": ["10", 0], "guider": ["12", 0], "sampler": ["11", 0], "sigmas": ["13", 0],
                           "latent_image": ["7", 0]}}

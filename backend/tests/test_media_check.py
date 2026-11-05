@@ -24,6 +24,7 @@ from .test_loras import KLEIN, ORIGIN, safetensors
 
 RED, BLUE, GREEN = (200, 30, 30, 255), (30, 30, 200, 255), (30, 200, 30, 255)
 PICTURE_MARK = M.PICTURE.splitlines()[0]
+HANDS_MARK = M.HANDS.splitlines()[0].split(":")[0]
 VIDEO_MARK = M.VIDEO.splitlines()[0].split(":")[0]
 BODIES = "Before you answer, look at the people in them"
 
@@ -46,7 +47,7 @@ def answers(turn: list[dict], checks: list[dict], seen: dict):
         text = last_user(body)
         if "short title" in text:
             return {"content": "Title"}
-        who = "checks" if PICTURE_MARK in text or VIDEO_MARK in text else "turn"
+        who = "checks" if PICTURE_MARK in text or VIDEO_MARK in text or HANDS_MARK in text else "turn"
         seen.setdefault(who, []).append(body)
         replies = checks if who == "checks" else turn
         return replies[min(len(seen[who]) - 1, len(replies) - 1)]
@@ -404,3 +405,158 @@ async def test_a_persona_with_check_pictures_has_its_pictures_checked_at_any_eff
     run = await finish(app, await say(signed_in, c2["id"], "Tegn det igen"))
     assert run.status == "done" and "checks" not in seen and len(fakes.comfy["prompts"]) == 3
     assert "checked" not in (tool_result(run)["display"] or {})
+
+
+# ---------------------------------------------------------------- the hands up close (0.80.0)
+
+def with_hands(*boxes: list[int]) -> dict:
+    """The first look: nothing wrong, and where the hands are."""
+    data = json.loads(right()["content"])
+    return {"content": json.dumps({**data, "hands_at": list(boxes)})}
+
+
+def looked(*hands: dict) -> dict:
+    return {"content": json.dumps({"hands": list(hands)})}
+
+
+def hand(digits: int = 5, mistake: str = "", serious: bool = False, crop: int = 1) -> dict:
+    return {"crop": crop, "digits": digits, "mistake": mistake, "serious": serious}
+
+
+def spotted(size=(1000, 1000), spot=(600, 700, 700, 800)) -> bytes:
+    """A blue picture with a red square where the hand is (left, top, right, bottom in pixels)."""
+    img = Image.new("RGB", size, BLUE[:3])
+    img.paste(RED[:3], spot)
+    buf = io.BytesIO()
+    img.save(buf, "PNG")
+    return buf.getvalue()
+
+
+def picture_of(part: dict) -> Image.Image:
+    from app.llm.messages import decode_data_url
+    return Image.open(io.BytesIO(decode_data_url(part["image_url"]["url"]))).convert("RGB")
+
+
+async def test_a_hand_with_too_many_fingers_is_made_again(signed_in, app, fakes):
+    """Søren, of Laura's post: five fingers lined up on a mug, and a thumb. A whole picture reaches the model too small
+    to count them: the first look says where the hands are, the second gets each one enlarged."""
+    extra(app)
+    c, run, res, seen = await draw(app, signed_in, fakes, make("a woman holding a mug"),
+                                   [with_hands([700, 600, 800, 700]),
+                                    looked(hand(6, "five fingers lined up on the mug and a thumb", True)),
+                                    right()],
+                                   [spotted(), _png((16, 16), BLUE)])
+    assert len(fakes.comfy["prompts"]) == 2                             # made again for what the close look found
+    first, close, again = seen["checks"]
+    assert PICTURE_MARK in first["messages"][0]["content"][0]["text"]
+    assert first["response_format"]["json_schema"]["schema"] == M.PICTURE_SCHEMA
+    assert "hands_at" in first["response_format"]["json_schema"]["schema"]["required"]
+    assert close["response_format"]["json_schema"]["schema"] == M.HANDS_SCHEMA
+    assert close["chat_template_kwargs"] == {"enable_thinking": False} and not close.get("tools")
+    assert len(close["messages"]) == 1                                  # its own request, not the conversation
+    parts = close["messages"][0]["content"]
+    assert parts[0]["text"].startswith(HANDS_MARK) and "a woman holding a mug" in parts[0]["text"]
+    assert parts[1] == {"type": "text", "text": "Crop 1:"} and len(parts) == 3
+    crop = picture_of(parts[2])
+    assert crop.size == (M.HAND_SIDE, M.HAND_SIDE)
+    r, g, b = crop.getpixel((M.HAND_SIDE // 2, M.HAND_SIDE // 2))
+    assert r > 150 and b < 100                                          # the hand is in the middle of it
+    assert picture_of(parts[2]).getpixel((5, 5))[2] > 150               # with what is round it
+    assert PICTURE_MARK in again["messages"][0]["content"][0]["text"]   # the new try is looked at from the start
+    assert [colour(blobs.read(i["sha"])) for i in res["images"]] == [BLUE]
+    checked = res["display"]["checked"]
+    assert checked["pictures"] == [{"state": "ok", "tries": 2, "try": 2, "mistakes": [], "minor": []}]
+    thrown = checked["rejected"][0]
+    assert thrown["mistakes"] == ["five fingers lined up on the mug and a thumb"]
+    with Image.open(io.BytesIO(blobs.read(thrown["hands"]))) as img:    # what it saw, to see whether it was right
+        assert img.size == (320, 320)
+    assert (thrown["hands"], "try 1: the hands it looked at") in M.shown_shas(checked)
+    assert [(s["what"], s["verdict"]) for s in chats.runs_for_chat(c["id"])[-1]["steps"] if s["type"] == "check"] == [
+        ("picture", "ok"), ("hands", "mistakes"), ("picture", "ok")]
+
+
+async def test_hands_that_are_right_cost_one_close_look(signed_in, app, fakes):
+    extra(app)
+    _, _, res, seen = await draw(app, signed_in, fakes, make("a woman waving"),
+                                 [with_hands([100, 100, 200, 200], [120, 120, 210, 220]),
+                                  looked(hand(5), hand(4, "none", True), hand(5, "a slightly thick thumb", False))],
+                                 [spotted()])
+    assert len(fakes.comfy["prompts"]) == 1 and len(seen["checks"]) == 2
+    parts = seen["checks"][1]["messages"][0]["content"]
+    assert len(parts) == 3                                              # two boxes on one hand: one crop
+    picture = res["display"]["checked"]["pictures"][0]
+    assert picture["state"] == "ok" and picture["mistakes"] == [] and picture["minor"] == ["a slightly thick thumb"]
+    assert (picture["hands"], "the hands it looked at") in M.shown_shas(res["display"]["checked"])
+    assert "Small things it noticed: a slightly thick thumb." in res["text"]
+
+
+async def test_a_picture_already_wrong_or_without_hands_gets_no_close_look(signed_in, app, fakes):
+    extra(app)
+    bad = wrong("a third arm")
+    bad["content"] = json.dumps({**json.loads(bad["content"]), "hands_at": [[100, 100, 200, 200]]})
+    _, _, res, seen = await draw(app, signed_in, fakes, make("a woman waving"), [bad, right()],
+                                 [spotted(), spotted()])
+    assert len(seen["checks"]) == 2                                     # the two first looks only
+    assert not any(HANDS_MARK in last_user(b) for b in seen["checks"])
+    assert "hands" not in res["display"]["checked"]["pictures"][0]
+
+
+async def test_the_first_look_stands_when_the_close_look_stops(signed_in, app, fakes, monkeypatch):
+    extra(app)
+    real = M.ask
+
+    async def ask(ctx, content, schema):
+        if schema == M.HANDS_SCHEMA:
+            raise RuntimeError("the model server went away")
+        return await real(ctx, content, schema)
+    monkeypatch.setattr(M, "ask", ask)
+    _, run, res, _ = await draw(app, signed_in, fakes, make("a woman waving"), [with_hands([100, 100, 200, 200])],
+                                [spotted()])
+    assert run.status == "done"
+    assert res["display"]["checked"]["pictures"] == [{"state": "ok", "tries": 1, "try": 1, "mistakes": [], "minor": []}]
+    assert "stopped" not in res["display"]["checked"]
+
+
+def test_where_the_hands_are():
+    assert M._box([100, 200, 300, 400]) == (0.2, 0.1, 0.4, 0.3)         # [ymin, xmin, ymax, xmax] of 1000
+    assert M._box([0.1, 0.2, 0.3, 0.4]) == (0.2, 0.1, 0.4, 0.3)         # of 1
+    assert M._box([300, 400, 100, 200]) == (0.2, 0.1, 0.4, 0.3)         # the wrong way round
+    assert M._box([900, 900, 1100, 1100]) == (0.9, 0.9, 1.0, 1.0)       # past the edge
+    for no in ([1, 2, 3], "here", None, [0, 0, 1000, 1000], [5, 5, 5, 9], ["a", 1, 2, 3], [None, 1, 2, 3]):
+        assert M._box(no) is None, no
+    v = M.parse(json.dumps({"figures": [], "mistakes": [], "verdict": "ok",
+                            "hands_at": [[100, 200, 300, 400], "here", [0, 0, 1000, 1000]]}))
+    assert v.hands == [(0.2, 0.1, 0.4, 0.3)]
+    assert M.parse(json.dumps({"figures": [], "mistakes": [], "verdict": "ok", "hands_at": "none"})).hands == []
+    assert M.parse(json.dumps({"figures": [], "mistakes": [], "verdict": "ok"})).hands == []
+
+
+def test_what_the_close_look_says():
+    assert M.parse_hands(json.dumps({"hands": [hand(6), hand(7, "seven fingers", False)]})) == (
+        ["a hand with 6 fingers", "seven fingers"], [])                 # more than five is serious, whatever it says
+    assert M.parse_hands(json.dumps({"hands": [hand(4), hand(3, "None.", True), hand(5, "n/a", True)]})) == ([], [])
+    assert M.parse_hands(json.dumps({"hands": [hand(5, "two fingers grown into one", True),
+                                               hand(5, "a short nail", False)]})) == (
+        ["two fingers grown into one"], ["a short nail"])
+    assert M.parse_hands(json.dumps({"hands": ["five", {"digits": "many", "mistake": "melted"}]})) == (["melted"], [])
+    assert M.parse_hands("I cannot see any hands.") == ([], []) and M.parse_hands("") == ([], [])
+
+
+def test_each_hand_is_cropped_inside_the_picture():
+    data = spotted((1000, 1250), (0, 1150, 100, 1250))                  # a hand in the corner, of a 4:5 picture
+    crops = M.hand_crops(data, [(0.0, 0.92, 0.1, 1.0)])
+    assert len(crops) == 1
+    with Image.open(io.BytesIO(crops[0])) as img:
+        assert img.size == (M.HAND_SIDE, M.HAND_SIDE)
+        assert img.convert("RGB").getpixel((5, M.HAND_SIDE - 5))[0] > 150      # kept in, not cut by the corner
+    far = [(k / 10, 0.1, k / 10 + 0.05, 0.15) for k in range(0, 10, 2)]
+    assert len(M.hand_crops(data, far)) == M.HANDS_LOOKED_AT            # the biggest hands, as the model gave them
+    small = M.hand_crops(data, [(0.5, 0.5, 0.501, 0.501)])              # a rough box still shows a hand's worth
+    assert len(small) == 1
+
+
+def test_a_sheet_says_what_is_on_it():
+    buf = io.BytesIO()
+    Image.new("RGB", (64, 64), (90, 90, 90)).save(buf, "JPEG")
+    frames = [(1.5, buf.getvalue()), (2.5, buf.getvalue())]
+    assert M.sheet(frames) != M.sheet(frames, labels=["crop 1", "crop 2"])

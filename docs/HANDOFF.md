@@ -4,24 +4,28 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## Next session - start here (written 2026-11-04, at 0.79.1)
+## Next session - start here (written 2026-11-05, at 0.80.0)
 
-The chat of 2026-10-31 to 2026-11-04 built 0.75.0-0.79.1; each version's paragraph under "State" says what and why.
-On VM 222 the Hub ran 0.79.0 at 17:32 that day; **0.79.1 is pushed, not yet installed** (`sudo bash
-/opt/slq-hub/update.sh`). How Søren works: Danish or English, short technical answers; he sends screenshots, chat
-exports (⋯ → Export for troubleshooting) and now ComfyUI's log (Settings → System → Logs → ComfyUI → Download) - ask
-for those before theorising.
+The chat of 2026-10-31 to 2026-11-04 built 0.75.0-0.79.1, the one of 2026-11-04/05 0.80.0; each version's paragraph
+under "State" says what and why. On VM 222 the Hub ran 0.79.1 on the morning of 2026-11-05; **0.80.0 is pushed, not yet
+installed** (`sudo bash /opt/slq-hub/update.sh`). How Søren works: Danish or English, short technical answers; he
+sends screenshots, chat exports (⋯ → Export for troubleshooting) and now ComfyUI's log (Settings → System → Logs →
+ComfyUI → Download) - ask for those before theorising.
 
 Waiting for his result on the card, newest first:
-1. **0.79.1** - Laura's task "Søndag morgen sengefoto" (chat 292): Make one now should hand in its post. Its history
+1. **0.80.0** - Laura's hands (item 100). After the update he was asked to turn on Check pictures (still off in chat
+   288's runs, 07:19 that morning) and put her Strength back to 0.5-0.8 (×1.1 then). The next post: 1280x1600 on the
+   line under the picture, about twice the time, "Show the hands it looked at" under it.
+2. **0.79.1** - Laura's task "Søndag morgen sengefoto" (chat 292): Make one now should hand in its post. Its history
    holds the two broken calls, sent clean now; the model server's log says "a call's start leaked into its arguments
    - cut" when it happens again.
-2. **0.79.0** - a task's own LoRAs (item 99). He put amateur_selfie at ×1.4 on that task; 0.6-1.0 was suggested.
-3. **0.78.0** - Check pictures for Laura (item 98). Not seen turned on yet: chat 292's 16:46 run had no check note.
-   Seen working in a chat at Effort Extra: Gemma 4 31B named a third hand, and with a new seed passed a clean picture.
-4. **Settings → Images is on FLUX.2 [klein] 9B base** since his test (68-86 s a picture on the card). It was
-   suggested he go back to 9B (U) now that the check exists; his choice.
-5. **0.76.x** - Laura's Instagram (item 96): the Meta app, its Unified-login configuration and the Hub's fields were
+3. **0.79.0** - a task's own LoRAs (item 99). He put amateur_selfie at ×1.4 on that task; 0.6-1.0 was suggested.
+4. **0.78.0** - Check pictures for Laura (item 98). Not seen turned on yet. Seen working in a chat at Effort Extra:
+   Gemma 4 31B named a third hand, and with a new seed passed a clean picture.
+5. **Settings → Images is on FLUX.2 [klein] 9B base** since his test (68-86 s a picture on the card). It was
+   suggested he go back to 9B (U) now that the check exists; his choice. Chat 288's cleanest hands were 9B (U)'s
+   (one picture, ×0.5, 30 steps).
+6. **0.76.x** - Laura's Instagram (item 96): the Meta app, its Unified-login configuration and the Hub's fields were
    set up with him (App ID 1093705243490654, Configuration ID 1816854056024329); whether the connect went through
    and a post was published is not known here.
 
@@ -33,11 +37,12 @@ Offered, not asked for - do not build unasked: a boomerang loop for clips under 
 a chat's troubleshooting export; a picture model of a persona's own (only if base proves better for her); LoRA
 training on Qwen-Image or Z-Image (the pinned ai-toolkit lists both; disk first); a colour-grade filter after the
 picture (if "filter" meant that rather than a LoRA); finding where the VM's disk went (17 GB free before klein base's
-8.9 GB); faulthandler on SIGUSR1 for item 56's hang. Decided: no Facebook posting (he cancelled it); TikTok by hand.
+8.9 GB); faulthandler on SIGUSR1 for item 56's hang; repairing a hand in place (item 100: only if the crops show the check
+finds them and fingers still come out wrong). Decided: no Facebook posting (he cancelled it); TikTok by hand.
 
 Known flake: tests/test_training.py::test_the_trainer_stops_a_job fails now and then in a full run and passes alone.
 
-## State (0.79.1, 2026-11-04)
+## State (0.80.0, 2026-11-05)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -1139,6 +1144,34 @@ tests/test_leaked_calls.py (his strings; the run of chat 292 again hands in its 
 back clean), each part failing without it (4 mutations). NOT seen on the card: the next run of that task (in chat
 292, whose history still holds the two broken calls - sent clean now); whether Gemma 4 slips like this elsewhere - the
 model server's log says "a call's start leaked into its arguments - cut" each time.
+0.80.0, Søren: "There are just way to many anatomi errors on the generated pictures" - a screenshot of Laura's post and
+chat 288's export (Hub 0.79.1). Its three pictures, enlarged here: autumn_cozy (9B (U), ×0.5, 30 steps - `klein_steps`
+stood at 30, above the field's 20): both hands right; walking_autumn (base, 20 steps, CFG 5, ×0.6): one hand right, the
+other's fingers fused to about three; recovery_morning (base, ×1.1): five fingers in a row on the mug and a thumb,
+thighs too big, speckled fabric. What the export showed: Check pictures off in all three runs (the result still has
+the BODIES line, which only a turn without a check gets; Gemma 4 said nothing and handed in); all three 1024x1024,
+because Gemma 4 ended the prompt "1024x1280 portrait." and gave no width or height; both mug pictures both hands round a
+mug, the last seated, and the prompts never said what the hands do (the persona's description had dropped the
+families' hint); `klein_steps` 30 reaching only the distilled model; strength 0.5, 0.6, 1.1 from one post to the next.
+Read in ComfyUI v0.42.3: above 4300 tokens BFL's shift is no longer raised for few steps (nodes_flux.py, DESIGN §8 "The
+shift above 1.1 MP"), so 1024x1280 ran at mu 1.32 where 1024x1024 has 2.20. Notes on klein from the web (anecdotes, not
+measurements): about 2 MP helps three-fingered hands, LoRA strength 0.4-0.75 and coherence lost above 1, seated poses
+fail more than standing, an inpaint pass with the same prompt fixes most. So (DESIGN §8 "A picture with room for its
+hands", "The hands up close"): 4:5 by itself and a size written in the prompt read, about 2 MP on klein for a picture
+of the persona or for a task, the shift kept, what each hand does in the persona's description, the check's close look
+at each hand, `klein_base_steps`, a word by Strength. Tests: tests/test_persona_tasks.py (a task's sizes: written,
+wide, bare, square, big, a picture without her; her chat; only klein), tests/test_media_check.py (a hand with too many
+fingers made again, what the close look was sent, right hands, no close look when the first found something, one that
+stops leaves the first verdict; the boxes, the answers, the crops), tests/test_loras.py (the shift against ComfyUI's
+numbers; the steps setting); each part failed without it (25 mutations). The crops on his three pictures with boxes
+read off them here: five nails plain to see in crop 1. In Chromium against the dev server with those pictures through
+two real turns: "Show the hands it looked at", the thrown try with its sheet, the warning at ×1.1, desktop dark and
+phone light; no console errors. Not reviewed by a separate agent. NOT seen on the card: item 100.
+Read but not acted on: `--reserve-vram 6` (0.73.1) keeps klein in fp8 in ComfyUI - `unet_dtype` converts only when twice
+the model's parameters fit in 0.88 of the card less the reserve and 0.8 GB, 14.3 GB here against about 19 - and a
+LoRA on fp8 weights goes through `stochastic_rounding` (model_patcher.py): a small change moves a weight a whole fp8
+step or not at all, noise that grows with the strength. A lead for the speckled fabric at ×1.1, not for the bodies
+(the complaints of 0.68.0 are older than the reserve). ComfyUI's log says which ("model weight dtype"); not measured.
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
 host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU
@@ -1916,6 +1949,21 @@ the host if the VM ever stops by itself.
       converter's cases are ComfyUI 0.42.3's own templates; files from other sites (Civitai, OpenArt) are
       untried - an export is the way to see what went wrong. When COMFYUI_REF changes, the editor's format may
       too: tools/workflow_oracle/ (convert.js, compare.py) is how the converter was checked - run it again.
+100. **Hands (0.80.0)** - none of it has run on the card:
+    - **2 MP**: 1280x1600 on klein 9B base with her LoRA - the time (20 steps took 34-46 s at about 1 MP; twice that
+      expected) and whether the decode fits with `--reserve-vram 6` (ComfyUI's log: no "retrying with tiled"). Does she
+      still look like herself at that size (the LoRA was trained at about 1 MP)?
+    - **Fewer broken hands?** Not measured: the same prompts and seeds at 1024x1024, 1024x1280 and 1280x1600, and at
+      ×0.6 against ×1.1, would say which part helps. Base against 9B (U) too: chat 288's cleanest was 9B (U), one picture.
+    - **The boxes**: does Gemma 4 31B give usable `hands_at` (the sheet under the picture shows what it got)? If they
+      miss or are empty the close look is wasted - then a small hand detector, or fixed tiles.
+    - **The counting**: does it name six fingers or fused ones in a crop, or answer five regardless (Vo et al., 2025)?
+      A false alarm costs a try. Chat 288's recovery_morning.jpg is a good test: crop 1 has five nails and a thumb.
+    - **The shift**: 1280x1600 now runs at mu 2.22 where ComfyUI's node has 1.81 (20 steps). Does it lose fine detail
+      (the last sigma before 0 is 0.33, would be 0.24)? Steps for klein 9B base at 30 would answer that.
+    - **If fingers still come out wrong and the check sees them**: repair in place instead of a whole new try - crop the
+      hand, redraw it at 1 MP with `pipe.edit` or a masked low-denoise pass, paste it back feathered. The `hands_at`
+      boxes give the place; not built.
 99. **A task's own LoRAs (0.79.0)** - with a real style LoRA for klein 9B (one he trains as a style, or uploads):
     - **The look**: does a filter-like LoRA at 0.5-1 change the colours and grain without changing her face (her LoRA
       and the style together - the strengths may need lowering, hers or the style's)? The line under the picture in
