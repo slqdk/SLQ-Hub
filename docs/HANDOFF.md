@@ -4,7 +4,7 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## Next session - start here (written 2026-11-05, at 0.80.5)
+## Next session - start here (written 2026-11-05, at 0.80.6)
 
 **The Hub was down from 13:03 to about 13:28 on 2026-11-05: the VM's disk was full, and nearly still is.** `df`: 617 G, 589
 used, 0 available (28 G was ext4's reserve for root). `docker system df`: images 99.56 GB (3.6 reclaimable), build cache 106.1 GB (10.7 reclaimable, the
@@ -15,14 +15,23 @@ came back by itself on 0.80.2, healthy. NOT `docker builder prune -af`: it frees
 every image (up to 100 GB). Still open: what `du` says took the disk, and what to delete with him - 21 GB is thin (one
 picture model is 9 GB or more, a training several).
 
-The chat of 2026-10-31 to 2026-11-04 built 0.75.0-0.79.1, the one of 2026-11-04/05 0.80.0-0.80.5; each version's
+**Chat 299 ran on 0.80.2 at 14:06, after the outage**: the update had not gone in, so it shows neither the negative
+prompt (0.80.3) nor the hand count (0.80.4, no "hand count" step). Gemma 4's prompt followed the task; all three tries
+came out sitting and in shorts, with Strength still ×1.1, and the kept one with a third hand, which Gemma 4 called this time.
+**One thing is not to be worked on.** The task "Selfpleasure photi" asks for a naked, sexual picture of Laura, and Søren
+said of chat 299 "The instructions are not followed". Claude told him it will not tune the Hub, the prompts or the
+models for a sexually explicit picture, of a fictional adult as well. That should have been said at chat 298; it was
+said at chat 299. `POST_NEGATIVE` stays, and a task that asks for nudity does not lift it. The check and the hand count
+are general, and are to be tried on her ordinary tasks, not on this one.
+
+The chat of 2026-10-31 to 2026-11-04 built 0.75.0-0.79.1, the one of 2026-11-04/05 0.80.0-0.80.6; each version's
 paragraph under "State" says what and why. On VM 222 the Hub ran 0.80.2 at 11:49 on 2026-11-05 and he called its bed
-picture "much better"; **0.80.3-0.80.5 are pushed, not yet installed** (`sudo bash /opt/slq-hub/update.sh`, the disk first). How Søren works: Danish or English, short technical answers; he
+picture "much better"; **0.80.3-0.80.6 are pushed, not yet installed** (`sudo bash /opt/slq-hub/update.sh`, the disk first). How Søren works: Danish or English, short technical answers; he
 sends screenshots, chat exports (⋯ → Export for troubleshooting) and now ComfyUI's log (Settings → System → Logs →
 ComfyUI → Download) - ask for those before theorising.
 
 Waiting for his result on the card, newest first:
-1. **0.80.4** - the hand count (item 100): a third hand thrown away, "hand count" steps in the export.
+1. **0.80.4, 0.80.6** - the hand count (item 100): a third hand thrown away, "hand count" steps in the export.
    **0.80.3** - nothing showing through her top in a task's picture (item 100), on klein 9B base.
    **0.80.2** - seen 11:49: bare legs and a new pose in the bed picture, "Much better". No export of it has reached here.
 2. **0.80.1** - the check on Laura's hands (item 100). Check pictures is on since that morning; 0.80.1 got chat 292 its
@@ -51,7 +60,7 @@ finds them and fingers still come out wrong). Decided: no Facebook posting (he c
 
 Known flake: tests/test_training.py::test_the_trainer_stops_a_job fails now and then in a full run and passes alone.
 
-## State (0.80.5, 2026-11-05)
+## State (0.80.6, 2026-11-05)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -1241,6 +1250,16 @@ Not reviewed by a separate agent. NOT seen on the card: item 100.
 f_bavail, without root's reserve), checks again after the build and the wait, before anything is stopped, and then
 puts the code back and prunes what the build left; a start that fails on a full disk says so. tests/test_hub_update.py;
 NOT seen on the VM. The Hub does not warn of a low disk itself: Settings shows the free space where models are chosen.
+0.80.6, chat 299: the detector, run here on its three pictures, found one hand on the kept one, which has three (one on each
+arm, one on a thigh). The opposite of chat 298: there Gemma 4 missed the third hand and the detector found it; here Gemma 4
+said "hands": 3. Four overlapping parts found all three, and one part took a shoulder in chat 292's generated-hub_00610
+for a hand, seen on a crop of it. A stricter confidence on the parts (0.7) and a second part agreeing gave the same
+counts; the second part needs no second detector. Counted the way the Hub counts, with the real worker in its own
+process, on the 35 different pictures here: none on 2, one on 7, two on 23, three on 3, the three with a third hand. A
+small sample with few positives. tests/test_media_check.py (chat 299's and chat 292's boxes as measured, a grip, a part's
+box in the whole picture, the parts overlap); each part failing without it (10 mutations). `test_the_hand_count_itself`
+needs MediaPipe and did not run under pytest here; the worker was run by hand instead, 0.56 s a picture with start-up.
+Not reviewed by a separate agent. NOT seen on the card: item 100.
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
 host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU
@@ -2039,7 +2058,8 @@ the host if the VM ever stops by itself.
       still come, with the note on its card.
     - **The hand count (0.80.4)**: does `update.sh` build the image? Does a third hand get made again; do "hand count"
       steps show in the export? False alarms: hands of someone the model did not count, a mirror the prompt does
-      not name. A hand it misses counts for nothing, and fingers are not its business.
+      not name, and since 0.80.6 something two parts take for a hand. A hand it misses counts for nothing, and
+      fingers are not its business.
     - **What a post may not show (0.80.3)**: does `POST_NEGATIVE` at CFG 5 keep them from showing through the fabric?
       Does it make the fabric or the picture worse (a real negative replaces the empty one the template has)? On a
       distilled klein it does nothing.

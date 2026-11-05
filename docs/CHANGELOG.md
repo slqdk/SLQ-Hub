@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.80.6 - 2026-11-05
+
+- The hand count now also looks at four overlapping parts of a picture. On the
+  whole picture the detector found one hand of three when her arms were crossed
+  and a third hand lay on her thigh. A hand found this way counts when two parts
+  agree on it, so a shoulder taken for a hand by one part does not.
+
 ## 0.80.5 - 2026-11-05
 
 - `update.sh` now checks the disk. It refuses to start with under 6 GB free for

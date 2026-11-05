@@ -16,6 +16,7 @@ from types import SimpleNamespace
 import pytest
 from PIL import Image
 
+from app.agent import hand_count as H
 from app.agent import media_check as M
 from app.chats import store as chats
 from app.projects import blobs
@@ -693,6 +694,51 @@ def test_each_hand_counts_once():
     assert M.distinct_hands(["hand", {"box": "here"}, {"box": [1, 2]}, {"box": [0, 0, 0, 0], "side": "L"}]) == [
         {"box": [0, 0, 0, 0], "side": "L"}]
     assert M.distinct_hands(None) == []
+
+
+def spot(box: list, side: str) -> dict:
+    return {"box": box, "side": side}
+
+
+def test_parts_of_a_picture_find_what_the_whole_missed():
+    """Chat 299, measured: crossed arms and a third hand on a thigh. The whole picture found one of the three."""
+    right = spot([0.588, 0.468, 0.741, 0.584], "R")
+    arm = spot([0.265, 0.456, 0.374, 0.556], "L")
+    thigh = spot([0.427, 0.813, 0.537, 0.923], "L")
+    parts = [[arm, spot([0.59, 0.461, 0.65, 0.579], "R")], [spot([0.591, 0.467, 0.739, 0.583], "R")],
+             [spot([0.422, 0.809, 0.544, 0.927], "L"), spot([0.265, 0.457, 0.374, 0.556], "L")],
+             [spot([0.592, 0.467, 0.742, 0.583], "R"), thigh]]
+    assert H.merged([right], parts) == [right, parts[2][0], arm]
+    assert M.distinct_hands(H.merged([right], parts)) == [right, parts[2][0], arm]
+
+
+def test_one_part_alone_does_not_make_a_hand():
+    """Chat 292, measured: one part took a shoulder for a hand. No other part did."""
+    whole = [spot([0.506, 0.636, 0.687, 0.759], "R"), spot([0.589, 0.665, 0.708, 0.789], "L")]
+    parts = [[], [spot([0.421, 0.361, 0.501, 0.483], "L")], [spot([0.51, 0.636, 0.65, 0.759], "R")],
+             [spot([0.506, 0.637, 0.687, 0.757], "R"), spot([0.601, 0.664, 0.715, 0.789], "L")]]
+    assert H.merged(whole, parts) == whole
+
+
+def test_a_grip_stays_two_hands_and_gets_no_third():
+    grip = [spot([0.278, 0.5261, 0.4186, 0.6534], "L"), spot([0.2479, 0.5173, 0.3239, 0.615], "R")]
+    assert H.merged(grip, [[], [], [], []]) == grip
+    other_side = spot([0.25, 0.52, 0.275, 0.6], "L")                    # the right hand, called a left by two parts
+    assert H.merged(grip, [[other_side], [other_side], [], []]) == grip
+
+
+def test_a_part_gives_its_hand_in_the_whole_picture():
+    assert H.in_picture([(0, 0), (0.5, 0.5)], (0.35, 0.4, 1, 1)) == [0.35, 0.4, 0.675, 0.7]
+    assert H.in_picture([(0, 0), (0.5, 0.5)], (0, 0, 1, 1)) == [0, 0, 0.5, 0.5]
+    assert H.in_picture([(-0.2, 1.3)], (0, 0.4, 0.65, 1)) == [0, 1, 0, 1]   # marks outside the part stay in it
+
+
+def test_the_parts_cover_the_picture_and_overlap():
+    def parts_at(x: float, y: float) -> int:
+        return sum(left <= x <= right and top <= y <= bottom for left, top, right, bottom in H.PARTS)
+
+    assert all(parts_at(x / 20, y / 20) for x in range(21) for y in range(21))
+    assert parts_at(0.45, 0.2) == parts_at(0.2, 0.45) == parts_at(0.55, 0.8) == parts_at(0.8, 0.55) == 2
 
 
 async def test_the_count_says_nothing_when_it_cannot(app, tmp_path, monkeypatch):

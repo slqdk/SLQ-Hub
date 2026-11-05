@@ -60,6 +60,7 @@ from typing import Awaitable, Callable
 from PIL import Image, ImageDraw, ImageOps
 
 from ..projects import blobs
+from .hand_count import shared
 
 log = logging.getLogger(__name__)
 
@@ -441,13 +442,6 @@ def _step(ctx, what: str, verdict: Verdict, t0: float, answer: str = "") -> None
                                  "answer": (answer or "")[:ANSWER_KEPT]})
 
 
-def _shared(a: list, b: list) -> float:
-    """How much of the smaller of two boxes (left, top, right, bottom) lies in the other."""
-    wide, high = min(a[2], b[2]) - max(a[0], b[0]), min(a[3], b[3]) - max(a[1], b[1])
-    smaller = min((a[2] - a[0]) * (a[3] - a[1]), (b[2] - b[0]) * (b[3] - b[1]))
-    return max(0, wide) * max(0, high) / smaller if smaller > 0 else 0.0
-
-
 def distinct_hands(found: list) -> list[dict]:
     """Each hand once. The detector can give a hand twice; the two hands of a grip overlap as much, but are a left and
     a right (chat 292's picture with a third hand was two of them over a phone, and one on her thigh)."""
@@ -456,7 +450,7 @@ def distinct_hands(found: list) -> list[dict]:
         box = hand.get("box") if isinstance(hand, dict) else None
         if not isinstance(box, list) or len(box) != 4 or not all(isinstance(v, (int, float)) for v in box):
             continue
-        if not any(h["side"] == hand.get("side") and _shared(h["box"], box) >= HAND_TWICE for h in out):
+        if not any(h["side"] == hand.get("side") and shared(h["box"], box) >= HAND_TWICE for h in out):
             out.append({"box": box, "side": hand.get("side")})
     return out
 

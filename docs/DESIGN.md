@@ -2229,7 +2229,16 @@ files afterwards.
   26 pictures of his that had reached here: one with no hand found, six with one,
   seventeen with two, and two with three - exactly the two that have a third
   hand. So it finds that and no more: it says nothing about fingers, and a
-  hand it misses is not counted. In the image: `pip install --no-deps
+  hand it misses is not counted. 0.80.6, chat 299: on the whole picture it
+  found one hand of three (arms crossed, a third hand on a thigh), and Gemma 4
+  counted three, the other way round from chat 298, so neither is enough
+  alone. `hand_count.py` now also looks at four overlapping parts (`PARTS`)
+  and adds a hand where nothing has been found yet and two parts agree
+  (`merged`): one part alone took a shoulder in chat 292 for a hand. On the 35
+  different pictures that had reached here, counted the way the Hub counts:
+  none on 2, one on 7, two on 23, three on 3, and those are the three with a
+  third hand. A hand in a corner lies in one part only, so it still has to be
+  found on the whole picture. In the image: `pip install --no-deps
   mediapipe` (OpenCV and matplotlib are only for its drawing helpers, and
   hand_count.py stubs them), its two dependencies in requirements.txt, libegl1
   and libgles2, which its library links to, and hand_landmarker.task at a
