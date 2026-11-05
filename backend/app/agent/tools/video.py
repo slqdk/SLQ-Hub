@@ -97,6 +97,7 @@ async def video_generate(ctx: ToolContext, args: dict) -> ToolResult:
     ctx.workdir.write(rel, out["data"], "agent", "hub", f"made {rel}")
     # At the Effort Extra, frames from across it are checked; it is not made again (0.71.0)
     checked = await media_check.video(ctx, rel, float(out["seconds"]), prompt, progress=_note(ctx, "video_progress"))
+    media_check.for_post(ctx, [rel], checked)
     source = {"t2v": "", "i2v": f" from {first}", "flf2v": f" from {first} to {last}"}[out["ability"]]
     quality_text = f", {out['quality']} quality" if out.get("quality") else ""
     cut = f" (seconds is at most {out['max_seconds']:g})" if seconds > out["max_seconds"] else ""

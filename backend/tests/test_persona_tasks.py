@@ -602,3 +602,50 @@ def test_a_size_written_at_the_end_of_a_prompt():
     assert _enough_pixels(1024, 1280) == (1280, 1600) and _enough_pixels(1024, 1024) == (1424, 1424)
     assert _enough_pixels(1280, 1600) == (1280, 1600) and _enough_pixels(2048, 2048) == (2048, 2048)
     assert _enough_pixels(1280, 720) == (1904, 1072)
+
+
+async def test_the_check_never_holds_a_post_back(signed_in, app, fakes):
+    """0.80.1, chat 292: three tries flagged, "offer to make it again" in the result, and Laura asked - nobody answers in
+    a task, so no post was handed in. The post goes in as it is, and says what the check found."""
+    from .test_media_check import answers, wrong
+
+    p, _ = await with_lora(signed_in, app)
+    await ok(await signed_in.patch(f"{API}/{p['id']}", json={"check_pictures": True}, headers=ORIGIN))
+    tid = (await ok(await signed_in.post(f"{API}/{p['id']}/tasks", json=MONDAY_POST, headers=ORIGIN)))["tasks"][0]["id"]
+    app.state.hub.settings.update("images", {"model": "flux2-klein-4b"})
+    seen: dict = {}
+    fakes.comfy["pictures"] = [_png((16, 16), (200, 30, 30, 255)) for _ in range(3)]
+    fakes.llama["responder"] = answers(
+        [{"tool_calls": [{"name": "image_generate", "arguments": {"prompt": "A woman running", "me": True,
+                                                                  "save_as": "run.jpg"}}]},
+         {"tool_calls": [{"name": "post_draft", "arguments": {"text": "Mandagsløb", "media": ["run.jpg"]}}]},
+         {"content": "Lagt klar."}], [wrong("a third arm on her left side")], seen)
+    store = app.state.hub.extras["personas"]
+    assert await store.tick(now=store.get(p["id"])["tasks"][0]["next_run"] + 60) == [f"{p['id']}/{tid}"]
+    await done(app, p["id"], tid)
+    assert len(fakes.comfy["prompts"]) == 3                                 # made again as ever
+    told = str(seen["turn"][1]["messages"])
+    assert "Hand the post in with post_draft as it is" in told and "offer to make it again" not in told
+    task = store.get(p["id"])["tasks"][0]
+    assert task["last_error"] == "" and task["last_post"]
+    post = (await ok(await signed_in.get(f"{API}/posts?status=review")))["posts"][0]
+    assert post["check"] == ["a third arm on her left side"]
+
+
+async def test_a_post_the_check_passed_says_nothing_and_no_offer_without_a_check(signed_in, app, fakes):
+    app.state.fakes = fakes
+    p, _ = await with_lora(signed_in, app)
+    tid = (await ok(await signed_in.post(f"{API}/{p['id']}/tasks", json=MONDAY_POST, headers=ORIGIN)))["tasks"][0]["id"]
+    app.state.hub.settings.update("images", {"model": "flux2-klein-4b"})
+    fakes.llama["replies"] = [
+        {"tool_calls": [{"name": "image_generate", "arguments": {"prompt": "A woman running", "me": True,
+                                                                 "save_as": "run.jpg"}}]},
+        {"tool_calls": [{"name": "post_draft", "arguments": {"text": "Mandagsløb", "media": ["run.jpg"]}}]},
+        {"content": "Lagt klar."}]
+    store = app.state.hub.extras["personas"]
+    fakes.llama["requests"].clear()
+    assert await store.tick(now=store.get(p["id"])["tasks"][0]["next_run"] + 60) == [f"{p['id']}/{tid}"]
+    await done(app, p["id"], tid)
+    told = str(fakes.llama["requests"][1]["messages"])
+    assert "Do not ask: nobody is here to answer." in told and "offer to make it again" not in told
+    assert "check" not in store.posts_of(p["id"])[-1]

@@ -27,6 +27,8 @@ export interface PostInstagram { state: "posting" | "posted" | "failed"; id?: st
 export interface PersonaPost {
   id: string; task: string; title: string; text: string; media: PostMedia[]; status: "draft" | "approved";
   made: number; chat: number | null; instagram?: PostInstagram;
+  /** 0.80.1: what Check pictures still found in its picture or video. */
+  check?: string[];
   /** instagram: the account the post can go to now ("" when none). */
   persona: { id: string; name: string; picture: string; instagram: string };
 }

@@ -411,6 +411,9 @@ function PostCard({ post, onChange, showWho = false }: { post: PersonaPost; onCh
             </div>
           </>
         ) : <div className="pe-post-text">{post.text}</div>}
+        {post.check && post.check.length > 0 && <div className="warn-text small">
+          The picture check found: {post.check.join("; ")}. It can be wrong - look for yourself; Its chat shows what it
+          looked at.</div>}
         <div className="row pe-post-acts">
           {post.status === "draft" && account && <ConfirmButton className="btn primary small"
             confirmText={`Post to @${account}?`} onConfirm={publish}><Send size={13} /> Approve and post</ConfirmButton>}

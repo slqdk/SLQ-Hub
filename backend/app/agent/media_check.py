@@ -26,6 +26,10 @@ fingers. So the first look also says where the hands are, and a picture it finds
 second request with each hand enlarged, finger by finger: about two tokens to a finger. The crops show under the
 picture.
 
+A task's post is never held back by the check (0.80.1, Søren, of chat 292: "I dont think the latest picture is wrong.
+But it was flagged wrong" - and no post was handed in: told to offer a new try, the persona asked, and nobody answers
+in a task). There the model is told to hand the post in, and the post says what the check found.
+
 The check runs on the turn's model (in the cloud when the turn runs there): the card switches back to it after the
 picture anyway, so a picture without mistakes costs only the check; each new try costs a switch to ComfyUI and back.
 A model that cannot see pictures cannot check: the result says so, and the model is asked to look itself. A call
@@ -36,6 +40,7 @@ from __future__ import annotations
 import io
 import json
 import logging
+import re
 import secrets
 import shlex
 import shutil
@@ -58,10 +63,11 @@ MAX_TOKENS = 1200                   # 8 figures and 8 mistakes fit in about 600
 SHOWN = 3                           # small things named in the result
 HANDS_AT = 6                        # hands the first look gives the place of
 HANDS_LOOKED_AT = 4                 # crops in the close look, the biggest hands first
-HAND_SIDE = 768                     # each crop's side for the close look
+HAND_SIDE = 1024                    # each crop's side for the close look
 HAND_MIN = 0.2                      # a crop's side at least, of the picture's short side: a model's boxes are rough
-HAND_ROOM = 1.6                     # a crop's side, of the hand's longer side
-HAND_SAME = 0.6                     # two crops overlapping this much are one (both hands round a mug)
+HAND_ROOM = 1.35                    # a crop's side, of the hand's (or grip's) longer side
+HAND_NEAR = 0.25                    # hands this close (of the longer side) are one crop: a grip on a phone or a mug
+ANSWER_KEPT = 1500                  # of a check's answer, in the turn's steps: what it said, for the export
 
 MISTAKES = """- People and animals: a part too many (a third arm, a second head, six fingers) or one missing where
   it should show (an arm that stops at the shoulder, a hand missing at the wrist); a limb that grows from the
@@ -100,7 +106,9 @@ Answer with JSON only:
  "verdict": "<ok|mistakes>"}}"""
 
 # The first line is how the tests find these requests too. Vision models answer five for a hand with six ("Vision
-# Language Models are Biased", Vo et al., 2025): hence finger by finger, and what is drawn.
+# Language Models are Biased", Vo et al., 2025): hence finger by finger, and what is drawn. 0.80.1: 0.80.0's list began
+# "more than five fingers and thumb together", and chat 292's Gemma 4 gave exactly that for two hands round a phone,
+# three pictures in a row, all of them right: a hand at a time, then, and a mistake of its own words.
 HANDS = """You check the hands in a picture an image model just made, before the user sees it: {n} enlarged crop(s)
 of it, each with its number.
 
@@ -109,21 +117,21 @@ It was made from this description:
 {prompt}
 \"\"\"
 
-Go through every hand in the crops finger by finger and count the fingers and the thumb you can see, each nail as one
-finger - what is drawn, not what a hand should have. Do not answer five because hands have five.
+A crop often shows two hands, one over the other. Take each hand on its own: follow its fingers back to the palm they
+grow from, and count the fingers and the thumb of that one hand, each nail as one finger - what is drawn, not what a
+hand should have. Do not answer five because hands have five. Never add two hands up.
 
-Then say what is wrong with that hand - only what you can see:
-- more than five fingers and thumb together; two fingers grown into one; a finger with a joint too many, bent the wrong
-  way or growing from the wrong place; a thumb on the wrong side of the hand; fingers melted into what they hold or
-  into the other hand.
-A finger hidden behind something or cut off by the edge of the crop is not missing. A hand out of focus or in motion
-is not a mistake.
+Then say in your own words what is wrong with that hand, if anything - only what you can see. For example: a sixth
+finger on one hand, two fingers of one hand grown into one, a finger with a joint too many, a finger bent the wrong way
+or growing from the wrong place, fingers melted into what they hold.
+The fingers of two hands lying over or between each other are no mistake. A finger hidden behind something or cut off
+by the edge of the crop is not missing. A hand out of focus or in motion is not a mistake.
 
 serious: true when someone would notice it looking at that hand in the picture, false for small things.
 
 Answer with JSON only, one entry for each hand:
-{{"hands": [{{"crop": <its number>, "digits": <the fingers and thumb you count>, "mistake": "<what is wrong, or empty>",
- "serious": <true|false>}}, ...]}}"""
+{{"hands": [{{"crop": <its number>, "which": "<which hand, where in the crop>", "digits": <that hand's fingers and thumb>,
+ "mistake": "<what is wrong, or empty>", "serious": <true|false>}}, ...]}}"""
 
 VIDEO = """You check a video a video model just made, before the user sees it: {n} frames from across it, in
 order, each with its time.
@@ -166,16 +174,20 @@ PICTURE_SCHEMA = {"type": "object", "properties": {
     "mistakes": {"type": "array", "maxItems": 8, "items": _MISTAKE},
     "verdict": _VERDICT}, "required": ["figures", "hands_at", "mistakes", "verdict"]}
 HANDS_SCHEMA = {"type": "object", "properties": {"hands": {"type": "array", "maxItems": 8, "items": {
-    "type": "object", "properties": {"crop": {"type": "integer"}, "digits": {"type": "integer"},
-                                     "mistake": {"type": "string"}, "serious": {"type": "boolean"}},
-    "required": ["crop", "digits", "mistake", "serious"]}}}, "required": ["hands"]}
+    "type": "object", "properties": {"crop": {"type": "integer"}, "which": {"type": "string"},
+                                     "digits": {"type": "integer"}, "mistake": {"type": "string"},
+                                     "serious": {"type": "boolean"}},
+    "required": ["crop", "which", "digits", "mistake", "serious"]}}}, "required": ["hands"]}
 VIDEO_SCHEMA = {"type": "object", "properties": {
     "mistakes": {"type": "array", "maxItems": 8, "items": {
         "type": "object", "properties": {**_MISTAKE["properties"], "frame": {"type": "integer"}},
         "required": ["what", "frame", "serious"]}},
     "verdict": _VERDICT}, "required": ["mistakes", "verdict"]}
 
-# For the model, when a picture or video keeps a serious mistake.
+# For the model, when a picture or video keeps a serious mistake - in a persona's task (0.80.1) there is nobody to
+# tell or to offer anything to, and the post goes to the owner's review with what the check found.
+IN_TASK = ("This is a scheduled task and nobody is here to answer: do not ask and do not offer anything. Hand the post "
+           "in with post_draft as it is. The owner reviews it and sees what the check found.")
 SUGGEST = ("Tell the user plainly what is wrong - do not call it fine - and suggest how to change the prompt so the "
            "model gets it right: {how}.")
 PICTURE_HOW = ("fewer people or animals, a simpler pose, say what the arms and hands do (or keep them out of the "
@@ -205,6 +217,22 @@ def plan(ctx) -> int | None:
     if getattr(ctx.engine, "level", "quick") != LEVEL and not persona_checks(ctx):
         return None
     return tries(ctx.hub.settings)
+
+
+def in_task(ctx) -> bool:
+    """A chat of a persona's task (0.75.0): nobody answers there."""
+    store = ctx.hub.extras.get("personas")
+    p = store.of_chat(ctx.chat) if store is not None else None
+    return bool(p and store.task_of(p, ctx.chat))
+
+
+def for_post(ctx, paths: list[str], outcome: Outcome | None) -> None:
+    """What the check still finds in files saved at these paths, for this turn's post_draft: the post says it."""
+    if outcome is None:
+        return
+    found = outcome.record.get("pictures") or [outcome.record]
+    ctx.state.setdefault("checked", {}).update(
+        {path: list(what.get("mistakes") or []) for path, what in zip(paths, found) if isinstance(what, dict)})
 
 
 def persona_checks(ctx) -> bool:
@@ -314,9 +342,14 @@ def parse(text: str, frames: list[float] | None = None) -> Verdict:
     return Verdict(state, serious[:8], minor[:8], len(figures), [b for b in map(_box, at) if b])
 
 
+TOO_MANY = re.compile(r"\b(more than five|six or more|too many)\b.*\b(fingers?|digits?)\b|"
+                      r"\b(extra|additional|sixth|six|seven|eight|nine|ten|\d+)\s+(\w+\s+)?(fingers?|digits?)\b", re.I)
+
+
 def parse_hands(text: str) -> tuple[list[str], list[str]]:
-    """The close look's answer: (serious mistakes, small ones). More than five is serious whatever the model calls it;
-    five or fewer is no mistake by itself - a finger can be hidden."""
+    """The close look's answer: (serious mistakes, small ones). Six digits on a hand is serious whatever the model
+    calls it. Seven or more is two hands added up, and five or fewer no mistake by itself - a finger can be hidden -
+    so "too many fingers" counts only with a count of six behind it (0.80.1)."""
     serious: list[str] = []
     minor: list[str] = []
     for h in (_json(text) or {}).get("hands") or []:
@@ -325,12 +358,13 @@ def parse_hands(text: str) -> tuple[list[str], list[str]]:
         what = " ".join(str(h.get("mistake") or "").split())[:300]
         if what.strip(" .").lower() in ("", "none", "no", "nothing", "ok", "n/a"):
             what = ""
-        digits = h.get("digits")
-        many = isinstance(digits, int) and digits > 5
-        if many and not what:
-            what = f"a hand with {digits} fingers"
+        six = h.get("digits") == 6
+        if not six and TOO_MANY.search(what):
+            what = ""
+        if six and not what:
+            what = "a hand with six fingers"
         if what:
-            (serious if many or _grave(h.get("serious", True)) else minor).append(what)
+            (serious if six or _grave(h.get("serious", True)) else minor).append(what)
     return serious, minor
 
 
@@ -383,11 +417,13 @@ def _count(engine, usage: dict) -> None:
         engine.usage[k] = engine.usage.get(k, 0) + int(usage.get(k) or 0)
 
 
-def _step(ctx, what: str, verdict: Verdict, t0: float) -> None:
-    """The check in the turn's steps: how long it took (the card's time per check is not measured yet)."""
+def _step(ctx, what: str, verdict: Verdict, t0: float, answer: str = "") -> None:
+    """The check in the turn's steps: how long it took (the card's time per check is not measured yet), and what the
+    model answered (0.80.1: chat 292's export could only show the sentence the Hub took from it)."""
     if ctx.engine is not None:
         ctx.engine.steps.append({"type": "check", "what": what, "model": checker(ctx), "verdict": verdict.state,
-                                 "mistakes": len(verdict.serious), "seconds": round(time.monotonic() - t0, 2)})
+                                 "mistakes": len(verdict.serious), "seconds": round(time.monotonic() - t0, 2),
+                                 "answer": (answer or "")[:ANSWER_KEPT]})
 
 
 async def look(ctx, sha: str, prompt: str, edit: bool = False, loras: list[str] | None = None) -> Verdict:
@@ -396,8 +432,9 @@ async def look(ctx, sha: str, prompt: str, edit: bool = False, loras: list[str] 
     t0 = time.monotonic()
     text = PICTURE.format(source=SOURCE[edit], prompt=prompt.strip()[:4000], mistakes=MISTAKES, hands_at=HANDS_AT,
                           loras=LORAS.format(names=", ".join(loras)) if loras else "")
-    verdict = parse(await ask(ctx, [{"type": "text", "text": text}, image_part(blobs.read(sha))], PICTURE_SCHEMA))
-    _step(ctx, "picture", verdict, t0)
+    answer = await ask(ctx, [{"type": "text", "text": text}, image_part(blobs.read(sha))], PICTURE_SCHEMA)
+    verdict = parse(answer)
+    _step(ctx, "picture", verdict, t0, answer)
     if verdict.hands and not verdict.bad:
         try:
             await look_closer(ctx, sha, prompt, verdict)
@@ -406,31 +443,34 @@ async def look(ctx, sha: str, prompt: str, edit: bool = False, loras: list[str] 
     return verdict
 
 
-def _overlap(a: tuple, b: tuple) -> float:
-    """How much of the smaller of two crops (left, top, right, bottom) lies in the other."""
-    wide = min(a[2], b[2]) - max(a[0], b[0])
-    high = min(a[3], b[3]) - max(a[1], b[1])
-    return max(0, wide) * max(0, high) / min((a[2] - a[0]) * (a[3] - a[1]), (b[2] - b[0]) * (b[3] - b[1]))
+def _joined(boxes: list[tuple]) -> list[tuple]:
+    """Boxes (left, top, right, bottom, in pixels) that touch or nearly do, as one: two hands round a phone are looked
+    at together, each whole - chat 292's two crops of one grip each cut the other hand in half."""
+    out: list[tuple] = []
+    for box in boxes:
+        near = HAND_NEAR * max(box[2] - box[0], box[3] - box[1])
+        for i, o in enumerate(out):
+            if box[0] - near < o[2] and o[0] < box[2] + near and box[1] - near < o[3] and o[1] < box[3] + near:
+                out[i] = (min(box[0], o[0]), min(box[1], o[1]), max(box[2], o[2]), max(box[3], o[3]))
+                break
+        else:
+            out.append(box)
+    return out
 
 
 def hand_crops(data: bytes, hands: list[tuple]) -> list[bytes]:
-    """Each hand enlarged: a square round it with some of what it touches, inside the picture. Two hands in one
-    square (round a mug) are one crop."""
+    """Each hand enlarged, or a grip's two hands together: a square round it with some of what it touches, inside the
+    picture."""
     with Image.open(io.BytesIO(data)) as img:
         im = ImageOps.exif_transpose(img).convert("RGB")
     w, h = im.size
-    squares: list[tuple] = []
-    for left, top, right, bottom in hands:
-        side = int(min(min(w, h), max(HAND_MIN * min(w, h), HAND_ROOM * max((right - left) * w, (bottom - top) * h))))
-        x = int(max(0, min(w - side, (left + right) / 2 * w - side / 2)))
-        y = int(max(0, min(h - side, (top + bottom) / 2 * h - side / 2)))
-        square = (x, y, x + side, y + side)
-        if not any(_overlap(square, s) >= HAND_SAME for s in squares):
-            squares.append(square)
     out = []
-    for square in squares[:HANDS_LOOKED_AT]:
+    for left, top, right, bottom in _joined([(a * w, b * h, c * w, d * h) for a, b, c, d in hands])[:HANDS_LOOKED_AT]:
+        side = int(min(min(w, h), max(HAND_MIN * min(w, h), HAND_ROOM * max(right - left, bottom - top))))
+        x = int(max(0, min(w - side, (left + right - side) / 2)))
+        y = int(max(0, min(h - side, (top + bottom - side) / 2)))
         buf = io.BytesIO()
-        im.crop(square).resize((HAND_SIDE, HAND_SIDE), Image.LANCZOS).save(buf, "JPEG", quality=92)
+        im.crop((x, y, x + side, y + side)).resize((HAND_SIDE, HAND_SIDE), Image.LANCZOS).save(buf, "JPEG", quality=92)
         out.append(buf.getvalue())
     return out
 
@@ -445,13 +485,14 @@ async def look_closer(ctx, sha: str, prompt: str, verdict: Verdict) -> None:
     content: list[dict] = [{"type": "text", "text": HANDS.format(n=len(crops), prompt=prompt.strip()[:4000])}]
     for k, data in enumerate(crops):
         content += [{"type": "text", "text": f"Crop {k + 1}:"}, image_part(data)]
-    serious, minor = parse_hands(await ask(ctx, content, HANDS_SCHEMA))
+    answer = await ask(ctx, content, HANDS_SCHEMA)
+    serious, minor = parse_hands(answer)
     verdict.crops = crops
     verdict.serious = [*verdict.serious, *serious][:8]
     verdict.minor = [*verdict.minor, *minor][:8]
     if serious:
         verdict.state = "mistakes"
-    _step(ctx, "hands", verdict, t0)
+    _step(ctx, "hands", verdict, t0, answer)
 
 
 # ---------------------------------------------------------------- pictures
@@ -541,7 +582,7 @@ async def pictures(ctx, items: list[dict], make: Make, prompt: str, *, edit: boo
         record["only"] = True                       # Settings: check, do not make again
     if stopped:
         record["stopped"] = stopped
-    return Outcome([s.item for s in slots], record, picture_text(slots, by, seeded, allowed, stopped))
+    return Outcome([s.item for s in slots], record, picture_text(slots, by, seeded, allowed, stopped, in_task(ctx)))
 
 
 def _hands_shown(verdict: Verdict | None) -> dict:
@@ -553,7 +594,7 @@ def _hands_shown(verdict: Verdict | None) -> dict:
     return {"hands": chats.save_upload(made, "checked-hands.jpg", "image/jpeg")["sha"]}
 
 
-def picture_text(slots: list[Slot], by: str, seeded: bool, allowed: int, stopped: str) -> str:
+def picture_text(slots: list[Slot], by: str, seeded: bool, allowed: int, stopped: str, task: bool = False) -> str:
     """What the model is told: what the check found for each picture, and what to do when one is still wrong."""
     one = len(slots) == 1
     lines = []
@@ -584,7 +625,7 @@ def picture_text(slots: list[Slot], by: str, seeded: bool, allowed: int, stopped
                      "call makes it with another.")
         elif not allowed:
             tail += " It was not made again (Settings -> Assistant: check only)."
-        tail += " " + SUGGEST.format(how=PICTURE_HOW)
+        tail += " " + (IN_TASK if task else SUGGEST.format(how=PICTURE_HOW))
     if stopped:
         tail += f" ({stopped[0].upper()}{stopped[1:]}; the pictures are given as they are.)"
     return head + " ".join(lines) + tail
@@ -681,19 +722,20 @@ async def video(ctx, rel: str, seconds: float, prompt: str, progress: Progress |
     shown = chats.save_upload(sheet(frames), "checked-frames.jpg", "image/jpeg")
     record = {"by": by, "frames": taken, "sheet": shown["sha"]}
     try:
-        verdict = parse(await ask(ctx, content, VIDEO_SCHEMA), taken)
+        answer = await ask(ctx, content, VIDEO_SCHEMA)
+        verdict = parse(answer, taken)
     except Exception as exc:  # noqa: BLE001
         log.warning("video check stopped: %s", exc)
         record.update(state="unchecked", mistakes=[], minor=[], seconds=round(time.monotonic() - t0, 1),
                       stopped=f"the check stopped: {exc}")
         return Outcome(None, record, f"\nNot checked before the user got it (Effort Extra): the check stopped ({exc}).")
-    _step(ctx, "video", verdict, t0)
+    _step(ctx, "video", verdict, t0, answer)
     record.update(state=verdict.state, mistakes=verdict.serious, minor=verdict.minor,
                   seconds=round(time.monotonic() - t0, 1))
-    return Outcome(None, record, video_text(verdict, by, len(frames)))
+    return Outcome(None, record, video_text(verdict, by, len(frames), in_task(ctx)))
 
 
-def video_text(v: Verdict, by: str, n: int) -> str:
+def video_text(v: Verdict, by: str, n: int, task: bool = False) -> str:
     head = (f"\nChecked before the user got it (Effort Extra): {by} looked at {n} frames from across it for wrong "
             "bodies, broken shapes and things that change between frames. ")
     if v.state == "ok":
@@ -702,7 +744,7 @@ def video_text(v: Verdict, by: str, n: int) -> str:
     if v.state == "unclear":
         return head + "The check gave no clear answer."
     return (head + f"Serious mistakes: {'; '.join(v.serious)}. It was not made again (a video takes minutes). "
-            + SUGGEST.format(how=VIDEO_HOW))
+            + (IN_TASK if task else SUGGEST.format(how=VIDEO_HOW)))
 
 
 # ---------------------------------------------------------------- the export

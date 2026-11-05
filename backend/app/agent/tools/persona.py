@@ -63,9 +63,11 @@ async def post_draft(ctx: ToolContext, args: dict) -> ToolResult:
         return ToolResult("This chat is not a task's chat.", is_error=True)
     media = args.get("media") or []
     media = [media] if isinstance(media, str) else media if isinstance(media, list) else []
+    found = (ctx.state.get("checked") or {})
     try:
         post = await store.hand_in(p["id"], task["id"], (ctx.chat or {}).get("id"),
-                                   getattr(ctx.run, "id", None), ctx.workdir, args.get("text"), media)
+                                   getattr(ctx.run, "id", None), ctx.workdir, args.get("text"), media,
+                                   [m for rel in media for m in found.get(str(rel), [])])
     except PersonaError as exc:
         return ToolResult(str(exc), is_error=True)
     files = len(post["media"])

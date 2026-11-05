@@ -8,6 +8,7 @@ from __future__ import annotations
 import io
 import json
 import re
+from types import SimpleNamespace
 
 from PIL import Image
 
@@ -420,7 +421,7 @@ def looked(*hands: dict) -> dict:
 
 
 def hand(digits: int = 5, mistake: str = "", serious: bool = False, crop: int = 1) -> dict:
-    return {"crop": crop, "digits": digits, "mistake": mistake, "serious": serious}
+    return {"crop": crop, "which": "the hand on the left", "digits": digits, "mistake": mistake, "serious": serious}
 
 
 def spotted(size=(1000, 1000), spot=(600, 700, 700, 800)) -> bytes:
@@ -471,8 +472,10 @@ async def test_a_hand_with_too_many_fingers_is_made_again(signed_in, app, fakes)
     with Image.open(io.BytesIO(blobs.read(thrown["hands"]))) as img:    # what it saw, to see whether it was right
         assert img.size == (320, 320)
     assert (thrown["hands"], "try 1: the hands it looked at") in M.shown_shas(checked)
-    assert [(s["what"], s["verdict"]) for s in chats.runs_for_chat(c["id"])[-1]["steps"] if s["type"] == "check"] == [
-        ("picture", "ok"), ("hands", "mistakes"), ("picture", "ok")]
+    steps = [s for s in chats.runs_for_chat(c["id"])[-1]["steps"] if s["type"] == "check"]
+    assert [(s["what"], s["verdict"]) for s in steps] == [("picture", "ok"), ("hands", "mistakes"), ("picture", "ok")]
+    assert "five fingers lined up on the mug" in steps[1]["answer"]     # what it said, for the export (0.80.1)
+    assert '"hands_at"' in steps[0]["answer"]
 
 
 async def test_hands_that_are_right_cost_one_close_look(signed_in, app, fakes):
@@ -531,10 +534,36 @@ def test_where_the_hands_are():
     assert M.parse(json.dumps({"figures": [], "mistakes": [], "verdict": "ok"})).hands == []
 
 
+async def test_two_hands_round_a_phone_are_no_mistake(signed_in, app, fakes):
+    """0.80.1, Søren, of chat 292: "I dont think the latest picture is wrong. But it was flagged wrong" - all three tries
+    "more than five fingers and thumb together", 0.80.0's own words, for two right hands round a phone."""
+    extra(app)
+    said = "more than five fingers and thumb together"
+    _, _, res, seen = await draw(app, signed_in, fakes, make("a woman reading her phone"),
+                                 [with_hands([560, 280, 700, 460], [545, 225, 690, 330]),
+                                  looked(hand(9, said, True), hand(5, said, True))],
+                                 [spotted((1280, 1600), (280, 880, 590, 1020))])
+    assert len(fakes.comfy["prompts"]) == 1                             # not made again
+    picture = res["display"]["checked"]["pictures"][0]
+    assert picture["state"] == "ok" and picture["mistakes"] == [] and picture["minor"] == []
+    parts = seen["checks"][1]["messages"][0]["content"]
+    assert len(parts) == 3                                              # one grip, one crop
+    text = parts[0]["text"]
+    assert said not in text and "together" not in text and "Never add two hands up." in text
+    assert "lying over or between each other are no mistake" in text
+    assert M.HANDS_SCHEMA["properties"]["hands"]["items"]["required"][:3] == ["crop", "which", "digits"]
+
+
 def test_what_the_close_look_says():
     assert M.parse_hands(json.dumps({"hands": [hand(6), hand(7, "seven fingers", False)]})) == (
-        ["a hand with 6 fingers", "seven fingers"], [])                 # more than five is serious, whatever it says
+        ["a hand with six fingers"], [])                                # six is serious; seven is two hands added up
     assert M.parse_hands(json.dumps({"hands": [hand(4), hand(3, "None.", True), hand(5, "n/a", True)]})) == ([], [])
+    for said in ("more than five fingers and thumb together", "too many fingers", "an extra finger", "a sixth digit",
+                 "6 fingers on this hand", "seven visible fingers"):        # without a count of six behind it
+        assert M.parse_hands(json.dumps({"hands": [hand(5, said, True), hand(10, said, True)]})) == ([], []), said
+        assert M.parse_hands(json.dumps({"hands": [hand(6, said, False)]})) == ([said], []), said
+    assert M.parse_hands(json.dumps({"hands": [hand(5, "an extra joint on the index finger", True)]})) == (
+        ["an extra joint on the index finger"], [])                     # other mistakes stand
     assert M.parse_hands(json.dumps({"hands": [hand(5, "two fingers grown into one", True),
                                                hand(5, "a short nail", False)]})) == (
         ["two fingers grown into one"], ["a short nail"])
@@ -553,6 +582,28 @@ def test_each_hand_is_cropped_inside_the_picture():
     assert len(M.hand_crops(data, far)) == M.HANDS_LOOKED_AT            # the biggest hands, as the model gave them
     small = M.hand_crops(data, [(0.5, 0.5, 0.501, 0.501)])              # a rough box still shows a hand's worth
     assert len(small) == 1
+
+
+def test_a_grip_is_one_crop_and_two_hands_apart_are_two():
+    data = spotted((1280, 1600), (280, 880, 590, 1020))
+    grip = [(0.28, 0.56, 0.46, 0.70), (0.225, 0.545, 0.33, 0.69)]       # chat 292's, about: the boxes overlap
+    assert M._joined([(a * 1280, b * 1600, c * 1280, d * 1600) for a, b, c, d in grip]) == [
+        (0.225 * 1280, 0.545 * 1600, 0.46 * 1280, 0.70 * 1600)]
+    assert len(M.hand_crops(data, grip)) == 1
+    with Image.open(io.BytesIO(M.hand_crops(data, grip)[0])) as img:    # both whole: the red runs to neither edge
+        r = img.convert("RGB")
+        assert r.getpixel((5, M.HAND_SIDE // 2))[0] < 100 and r.getpixel((M.HAND_SIDE - 5, M.HAND_SIDE // 2))[0] < 100
+    apart = [(0.05, 0.5, 0.2, 0.62), (0.75, 0.5, 0.9, 0.62)]
+    assert len(M.hand_crops(data, apart)) == 2
+
+
+def test_what_the_check_found_goes_to_the_post():
+    ctx = SimpleNamespace(state={})
+    pictures = {"pictures": [{"mistakes": ["a third arm"]}, {"mistakes": []}]}
+    M.for_post(ctx, ["a.png", "b.png"], M.Outcome([], pictures, ""))
+    M.for_post(ctx, ["c.mp4"], M.Outcome(None, {"state": "mistakes", "mistakes": ["five legs"]}, ""))
+    M.for_post(ctx, ["d.png"], None)                                    # not checked
+    assert ctx.state["checked"] == {"a.png": ["a third arm"], "b.png": [], "c.mp4": ["five legs"]}
 
 
 def test_a_sheet_says_what_is_on_it():

@@ -381,6 +381,7 @@ async def image_generate(ctx: ToolContext, args: dict) -> ToolResult:
                                          edit=portrait is not None, seeded=_seeded(args), progress=_note(ctx))
     items = checked.items if checked is not None else items
     paths = _save_outputs(ctx, items, args.get("save_as"), prompt)
+    media_check.for_post(ctx, paths, checked)
     desc = ", ".join(f"{it['width']}x{it['height']} seed {it['seed']}" for it in items)
     if portrait is not None:
         desc += ", from your portrait"
@@ -390,7 +391,7 @@ async def image_generate(ctx: ToolContext, args: dict) -> ToolResult:
     made = _made_with(pipe, items[0], seeds=items)                          # the owner's name for the model
     return ToolResult(f"Generated {len(items)} image(s) with {made['model']}{_lora_text(items[0])} ({desc}). They "
                       f"are shown to the user and below, with a line saying what made them.{_ignored(args)}{where}"
-                      f"{enhanced}{_check_text(checked, BODIES)}",
+                      f"{enhanced}{_check_text(checked, BODIES_IN_TASK if _task(ctx) is not None else BODIES)}",
                       images=[{"sha": it["sha"], "mime": "image/png"} for it in items],
                       display=_checked({"generated": [{"sha": it["sha"], "seed": it["seed"], "path": p}
                                                       for it, p in zip(items, paths + [None] * len(items))],
@@ -421,6 +422,7 @@ async def image_edit(ctx: ToolContext, args: dict) -> ToolResult:
                                          seeded=_seeded(args), progress=_note(ctx))
     items = checked.items if checked is not None else items
     paths = _save_outputs(ctx, items, args.get("save_as"), prompt or "edit")
+    media_check.for_post(ctx, paths, checked)
     where = _saved_text(paths)
     made = _made_with(pipe, items[0], ctx, seeds=items)
     why = f" {made['note'][0].upper()}{made['note'][1:]}." if made.get("note") else ""
@@ -609,6 +611,9 @@ POSES = ("Say plainly how you stand or sit and what each hand does. Bodies and h
 # makes, so it looks at the bodies and says what is wrong instead of handing a broken one over as it is.
 BODIES = ("\nBefore you answer, look at the people in them: arms, hands and legs - if one is extra, missing or "
           "grown together, say so and offer to make it again with another seed.")
+# 0.80.1: in a task nobody can take up an offer (media_check.IN_TASK).
+BODIES_IN_TASK = ("\nLook at the people in them: arms, hands and legs - if one is extra, missing or grown together, "
+                  "make it once more with another seed. Do not ask: nobody is here to answer.")
 EDIT_TEXT = ("Edit images with an instruction (Qwen-Image 2.1): change, add or remove things, restyle, combine "
              "several reference images (up to 10; FLUX.2 klein uses the first 6). The output keeps the first "
              "image's proportions, so put first the picture whose scene and framing should stay: images "

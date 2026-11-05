@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.80.1 - 2026-11-05
+
+- Fixed: Check pictures called right hands wrong when two hands held the same
+  thing, as round a phone: it added them up, picture after picture. It now
+  takes one hand at a time, a grip is looked at as one crop, and "too many
+  fingers" only counts with a count of six behind it.
+- Fixed: a task could end without a post when every try was flagged - the
+  persona offered to try again, and nobody answers in a task. A task now
+  always hands in its post.
+- A post now says what the check still found, so you can look for yourself.
+- A chat's export now has what the check answered, word for word.
+
 ## 0.80.0 - 2026-11-05
 
 - Fewer broken hands in a persona's pictures. A post's picture now comes out

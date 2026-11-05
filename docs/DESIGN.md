@@ -2194,19 +2194,31 @@ files afterwards.
   4 one token for every 48x48 px: patches of 16, pooled by 3, at most 1120
   tokens - tools/mtmd), so a hand 200 px across is four tokens wide and a
   finger half of one: enough for a third hand, not for fingers. The first
-  look now also says
-  where the hands are (`hands_at`, [ymin, xmin, ymax, xmax] of 1000, no local
-  detector and nothing new on the card), and a picture it finds nothing
-  wrong with goes on to a request of its own (`HANDS`, `HANDS_SCHEMA`): up to
-  four squares round the hands, each enlarged to 768 px (about two tokens
-  to a finger), gone through finger by finger. More than five is serious whatever the model calls it; five
-  or fewer is no mistake by itself, a finger can be hidden. A close look
-  that stops leaves the first look's verdict. The crops are kept on a sheet
+  look now also says where the hands are (`hands_at`, [ymin, xmin, ymax,
+  xmax] of 1000, no local detector and nothing new on the card), and a
+  picture it finds nothing wrong with goes on to a request of its own
+  (`HANDS`, `HANDS_SCHEMA`): up to four squares round the hands, each
+  enlarged to 1024 px (about two tokens to a finger), gone through a hand at
+  a time. Six on a hand is serious whatever the model calls it; five or
+  fewer is no mistake by itself, a finger can be hidden; seven or more is two
+  hands added up. "Too many fingers" in its words counts only with a count
+  of six behind it, and hands that nearly touch are one crop (`_joined`).
+  Why (0.80.1): 0.80.0's list began "more than five fingers and thumb
+  together", and on chat 292 Gemma 4 answered exactly that for two right
+  hands round a phone, three pictures in a row. A close look that stops
+  leaves the first look's verdict. The crops are kept on a sheet
   (`pictures[].hands`, `rejected[].hands`), shown under the picture and in
   the export, so what it saw can be judged. It counts on a model that can
   count: vision models tend to answer five for a hand with six (Vo et al.,
   "Vision Language Models are Biased", 2025), hence "what is drawn, not what
   a hand should have".
+- **A task's post is never held back by the check** (0.80.1). Chat 292's three
+  tries were all flagged, the result said to "offer to make it again", and
+  the persona did - to nobody, so no post came. In a task's chat
+  (`media_check.in_task`) the result now says to hand the post in as it is
+  (`IN_TASK`), with or without a check; the owner reviews every post anyway.
+  What the check still finds goes through the turn's `ctx.state` to
+  post_draft and stays on the post (`check`), and its card says so.
 - **A picture with room for its hands** (0.80.0). `image_generate` takes the
   size from the call, else from the very end of the prompt (`WRITTEN_SIZE`;
   chat 288's Gemma 4 ended its prompts "... high quality. 1024x1280

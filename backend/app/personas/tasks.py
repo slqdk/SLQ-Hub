@@ -394,8 +394,9 @@ class TaskJobs:
         return sorted(out, key=lambda s: s.get("made") or 0, reverse=True)[:limit]
 
     async def hand_in(self, pid: str, tid: str, chat_id: int | None, run_id: str | None, workdir, text,
-                      media) -> dict:
-        """post_draft: the post's text and its files from the chat's folder, kept with the persona as a draft."""
+                      media, check: list[str] | None = None) -> dict:
+        """post_draft: the post's text and its files from the chat's folder, kept with the persona as a draft. check:
+        what Check pictures still found in those files (0.80.1) - the owner decides, the card says it."""
         from PIL import Image, UnidentifiedImageError
 
         from .store import PersonaError
@@ -453,7 +454,8 @@ class TaskJobs:
                 stored.append({"file": await asyncio.to_thread(self._put, pid, f"posts/{sid}-{i + 1}.{ext}", data),
                                "kind": kind})
             post = {"id": sid, "task": tid, "title": t["title"], "text": text, "media": stored, "status": "draft",
-                    "made": int(time.time()), "chat": chat_id, "run": run_id}
+                    "made": int(time.time()), "chat": chat_id, "run": run_id,
+                    **({"check": list(dict.fromkeys(check))[:4]} if check else {})}
             posts = self.posts_of(pid)
             again = [s for s in posts if run_id and s.get("run") == run_id and s["status"] == "draft"]
             for old in again:                                  # handed in again in the same run: this one counts
