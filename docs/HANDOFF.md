@@ -4,24 +4,26 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## Next session - start here (written 2026-11-05, at 0.80.1)
+## Next session - start here (written 2026-11-05, at 0.80.2)
 
-The chat of 2026-10-31 to 2026-11-04 built 0.75.0-0.79.1, the one of 2026-11-04/05 0.80.0 and 0.80.1; each version's
-paragraph under "State" says what and why. On VM 222 the Hub ran 0.80.0 at 09:04 on 2026-11-05; **0.80.1 is pushed, not
+The chat of 2026-10-31 to 2026-11-04 built 0.75.0-0.79.1, the one of 2026-11-04/05 0.80.0-0.80.2; each version's
+paragraph under "State" says what and why. On VM 222 the Hub ran 0.80.1 at 10:55 on 2026-11-05; **0.80.2 is pushed, not
 yet installed** (`sudo bash /opt/slq-hub/update.sh`). How Søren works: Danish or English, short technical answers; he
 sends screenshots, chat exports (⋯ → Export for troubleshooting) and now ComfyUI's log (Settings → System → Logs →
 ComfyUI → Download) - ask for those before theorising.
 
 Waiting for his result on the card, newest first:
-1. **0.80.1** - the check on Laura's hands (item 100). Check pictures is on since that morning. Chat 292's task again: a post
-   should come whatever the check says, with a warning on its card if it still finds something. Each `check` step
-   in the export now has the model's answer: what it counted for each hand.
-2. **Her Strength** was still ×1.1 at 09:04 (0.5-0.8 was asked of him).
-3. **0.79.0** - a task's own LoRAs (item 99). He put amateur_selfie at ×1.4 on that task; 0.6-1.0 was suggested.
-4. **Settings → Images is on FLUX.2 [klein] 9B base** since his test (68-86 s a picture on the card). It was
+1. **0.80.2** - her legs and the copied prompts (item 100). A task's next run should write a new prompt with a new pose;
+   a duvet with her legs' shape under it. Chat 288 and 292 hold all the old calls, shown without their prompts.
+2. **0.80.1** - the check on Laura's hands (item 100). Check pictures is on since that morning; 0.80.1 got chat 292 its
+   post. No export of a run with the raw `answer` has reached here yet (chat 288's run was still going when exported):
+   each `check` step has what the model counted for each hand.
+3. **Her Strength** was still ×1.1 at 09:04 (0.5-0.8 was asked of him); not known for 10:52.
+4. **0.79.0** - a task's own LoRAs (item 99). He put amateur_selfie at ×1.4 on that task; 0.6-1.0 was suggested.
+5. **Settings → Images is on FLUX.2 [klein] 9B base** since his test (68-86 s a picture on the card). It was
    suggested he go back to 9B (U) now that the check exists; his choice. Chat 288's cleanest hands were 9B (U)'s
    (one picture, ×0.5, 30 steps).
-5. **0.76.x** - Laura's Instagram (item 96): the Meta app, its Unified-login configuration and the Hub's fields were
+6. **0.76.x** - Laura's Instagram (item 96): the Meta app, its Unified-login configuration and the Hub's fields were
    set up with him (App ID 1093705243490654, Configuration ID 1816854056024329); whether the connect went through
    and a post was published is not known here.
 
@@ -40,7 +42,7 @@ finds them and fingers still come out wrong). Decided: no Facebook posting (he c
 
 Known flake: tests/test_training.py::test_the_trainer_stops_a_job fails now and then in a full run and passes alone.
 
-## State (0.80.1, 2026-11-05)
+## State (0.80.2, 2026-11-05)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -1189,6 +1191,21 @@ hands apart; the answer kept), tests/test_persona_tasks.py (all tries flagged: t
 offer without a check), each part failing without it (10 mutations). The joined crop on his kept picture looked at
 here. In Chromium against the dev server: the note on the post's card, desktop dark and phone light; no console
 errors. Not reviewed by a separate agent. NOT seen on the card: item 100.
+0.80.2, Søren: "for the last many pictures, i seems like her torso just looms up from the bed... Her legs are not present,
+even under the blanket" - a screenshot of the post from 10:52 and an export of chat 288, the Monday task, still running at
+09:55 UTC; the bed pictures are chat 292's, read from its export of that morning. All 22 of its prompts, against small
+sheets of its pictures: runs 6-8 say "one leg exposed", "a hint of her leg" and show legs; from run 9 "collarbones and
+cleavage" and nothing below, and it is an upright torso on a flat duvet from then on, at base ×0.6, base ×1.1 and 9B (U)
+×0.7 - neither the model nor the strength decides it, though the prompts all say "lying". Those 14 prompts differ by a
+word or two: "say something new each time" did nothing for them. And chat 288's newest, on 0.80.1, ends "1024x1280
+portrait." like its elders, with POSES in its tools (context.json shows it) and "never write a size in the prompt" in its
+system prompt: Gemma 4 copies, so 0.80.0's hint never took. Fixed (DESIGN §8 "A task writes each picture prompt anew",
+"Legs"): the prompts of a task's earlier runs are left out of what the model gets, the task's prompt and POSES ask for
+something new and for the legs, a picture of the persona under a cover with no word of its legs gets a sentence that
+asks for them, the check's list has a body that ends too soon. Tests: tests/test_persona_tasks.py (two runs of a task: the old
+prompt gone, the post's words there, its own turn's kept, context.json the same; which calls; the placeholder refused;
+the sentence, of her only, and when it stays out), tests/test_media_check.py; each part failing without it (12
+mutations). Not reviewed by a separate agent. NOT seen on the card: item 100.
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
 host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU
@@ -1983,7 +2000,12 @@ the host if the VM ever stops by itself.
     - **If fingers still come out wrong and the check sees them**: repair in place instead of a whole new try - crop the
       hand, redraw it at 1 MP with `pipe.edit` or a masked low-denoise pass, paste it back feathered. The `hands_at`
       boxes give the place; not built.
-    - **A task's post**: with every try flagged the post should still come, with the note on its card (chat 292's task).
+    - **A task's post**: seen 2026-11-05, 0.80.1 brought chat 292's post at 10:52. With every try flagged it should
+      still come, with the note on its card.
+    - **Legs (0.80.2)**: does a duvet now show her legs? Does a task's prompt change from run to run, and does the pose
+      follow? Does "a body that ends too soon" flag right pictures of someone in bed (a false alarm costs two tries
+      and a warning on the post; if it does, take it out of MISTAKES)? `PROMPT_LEFT_OUT` copied into a call would show as
+      an error step.
 99. **A task's own LoRAs (0.79.0)** - with a real style LoRA for klein 9B (one he trains as a style, or uploads):
     - **The look**: does a filter-like LoRA at 0.5-1 change the colours and grain without changing her face (her LoRA
       and the style together - the strengths may need lowering, hers or the style's)? The line under the picture in

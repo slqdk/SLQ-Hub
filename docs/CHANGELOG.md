@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.80.2 - 2026-11-05
+
+- Fixed: a task's pictures kept the same pose, because the chat model copied
+  its last prompt word for word, run after run. A task now writes each picture
+  prompt from the start, and is told to show something new.
+- A persona now says where its legs are in a picture prompt, in bed too, and a
+  picture of it under a duvet asks for the shape of its legs under the duvet.
+  Laura's torso rose out of a flat duvet once the prompts stopped mentioning
+  her legs.
+- Check pictures now also looks for a body that ends too soon, such as a torso
+  rising straight out of a flat duvet.
+
 ## 0.80.1 - 2026-11-05
 
 - Fixed: Check pictures called right hands wrong when two hands held the same

@@ -606,6 +606,10 @@ def test_what_the_check_found_goes_to_the_post():
     assert ctx.state["checked"] == {"a.png": ["a third arm"], "b.png": [], "c.mp4": ["five legs"]}
 
 
+def test_the_check_knows_a_body_can_end_too_soon():
+    assert "a torso rising straight out of a flat duvet" in M.MISTAKES
+
+
 def test_a_sheet_says_what_is_on_it():
     buf = io.BytesIO()
     Image.new("RGB", (64, 64), (90, 90, 90)).save(buf, "JPEG")

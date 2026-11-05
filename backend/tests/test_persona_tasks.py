@@ -5,8 +5,10 @@ pictures of the persona itself, with its LoRA ("i have a lora for her") or from 
 from __future__ import annotations
 
 import asyncio
+import io
 import time
 import json
+import zipfile
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -649,3 +651,110 @@ async def test_a_post_the_check_passed_says_nothing_and_no_offer_without_a_check
     told = str(fakes.llama["requests"][1]["messages"])
     assert "Do not ask: nobody is here to answer." in told and "offer to make it again" not in told
     assert "check" not in store.posts_of(p["id"])[-1]
+
+
+BED = ("A cozy, intimate morning scene. A woman is lying in a plush bed with messy white linen sheets. She is "
+       "strategically covered by a soft white duvet. She is holding a smartphone.")
+
+
+async def test_a_task_writes_each_picture_prompt_anew(signed_in, app, fakes):
+    """0.80.2, Søren: "her torso just looms up from the bed". Gemma 4 copied its last prompt 14 times in chat 292, and so
+    the pose; chat 288's still ended in "1024x1280 portrait." with both prompts saying never to. The posts' own words stay."""
+    from app.agent import context as C
+
+    p, _ = await with_lora(signed_in, app)
+    tid = (await ok(await signed_in.post(f"{API}/{p['id']}/tasks", json=MONDAY_POST, headers=ORIGIN)))["tasks"][0]["id"]
+    app.state.hub.settings.update("images", {"model": "flux2-klein-4b"})
+    store = app.state.hub.extras["personas"]
+
+    async def run(prompt: str, text: str) -> None:
+        fakes.llama["replies"] = [
+            {"tool_calls": [{"name": "image_generate", "arguments": {"prompt": prompt, "me": True, "save_as": "p.jpg"}}]},
+            {"tool_calls": [{"name": "post_draft", "arguments": {"text": text, "media": ["p.jpg"]}}]},
+            {"content": "Lagt klar."}]
+        await store.tick(now=store.get(p["id"])["tasks"][0]["next_run"] + 60)
+        await done(app, p["id"], tid)
+
+    await run("A woman by the harbour at dawn", "Morgen ved havnen")
+    fakes.llama["requests"].clear()
+    await run("A woman on a bridge in the rain", "Regn på broen")
+    first, later = fakes.llama["requests"][0], fakes.llama["requests"][1]
+    sent = json.dumps(first["messages"], ensure_ascii=False)
+    assert "A woman by the harbour at dawn" not in sent and C.PROMPT_LEFT_OUT in sent
+    assert "Morgen ved havnen" in sent                                      # what it said stays: to say something new
+    assert "write each one from the start" in first["messages"][0]["content"]
+    assert "A woman on a bridge in the rain" in json.dumps(later["messages"], ensure_ascii=False)     # its own turn's
+    chat = store.posts_of(p["id"])[-1]["chat"]
+    with zipfile.ZipFile(io.BytesIO((await signed_in.get(f"/hub/api/chats/{chat}/export")).content)) as z:
+        context = z.read("context.json").decode()                           # the export says what the model gets
+    assert "A woman by the harbour at dawn" not in context and C.PROMPT_LEFT_OUT in context
+
+
+def test_only_a_tasks_earlier_prompts_are_left_out():
+    from app.agent import context as C
+
+    def row(n, run, role, blocks):
+        return {"id": n, "run_id": run, "role": role, "content": blocks, "created_at": None}
+
+    def call(cid, name, args):
+        return {"type": "tool_call", "id": cid, "name": name, "arguments": json.dumps(args)}
+
+    rows = [row(1, "r1", "assistant", [call("a", "image_generate", {"prompt": "old", "me": True}),
+                                       call("b", "post_draft", {"text": "stays", "prompt": "not a picture's"})]),
+            row(2, "r1", "tool", [{"type": "tool_result", "tool_call_id": "a", "text": "ok"},
+                                  {"type": "tool_result", "tool_call_id": "b", "text": "ok"}]),
+            row(3, "r2", "assistant", [call("c", "video_generate", {"prompt": "new"})]),
+            row(4, "r2", "tool", [{"type": "tool_result", "tool_call_id": "c", "text": "ok"}])]
+
+    def args(messages):
+        return [json.loads(c["function"]["arguments"]) for m in messages for c in m.get("tool_calls") or []]
+
+    left, draft, now = args(C.to_model_messages(rows, "r2", task=True))
+    assert left == {"prompt": C.PROMPT_LEFT_OUT, "me": True}
+    assert draft["prompt"] == "not a picture's" and now == {"prompt": "new"}
+    assert [a["prompt"] for a in args(C.to_model_messages(rows, "r2"))] == ["old", "not a picture's", "new"]
+    assert C.in_task_chat({"settings": {"persona_task": "t1"}}) and not C.in_task_chat({"settings": {}})
+    assert not C.in_task_chat(None)
+
+
+async def test_a_copied_placeholder_makes_no_picture(signed_in, app, fakes):
+    from app.agent import context as C
+
+    p, _ = await with_lora(signed_in, app)
+    await ok(await signed_in.patch(f"{API}/{p['id']}", json={"pictures": True}, headers=ORIGIN))
+    app.state.hub.settings.update("images", {"model": "flux2-klein-4b"})
+    c = await chat_with(signed_in, p["id"])
+    fakes.llama["replies"] = [{"tool_calls": [{"name": "image_generate", "arguments": {"prompt": C.PROMPT_LEFT_OUT}}]},
+                              {"content": "Ups."}, {"content": "Titel"}]
+    n = len(fakes.comfy["prompts"])
+    await finish(app, await send(signed_in, c["id"], "Send et billede"))
+    assert len(fakes.comfy["prompts"]) == n
+
+
+async def test_her_legs_are_asked_for_under_a_duvet(signed_in, app, fakes):
+    p, _ = await with_lora(signed_in, app)
+    await ok(await signed_in.patch(f"{API}/{p['id']}", json={"pictures": True}, headers=ORIGIN))
+    app.state.hub.settings.update("images", {"model": "flux2-klein-4b"})
+    c = await chat_with(signed_in, p["id"])
+    fakes.llama["replies"] = [
+        {"tool_calls": [{"name": "image_generate", "arguments": {"prompt": BED, "me": True}}]},
+        {"tool_calls": [{"name": "image_generate", "arguments": {"prompt": BED}}]},
+        {"content": "Her."}, {"content": "Seng"}]
+    n = len(fakes.comfy["prompts"])
+    await finish(app, await send(signed_in, c["id"], "Send et billede af dig"))
+    her, bed = fakes.comfy["prompts"][n:]
+    legs = "The shape of the hips and legs shows clearly under the duvet."
+    assert legs in json.dumps(her) and legs not in json.dumps(bed)          # only a picture of her
+
+
+def test_a_cover_with_no_word_of_the_legs_under_it():
+    from app.agent.tools.images import POSES, _with_legs as legs
+
+    assert legs(BED).endswith(" The shape of the hips and legs shows clearly under the duvet.")
+    assert legs("A woman wrapped in a wool blanket on a sofa").endswith("under the blanket.")
+    assert legs("A woman tucked under the covers").endswith("under the covers.")
+    for kept in ("A woman covered by a duvet that leaves one leg exposed", "Knees drawn up under the duvet, she reads",
+                 "A woman on a sofa with a blanket", "A woman lying on a beach. A blanket beside her",
+                 "A woman making the bed"):
+        assert legs(kept) == kept
+    assert "where your legs are" in POSES and "knees drawn up under the duvet" in POSES

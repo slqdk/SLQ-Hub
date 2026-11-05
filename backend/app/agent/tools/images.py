@@ -15,6 +15,7 @@ from ...chats import store as chats
 from ...projects import blobs
 from ...projects.store import mime_of
 from .. import media_check
+from ..context import PROMPT_LEFT_OUT
 from .base import Tool, ToolContext, ToolResult, gpu_failure, obj, register
 from .shell import SandboxError, sandbox_exec
 
@@ -212,6 +213,14 @@ def _written_size(prompt: str) -> tuple[str, tuple[int, int] | None]:
     return f"{rest}.", (int(m[1]), int(m[2]))
 
 
+def _with_legs(prompt: str) -> str:
+    """A persona under a duvet, in a prompt that does not say where its legs are, has them shown."""
+    m = COVERED.search(prompt)
+    if m is None or LEGS.search(prompt):
+        return prompt
+    return f"{prompt.rstrip()} The shape of the hips and legs shows clearly under the {m[1].lower()}."
+
+
 def _enough_pixels(width: int, height: int) -> tuple[int, int]:
     """The same shape at PEOPLE_PIXELS, when it is smaller; on klein's grid of 16."""
     from ...images.workflows import snap
@@ -344,8 +353,8 @@ def _made_with(pipe, item: dict, ctx: ToolContext | None = None, seeds: list[dic
 async def image_generate(ctx: ToolContext, args: dict) -> ToolResult:
     pipe = _pipeline(ctx)
     prompt = (args.get("prompt") or "").strip()
-    if not prompt:
-        return ToolResult("prompt is required", is_error=True)
+    if not prompt or prompt == PROMPT_LEFT_OUT:
+        return ToolResult("prompt is required: describe the picture", is_error=True)
     from ...images.pipeline import ImageError
     model, loras, portrait = _picture_model(ctx), _loras(ctx), None
     me = _persona_me(ctx) if args.get("me") else None
@@ -362,6 +371,8 @@ async def image_generate(ctx: ToolContext, args: dict) -> ToolResult:
     task_loras = _task_loras(ctx)           # a task's style or filter, after (the store skips one given twice)
     loras = [*loras, *task_loras]
     prompt, width, height = _picture_size(ctx, args, prompt, model, me is not None)
+    if me is not None:
+        prompt = _with_legs(prompt)
 
     async def make(count: int, seed=None, label: str = "") -> list[dict]:
         if portrait is not None:
@@ -409,6 +420,8 @@ async def image_edit(ctx: ToolContext, args: dict) -> ToolResult:
         return ToolResult(f"No such image: {exc}", is_error=True)
     from ...images.pipeline import ImageError
     prompt = args.get("prompt") or ""
+    if prompt == PROMPT_LEFT_OUT:
+        return ToolResult("prompt is required: describe the change", is_error=True)
 
     async def make(count: int, seed=None, label: str = "") -> list[dict]:
         return await pipe.edit(prompt, datas, seed=seed, fast=bool(args.get("fast")), model=_picture_model(ctx),
@@ -604,9 +617,16 @@ GENERATE_TEXT = ("Generate images from a text prompt with the model chosen for t
                  "exact text in quotes. Takes 15-90 s per image.")
 # 0.80.0: chat 288's prompts never said what the hands do, and two of its three pictures had both round a mug, seated -
 # what klein draws worst. The picture models' own hint (pipeline.HINTS) did not reach a persona's description.
-POSES = ("Say plainly how you stand or sit and what each hand does. Bodies and hands come out best in simple poses: "
-         "standing or walking rather than sitting, a hand at your side, in a pocket or on a strap rather than both "
-         "hands round one thing.")
+# 0.80.2: and chat 292's lost her legs - once its prompts stopped saying "one leg exposed", a torso rose from a flat
+# duvet, picture after picture.
+POSES = ("Say plainly how you stand, sit or lie, where your legs are and what each hand does - in bed too: knees drawn "
+         "up under the duvet, or legs stretched out with their shape showing under it. Bodies and hands come out best "
+         "in simple poses: standing or walking rather than sitting, a hand at your side, in a pocket or on a strap "
+         "rather than both hands round one thing.")
+# 0.80.2: a body under a cover, and no word of what is under it. klein then draws a torso rising from a flat duvet.
+COVERED = re.compile(r"\b(?:covered|wrapped|draped|tucked|under|beneath)\b[^.]*?\b(duvet|blanket|quilt|comforter|"
+                     r"sheets?|covers)\b", re.I)
+LEGS = re.compile(r"\b(?:legs?|knees?|thighs?|feet|foot|hips?)\b", re.I)
 # 0.68.0 (Søren: FLUX.2 klein 9B "often ... makes 3 arms, or a hand is missing"): the assistant sees each picture it
 # makes, so it looks at the bodies and says what is wrong instead of handing a broken one over as it is.
 BODIES = ("\nBefore you answer, look at the people in them: arms, hands and legs - if one is extra, missing or "

@@ -1290,7 +1290,7 @@ class Agent:
         keep_from = rows[-12]["id"] if len(rows) > 12 else 0
         return [{"role": "system", "content": sp},
                 *C.to_model_messages(rows, run.id, keep_from, vision=vision(entry) or bool(cloud_model),
-                                     keep_results_from=C.results_from(rows, run.id))]
+                                     keep_results_from=C.results_from(rows, run.id), task=C.in_task_chat(chat))]
 
     async def _compact(self, chat_id: int, engine: Engine, run: Run, messages: list[dict]) -> list[dict]:
         """Fold everything before the latest user message into the chat's

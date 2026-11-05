@@ -445,7 +445,7 @@ def _context(hub, agent, chat: dict, project: dict | None) -> dict:
     keep_from = rows[-12]["id"] if len(rows) > 12 else 0
     messages = [{"role": "system", "content": system},
                 *C.to_model_messages(rows, None, keep_from, vision=vision(entry),
-                                     keep_results_from=C.results_from(rows, None))]
+                                     keep_results_from=C.results_from(rows, None), task=C.in_task_chat(chat))]
     tools = engine.tools()
     schemas = engine.schemas(tools)
     ctx = hub.catalog.context_per_request(entry["id"])

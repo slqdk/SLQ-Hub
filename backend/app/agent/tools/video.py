@@ -3,6 +3,7 @@ MP4 in the working folder, where the card under the answer plays it."""
 from __future__ import annotations
 
 from .. import media_check
+from ..context import PROMPT_LEFT_OUT
 from .audio import _progress, slug
 from .base import Tool, ToolContext, ToolResult, gpu_failure, obj, register
 from .images import _image_bytes, _note
@@ -62,7 +63,7 @@ def _reach(ctx: ToolContext, data: bytes) -> str:
 async def video_generate(ctx: ToolContext, args: dict) -> ToolResult:
     pipe = _pipe(ctx)
     prompt = str(args.get("prompt") or "").strip()
-    if not prompt:
+    if not prompt or prompt == PROMPT_LEFT_OUT:
         return ToolResult("prompt is required: what happens in the video", is_error=True)
     from ...video.pipeline import VideoError
     first, last = str(args.get("image") or "").strip(), str(args.get("last_image") or "").strip()

@@ -2219,6 +2219,28 @@ files afterwards.
   (`IN_TASK`), with or without a check; the owner reviews every post anyway.
   What the check still finds goes through the turn's `ctx.state` to
   post_draft and stays on the post (`check`), and its card says so.
+- **A task writes each picture prompt anew** (0.80.2). Søren: "her torso just
+  looms up from the bed". Gemma 4 copies the last prompt in a chat rather than
+  read what it is told: chat 292 has 14 near-identical prompts in a row, and
+  chat 288's newest still ended "1024x1280 portrait." on 0.80.1, with "never
+  write a size in the prompt" in both the system prompt and the tool. So
+  `context.to_model_messages(task=True)` (a chat with `persona_task`) replaces
+  the `prompt` of image_generate, image_edit and video_generate calls from
+  earlier runs with `PROMPT_LEFT_OUT`; the calls stay, so the pairs stay whole
+  and the save_as names show, and post_draft keeps its text, which is what
+  "say something new" needs. A model that copies the placeholder gets an
+  error. The export's context.json shows the same. An ordinary chat keeps
+  its prompts: there "the same again but in blue" must work.
+- **Legs** (0.80.2). The first prompts of chat 292 said "one leg exposed", "a hint
+  of her leg", and those pictures have legs. From run 9 they said only
+  "collarbones and cleavage": an upright torso on a flat duvet, at klein 9B base
+  ×0.6 and ×1.1 and at 9B (U) ×0.7, so neither the model nor the strength
+  decides it, and the prompt's "lying" was not drawn. 4:5 shows more of the
+  flat duvet than a square did. `POSES` now asks where the legs are, in bed
+  too, and `images._with_legs` adds "The shape of the hips and legs shows
+  clearly under the duvet." to a picture of the persona under a cover (`COVERED`)
+  whose prompt names no legs, knees, thighs, feet or hips (`LEGS`) - a model
+  cannot be relied on to read. The check's list has "a body that ends too soon".
 - **A picture with room for its hands** (0.80.0). `image_generate` takes the
   size from the call, else from the very end of the prompt (`WRITTEN_SIZE`;
   chat 288's Gemma 4 ended its prompts "... high quality. 1024x1280
@@ -3124,7 +3146,8 @@ done in the profile text". `app/personas/instagram.py` (a mixin of `Personas`).
   it off the Hub only (Instagram's API cannot delete a post).
 - **Checked before**: a caption of at most 2,200 characters (in UTF-16, as
   Instagram counts), 30 hashtags and 20 @names; a picture or video. A task's
-  prompt gives those limits; its pictures are 4:5 by themselves (0.80.0).
+  prompt gives those limits; its pictures are 4:5 by themselves (0.80.0), and
+  the prompts of earlier runs are not shown to it (0.80.2).
 - The review list on the Personas page has the drafts and the posts on their
   way to Instagram or that did not get there (`?status=review`).
 - httpx writes each request's address to the log, and Instagram's GET

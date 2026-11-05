@@ -71,7 +71,8 @@ ANSWER_KEPT = 1500                  # of a check's answer, in the turn's steps: 
 
 MISTAKES = """- People and animals: a part too many (a third arm, a second head, six fingers) or one missing where
   it should show (an arm that stops at the shoulder, a hand missing at the wrist); a limb that grows from the
-  wrong place, bends the wrong way or merges with another body or a thing; a melted, doubled or twisted face. A
+  wrong place, bends the wrong way or merges with another body or a thing; a melted, doubled or twisted face; a
+  body that ends too soon (a torso rising straight out of a flat duvet or sofa, with no room for hips and legs). A
   part hidden behind something or cut off by the edge of the picture is not missing.
 - Things: objects melted into each other, broken where they should be whole, or shapes that could not exist (a
   chair leg that ends in mid-air, two cups grown together).

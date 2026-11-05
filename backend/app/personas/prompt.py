@@ -50,8 +50,9 @@ things up, make the picture or the video - then hand it in with post_draft: the 
 posted, in your voice and language (hashtags if they fit), and the picture or video. Social media cut pictures to \
 their shape: a picture comes out portrait (4:5) by itself - give image_generate width and height only for another \
 shape, and never write a size in the prompt. Keep the text under 2,200 characters and 30 hashtags. {user} reviews \
-every post before it goes anywhere. Your earlier posts for this task are above: say something new each time. Once it \
-is handed in, answer with one short line."""
+every post before it goes anywhere. Your earlier posts for this task are above: say something new each time, and show \
+something new - another pose, another moment. Their picture prompts are left out: write each one from the start. Once \
+it is handed in, answer with one short line."""
 
 
 CONDENSE = """Condense the conversation above between {user} and {name} into the notes {name} goes on from without \

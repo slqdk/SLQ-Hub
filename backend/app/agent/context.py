@@ -149,14 +149,37 @@ def _file_ref(block: dict, fresh: bool) -> str:
             "read it with read_file]")
 
 
+# A task's chat holds every picture it ever made. Gemma 4 copies the last prompt word for word, whatever it is told:
+# chat 292 has 14 near-identical prompts in a row, and so 14 times the same pose, and chat 288's prompts still ended in
+# "1024x1280 portrait." with "never write a size in the prompt" in both the system prompt and the tool (0.80.2). So the
+# prompts of a task's earlier runs are not shown; the posts' own words are, to say something new.
+PROMPT_LEFT_OUT = "(left out: write a new prompt for every picture)"
+MEDIA_TOOLS = ("image_generate", "image_edit", "video_generate")
+
+
+def in_task_chat(chat: dict | None) -> bool:
+    return bool(((chat or {}).get("settings") or {}).get("persona_task"))
+
+
+def _prompt_left_out(arguments: str) -> str:
+    try:
+        args = json.loads(arguments)
+    except ValueError:
+        return arguments
+    if isinstance(args, dict) and args.get("prompt"):
+        return json.dumps({**args, "prompt": PROMPT_LEFT_OUT}, ensure_ascii=False)
+    return arguments
+
+
 def to_model_messages(rows: list[dict], current_run: str | None = None, keep_images_from: int = 0,
-                      vision: bool = True, keep_results_from: int = 0) -> list[dict]:
+                      vision: bool = True, keep_results_from: int = 0, task: bool = False) -> list[dict]:
     """Stored rows -> OpenAI-format messages. Images older than message id
     `keep_images_from` are replaced by a note (they cost ~1000 tokens each),
     and so is every image when the model has no vision; long tool output older
     than `keep_results_from` is shortened. A tool call without a stored result
     (the turn was stopped) gets a stand-in result, because every API - and the
-    chat templates - expect the pairs to be complete."""
+    chat templates - expect the pairs to be complete. task: a persona task's
+    chat, whose earlier runs' picture prompts are left out."""
     out: list[dict] = []
     pending_images: list[dict] = []
     open_calls: list[str] = []
@@ -248,6 +271,10 @@ def to_model_messages(rows: list[dict], current_run: str | None = None, keep_ima
             calls = [{"id": b["id"], "type": "function",      # as stored, unless the model server could not read it back
                       "function": {"name": b["name"], "arguments": valid_arguments(b.get("arguments"))}}
                      for b in blocks if b.get("type") == "tool_call"]
+            if task and r.get("run_id") != current_run:
+                for c in calls:
+                    if c["function"]["name"] in MEDIA_TOOLS:
+                        c["function"]["arguments"] = _prompt_left_out(c["function"]["arguments"])
             if calls:
                 msg["tool_calls"] = calls
                 open_calls.extend(c["id"] for c in calls)
