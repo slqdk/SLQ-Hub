@@ -87,6 +87,9 @@ FOLDERS = ("data", "models/llm", "models/comfy", "models/speech", "comfy/input",
            "data/logs/comfyui")   # ComfyUI's log (0.77.0), written by its container, read by the Hub
 KEEP = 3
 TIMEOUT = 300
+# 2026-11-05: the build and the backup, as root, wrote into the 5% of the disk ext4 keeps for root. The Hub, which is uid
+# 1000, had 0 bytes left: "sqlite3.OperationalError: disk I/O error" for the new version and for the old one put back.
+MIN_FREE = 6 * 1024 ** 3   # of the disk, for a user who is not root, when the Hub is stopped: a backup, and room to run
 POLL = float(os.environ.get("HUB_UPDATE_POLL", "3"))
 QUIET = 60                # seconds the Hub must have had nothing to do before an update stops it (0.26.0)
 CHECK = float(os.environ.get("HUB_UPDATE_CHECK", "5"))
@@ -528,6 +531,22 @@ def quiet_signals() -> None:
         signal.signal(s, signal.SIG_IGN)
 
 
+def free_space(path: Path | None = None) -> int:
+    """What a user who is not root can still write: the Hub. disk_usage leaves out the blocks kept for root."""
+    return shutil.disk_usage(path or HUB_ROOT).free
+
+
+def short_of_room() -> str:
+    """Why the Hub should not be stopped for an update, or nothing."""
+    try:
+        free = free_space()
+    except OSError:
+        return ""
+    if free >= MIN_FREE:
+        return ""
+    return f"only {human(free)} of the disk is left for the Hub, and an update needs {human(MIN_FREE)}."
+
+
 def undo_build(state: dict) -> None:
     """Back to before the fast-forward, as after a failed build: the old code, the old images as :latest."""
     git("reset", "--hard", state["old"])
@@ -861,6 +880,10 @@ def cmd_update(args) -> int:
     if failed.get("commit") == target and not args.force:
         raise Stop(f"{new_version} ({target[:10]}) did not start when it was tried at "
                    f"{failed.get('at')}, and nothing newer has been pushed. Try again with --force.")
+    room = short_of_room()
+    if room:
+        raise Stop(f"{room} Nothing was changed. See what takes it: sudo docker system df, and "
+                   f"sudo du -sh {HUB_ROOT}/*")
     if incoming:
         out.head(f"New: {old_version} -> {new_version}")
         for l in incoming[:30]:
@@ -983,6 +1006,12 @@ def _finish_update(args, state: dict) -> int:
             out.head(f"Waiting until nobody has used the Hub for {int(args.quiet)} s...")
             wait_until_free(args.quiet)
             out.ok("Nobody uses the Hub")
+        room = short_of_room()                         # the last moment the Hub can simply run on
+        if room:
+            quiet_signals()
+            undo_build(state)
+            run(["docker", "image", "prune", "-f"])    # what the build just took
+            raise Stop(f"{room} The code is back where it was; nothing was stopped. Make room and update again.")
     except Stop:
         raise
     except (Cancelled, KeyboardInterrupt) as exc:
@@ -1042,6 +1071,9 @@ def _finish_update(args, state: dict) -> int:
         return 0
 
     show_log()
+    room = short_of_room()
+    if room:
+        out.bad(room + " A Hub that cannot write to its disk does not start.")
     if not any(old_images.values()):
         raise Stop("the new version does not start, and there are no earlier images to go back to.")
     backup_dir().mkdir(parents=True, exist_ok=True)

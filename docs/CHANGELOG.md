@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.80.5 - 2026-11-05
+
+- `update.sh` now checks the disk. It refuses to start with under 6 GB free for
+  the Hub, and checks again after the build, before it stops anything. On
+  2026-11-05 a full disk stopped the Hub: the update could still write as root,
+  but the Hub could not, and neither the new version nor the old one started.
+
 ## 0.80.4 - 2026-11-05
 
 - Check pictures now counts hands with a small hand detector as well, so a

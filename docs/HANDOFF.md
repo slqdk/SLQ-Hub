@@ -4,11 +4,20 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## Next session - start here (written 2026-11-05, at 0.80.4)
+## Next session - start here (written 2026-11-05, at 0.80.5)
 
-The chat of 2026-10-31 to 2026-11-04 built 0.75.0-0.79.1, the one of 2026-11-04/05 0.80.0-0.80.4; each version's
+**The Hub was down from 13:03 to about 13:28 on 2026-11-05: the VM's disk was full, and nearly still is.** `df`: 617 G, 589
+used, 0 available (28 G was ext4's reserve for root). `docker system df`: images 99.56 GB (3.6 reclaimable), build cache 106.1 GB (10.7 reclaimable, the
+rest shared with images). The update to 0.80.4 built and backed up as root, then neither 0.80.4 nor 0.80.2 could open
+hub.db as uid 1000 ("disk I/O error" at `PRAGMA journal_mode=WAL`); the data was restored, the backup is
+2026-11-05_130245_0.80.2. `sudo tune2fs -m 1 /dev/mapper/ubuntu--vg-ubuntu--lv` (nothing deleted) gave 21 GB, and the Hub
+came back by itself on 0.80.2, healthy. NOT `docker builder prune -af`: it frees 10.7 GB and could force a rebuild of
+every image (up to 100 GB). Still open: what `du` says took the disk, and what to delete with him - 21 GB is thin (one
+picture model is 9 GB or more, a training several).
+
+The chat of 2026-10-31 to 2026-11-04 built 0.75.0-0.79.1, the one of 2026-11-04/05 0.80.0-0.80.5; each version's
 paragraph under "State" says what and why. On VM 222 the Hub ran 0.80.2 at 11:49 on 2026-11-05 and he called its bed
-picture "much better"; **0.80.3 and 0.80.4 are pushed, not yet installed** (`sudo bash /opt/slq-hub/update.sh`). How Søren works: Danish or English, short technical answers; he
+picture "much better"; **0.80.3-0.80.5 are pushed, not yet installed** (`sudo bash /opt/slq-hub/update.sh`, the disk first). How Søren works: Danish or English, short technical answers; he
 sends screenshots, chat exports (⋯ → Export for troubleshooting) and now ComfyUI's log (Settings → System → Logs →
 ComfyUI → Download) - ask for those before theorising.
 
@@ -42,7 +51,7 @@ finds them and fingers still come out wrong). Decided: no Facebook posting (he c
 
 Known flake: tests/test_training.py::test_the_trainer_stops_a_job fails now and then in a full run and passes alone.
 
-## State (0.80.4, 2026-11-05)
+## State (0.80.5, 2026-11-05)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -1228,6 +1237,10 @@ stage included, was not built. Tests: tests/test_media_check.py (a third hand fo
 detector's boxes in the close look, nothing to say changes nothing, the rule, each hand once; no model, no JSON, an
 abort, a hang; the real thing where MediaPipe and the model are, run here); each part failing without it (11 mutations).
 Not reviewed by a separate agent. NOT seen on the card: item 100.
+0.80.5, the outage above: tools/hub_update.py refuses to start with under 6 GB free for the Hub (`shutil.disk_usage` is
+f_bavail, without root's reserve), checks again after the build and the wait, before anything is stopped, and then
+puts the code back and prunes what the build left; a start that fails on a full disk says so. tests/test_hub_update.py;
+NOT seen on the VM. The Hub does not warn of a low disk itself: Settings shows the free space where models are chosen.
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
 host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU

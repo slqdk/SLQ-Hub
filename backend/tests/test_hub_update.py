@@ -28,6 +28,7 @@ def hu(tmp_path, monkeypatch):
             return subprocess.CompletedProcess(args, 1 if mod.changed else 0, "", "")
         return subprocess.CompletedProcess(args, 0, "", "")
     mod.changed = True
+    monkeypatch.setattr(mod, "free_space", lambda path=None: 10 ** 12)
     monkeypatch.setattr(mod, "git", git)
     monkeypatch.setattr(mod, "tag_images", lambda src, dst: mod.calls.append(("tag", src, dst)) or {"hub": "sha256:a"})
     return mod
@@ -410,6 +411,59 @@ def test_anything_going_wrong_before_the_install_puts_the_code_back(hu, monkeypa
     with pytest.raises(hu.Stop, match="RuntimeError while waiting for the Hub to be free: the clock went backwards"):
         hu.finish_update(args(), dict(STATE))
     assert undone(hu) and ("compose", "stop") not in hu.calls
+
+
+GB = 1024 ** 3
+
+
+def test_no_update_starts_on_a_full_disk(hu, monkeypatch):
+    """2026-11-05: 0 bytes left for the Hub, 28 GB for root. The build and the backup went fine, and neither version
+    could open its database."""
+    def git(*a):
+        hu.calls.append(("git", *a))
+        return subprocess.CompletedProcess(a, 0, {"rev-parse": "b" * 40, "log": "bbbbbbb New\n"}.get(a[0], ""), "")
+    monkeypatch.setattr(hu, "git", git)
+    monkeypatch.setattr(hu, "preflight", lambda *a, **k: "main")
+    monkeypatch.setattr(hu, "read_version_at", lambda ref="HEAD": "0.16.1")
+    monkeypatch.setattr(hu, "free_space", lambda path=None: 2 * GB)
+    with pytest.raises(hu.Stop, match=r"only 2.0 GB of the disk is left for the Hub.*Nothing was changed.*du -sh"):
+        hu.cmd_update(args())
+    assert not [c for c in hu.calls if c[:2] == ("git", "merge")] and ("compose", "build") not in hu.calls
+
+
+def test_a_build_that_takes_the_last_of_the_disk_stops_nothing(hu, monkeypatch):
+    fake_update(hu, monkeypatch)
+    monkeypatch.setattr(hu, "free_space", lambda path=None: GB if ("compose", "build") in hu.calls else 20 * GB)
+    pruned = []
+    real = hu.run
+    monkeypatch.setattr(hu, "run", lambda cmd, **k: pruned.append(cmd) or real(cmd, **k))
+    with pytest.raises(hu.Stop, match="left for the Hub.*The code is back where it was; nothing was stopped"):
+        hu.finish_update(args(now=True), dict(STATE))
+    assert undone(hu) and ("compose", "stop") not in hu.calls and not [c for c in hu.calls if c[0] == "backup"]
+    assert ["docker", "image", "prune", "-f"] in pruned
+
+
+def test_a_disk_that_cannot_be_read_stops_nothing_and_enough_goes_on(hu, monkeypatch):
+    assert hu.short_of_room() == ""
+    monkeypatch.setattr(hu, "free_space", lambda path=None: hu.MIN_FREE)
+    assert hu.short_of_room() == ""
+    monkeypatch.setattr(hu, "free_space", lambda path=None: hu.MIN_FREE - 1)
+    assert "left for the Hub" in hu.short_of_room()
+
+    def gone(path=None):
+        raise OSError("no such folder")
+    monkeypatch.setattr(hu, "free_space", gone)
+    assert hu.short_of_room() == ""
+
+
+def test_a_hub_that_does_not_start_on_a_full_disk_says_so(hu, monkeypatch, capsys):
+    fake_update(hu, monkeypatch)
+    monkeypatch.setattr(hu, "wait_healthy", lambda timeout: False)
+    monkeypatch.setattr(hu, "put_back", lambda *a: True)
+    monkeypatch.setattr(hu, "show_log", lambda: None)
+    monkeypatch.setattr(hu, "free_space", lambda path=None: GB if [c for c in hu.calls if c[0] == "backup"] else 20 * GB)
+    assert hu.finish_update(args(now=True), dict(STATE)) == 1
+    assert "A Hub that cannot write to its disk does not start." in capsys.readouterr().out
 
 
 def test_one_update_at_a_time_and_cancel(hu, monkeypatch):
