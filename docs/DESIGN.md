@@ -2212,6 +2212,28 @@ files afterwards.
   count: vision models tend to answer five for a hand with six (Vo et al.,
   "Vision Language Models are Biased", 2025), hence "what is drawn, not what
   a hand should have".
+- **The hands are counted** (0.80.4). Søren, of chat 298: "the 3rd hand here is
+  not good". The first export with the check's own words shows why it got
+  through: Gemma 4 answered `"arms": 2, "hands": 2`, gave two boxes, and the
+  close look was sent those two hands, both fine. A language model knows how
+  many hands a person has ("Vision Language Models are Biased"); a detector
+  does not. `agent/hand_count.py` runs MediaPipe's HandLandmarker on the CPU in
+  a process of its own (0.4-0.8 s, nothing on the card, and a native crash
+  cannot take the Hub down), and `media_check.count_hands` returns each hand
+  once: the detector can give a hand twice, the same side and a shared box,
+  while the overlapping hands of a grip are a left and a right
+  (`distinct_hands`). More than two hands for each figure the model counted
+  is a serious mistake (`judge_count`), unless the prompt has a mirror or a
+  reflection in it. Its boxes replace the model's for the close look. No
+  model file, a crash or a hang: None, and the check goes on as before. On the
+  26 pictures of his that had reached here: one with no hand found, six with one,
+  seventeen with two, and two with three - exactly the two that have a third
+  hand. So it finds that and no more: it says nothing about fingers, and a
+  hand it misses is not counted. In the image: `pip install --no-deps
+  mediapipe` (OpenCV and matplotlib are only for its drawing helpers, and
+  hand_count.py stubs them), its two dependencies in requirements.txt, libegl1
+  and libgles2, which its library links to, and hand_landmarker.task at a
+  fixed version, checked by sha256.
 - **A task's post is never held back by the check** (0.80.1). Chat 292's three
   tries were all flagged, the result said to "offer to make it again", and
   the persona did - to nobody, so no post came. In a task's chat

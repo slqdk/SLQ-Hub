@@ -26,6 +26,11 @@ fingers. So the first look also says where the hands are, and a picture it finds
 second request with each hand enlarged, finger by finger: about two tokens to a finger. The crops show under the
 picture.
 
+The hands are counted by a detector as well (0.80.4, Søren, of chat 298: "the 3rd hand here is not good"; hand_count.py):
+Gemma 4 had said two arms, two hands, and given two boxes, so the third hand never reached the close look either. A
+language model knows how many hands a person has. More than two a person is a serious mistake, and the detector's boxes
+go to the close look, Gemma 4's only when it has none.
+
 A task's post is never held back by the check (0.80.1, Søren, of chat 292: "I dont think the latest picture is wrong.
 But it was flagged wrong" - and no post was handed in: told to offer a new try, the persona asked, and nobody answers
 in a task). There the model is told to hand the post in, and the post says what the check found.
@@ -37,15 +42,19 @@ with a seed is checked but not made again - its seed makes the same picture. The
 leaves pictures, sound and video out: this is their check."""
 from __future__ import annotations
 
+import asyncio
 import io
 import json
 import logging
+import os
 import re
 import secrets
 import shlex
 import shutil
+import sys
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Awaitable, Callable
 
 from PIL import Image, ImageDraw, ImageOps
@@ -68,6 +77,11 @@ HAND_MIN = 0.2                      # a crop's side at least, of the picture's s
 HAND_ROOM = 1.35                    # a crop's side, of the hand's (or grip's) longer side
 HAND_NEAR = 0.25                    # hands this close (of the longer side) are one crop: a grip on a phone or a mug
 ANSWER_KEPT = 1500                  # of a check's answer, in the turn's steps: what it said, for the export
+HAND_MODEL = Path(os.environ.get("HUB_HAND_MODEL") or "/app/hand_landmarker.task")     # backend/Dockerfile
+HAND_COUNT = Path(__file__).with_name("hand_count.py")
+HAND_COUNT_SECONDS = 30
+HAND_TWICE = 0.5                    # one hand given twice: the same side, and this much of the smaller box shared
+MIRROR = re.compile(r"\b(?:mirrors?|reflect\w*|spejl\w*)\b", re.I)    # a reflection shows the same hands again
 
 MISTAKES = """- People and animals: a part too many (a third arm, a second head, six fingers) or one missing where
   it should show (an arm that stops at the shoulder, a hand missing at the wrist); a limb that grows from the
@@ -427,15 +441,78 @@ def _step(ctx, what: str, verdict: Verdict, t0: float, answer: str = "") -> None
                                  "answer": (answer or "")[:ANSWER_KEPT]})
 
 
+def _shared(a: list, b: list) -> float:
+    """How much of the smaller of two boxes (left, top, right, bottom) lies in the other."""
+    wide, high = min(a[2], b[2]) - max(a[0], b[0]), min(a[3], b[3]) - max(a[1], b[1])
+    smaller = min((a[2] - a[0]) * (a[3] - a[1]), (b[2] - b[0]) * (b[3] - b[1]))
+    return max(0, wide) * max(0, high) / smaller if smaller > 0 else 0.0
+
+
+def distinct_hands(found: list) -> list[dict]:
+    """Each hand once. The detector can give a hand twice; the two hands of a grip overlap as much, but are a left and
+    a right (chat 292's picture with a third hand was two of them over a phone, and one on her thigh)."""
+    out: list[dict] = []
+    for hand in found if isinstance(found, list) else []:
+        box = hand.get("box") if isinstance(hand, dict) else None
+        if not isinstance(box, list) or len(box) != 4 or not all(isinstance(v, (int, float)) for v in box):
+            continue
+        if not any(h["side"] == hand.get("side") and _shared(h["box"], box) >= HAND_TWICE for h in out):
+            out.append({"box": box, "side": hand.get("side")})
+    return out
+
+
+async def count_hands(sha: str) -> list[dict] | None:
+    """The hands in a picture, by a process of its own (hand_count.py). None: it could not say, and the check goes on
+    without it."""
+    if not HAND_MODEL.exists():
+        return None
+    try:
+        proc = await asyncio.create_subprocess_exec(sys.executable, "-I", str(HAND_COUNT), str(blobs.path(sha)),
+                                                    str(HAND_MODEL), stdout=asyncio.subprocess.PIPE,
+                                                    stderr=asyncio.subprocess.DEVNULL)
+    except OSError as exc:
+        log.warning("the hand count did not start: %s", exc)
+        return None
+    try:
+        out, _ = await asyncio.wait_for(proc.communicate(), HAND_COUNT_SECONDS)
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.wait()
+        log.warning("the hand count took too long")
+        return None
+    lines = out.decode("utf-8", "replace").strip().splitlines()      # a native library can write to stdout too
+    try:
+        return distinct_hands(json.loads(lines[-1]))
+    except (IndexError, ValueError):
+        log.warning("the hand count failed (exit code %s)", proc.returncode)
+        return None
+
+
+def judge_count(verdict: Verdict, found: list[dict], prompt: str) -> None:
+    """The detector's hands against the people the model counted: more than two a person is a serious mistake, unless
+    the picture has a mirror in it. Its boxes are better than a model's: they go to the close look."""
+    if found:
+        verdict.hands = [tuple(h["box"]) for h in found][:HANDS_AT]
+    people = max(1, verdict.figures)
+    if len(found) > 2 * people and not MIRROR.search(prompt):
+        who = "one person" if people == 1 else f"{people} people"
+        verdict.serious = [f"{len(found)} hands on {who}", *verdict.serious][:8]
+        verdict.state = "mistakes"
+
+
 async def look(ctx, sha: str, prompt: str, edit: bool = False, loras: list[str] | None = None) -> Verdict:
     """One picture checked."""
     from ..llm.messages import image_part
     t0 = time.monotonic()
+    found = await count_hands(sha)
     text = PICTURE.format(source=SOURCE[edit], prompt=prompt.strip()[:4000], mistakes=MISTAKES, hands_at=HANDS_AT,
                           loras=LORAS.format(names=", ".join(loras)) if loras else "")
     answer = await ask(ctx, [{"type": "text", "text": text}, image_part(blobs.read(sha))], PICTURE_SCHEMA)
     verdict = parse(answer)
     _step(ctx, "picture", verdict, t0, answer)
+    if found is not None:
+        judge_count(verdict, found, prompt)
+        _step(ctx, "hand count", verdict, t0, json.dumps(found))
     if verdict.hands and not verdict.bad:
         try:
             await look_closer(ctx, sha, prompt, verdict)

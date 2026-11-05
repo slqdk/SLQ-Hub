@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.80.4 - 2026-11-05
+
+- Check pictures now counts hands with a small hand detector as well, so a
+  third hand is caught even when the chat model says there are two. More than
+  two hands a person is a serious mistake, and the picture is made again. A
+  picture with a mirror in it is left out of the count.
+- The close look now gets every hand the detector found.
+- The Hub's image grows by about 150 MB (MediaPipe, on the CPU), so this update
+  takes a little longer.
+
 ## 0.80.3 - 2026-11-05
 
 - A task's pictures now keep out what a post may not show. The chat model wrote

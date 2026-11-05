@@ -5,11 +5,15 @@ it right, then suggest improvements to my prompt." The fake model answers the ch
 the fake ComfyUI gives one picture per queued prompt (fakes.comfy["pictures"])."""
 from __future__ import annotations
 
+import importlib.util
 import io
 import json
 import re
+import subprocess
+import sys
 from types import SimpleNamespace
 
+import pytest
 from PIL import Image
 
 from app.agent import media_check as M
@@ -604,6 +608,125 @@ def test_what_the_check_found_goes_to_the_post():
     M.for_post(ctx, ["c.mp4"], M.Outcome(None, {"state": "mistakes", "mistakes": ["five legs"]}, ""))
     M.for_post(ctx, ["d.png"], None)                                    # not checked
     assert ctx.state["checked"] == {"a.png": ["a third arm"], "b.png": [], "c.mp4": ["five legs"]}
+
+
+# ---------------------------------------------------------------- the hand count (0.80.4)
+
+THREE = [{"box": [0.0064, 0.7637, 0.1565, 0.8195], "side": "R"}, {"box": [0.363, 0.787, 0.4721, 0.9111], "side": "L"},
+         {"box": [0.3957, 0.669, 0.5524, 0.7402], "side": "L"}]              # chat 298, as the detector gave them
+TWO = THREE[1:]
+
+
+def detector(monkeypatch, *answers) -> list:
+    """What the hand count says, picture by picture (the last again and again)."""
+    asked: list = []
+
+    async def count(sha):
+        asked.append(sha)
+        return answers[min(len(asked), len(answers)) - 1]
+    monkeypatch.setattr(M, "count_hands", count)
+    return asked
+
+
+async def test_a_third_hand_is_found_by_counting(signed_in, app, fakes, monkeypatch):
+    """Søren, of chat 298: "the 3rd hand here is not good". Gemma 4 said two arms and two hands, with two boxes. A language
+    model knows how many hands a person has; a detector does not."""
+    extra(app)
+    detector(monkeypatch, THREE, TWO)
+    c, _, res, seen = await draw(app, signed_in, fakes, make("a woman on a bed"),
+                                 [with_hands([644, 397, 712, 545], [733, 0, 806, 187]), with_hands(), looked(hand(5))],
+                                 [spotted(), spotted()])
+    assert len(fakes.comfy["prompts"]) == 2                             # made again
+    checked = res["display"]["checked"]
+    assert checked["rejected"][0]["mistakes"] == ["3 hands on one person"]
+    assert checked["pictures"][0]["state"] == "ok" and checked["pictures"][0]["try"] == 2
+    close = [b for b in seen["checks"] if HANDS_MARK in last_user(b)]
+    assert len(close) == 1                                              # none for the try already found wrong
+    steps = [s for s in chats.runs_for_chat(c["id"])[-1]["steps"] if s["type"] == "check"]
+    assert [(s["what"], s["verdict"]) for s in steps] == [
+        ("picture", "ok"), ("hand count", "mistakes"), ("picture", "ok"), ("hand count", "ok"), ("hands", "ok")]
+    assert json.loads(steps[1]["answer"]) == THREE                      # what it found, for the export
+
+
+async def test_the_close_look_gets_the_hands_the_detector_found(signed_in, app, fakes, monkeypatch):
+    extra(app)
+    detector(monkeypatch, [{"box": [0.6, 0.7, 0.7, 0.8], "side": "L"}])
+    _, _, _, seen = await draw(app, signed_in, fakes, make("a woman waving"),
+                               [with_hands([0, 0, 50, 50]), looked(hand(5))], [spotted()])     # a wrong box of its own
+    crop = picture_of(seen["checks"][1]["messages"][0]["content"][2])
+    assert crop.getpixel((M.HAND_SIDE // 2, M.HAND_SIDE // 2))[0] > 150      # the red square, where the detector said
+
+
+async def test_a_detector_with_nothing_to_say_changes_nothing(signed_in, app, fakes, monkeypatch):
+    extra(app)
+    detector(monkeypatch, None)
+    _, _, res, seen = await draw(app, signed_in, fakes, make("a woman waving"),
+                                 [with_hands([600, 700, 700, 800]), looked(hand(5))], [spotted()])
+    assert len(seen["checks"]) == 2 and res["display"]["checked"]["pictures"][0]["state"] == "ok"
+    detector(monkeypatch, [])                                           # it saw none: the model's boxes stay
+    v = M.Verdict("ok", figures=1, hands=[(0.1, 0.1, 0.2, 0.2)])
+    M.judge_count(v, [], "a woman")
+    assert v.hands == [(0.1, 0.1, 0.2, 0.2)] and v.state == "ok"
+
+
+def test_how_many_hands_are_too_many():
+    def judged(found, figures=1, prompt="a woman on a bed"):
+        v = M.Verdict("ok", figures=figures)
+        M.judge_count(v, found, prompt)
+        return v.state, v.serious
+
+    assert judged(TWO) == ("ok", [])
+    assert judged(THREE) == ("mistakes", ["3 hands on one person"])
+    assert judged(THREE, figures=2) == ("ok", [])
+    assert judged([*THREE, *THREE[:2]], figures=2) == ("mistakes", ["5 hands on 2 people"])
+    assert judged(THREE, figures=0) == ("mistakes", ["3 hands on one person"])     # no clear answer from the model
+    assert judged(THREE, prompt="a woman in front of the mirror") == ("ok", [])
+    assert judged(THREE, prompt="her reflection in a window") == ("ok", [])
+
+
+def test_each_hand_counts_once():
+    grip = [{"box": [0.278, 0.5261, 0.4186, 0.6534], "side": "L"}, {"box": [0.2479, 0.5173, 0.3239, 0.615], "side": "R"}]
+    assert M.distinct_hands(grip) == grip                               # chat 292: overlapping, a left and a right
+    twice = [{"box": [0.2, 0.51, 0.28, 0.62], "side": "R"}, {"box": [0.23, 0.52, 0.3, 0.62], "side": "R"}]
+    assert M.distinct_hands(twice) == twice[:1]                         # one hand, given twice
+    assert M.distinct_hands(THREE) == THREE
+    assert M.distinct_hands(["hand", {"box": "here"}, {"box": [1, 2]}, {"box": [0, 0, 0, 0], "side": "L"}]) == [
+        {"box": [0, 0, 0, 0], "side": "L"}]
+    assert M.distinct_hands(None) == []
+
+
+async def test_the_count_says_nothing_when_it_cannot(app, tmp_path, monkeypatch):
+    sha = blobs.store(spotted())
+
+    async def run(script: str) -> list | None:
+        count = tmp_path / "count.py"
+        count.write_text(script)
+        monkeypatch.setattr(M, "HAND_COUNT", count)
+        return await M.count_hands(sha)
+
+    monkeypatch.setattr(M, "HAND_MODEL", tmp_path / "nothing.task")
+    assert await run("print('[]')") is None                             # no model: as before 0.80.4
+    model = tmp_path / "hand.task"
+    model.write_bytes(b"")
+    monkeypatch.setattr(M, "HAND_MODEL", model)
+    assert await run("print('[]')") == []
+    assert await run("import sys; print(sys.argv[1], sys.argv[2])") is None     # no JSON
+    assert await run("import os; os.abort()") is None                   # a library that dies
+    assert await run("""print('noise'); print('[{"box": [0, 0, 1, 1], "side": "L"}]')""") == [
+        {"box": [0, 0, 1, 1], "side": "L"}]
+    monkeypatch.setattr(M, "HAND_COUNT_SECONDS", 0.2)
+    assert await run("import time; time.sleep(30)") is None             # hung: killed
+
+
+def test_the_hand_count_itself(tmp_path, monkeypatch):
+    """Needs MediaPipe and the model: in the Hub's image, and wherever HUB_HAND_MODEL points at it."""
+    if importlib.util.find_spec("mediapipe") is None or not M.HAND_MODEL.exists():
+        pytest.skip("no MediaPipe or no hand model")
+    picture = tmp_path / "blue.png"
+    picture.write_bytes(spotted())
+    out = subprocess.run([sys.executable, "-I", str(M.HAND_COUNT), str(picture), str(M.HAND_MODEL)], capture_output=True,
+                         text=True, timeout=60, check=True)
+    assert json.loads(out.stdout.strip().splitlines()[-1]) == []
 
 
 def test_the_check_knows_a_body_can_end_too_soon():

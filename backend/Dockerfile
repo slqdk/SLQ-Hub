@@ -12,11 +12,17 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
-RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates tini \
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates tini libegl1 libgles2 \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY backend/requirements.txt /app/requirements.txt
 RUN pip install -r /app/requirements.txt
+# The picture check's hand count (app/agent/hand_count.py), on the CPU: MediaPipe without the OpenCV and matplotlib it
+# only draws with, and its hand model at a fixed version. libegl1 and libgles2 are what its library links to.
+RUN pip install --no-deps mediapipe==1.2.2 \
+    && curl -fsSL -o /app/hand_landmarker.task \
+       https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task \
+    && echo "fbc2a30080c3c557093b5ddfc334698132eb341044ccee322ccf8bcf3607cde1  /app/hand_landmarker.task" | sha256sum -c -
 COPY backend/app /app/app
 COPY VERSION /app/VERSION
 COPY --from=web /web/dist /app/static
