@@ -54,6 +54,7 @@ PROTOCOL = "2025-06-18"
 RETRY_AFTER_S = 60
 NAME_RE = re.compile(r"[^A-Za-z0-9_-]+")
 FILE_FORMAT = "slq-hub-file"            # an argument naming files in the working folder (0.36.0)
+META_LIST, META_CALL = "mcp_tools", "mcp_call"   # 0.85.0: the servers' tools on demand, in two tools
 FILE_META = "slq-hub/files"             # where their content goes: params._meta[FILE_META]
 MAX_FILE = 20 * 1024 * 1024
 MAX_FILES = 50 * 1024 * 1024            # all of one call's files together
@@ -274,6 +275,18 @@ class SandboxConnection:
 
 def slug(s: str) -> str:
     return NAME_RE.sub("_", s or "").strip("_") or "x"
+
+
+def _text(spec: dict) -> str:
+    d = spec.get("description") or spec.get("title") or spec.get("name") or ""
+    return d.strip() if isinstance(d, str) else ""
+
+
+def _gist(text: str, limit: int = 200) -> str:
+    """A description's first sentence, short."""
+    flat = " ".join(text.strip().split("\n\n", 1)[0].split())
+    first = re.split(r"(?<=[.!?])\s", flat, maxsplit=1)[0]
+    return first if len(first) <= limit else first[:limit - 3].rstrip() + "..."
 
 
 def file_params(schema) -> list[tuple[str, bool]]:
@@ -546,6 +559,128 @@ class McpManager:
                                 needs_approval=not s.cfg.get("trusted"), group="mcp", only_looks=_only_looks(t),
                                 sends_files=tuple(files)))
         return out
+
+    # ------------------------------------------------ on demand (0.85.0)
+
+    def meta_tools(self, review: bool = False) -> list[Tool]:
+        """Two tools in place of every MCP tool's schema in every request (0.85.0). Søren's turn of 2026-11-25 was
+        48,158 tokens before it had begun, for a model that takes 32,768; the Hub's own part is about 7,000 - the
+        rest was the MCP servers' tools (with them off, it fit). mcp_tools lists the servers' tools and describes one with its arguments; mcp_call calls
+        it, and the loop unwraps that call into the tool itself (Engine._unwrap_mcp): its approval, its card, its
+        "Always" are the tool's own, as before. Ten servers cost what one does, and the request stays the same from
+        turn to turn, so the model server's prompt cache holds. review: those the independent review may use."""
+        servers: dict[str, int] = {}
+        for t in self.tools(review):
+            name = self._server_of(t.name)
+            servers[name] = servers.get(name, 0) + 1
+        if not servers:
+            return []
+        listed = ", ".join(f"{n} ({k} tool{'s' if k != 1 else ''})" for n, k in servers.items())
+
+        async def describe(ctx: ToolContext, args: dict) -> ToolResult:
+            names = set(getattr(ctx.engine, "mcp_hidden", None) or {t.name for t in self.tools(review)})
+            text, ok, full = self.describe(names, str(args.get("server") or ""), str(args.get("tool") or ""))
+            if full and ctx.engine is not None:          # its schema is in the turn: a failed call needs no copy
+                ctx.engine.mcp_described.add(full)
+            return ToolResult(text, is_error=not ok)
+
+        async def unwrapped(ctx: ToolContext, args: dict) -> ToolResult:      # the loop runs the tool itself
+            return ToolResult("mcp_call is run by the Hub: call it again.", is_error=True)
+
+        return [
+            Tool(META_LIST,
+                 f"The tools of the MCP servers connected to the Hub - {listed[:600]}. With no arguments: every "
+                 "server's tools by name; with server: its tools, a line each; with server and tool: that tool's "
+                 "description and its arguments (a JSON schema). Then call it with mcp_call.",
+                 {"type": "object", "properties": {
+                     "server": {"type": "string", "description": "A server's name: its tools, a line each."},
+                     "tool": {"type": "string", "description": "With server: that tool's description and arguments."}}},
+                 describe, read_only=True, group="mcp"),
+            Tool(META_CALL,
+                 "Call a tool of an MCP server - server and tool as mcp_tools names them, arguments as its schema in "
+                 "mcp_tools says. A tool of a server the user has not marked as trusted asks the user first.",
+                 {"type": "object", "properties": {
+                     "server": {"type": "string", "description": "The server's name."},
+                     "tool": {"type": "string", "description": "The tool's name on that server."},
+                     "arguments": {"type": "object", "description": "The tool's arguments, a JSON object."}},
+                  "required": ["server", "tool"]},
+                 unwrapped, group="mcp"),
+        ]
+
+    def _server_of(self, full: str) -> str:
+        """The server's name for a tool's agent name (mcp__<server>__<tool>)."""
+        for s in self.servers.values():
+            if full.startswith(f"mcp__{slug(s.name)}__"):
+                return s.name
+        return full.split("__")[1] if full.count("__") >= 2 else full
+
+    def _offered(self, names: set[str]) -> list[tuple["McpServer", dict, str]]:
+        """(server, its tool's spec, the agent name) of the tools among `names`, in the servers' order."""
+        out = []
+        for s in self.servers.values():
+            if s.status != "ready" or not s.cfg.get("enabled", True):
+                continue
+            for spec in s.tools:
+                full = self.tool_name(s.name, spec["name"])
+                if full in names:
+                    out.append((s, spec, full))
+        return out
+
+    def find(self, names: set[str], server: str, tool: str) -> str | None:
+        """The agent name of `tool` on `server` among `names` (names as mcp_tools gives them, or close to it)."""
+        if tool in names:                  # the tool's agent name, as before 0.85.0
+            return tool
+        full = self.tool_name(server or "", tool or "")
+        if full in names:
+            return full
+        want_s, want_t = slug(server).lower() if server else "", slug(tool or "").lower()
+        hits = [f for s, spec, f in self._offered(names)
+                if slug(spec["name"]).lower() == want_t and (not want_s or slug(s.name).lower() == want_s)]
+        return hits[0] if len(hits) == 1 else None      # no server: the tool's name alone, when only one has it
+
+    def describe(self, names: set[str], server: str = "", tool: str = "") -> tuple[str, bool, str | None]:
+        """mcp_tools' answer: every server's tools by name, one server's a line each, or one tool's description and
+        arguments - of the tools among `names` (what this turn may use). (The text, whether what it asked for is
+        there - a server or tool that is not gets the names that are -, the tool it describes.)"""
+        rows = self._offered(names)
+        if not rows:
+            return "No MCP server's tools can be used now.", False, None
+        servers = list(dict.fromkeys(s.name for s, _, _ in rows))
+        if not server:
+            out = ["The MCP servers' tools (mcp_tools with server for a line each, with server and tool for its "
+                   "arguments; then mcp_call):"]
+            for name in servers:
+                tools = [spec["name"] for s, spec, _ in rows if s.name == name]
+                out.append(f"- {name}: " + ", ".join(tools))
+            return "\n".join(out)[:12000], True, None
+        mine = [r for r in rows if slug(r[0].name).lower() == slug(server).lower()]
+        if not mine:
+            return f"There is no MCP server {server!r} here. The servers: {', '.join(servers)}.", False, None
+        name = mine[0][0].name
+        asks = "" if mine[0][0].cfg.get("trusted") else " (each call asks the user first)"
+        if not tool:
+            lines = [f"The tools of {name}{asks} - mcp_tools with server and tool gives one's arguments:"]
+            for _, spec, _ in mine:
+                lines.append(f"- {spec['name']}: {_gist(_text(spec))}")
+            return "\n".join(lines)[:12000], True, None
+        hit = next((r for r in mine if slug(r[1]["name"]).lower() == slug(tool).lower()), None)
+        if hit is None:
+            return (f"{name} has no tool {tool!r}. Its tools: {', '.join(spec['name'] for _, spec, _ in mine)}.",
+                    False, None)
+        _, spec, full = hit
+        files = [n for n, _ in file_params(spec.get("inputSchema"))]
+        note = (f"\nGive {', '.join(files)} as paths in your working folder: the Hub sends those files' content to "
+                "the server." if files else "")
+        schema = json.dumps(_clean_schema(spec.get("inputSchema")), ensure_ascii=False)
+        return (f"{spec['name']} on {name}{asks}:\n{_text(spec)[:4000]}{note}\n"
+                f"Its arguments (a JSON schema): {schema[:8000]}\n"
+                f"Call it: mcp_call with server \"{name}\", tool \"{spec['name']}\" and arguments."), True, full
+
+    def schema_of(self, full: str) -> str:
+        """The arguments of a tool, by its agent name - for a call that went wrong."""
+        for s, spec, f in self._offered({full}):
+            return json.dumps(_clean_schema(spec.get("inputSchema")), ensure_ascii=False)[:4000]
+        return ""
 
     async def _call(self, ctx: ToolContext, server: McpServer, tool: str, args: dict) -> ToolResult:
         timeout = float(server.cfg.get("timeout_s") or 300)

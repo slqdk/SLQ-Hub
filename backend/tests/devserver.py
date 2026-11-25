@@ -368,7 +368,8 @@ def responder(body: dict) -> dict:
                 "path": "src/Main.st", "content": "PROGRAM Main\nVAR\n    count : INT;\nEND_VAR\ncount := count + 1;\n"
                                                   "END_PROGRAM\n"}}]}
         if tools_done == 1:
-            return {"tool_calls": [{"name": "mcp__calc__build", "arguments": {"files": ["src/Main.st"], "target": "plc"}}]}
+            return {"tool_calls": [{"name": "mcp_call", "arguments": {"server": "calc", "tool": "build", "arguments": {
+                "files": ["src/Main.st"], "target": "plc"}}}]}
         return {"content": "The build server got **src/Main.st**."}
     if "work steps" in low:          # 0.46.0: thoughts and calls as a working turn has them - one edit misses
         md = ("---\nname: picture-animals\ndescription: A picture with animals.\n---\n\n# Questions\n\n"
@@ -509,9 +510,12 @@ def responder(body: dict) -> dict:
                                {"name": "web_search", "arguments": {"query": "tesla model 3 kwh per 100 km"}}]}
     if "slow" in low:
         return {"content": "That took a while, but here it is.", "delay": 5}
-    if "add numbers" in low:
+    if "add numbers" in low:                           # 0.85.0: what the servers have, then the call
         if tools_done == 0:
-            return {"tool_calls": [{"name": "mcp__calc__add", "arguments": {"a": 2, "b": 3}}]}
+            return {"tool_calls": [{"name": "mcp_tools", "arguments": {"server": "calc"}}]}
+        if tools_done == 1:
+            return {"tool_calls": [{"name": "mcp_call", "arguments": {"server": "calc", "tool": "add",
+                                                                      "arguments": {"a": 2, "b": 3}}}]}
         return {"content": "2 + 3 = 5, says the calculator."}
     if "You are a subagent" in msgs[0]["content"]:
         if tools_done == 0:

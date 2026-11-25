@@ -556,7 +556,9 @@ async def test_mcp_over_http_asks_first_and_can_be_always_allowed(signed_in, app
     status = (await signed_in.post("/hub/api/mcp/reload")).json()
     assert status[0]["status"] == "ready"
 
-    fakes.llama["replies"] = [{"tool_calls": [{"name": "mcp__calc__add", "arguments": {"a": 2, "b": 3}}]},
+    # 0.85.0: mcp_call names the tool; from there on it is that tool's call - its card, its question, its "Always".
+    call = {"server": "calc", "tool": "add", "arguments": {"a": 2, "b": 3}}
+    fakes.llama["replies"] = [{"tool_calls": [{"name": "mcp_call", "arguments": call}]},
                               {"content": "2 + 3 = 5"}, {"content": "Sum"}]
     c = await new_chat(signed_in)
     run_id = await say(signed_in, c["id"], "add 2 and 3")
@@ -564,19 +566,114 @@ async def test_mcp_over_http_asks_first_and_can_be_always_allowed(signed_in, app
     await until(lambda: any(e["type"] == "approval_needed" for e in run.events))
     ask = next(e for e in run.events if e["type"] == "approval_needed")["data"]
     assert ask["tool"] == "mcp__calc__add" and ask["arguments"] == {"a": 2, "b": 3} and "sends" not in ask
+    shown = next(e for e in run.events if e["type"] == "tool_call")["data"]
+    assert (shown["name"], shown["arguments"]) == ("mcp__calc__add", {"a": 2, "b": 3})
     r = await signed_in.post(f"/hub/api/runs/{run_id}/approve", json={"call_id": ask["id"], "decision": "always"})
     assert r.status_code == 200
     await finish(app, run_id)
     tool_msg = [m for m in chats.messages(c["id"]) if m["role"] == "tool"][0]["content"][0]
     assert tool_msg["text"] == "5" and not tool_msg["is_error"]
-    schema = next(t for t in fakes.llama["requests"][0]["tools"] if t["function"]["name"] == "mcp__calc__add")
-    assert "$schema" not in schema["function"]["parameters"]
+    # The request has two tools for the servers in place of their own: a server costs the same, whatever it has.
+    tools = {t["function"]["name"]: t["function"] for t in fakes.llama["requests"][0]["tools"]}
+    assert {"mcp_tools", "mcp_call"} <= set(tools) and not [n for n in tools if n.startswith("mcp__")]
+    assert "calc (3 tools)" in tools["mcp_tools"]["description"]
+    assert tools["mcp_call"]["parameters"]["required"] == ["server", "tool"]
     assert [p["tool"] for p in (await signed_in.get("/hub/api/tool-permissions")).json()] == ["mcp__calc__add"]
-    # Second time: no question.
+    # Second time: no question. And a tool called by its own name, as before 0.85.0, still runs.
     fakes.llama["requests"].clear()
     fakes.llama["replies"] = [{"tool_calls": [{"name": "mcp__calc__add", "arguments": {"a": 1, "b": 1}}]}, {"content": "2"}]
     run = await finish(app, await say(signed_in, c["id"], "and 1+1"))
     assert run.status == "done" and not any(e["type"] == "approval_needed" for e in run.events)
+    assert [m for m in chats.messages(c["id"]) if m["role"] == "tool"][-1]["content"][0]["text"] == "2"
+
+
+async def test_mcp_tools_tells_the_model_what_the_servers_have(signed_in, app, fakes):
+    """0.85.0: mcp_tools gives every server's tools by name, one server's a line each, one tool's description and
+    arguments; a name that is not there gets those that are. mcp_call takes its arguments as an object, as JSON
+    text, or beside server and tool, and the first failed call of a tool brings its arguments' schema."""
+    await signed_in.put("/hub/api/settings", json={"section": "mcp", "values": {"servers": [
+        {"name": "calc", "transport": "http", "url": "http://mcp.test/mcp", "enabled": True, "trusted": True}]}})
+    await signed_in.post("/hub/api/mcp/reload")
+    c = await new_chat(signed_in)
+    calls = [{"name": "mcp_tools", "arguments": {}},
+             {"name": "mcp_tools", "arguments": {"server": "calc"}},
+             {"name": "mcp_tools", "arguments": {"server": "Calc", "tool": "build"}},
+             {"name": "mcp_tools", "arguments": {"server": "nope"}},
+             {"name": "mcp_call", "arguments": {"server": "calc", "tool": "nope"}},
+             {"name": "mcp_call", "arguments": {"server": "calc", "tool": "add", "arguments": "{\"a\": 1, \"b\": 2}"}},
+             {"name": "mcp_call", "arguments": {"server": "calc", "tool": "add", "a": 4, "b": 5}},
+             {"name": "mcp_call", "arguments": {"tool": "add", "arguments": {"a": 1, "b": 1}}},
+             {"name": "mcp_call", "arguments": {"server": "calc", "tool": "add", "arguments": "[1, 2]"}},
+             {"name": "mcp_call", "arguments": {"server": "calc", "tool": "build", "arguments": {"files": ["x.st"]}}},
+             {"name": "mcp_call", "arguments": {"server": "calc", "tool": "build", "arguments": {"files": ["y.st"]}}}]
+    fakes.llama["replies"] = [{"tool_calls": [x]} for x in calls] + [{"content": "done"}, {"content": "T"}]
+    run = await finish(app, await say(signed_in, c["id"], "what can the servers do"))
+    assert run.status == "done"
+    got = [(m["content"][0]["text"], m["content"][0]["is_error"]) for m in chats.messages(c["id"]) if m["role"] == "tool"]
+    assert got[0] == ("The MCP servers' tools (mcp_tools with server for a line each, with server and tool for its "
+                      "arguments; then mcp_call):\n- calc: add, picture, build", False)
+    assert got[1][0].splitlines()[1:] == ["- add: Add two numbers", "- picture: Return a small picture",
+                                          "- build: Build the files"] and "asks the user" not in got[1][0]
+    text = got[2][0]
+    assert text.startswith("build on calc:\nBuild the files\nGive files as paths in your working folder") and not got[2][1]
+    assert '"format": "slq-hub-file"' in text and "$schema" not in text
+    assert got[3] == ("There is no MCP server 'nope' here. The servers: calc.", True)
+    assert got[4] == ("calc has no tool 'nope'. Its tools: add, picture, build.", True)
+    assert [g[0] for g in got[5:8]] == ["3", "9", "2"]           # JSON text, beside, the one server with that tool
+    assert got[8] == ("arguments must be a JSON object, as the tool's schema in mcp_tools says.", True)
+    assert got[9][1] and "x.st: there is no such file" in got[9][0] and "Its arguments" not in got[9][0]  # had it
+    adds = [m for m in fakes.mcp["calls"] if m.get("method") == "tools/call" and m["params"]["name"] == "add"]
+    assert [m["params"]["arguments"] for m in adds] == [{"a": 1, "b": 2}, {"a": 4, "b": 5}, {"a": 1, "b": 1}]
+    # The schema comes with the first failure of a tool the model has not had described this turn, once.
+    fakes.llama["requests"].clear()
+    fakes.llama["replies"] = [{"tool_calls": [calls[9]]}, {"tool_calls": [calls[10]]}, {"content": "no"}]
+    await finish(app, await say(signed_in, c["id"], "build again"))
+    last = [m["content"][0]["text"] for m in chats.messages(c["id"]) if m["role"] == "tool"][-2:]
+    assert "(Its arguments, a JSON schema: {" in last[0] and "Its arguments" not in last[1]
+    mcp = app.state.hub.extras["mcp"]
+    names = {t.name for t in mcp.tools()}
+    assert mcp.find(names, "", "mcp__calc__add") == "mcp__calc__add" and mcp.find(names, "x", "add") is None
+    add = mcp.describe(names, "calc", "add")[0]                   # its schema as the model gets it: no "$schema"
+    assert '"required": ["a", "b"]' in add and "$schema" not in add and "json-schema.org" not in add
+    # Two servers with a tool of the same name: without a server it is not guessed, and each is listed.
+    await signed_in.put("/hub/api/settings", json={"section": "mcp", "values": {"servers": [
+        {"name": n, "transport": "http", "url": "http://mcp.test/mcp", "enabled": True, "trusted": True}
+        for n in ("calc", "Calc 2")]}})
+    await signed_in.post("/hub/api/mcp/reload")
+    names = {t.name for t in mcp.tools()}
+    assert mcp.find(names, "", "add") is None and mcp.find(names, "calc 2", "ADD") == "mcp__Calc_2__add"
+    assert mcp.describe(names)[0].splitlines()[1:] == ["- calc: add, picture, build", "- Calc 2: add, picture, build"]
+    await mcp.close()
+
+
+async def test_a_request_that_does_not_fit_says_what_takes_the_room(signed_in, app, fakes):
+    """0.85.0: when the model server still refuses the request after it was made smaller, the error says what it
+    is made of - here the MCP tools - and what to do, in place of llama-server's own words."""
+    from app.agent.loop import too_big_text
+    schemas = [{"type": "function", "function": {"name": "mcp__gh__x", "description": "d" * 9000}},
+               {"type": "function", "function": {"name": "read_file", "description": "r" * 1000}}]
+    messages = [{"role": "system", "content": "# Hub\n" + "h" * 4000 + "\n# Skills\n" + "s" * 500 + "\n# Memory\nm"},
+                {"role": "user", "content": "hi"}]
+    text = too_big_text(48158, 32768, "Gemma 4 31B", messages, schemas)
+    assert text.startswith("The request is 48,158 tokens; Gemma 4 31B has room for 32,768 per request. Of it: MCP "
+                           "tools about 29,"), text
+    assert "the Hub's instructions about" in text and "skills about" in text and "memory" not in text.split("To")[0]
+    assert "turn off MCP servers it does not need (Settings, MCP servers)" in text
+    assert text.endswith("pick a model with more context, or give this one more (Settings, Models: its context "
+                         "per chat).")
+    alone = too_big_text(9000, None, "M", [{"role": "system", "content": "# Notes on this conversation\n" + "n" * 600},
+                                           {"role": "user", "content": "x" * 900}], [])     # the notes are the chat's
+    assert alone.startswith("The request is 9,000 tokens - more than M has room for. Of it: the conversation about "
+                            "9,000. To make room: go on in a new chat (the chat's menu: Continue in a new chat), or send "
+                            "less at once; or "), alone
+    # Through a turn: the server refuses twice - the Hub fits the request once, then explains.
+    fakes.llama["replies"] = [{"error": "request (48158 tokens) exceeds the available context size (32768 tokens), "
+                                        "try increasing it", "status": 400}] * 2
+    c = await new_chat(signed_in)
+    run = await finish(app, await say(signed_in, c["id"], "hello"))
+    assert run.status == "error"
+    err = next(e for e in run.events if e["type"] == "error")["data"]
+    assert "The request is 48,158 tokens" in str(err) and "To make room:" in str(err), err
 
 
 async def test_a_tool_allowed_in_this_chat(signed_in, app, fakes):
@@ -587,7 +684,8 @@ async def test_a_tool_allowed_in_this_chat(signed_in, app, fakes):
 
     def add(a: int):
         fakes.llama["requests"].clear()
-        fakes.llama["replies"] = [{"tool_calls": [{"name": "mcp__calc__add", "arguments": {"a": a, "b": 1}}]},
+        fakes.llama["replies"] = [{"tool_calls": [{"name": "mcp_call", "arguments": {
+                                      "server": "calc", "tool": "add", "arguments": {"a": a, "b": 1}}}]},
                                   {"content": "ok"}, {"content": "Sum"}]
 
     c = await new_chat(signed_in)
@@ -618,7 +716,8 @@ async def test_a_declined_tool_call_is_reported_to_the_model(signed_in, app, fak
     await signed_in.put("/hub/api/settings", json={"section": "mcp", "values": {"servers": [
         {"name": "calc", "transport": "http", "url": "http://mcp.test/mcp", "enabled": True}]}})
     await signed_in.post("/hub/api/mcp/reload")
-    fakes.llama["replies"] = [{"tool_calls": [{"name": "mcp__calc__add", "arguments": {"a": 2, "b": 3}}]},
+    fakes.llama["replies"] = [{"tool_calls": [{"name": "mcp_call", "arguments": {
+                                  "server": "calc", "tool": "add", "arguments": {"a": 2, "b": 3}}}]},
                               {"content": "OK, I will not."}, {"content": "T"}]
     c = await new_chat(signed_in)
     run_id = await say(signed_in, c["id"], "add")
@@ -640,11 +739,15 @@ async def test_an_mcp_tool_gets_files_from_the_working_folder(signed_in, app, fa
     root = app.state.hub.extras["agent"].workdir(chats.get_chat(c["id"])).root
     (root / "src").mkdir(parents=True)
     (root / "src" / "Axis.st").write_text("FUNCTION_BLOCK Axis\nEND_FUNCTION_BLOCK\n")
-    build = {"name": "mcp__calc__build", "arguments": {"files": ["src/Axis.st", "./src/Axis.st"], "target": "x"}}
+    args = {"files": ["src/Axis.st", "./src/Axis.st"], "target": "x"}
+    build = {"name": "mcp_call", "arguments": {"server": "calc", "tool": "build", "arguments": args}}
+
+    def other(files):
+        return {"tool_calls": [{"name": "mcp_call", "arguments": {"server": "calc", "tool": "build",
+                                                                  "arguments": {"files": files}}}]}
     fakes.llama["replies"] = [{"tool_calls": [build]},
                               {"tool_calls": [build]},          # again: a build may differ (a file changed on the PC)
-                              {"tool_calls": [{"name": "mcp__calc__build", "arguments": {"files": ["src/None.st"]}}]},
-                              {"tool_calls": [{"name": "mcp__calc__build", "arguments": {"files": ["../../x.st"]}}]},
+                              other(["src/None.st"]), other(["../../x.st"]),
                               {"content": "built"}, {"content": "T"}]
     run = await finish(app, await say(signed_in, c["id"], "build it"))
     assert run.status == "done"
@@ -653,16 +756,18 @@ async def test_an_mcp_tool_gets_files_from_the_working_folder(signed_in, app, fa
     files = calls[0]["params"]["_meta"]["slq-hub/files"]
     assert [(f["param"], f["arg"], f["path"], f["name"], f["size"]) for f in files] == [
         ("files", "src/Axis.st", "src/Axis.st", "Axis.st", 39)]            # named twice, sent once
-    assert calls[0]["params"]["arguments"] == build["arguments"] and calls[1]["params"] == calls[0]["params"]
+    assert calls[0]["params"]["arguments"] == args and calls[1]["params"] == calls[0]["params"]
     results = [m["content"][0] for m in chats.messages(c["id"]) if m["role"] == "tool"]
     assert results[0]["text"] == "src/Axis.st 39 FUNCTION_BLOCK Axis" and not results[0]["is_error"]
     assert (results[1]["text"], results[1]["is_error"]) == (results[0]["text"], False)   # not refused as a repeat
     assert results[2]["is_error"] and "src/None.st: there is no such file in your working folder" in results[2]["text"]
     assert results[3]["is_error"] and "outside the working folder" in results[3]["text"]
-    tool = next(t for t in fakes.llama["requests"][0]["tools"] if t["function"]["name"] == "mcp__calc__build")
-    assert "Give files as paths in your working folder" in tool["function"]["description"]
-    assert tool["function"]["parameters"]["properties"]["files"]["items"]["format"] == "slq-hub-file"
-    await app.state.hub.extras["mcp"].close()
+    assert "(Its arguments, a JSON schema: " in results[2]["text"]          # its first failure brings them
+    mcp = app.state.hub.extras["mcp"]
+    text, ok, full = mcp.describe({t.name for t in mcp.tools()}, "calc", "build")
+    assert ok and full == "mcp__calc__build" and "Give files as paths in your working folder" in text
+    assert '"items": {"type": "string", "format": "slq-hub-file"}' in text
+    await mcp.close()
 
 
 def test_mcp_files_are_counted_and_each_sent_once(tmp_path, monkeypatch):
@@ -703,14 +808,17 @@ async def test_an_mcp_tool_that_asks_says_which_files_it_sends(signed_in, app, f
     root = app.state.hub.extras["agent"].workdir(chats.get_chat(c["id"])).root
     root.mkdir(parents=True, exist_ok=True)
     (root / "Main.st").write_text("PROGRAM Main\nEND_PROGRAM\n")
-    fakes.llama["replies"] = [{"tool_calls": [{"name": "mcp__calc__build",
-                                               "arguments": {"files": ["Main.st", "Main.st"]}}]},
+    fakes.llama["replies"] = [{"tool_calls": [{"name": "mcp_call", "arguments": {
+                                  "server": "calc", "tool": "build", "arguments": {"files": ["Main.st", "Main.st"]}}}]},
                               {"content": "ok"}, {"content": "T"}]
     run_id = await say(signed_in, c["id"], "build")
     run = app.state.hub.extras["agent"].runs.get(run_id)
     await until(lambda: any(e["type"] == "approval_needed" for e in run.events))
     ask = next(e for e in run.events if e["type"] == "approval_needed")["data"]
-    assert ask["sends"] == ["Main.st"]
+    assert ask["sends"] == ["Main.st"] and ask["tool"] == "mcp__calc__build"
+    mcp = app.state.hub.extras["mcp"]
+    assert "build: Build the files" in mcp.describe({t.name for t in mcp.tools()}, "calc")[0]
+    assert "The tools of calc (each call asks the user first)" in mcp.describe({t.name for t in mcp.tools()}, "calc")[0]
     await signed_in.post(f"/hub/api/runs/{run_id}/approve", json={"call_id": ask["id"], "decision": "allow"})
     run = await finish(app, run_id)
     assert run.status == "done"

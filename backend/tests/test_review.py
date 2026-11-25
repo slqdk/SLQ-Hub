@@ -655,21 +655,34 @@ async def test_the_reviewer_may_build_with_the_servers_it_is_allowed(signed_in, 
     review use - a TwinCAT build on the user's PC is how PLC code is checked. Not a server that asks first (the review
     should not wait for the user), not one the owner did not let it use, never a tool that changes something."""
     on(app)
-    for trusted, review, expect in ((True, True, {"mcp__calc__build"}), (True, False, set()), (False, True, set())):
+    meta = {"mcp_tools", "mcp_call"}                          # 0.85.0: the servers' tools are reached through these
+    for trusted, review, expect in ((True, True, meta), (True, False, set()), (False, True, set())):
         await signed_in.put("/hub/api/settings", json={"section": "mcp", "values": {"servers": [
             {"name": "calc", "transport": "http", "url": "http://mcp.test/mcp", "enabled": True,
              "trusted": trusted, "review": review}]}})
         status = (await signed_in.post("/hub/api/mcp/reload")).json()
         assert (status[0]["trusted"], status[0]["review"]) == (trusted, review)
         seen: dict = {}
-        fakes.llama["responder"] = responder(MAIN[:2], [{"content": "Checked.\nVERDICT: OK"}], seen)
+        checks = [{"tool_calls": [{"name": "mcp_tools", "arguments": {"server": "calc"}}]},
+                  {"tool_calls": [{"name": "mcp_call", "arguments": {"server": "calc", "tool": "add",
+                                                                     "arguments": {"a": 1, "b": 2}}}]},
+                  {"content": "Checked.\nVERDICT: OK"}] if expect else [{"content": "Checked.\nVERDICT: OK"}]
+        fakes.llama["responder"] = responder(MAIN[:2], checks, seen)
         c = await new_chat(signed_in, settings={"model": "qwen3.6-35b-a3b"})
         run = await finish(app, await say(signed_in, c["id"], "Lav et spil"))
         assert run.status == "done"
-        mcp_tools = {t for t in tools_of(seen["reviewer"][0]) if t.startswith("mcp__")}
+        mcp_tools = {t for t in tools_of(seen["reviewer"][0]) if t.startswith("mcp")}
         assert mcp_tools == expect, (trusted, review, mcp_tools)
         if trusted:                                            # the one working has all of them
-            assert {"mcp__calc__add", "mcp__calc__build"} <= tools_of(seen["main"][0])
-        told = "Tools named mcp__... are the user's own servers' tools" in seen["reviewer"][0]["messages"][0]["content"]
+            assert meta <= tools_of(seen["main"][0])
+            listing = next(t for t in seen["main"][0]["tools"] if t["function"]["name"] == "mcp_tools")
+            assert "calc (3 tools)" in listing["function"]["description"]
+        if expect:                     # the reviewer's: only the one that only looks - add is not there for it
+            listing = next(t for t in seen["reviewer"][0]["tools"] if t["function"]["name"] == "mcp_tools")
+            assert "calc (1 tool)" in listing["function"]["description"]
+            results = [m for m in seen["reviewer"][-1]["messages"] if m["role"] == "tool"]
+            assert results[0]["content"].splitlines()[1:] == ["- build: Build the files"]
+            assert results[1]["content"] == "calc has no tool 'add'. Its tools: build."
+        told = "mcp_tools and mcp_call reach the user's own servers' tools" in seen["reviewer"][0]["messages"][0]["content"]
         assert told == bool(expect)                            # told about them only when it has them
     await app.state.hub.extras["mcp"].close()

@@ -62,6 +62,22 @@ function parseArgs(s: string): Record<string, unknown> | undefined {
   }
 }
 
+/** mcp_call as the MCP tool it calls (0.85.0): the card shows that tool and its arguments, as the Hub runs it. Live,
+ *  the tool_call event says so; this does it for stored turns, where the call is kept as the model made it. */
+export function unwrapMcp(name: string, args: Record<string, unknown> | undefined):
+  [string, Record<string, unknown> | undefined] {
+  if (name !== "mcp_call" || !args || typeof args.server !== "string" || typeof args.tool !== "string") return [name, args];
+  let inner: unknown = args.arguments;
+  if (typeof inner === "string") {
+    try { inner = JSON.parse(inner); } catch { inner = undefined; }
+  } else if (inner === undefined || inner === null) {         // the tool's arguments beside server and tool
+    const { server: _s, tool: _t, ...rest } = args;
+    inner = rest;
+  }
+  const plain = inner && typeof inner === "object" && !Array.isArray(inner) ? inner as Record<string, unknown> : {};
+  return [`mcp__${args.server}__${args.tool}`, plain];
+}
+
 function lastTools(items: Item[]): ToolView[] {
   const last = items[items.length - 1];
   if (last && last.kind === "tools") return last.tools;
@@ -171,8 +187,8 @@ export function buildTurns(messages: Message[], runs: RunRecord[], skipRun?: str
         cur.items.push({ kind: "text", text: b.text });
         cur.text += (cur.text ? "\n\n" : "") + b.text;
       } else if (b.type === "tool_call") {
-        lastTools(cur.items).push({ id: b.id, name: b.name, argsText: b.arguments, args: parseArgs(b.arguments),
-          state: "running" });
+        const [name, args] = unwrapMcp(b.name, parseArgs(b.arguments));
+        lastTools(cur.items).push({ id: b.id, name, argsText: b.arguments, args, state: "running" });
       } else if (b.type === "tool_result") {
         const t = findTool(cur.items, b.tool_call_id);
         if (!t) continue;
@@ -258,6 +274,7 @@ function applyStream(items: Item[], ev: RunEvent): void {
         t = { id: d.id, name: d.name, argsText: JSON.stringify(d.arguments ?? {}), state: "running" };
         lastTools(items).push(t);
       }
+      if (typeof d.name === "string" && d.name) t.name = d.name;   // an mcp_call runs as the tool it names (0.85.0)
       t.args = d.arguments ?? parseArgs(t.argsText);
       t.state = "running";
       break;
@@ -545,6 +562,8 @@ function givenLine(t: ToolView): string {
     case "escalate": return s("reason");
     case "remember": return s("action") === "forget" ? `Forget: ${s("old") || s("text")}` : s("text");   // 0.74.0
     case "post_draft": return s("text").split("\n")[0];                                                 // 0.75.0
+    case "mcp_tools": return [s("server"), s("tool")].filter(Boolean).join(": ") || "all servers";      // 0.85.0
+    case "mcp_call": return [s("server"), s("tool")].filter(Boolean).join(": ");
     default: {
       const first = Object.values(a).find((v) => typeof v === "string");
       return typeof first === "string" ? first : "";
@@ -556,6 +575,8 @@ export function toolLabel(name: string): string {
   if (name === "ask_user") return "Question";
   if (name === "remember") return "Memory";               // a persona's notes about you (0.74.0)
   if (name === "post_draft") return "Post";               // a persona's task hands in its post (0.75.0)
+  if (name === "mcp_tools") return "MCP tools";           // what the servers have (0.85.0)
+  if (name === "mcp_call") return "MCP";                  // a call the Hub could not take as a server's tool
   const m = name.match(/^mcp__(.+?)__(.+)$/);
   if (m) return `${m[1]}: ${m[2]}`;
   return name.replace(/_/g, " ");

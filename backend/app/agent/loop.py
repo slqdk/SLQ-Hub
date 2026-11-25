@@ -221,6 +221,8 @@ class Engine:
         # (the owner said so on the task; nobody is there to answer at its time)
         self.internet_granted: set[str] = set()
         self.mcp_checks = False              # with `only`: also the MCP tools the review may use (mcp.tools)
+        self.mcp_hidden: dict[str, Tool] = {}   # the MCP tools mcp_call reaches this turn, by name (0.85.0)
+        self.mcp_described: set[str] = set()    # those whose arguments the model has seen this turn (mcp_tools)
         self.level = "quick"                 # the turn's effort (Agent.level_of): extra has the independent review
         self.top_model: str | None = None   # the turn's model, when this engine works for it with another (reviewer)
         self.wrap_up: WrapUp | None = None  # it must end with a report (the reviewer): told so near its end
@@ -279,12 +281,37 @@ class Engine:
             except Exception:  # noqa: BLE001 - a broken check hides the tool, nothing more
                 continue
         mcp = self.hub.extras.get("mcp")
-        if mcp is not None and self.device is None:
-            if self.only is None:
-                out += mcp.tools()
-            elif self.mcp_checks:            # the reviewer: a build or a test run on the user's server (0.36.0)
-                out += mcp.tools(review=True)
+        self.mcp_hidden = {}
+        if mcp is not None and self.device is None and (self.only is None or self.mcp_checks):
+            # The servers' tools on demand (0.85.0): mcp_tools and mcp_call in the request, the tools themselves here
+            # for _unwrap_mcp. The reviewer: those that only look, of servers it may use (0.36.0).
+            review = self.only is not None
+            self.mcp_hidden = {t.name: t for t in mcp.tools(review=review)}
+            if self.mcp_hidden:
+                out += mcp.meta_tools(review=review)
         return out
+
+    def _unwrap_mcp(self, args: dict) -> tuple[str, Tool | None, dict, str | None]:
+        """A call of mcp_call as the call of the MCP tool it names (0.85.0): (its name, the tool, its arguments), or
+        why it cannot be with the tool None."""
+        mcp = self.hub.extras.get("mcp")
+        if mcp is None or not self.mcp_hidden:
+            return "mcp_call", None, args, "No MCP server's tools can be used now."
+        server, inner = str(args.get("server") or ""), str(args.get("tool") or "")
+        inner_args = args.get("arguments")
+        if inner_args is None:            # the tool's arguments given beside server and tool
+            inner_args = {k: v for k, v in args.items() if k not in ("server", "tool")}
+        if isinstance(inner_args, str):
+            try:
+                inner_args = json.loads(inner_args) if inner_args.strip() else {}
+            except ValueError:
+                inner_args = None
+        if not isinstance(inner_args, dict):
+            return "mcp_call", None, args, "arguments must be a JSON object, as the tool's schema in mcp_tools says."
+        full = mcp.find(set(self.mcp_hidden), server, inner)
+        if full is None:
+            return "mcp_call", None, args, mcp.describe(set(self.mcp_hidden), server, inner if server else "")[0]
+        return full, self.mcp_hidden[full], inner_args, None
 
     async def _inbox(self, messages: list[dict], persist: Persist) -> None:
         """Messages the user sent while this turn worked: stored where the model
@@ -351,7 +378,14 @@ class Engine:
                     messages = await self._fit(messages, compact)
                     if forced and (messages[-1].get("content") != forced_text):   # condensing rebuilt them
                         messages.append({"role": "user", "content": forced_text})
-                    res = await self._model_step(messages, [] if forced else schemas, step)
+                    try:
+                        res = await self._model_step(messages, [] if forced else schemas, step)
+                    except LlmError as again:     # still too long: what takes the room, and what to do (0.85.0)
+                        still = refused_size(again)
+                        if still is None:
+                            raise
+                        raise LlmError(too_big_text(still[0], still[1] or room, Catalog.label(self.model), messages,
+                                                    [] if forced else schemas)) from again
             except asyncio.CancelledError:
                 await self._save_partial(persist)
                 raise
@@ -642,11 +676,19 @@ class Engine:
         t0 = time.monotonic()
         tool = by_name.get(name)
         args: dict = {}
+        via = None                                    # the MCP tool an mcp_call named (0.85.0)
+        if tool is None and name in self.mcp_hidden:  # one called by its own name, as before 0.85.0: it runs
+            tool, via = self.mcp_hidden[name], name
         if tool is None:
             result = ToolResult(f"There is no tool called {name!r}. Available: {', '.join(sorted(by_name))}.",
                                 is_error=True)
         else:
             args, bad = self._arguments(call, cut)
+            if bad is None and name == "mcp_call" and via is None:
+                # From here on it is the call of the tool it names: its approval, its card, its "Always".
+                name, inner, args, bad = self._unwrap_mcp(args)
+                if inner is not None:
+                    tool, via = inner, name
             if bad is not None:
                 result = ToolResult(bad, is_error=True)
             else:
@@ -712,6 +754,14 @@ class Engine:
                     except Exception as exc:  # noqa: BLE001 - the model should see it
                         log.exception("tool %s failed", name)
                         result = ToolResult(f"{type(exc).__name__}: {exc}", is_error=True)
+                    if via is not None and result.is_error and via not in self.mcp_described:
+                        # What it takes, to call it right the next time - once a turn, unless mcp_tools gave it.
+                        self.mcp_described.add(via)
+                        mcp = self.hub.extras.get("mcp")
+                        schema = mcp.schema_of(via) if mcp is not None else ""
+                        if schema:
+                            result = ToolResult(f"{result.text}\n(Its arguments, a JSON schema: {schema})",
+                                                is_error=True, images=result.images, display=result.display)
                 if tool.read_only:
                     self.seen[key] = (self.epoch, not result.is_error, (tries if epoch == self.epoch else 0) + 1)
                 else:
@@ -1037,6 +1087,51 @@ SENT_SAMPLING = ("temperature", "top_p", "top_k", "min_p", "presence_penalty", "
 
 
 TOO_LONG = re.compile(r"request \((\d+) tokens\) exceeds the available context size(?: \((\d+) tokens\))?")
+
+
+TOO_BIG_ADVICE = {
+    "MCP tools": "turn off MCP servers it does not need (Settings, MCP servers)",
+    "skills": "choose fewer skills for the chat or its project",
+    "the project's instructions": "shorten the project's instructions",
+    "memory": "tidy the memory (Settings, Memory)",
+    "the conversation": "go on in a new chat (the chat's menu: Continue in a new chat), or send less at once",
+}
+
+
+def too_big_text(real: int, room: int | None, model: str, messages: list[dict], schemas: list[dict]) -> str:
+    """Why a request does not fit the model even after it was made smaller (0.85.0): its parts - the Hub's
+    instructions, skills, the project's instructions, memory, the Hub's tools, MCP tools, the conversation - in
+    tokens (each part's share of the characters, of the model server's own count), the biggest first, and what to
+    do about it. Before, llama-server's own words: "request (48158 tokens) exceeds the available context size
+    (32768 tokens), try increasing it" - with nothing on what took the room (2026-11-25: the MCP servers' tools)."""
+    def size(x) -> int:
+        return len(x) if isinstance(x, str) else len(json.dumps(x, ensure_ascii=False)) if x else 0
+    parts: dict[str, int] = {}
+    rest = messages
+    if messages and messages[0].get("role") == "system":
+        system = messages[0].get("content")
+        text = system if isinstance(system, str) else json.dumps(system, ensure_ascii=False)
+        for section in re.split(r"(?m)^(?=# )", text):
+            head = section.split("\n", 1)[0]
+            key = ("skills" if head.startswith("# Skills") else
+                   "the project's instructions" if head.startswith("# Project") else
+                   "memory" if head.startswith("# Memory") else
+                   "the conversation" if head.startswith(("# Notes on this conversation", "# Earlier in this "
+                                                          "conversation")) else "the Hub's instructions")
+            parts[key] = parts.get(key, 0) + len(section)
+        rest = messages[1:]
+    for sc in schemas:
+        name = str((sc.get("function") or {}).get("name") or "")
+        key = "MCP tools" if name.startswith("mcp") else "the Hub's tools"
+        parts[key] = parts.get(key, 0) + size(sc)
+    parts["the conversation"] = sum(size(m.get("content")) + size(m.get("tool_calls")) for m in rest)
+    total = sum(parts.values()) or 1
+    tokens = sorted(((round(real * n / total), k) for k, n in parts.items() if n), reverse=True)
+    listed = ", ".join(f"{k} about {t:,}" for t, k in tokens if t >= 50)
+    todo = [TOO_BIG_ADVICE[k] for t, k in tokens if k in TOO_BIG_ADVICE and t >= 0.15 * real][:2]
+    todo.append("pick a model with more context, or give this one more (Settings, Models: its context per chat)")
+    took = f"; {model} has room for {room:,} per request" if room else f" - more than {model} has room for"
+    return f"The request is {real:,} tokens{took}. Of it: {listed}. To make room: " + "; or ".join(todo) + "."
 
 
 def refused_size(exc: Exception) -> tuple[int, int | None] | None:

@@ -75,8 +75,8 @@ answer the user was given.
   what you checked that works, and one on what you did not check.
 - End with exactly one line: VERDICT: OK when nothing needs fixing, or VERDICT: PROBLEMS when something does."""
 # Only when it has such tools (0.36.0).
-MCP_LINE = ("\n  Tools named mcp__... are the user's own servers' tools that only look (a build on their machine, a test "
-            "run):\n  use one when it is the way to check what was made.")
+MCP_LINE = ("\n  mcp_tools and mcp_call reach the user's own servers' tools that only look (a build on their machine, a "
+            "test run):\n  use one when it is the way to check what was made.")
 # The Hub's messages near the review's end (loop.WrapUp fills in {why}).
 WRAP_UP = ("(SLQ Hub: this review is nearly over - {why}. Stop checking now and write your report: the problems you "
            "found, each with its evidence, what works, and what you did not check - then the VERDICT line. If one "

@@ -579,8 +579,8 @@ has no answer to mark; the user's own message can be edited and sent again.
 **Loop guard.** Small models can get stuck repeating a step (chat 7: Ornith
 1.5 9B fetched the same two pages 52 times). Tools that only look things up
 are marked `read_only` (web_search, web_fetch, read_file, list_files,
-search_files, view_image, image_ocr, skill, library_search). MCP tools are
-not, even those whose server says they only look (0.36.0): a build after the
+search_files, view_image, image_ocr, skill, library_search, mcp_tools). MCP
+tools are not, even those whose server says they only look (0.36.0): a build after the
 user changed a file on their PC, or a live value read again, can give another
 result with nothing changed in the chat. Each turn keeps an epoch that every
 other tool call advances. A read-only call repeated with
@@ -708,7 +708,7 @@ message's time with the conversation.
 | `artifact` | Create or update an HTML, React, SVG, Mermaid, Markdown or code artifact, with versions. Shown in the side panel in a sandboxed iframe. React and Babel are served locally, so it works offline. |
 | `todo_write` | A visible checklist for long tasks. It helps a 27B model keep track of them. |
 | `task` | A subagent with a fresh context and the tools except artifact, todo_write, image and sound generation, task and escalate, inside the same lease. Its steps show nested under the call; only its report goes back. |
-| MCP tools | From configured servers: streamable HTTP, or stdio servers that run inside the sandbox through a pipe in the sandbox daemon. These ask first, with "Always allow" per tool. Since 0.36.0 a server can ask for files from the working folder, and the review can use its tools that only look (below, "MCP tools and the working folder"). |
+| `mcp_tools`, `mcp_call` | The tools of the configured MCP servers - streamable HTTP, or stdio servers that run inside the sandbox through a pipe in the sandbox daemon - on demand (0.85.0, "MCP tools on demand" below): `mcp_tools` lists them and describes one with its arguments, `mcp_call` calls one. A server's tools ask first, with "Always allow" per tool. Since 0.36.0 a server can ask for files from the working folder, and the review can use its tools that only look (below, "MCP tools and the working folder"). |
 | `ask_user` | (0.43.0) Questions with 2-6 options each, up to 4, shown as a card with buttons; the turn waits for the answer (30 minutes), and a message written meanwhile answers it. Only for real choices. Not in subagents or the review. |
 | `escalate` | Present when someone can take over: the stronger local model (Settings → Assistant), or the cloud where escalation is on. Its description names who. |
 
@@ -735,8 +735,9 @@ resolves each path inside the folder (a link is followed only when it leads to
 a file inside it, and `path` is then where that file is) and opens it with
 `Workdir.open_inside`, which follows no link on the way. A file named twice for
 one argument goes once; at most 1,000 files, 20 MB a file and 50 MB a call; the
-request is encoded off the event loop. The tool's description gets a line
-saying so, a missing file or one outside the folder is the model's error before
+request is encoded off the event loop. The tool's description (in `mcp_tools`
+since 0.85.0) gets a line saying so, a missing file or one outside the folder is
+the model's error before
 anything reaches the server, and a server that asks first lists the files on
 its approval card - their content leaves the Hub with the call. A server on
 another machine - the TwinCAT build server on Søren's 4026 PC - gets the code
@@ -753,6 +754,37 @@ decides which servers belong to checking work: a build server, not a memory
 server. These tools are not `read_only` in the loop guard's sense (below):
 their result can change with nothing changed in the chat. Settings → MCP marks
 them "only looks", and the ones that take files "gets files".
+
+**MCP tools on demand** (0.85.0, `McpManager.meta_tools`, `Engine._unwrap_mcp`).
+Until 0.84.0 every tool of every ready server went into every request with its
+description and JSON schema. Søren's turn of 2026-11-25 in the SLQ-Game-Lobby
+project was 48,158 tokens before it had begun, for Gemma 4 31B with 32,768 a
+request - the Hub's own part was about 7,000 (system 7,425 characters, its 22
+tools 14,614); turning the MCP servers off made it fit. Now a request has two
+fixed tools in their place, whatever the servers have:
+
+- `mcp_tools` (read-only): with no arguments every server's tools by name;
+  with `server` its tools a line each (the description's first sentence, and
+  "each call asks the user first" for a server that is not trusted); with
+  `server` and `tool` that tool's description, the files line above and its
+  arguments as the cleaned JSON schema. Its own description names the servers
+  and how many tools each has, so it changes only when the servers do and the
+  model server's prompt cache holds from turn to turn.
+- `mcp_call` (`server`, `tool`, `arguments`): the loop unwraps it into the call
+  of the tool it names before anything else happens, so the approval card, the
+  "Always" and "Allow in this chat" keys (`mcp__<server>__<tool>`), the repeat
+  guard, the files it sends and the card in the chat are that tool's, as
+  before. The stored assistant message keeps the call as the model made it (the
+  model's history must stay its own); the chat shows it as the tool (`tool_call`
+  event live, `unwrapMcp` in `lib/turns.ts` for stored turns). `arguments` may
+  also come as JSON text or beside `server` and `tool`; without `server` a tool
+  name only one server has is found. A server or tool that is not there gets an
+  error with the names that are. A tool's first failed call in a turn brings
+  its schema, unless `mcp_tools` gave it already that turn.
+
+A call by a tool's own name (`mcp__calc__add`, as a model that saw it in an
+older turn might make) still runs. The review gets the two tools only when it
+may use a server's tools that only look, and `mcp_call` reaches only those.
 
 **Internet for the assistant** (0.15.0, `app/agent/internet.py`). Settings →
 Assistant → Web → "Internet for the assistant": **Allowed** (the default, as
@@ -1302,8 +1334,14 @@ longer than its context ("request (N tokens) exceeds the available context
 size (M tokens)"), N sets the ratio, M caps the turn's context (a server keeps
 the size it was started with until it is loaded again, whatever Settings say
 now), and the request is fitted again, once (a `refit` step; a forced answer
-keeps its instruction). A step's `sent` keeps `token_ratio` when it was above
-1. A summary so long that the request to condense more could take in fewer
+keeps its instruction). Refused again, the turn ends with what the request is
+made of (0.85.0, `too_big_text`): the Hub's instructions, skills, the project's
+instructions, memory (the system prompt's `# ` sections), the Hub's tools, MCP
+tools and the conversation, each its share of the characters scaled to the
+server's own count, the biggest first, and what to do about the big ones (turn
+off MCP servers, fewer skills, Continue in a new chat, a model with more
+context) - in place of llama-server's own words, which said nothing on what
+took the room. A step's `sent` keeps `token_ratio` when it was above 1. A summary so long that the request to condense more could take in fewer
 than 1,000 estimated tokens of old messages is not extended: folding would
 move `summary_upto` past messages it never read, so the turn is shortened
 instead.

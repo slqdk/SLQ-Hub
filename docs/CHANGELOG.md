@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.85.0 - 2026-11-25
+
+- MCP servers no longer fill every request. The assistant gets two tools in
+  place of all their tools: mcp_tools, which lists what the servers have and
+  describes a tool with its arguments, and mcp_call, which calls one. A
+  server's tools cost the same room however many it has, so MCP servers can
+  stay on with a small context.
+- A call through mcp_call is still that tool's call: it asks first in the
+  same way, its "Always" and "Allow in this chat" are kept for the tool, and
+  the chat shows the tool and its arguments.
+- When a request still does not fit the model after the Hub has made it
+  smaller, the error says what takes the room - the Hub's instructions,
+  skills, the project's instructions, memory, tools, MCP tools, the
+  conversation, in tokens - and what to do about it. Before, it was
+  llama-server's "exceeds the available context size" alone.
+
 ## 0.84.0 - 2026-11-25
 
 - A project's files folder can be a clone of a repository on the git

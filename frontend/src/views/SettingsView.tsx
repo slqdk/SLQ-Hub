@@ -1873,7 +1873,8 @@ function McpTab({ s }: { s: S }) {
         runs inside the sandbox (no LAN access), for example <span className="mono">npx -y @modelcontextprotocol/server-memory</span>.
         Their tools ask before they run, unless you trust the server. A tool may take files from the chat's folder (the
         Hub sends them along). You can let the independent review use a trusted server's tools that only look - a build
-        on another PC, say.</p>
+        on another PC, say. The assistant looks a server's tools up when it needs them, so many servers or tools do not
+        take room in every request.</p>
       <div className="row" style={{ marginBottom: 10 }}>
         <button className="btn primary" onClick={() => setEdit({ cfg: { ...NEW_SERVER }, index: -1 })}><Plus size={15} /> Add a server</button>
         <button className="btn" disabled={reloading} onClick={async () => { setReloading(true); try { setStatus(await api("/hub/api/mcp/reload", { method: "POST" })); } finally { setReloading(false); } }}>
