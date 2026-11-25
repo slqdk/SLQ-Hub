@@ -708,7 +708,7 @@ message's time with the conversation.
 | `artifact` | Create or update an HTML, React, SVG, Mermaid, Markdown or code artifact, with versions. Shown in the side panel in a sandboxed iframe. React and Babel are served locally, so it works offline. |
 | `todo_write` | A visible checklist for long tasks. It helps a 27B model keep track of them. |
 | `task` | A subagent with a fresh context and the tools except artifact, todo_write, image and sound generation, task and escalate, inside the same lease. Its steps show nested under the call; only its report goes back. |
-| `mcp_tools`, `mcp_call` | The tools of the configured MCP servers - streamable HTTP, or stdio servers that run inside the sandbox through a pipe in the sandbox daemon - on demand (0.85.0, "MCP tools on demand" below): `mcp_tools` lists them and describes one with its arguments, `mcp_call` calls one. A server's tools ask first, with "Always allow" per tool. Since 0.36.0 a server can ask for files from the working folder, and the review can use its tools that only look (below, "MCP tools and the working folder"). |
+| `mcp_tools`, `mcp_call` | The tools of the configured MCP servers - streamable HTTP, or stdio servers that run inside the sandbox through a pipe in the sandbox daemon - on demand (0.85.0, "MCP tools on demand" below): `mcp_tools` lists them and describes one with its arguments, `mcp_call` calls one. A server's tools ask first, with "Always allow" per tool. Since 0.36.0 a server can ask for files from the working folder, and the review can use its tools that only look (below, "MCP tools and the working folder"). Since 0.86.0 Settings suggests servers and reads a server's configuration pasted from its page (below, "More servers"). |
 | `ask_user` | (0.43.0) Questions with 2-6 options each, up to 4, shown as a card with buttons; the turn waits for the answer (30 minutes), and a message written meanwhile answers it. Only for real choices. Not in subagents or the review. |
 | `escalate` | Present when someone can take over: the stronger local model (Settings → Assistant), or the cloud where escalation is on. Its description names who. |
 
@@ -785,6 +785,50 @@ fixed tools in their place, whatever the servers have:
 A call by a tool's own name (`mcp__calc__add`, as a model that saw it in an
 older turn might make) still runs. The review gets the two tools only when it
 may use a server's tools that only look, and `mcp_call` reaches only those.
+
+**More servers: suggested, and pasted from a server's page** (0.86.0,
+`app/agent/mcp_import.py`). Søren: "Jeg kunne godt tænke mig at have nogle flere
+mcp servere til brug i chatten.. Jeg har kigget på mcpservers.org men jeg ved
+ikke rigtigt hvad jeg skal gøre". Settings → MCP servers has two new ways in:
+
+- **Suggested servers** (`CATALOG`, `GET /hub/api/mcp/catalog`): hosted servers
+  that need no account and answered the Hub's own client - `initialize`,
+  `tools/list` and a call through `McpManager` - when last checked
+  (`CHECKED`, 2026-11-25): MDN (`https://mcp.mdn.mozilla.net/`), Context7
+  (`https://mcp.context7.com/mcp`, an optional free key in the
+  `CONTEXT7_API_KEY` header - without one its monthly quota can run out, as it
+  had for the check's address), Microsoft Learn
+  (`https://learn.microsoft.com/api/mcp`), DeepWiki
+  (`https://mcp.deepwiki.com/mcp`) and Hugging Face (`https://huggingface.co/mcp`,
+  an optional token). Together 15 tools whose schemas were about 35,000
+  characters - in every request before 0.85.0, now two small tools. Each entry
+  says whether it is set up already (matched by URL). Docs servers for the
+  owner's work: web and three.js (the game), C# and Windows Forms (his tools),
+  models.
+- **Paste a configuration** (`read_config`, `POST /hub/api/mcp/read-config`):
+  what a server's page gives for another client - JSON for Claude Desktop,
+  Cursor, VS Code (with its `inputs`), Windsurf (`serverUrl`), Gemini CLI
+  (`httpUrl`), Zed (`context_servers`), Opencode (`command` as a list), Xcode
+  (`requestInit.headers`), TOML for Codex (`[mcp_servers.<name>]`), `claude
+  mcp add` (and `add-json`, amp's, gemini's), a URL, or an npx/uvx command;
+  pages print JSON with comments, trailing commas and without the outer
+  braces, and a pasted README is read block by block (an `npm install` line
+  is not a server). It only reads the text - nothing is fetched or run - and
+  returns the Hub's server settings with: the values the page leaves open
+  (`${input:…}`, `${VAR}`, `<…>`, `YOUR_…`, `your-…` - a placeholder in the
+  host takes the whole host), to fill in; what cannot run here (Docker, Go,
+  Bun or Deno in the sandbox); notes (`/sse`, the old transport, is changed
+  to `/mcp`, which most such servers also have; `localhost` is the Hub's own
+  container; a path on another computer); and a server set up already
+  (`same_as`, by URL or command). A key in a command line goes into the
+  server's environment, which Settings masks, and the line names it
+  (`--api-key "${API_KEY}"`, everything else in the line quoted as text:
+  `bash -c` in the sandbox expands only those). `mcp-remote` - a bridge for
+  clients that cannot reach a URL - is replaced by the URL itself.
+
+Servers added either way ask before their tools run, like any other; Edit
+trusts one. Not handled: the old SSE transport itself, and OAuth sign-in
+(servers that offer only that - GitHub's offers a token too).
 
 **Internet for the assistant** (0.15.0, `app/agent/internet.py`). Settings →
 Assistant → Web → "Internet for the assistant": **Allowed** (the default, as

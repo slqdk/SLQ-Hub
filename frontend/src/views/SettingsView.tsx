@@ -1,8 +1,9 @@
 // Settings: models, the queue, apps and keys, the agent, memory, MCP, cloud, system (skills have their own page).
 import { LEVEL_OPTIONS } from "../lib/effort";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ChevronDown, ChevronUp, Copy, Download, Menu, Plus, RefreshCw, Upload, X } from "lucide-react";
-import { api, type ApiKey, type Person, type HFLookup, type HFSearchHit, type ImageLookup, type McpServerConfig, type McpStatus,
+import { ChevronDown, ChevronUp, ClipboardPaste, Copy, Download, Menu, Plus, RefreshCw, Upload, X } from "lucide-react";
+import { api, type ApiKey, type Person, type HFLookup, type HFSearchHit, type ImageLookup, type McpCatalogEntry, type McpFound,
+  type McpServerConfig, type McpStatus,
   type MemoryFile, type ModelEntry, type Sampling, type SdxlChoices, type SdxlSettings, type Settings, type UsageData,
   type UsageRow } from "../lib/api";
 import { ago, bytes, energy, money, residencyName, seconds, tokens } from "../lib/format";
@@ -1831,6 +1832,8 @@ function McpTab({ s }: { s: S }) {
   const [status, setStatus] = useState<McpStatus[]>([]);
   const [perms, setPerms] = useState<{ tool: string; created_at: string }[]>([]);
   const [edit, setEdit] = useState<{ cfg: McpServerConfig; index: number } | null>(null);
+  const [adding, setAdding] = useState<{ title: string; items: McpFound[]; paste?: boolean } | null>(null);
+  const [catalog, setCatalog] = useState<McpCatalogEntry[]>([]);
   const [reloading, setReloading] = useState(false);
   const servers = (s.data?.settings.mcp?.servers ?? []) as McpServerConfig[];
   const load = useCallback(async () => {
@@ -1838,6 +1841,7 @@ function McpTab({ s }: { s: S }) {
       setStatus(await api<McpStatus[]>("/hub/api/mcp"));
       setPerms((await api<{ tool: string; created_at: string }[]>("/hub/api/tool-permissions"))
         .filter((p) => !p.tool.startsWith("internet:")));         // those are listed under Assistant -> Web
+      setCatalog(await api<McpCatalogEntry[]>("/hub/api/mcp/catalog"));
     } catch (e) {
       toast((e as Error).message, "fault");
     }
@@ -1857,6 +1861,7 @@ function McpTab({ s }: { s: S }) {
       } finally {
         setReloading(false);
       }
+      load();
     }
   };
   const forget = async (tool: string) => {
@@ -1877,6 +1882,8 @@ function McpTab({ s }: { s: S }) {
         take room in every request.</p>
       <div className="row" style={{ marginBottom: 10 }}>
         <button className="btn primary" onClick={() => setEdit({ cfg: { ...NEW_SERVER }, index: -1 })}><Plus size={15} /> Add a server</button>
+        <button className="btn" onClick={() => setAdding({ title: "Paste a server's configuration", items: [], paste: true })}>
+          <ClipboardPaste size={14} /> Paste a configuration</button>
         <button className="btn" disabled={reloading} onClick={async () => { setReloading(true); try { setStatus(await api("/hub/api/mcp/reload", { method: "POST" })); } finally { setReloading(false); } }}>
           <RefreshCw size={14} /> {reloading ? "Connecting" : "Reconnect all"}</button>
       </div>
@@ -1903,6 +1910,24 @@ function McpTab({ s }: { s: S }) {
           );
         })}
       </div>
+      {catalog.length > 0 && <>
+        <h3>Suggested servers</h3>
+        <p className="muted">Hosted by others and free to use; each answered the Hub when last checked
+          ({catalog[0].checked}). What the assistant looks up there goes to them.</p>
+        <div className="list" style={{ marginBottom: 24 }}>
+          {catalog.map((e) => (
+            <div className="list-row" key={e.id}>
+              <div className="grow">
+                <b>{e.name}</b> <a className="meta" href={e.docs} target="_blank" rel="noreferrer">about it</a>
+                <div className="meta">{e.about}</div>
+              </div>
+              {e.added ? <span className="tag">{e.added === e.name ? "added" : `added as ${e.added}`}</span>
+                : <button className="btn small" onClick={() => setAdding({ title: `Add ${e.name}`, items: [e.found] })}>
+                  <Plus size={13} /> Add</button>}
+            </div>
+          ))}
+        </div>
+      </>}
       <h3>Tools you always allow</h3>
       <div className="list">
         {perms.length === 0 ? <Empty>None. When a tool asks and you choose "Always allow this tool", it appears here.</Empty> : perms.map((p) => (
@@ -1910,10 +1935,117 @@ function McpTab({ s }: { s: S }) {
             <button className="btn quiet small" onClick={() => forget(p.tool)}>Ask again</button></div>
         ))}
       </div>
+      {adding && <McpAdd title={adding.title} initial={adding.items} paste={adding.paste} onClose={() => setAdding(null)}
+        onAdd={(list) => { write([...servers, ...list]); setAdding(null); }} />}
       {edit && <McpEditor cfg={edit.cfg} existing={edit.index >= 0} onClose={() => setEdit(null)}
         onDelete={() => { write(servers.filter((_, j) => j !== edit.index)); setEdit(null); }}
         onSave={(cfg) => { write(edit.index >= 0 ? servers.map((x, j) => (j === edit.index ? cfg : x)) : [...servers, cfg]); setEdit(null); }} />}
     </div>
+  );
+}
+
+/** A found server with the user's values where its page left them open (0.86.0). An optional value left empty takes
+ *  its header or variable away. */
+function filled(f: McpFound, name: string, values: string[]): McpServerConfig {
+  const c: McpServerConfig = { ...f.config, name: name.trim(), headers: { ...(f.config.headers ?? {}) },
+    env: { ...(f.config.env ?? {}) } };
+  f.needs.forEach((n, i) => {
+    const v = (values[i] ?? "").trim();
+    if (n.where === "url") {
+      if (n.placeholder) c.url = (c.url ?? "").split(n.placeholder).join(v);
+      return;
+    }
+    const bag = (n.where === "header" ? c.headers : c.env) as Record<string, string>;
+    if (!v) {
+      if (n.optional) delete bag[n.key];
+      return;
+    }
+    bag[n.key] = n.placeholder ? (bag[n.key] ?? n.placeholder).split(n.placeholder).join(v) : v;
+  });
+  return c;
+}
+
+/** Servers to add (0.86.0): from the catalog, or read from what a server's page gives - with the values it leaves
+ *  open, what will not work here, and the ones set up already left out. */
+function McpAdd({ title, initial, paste, onClose, onAdd }: { title: string; initial: McpFound[]; paste?: boolean;
+  onClose: () => void; onAdd: (list: McpServerConfig[]) => void }) {
+  const { toast } = useApp();
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [items, setItems] = useState<McpFound[]>(initial);
+  const [picked, setPicked] = useState<boolean[]>(initial.map((f) => !f.problem && !f.same_as));
+  const [names, setNames] = useState<string[]>(initial.map((f) => f.config.name));
+  const [values, setValues] = useState<string[][]>(initial.map((f) => f.needs.map(() => "")));
+  const read = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      const r = await api<{ servers: McpFound[]; error: string | null }>("/hub/api/mcp/read-config", { body: { text } });
+      setItems(r.servers);
+      setPicked(r.servers.map((f) => !f.problem && !f.same_as));
+      setNames(r.servers.map((f) => f.config.name));
+      setValues(r.servers.map((f) => f.needs.map(() => "")));
+      setError(r.error ?? "");
+    } catch (e) {
+      toast((e as Error).message, "fault");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const chosen = items.map((_, i) => i).filter((i) => picked[i] && !items[i].problem);
+  const complete = (i: number) => !!names[i]?.trim()
+    && items[i].needs.every((n, j) => n.optional || (values[i]?.[j] ?? "").trim());
+  const ok = chosen.length > 0 && chosen.every(complete);
+  const set = (i: number, j: number, v: string) => setValues(values.map((row, k) => (k === i ? row.map((x, m) => (m === j ? v : x)) : row)));
+  return (
+    <Modal wide title={title} onClose={onClose} footer={<>
+      <span className="grow" />
+      <button className="btn" onClick={onClose}>Cancel</button>
+      <button className="btn primary" disabled={!ok} onClick={() => onAdd(chosen.map((i) => filled(items[i], names[i], values[i] ?? [])))}>
+        {chosen.length > 1 ? `Add ${chosen.length} servers` : "Add and connect"}</button></>}>
+      {paste && <div className="stack" style={{ gap: 8, marginBottom: 14 }}>
+        <p className="muted" style={{ margin: 0 }}>Paste what the server's page gives: the JSON for Claude Desktop, Cursor or
+          VS Code (with mcpServers or servers), a <span className="mono">claude mcp add</span> command, its URL, or the npx
+          or uvx command that starts it. The Hub only reads it.</p>
+        <textarea className="textarea mono" rows={8} value={text} aria-label="Configuration"
+          placeholder={'{ "mcpServers": { "docs": { "url": "https://example.com/mcp" } } }'}
+          onChange={(e) => setText(e.target.value)} />
+        <div><button className="btn" disabled={busy || !text.trim()} onClick={read}>{busy ? "Reading" : "Read it"}</button></div>
+        {error && <p style={{ margin: 0, color: "var(--fault)" }}>{error}</p>}
+      </div>}
+      {items.length > 0 && <div className="list">
+        {items.map((f, i) => (
+          <div className="list-row" key={i} style={{ alignItems: "flex-start" }}>
+            <input type="checkbox" aria-label={`Add ${names[i]}`} checked={!!picked[i] && !f.problem} disabled={!!f.problem}
+              style={{ marginTop: 9, accentColor: "var(--act)", width: 16, height: 16 }}
+              onChange={(e) => setPicked(picked.map((x, k) => (k === i ? e.target.checked : x)))} />
+            <div className="grow stack" style={{ gap: 6, minWidth: 0 }}>
+              <div className="row">
+                <input className="input" aria-label="Name" value={names[i] ?? ""} style={{ maxWidth: "16rem" }}
+                  onChange={(e) => setNames(names.map((x, k) => (k === i ? e.target.value : x)))} />
+                <span className="tag">{f.config.transport === "stdio" ? "command" : "HTTP"}</span>
+              </div>
+              <div className="meta mono ellipsis">{f.config.transport === "stdio" ? f.config.command : f.config.url}</div>
+              {f.same_as && <div className="meta">Set up already, as {f.same_as}.</div>}
+              {f.problem && <div className="meta" style={{ color: "var(--fault)" }}>{f.problem}</div>}
+              {f.notes.map((n, j) => <div className="meta" key={j}>{n}</div>)}
+              {f.needs.map((n, j) => (
+                <label className="field" key={j} style={{ margin: 0 }}>
+                  <span>{n.label}</span>
+                  <input className="input mono" type={n.secret ? "password" : "text"} autoComplete="off"
+                    value={values[i]?.[j] ?? ""} onChange={(e) => set(i, j, e.target.value)} />
+                  <small>{n.optional ? "Optional. " : ""}{n.help ? `${n.help} ` : ""}{n.where === "url" ? "It goes into the URL."
+                    : n.where === "header" ? <>Sent as the header <span className="mono">{n.key}</span>.</>
+                      : <>Given to the command as <span className="mono">{n.key}</span>.</>}</small>
+                </label>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>}
+      {items.length > 0 && <p className="muted">Its tools ask before they run. Edit a server afterwards to trust it.</p>}
+    </Modal>
   );
 }
 

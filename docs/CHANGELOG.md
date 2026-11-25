@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.86.0 - 2026-11-25
+
+- Settings, MCP servers suggests five servers that work with the Hub and need
+  no account: MDN (web documentation and browser support), Context7
+  (library documentation), Microsoft Learn (C#, .NET, Windows Forms),
+  DeepWiki (questions about a GitHub repository) and Hugging Face (models
+  and datasets). Add puts one in; Context7 and Hugging Face take an optional
+  key for higher limits.
+- Paste a configuration: paste what a server's page gives - the JSON for
+  Claude Desktop, Cursor or VS Code, a `claude mcp add` command, its URL or
+  the npx or uvx command - and the Hub turns it into its own settings. It
+  asks for the API key where the page has a placeholder, says what cannot
+  run here (Docker, for one) and which servers are set up already.
+- A key in a server's command line is kept in its environment, hidden in
+  Settings like a header.
+
 ## 0.85.0 - 2026-11-25
 
 - MCP servers no longer fill every request. The assistant gets two tools in

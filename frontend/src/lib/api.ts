@@ -407,6 +407,15 @@ export interface McpStatus { name: string; transport: string; enabled: boolean; 
   tools: { name: string; agent_name: string; description: string; only_looks?: boolean; files?: string[] }[] }
 export interface McpServerConfig { name: string; transport: "http" | "stdio"; url?: string; headers?: Record<string, string>;
   command?: string; env?: Record<string, string>; enabled: boolean; trusted?: boolean; review?: boolean; timeout_s?: number }
+/** A value a server's page leaves to the reader (0.86.0): the placeholder in a header, the environment or the URL -
+ *  or, with placeholder null, the whole value. */
+export interface McpNeed { where: "header" | "env" | "url"; key: string; placeholder: string | null; label: string;
+  optional?: boolean; secret?: boolean; help?: string }
+/** A server read from a pasted configuration, or one from the catalog (0.86.0). */
+export interface McpFound { config: McpServerConfig; needs: McpNeed[]; notes: string[]; problem: string | null;
+  same_as: string | null }
+export interface McpCatalogEntry { id: string; name: string; about: string; docs: string; checked: string;
+  added: string | null; found: McpFound }
 
 export interface Library { id: number; name: string; description: string; docs: number; ready: number; busy: number;
   errors: number; bytes: number; pages: number; created_at: string }

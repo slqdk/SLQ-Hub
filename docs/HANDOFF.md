@@ -4,7 +4,23 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## Next session - start here (written 2026-11-25, at 0.85.0)
+## Next session - start here (written 2026-11-25, at 0.86.0)
+
+**0.86.0 (2026-11-25): more MCP servers - five suggested in Settings, and any other pasted from its page - pushed,
+not yet installed.** Søren's first wish of the day ("Jeg kunne godt tænke mig at have nogle flere mcp servere til brug
+i chatten.. Jeg har kigget på mcpservers.org men jeg ved ikke rigtigt hvad jeg skal gøre"), picked again after 0.85.0
+as "Flere MCP-servere". Built (DESIGN §6 "More servers"): Settings -> MCP servers -> Suggested servers (MDN, Context7,
+Microsoft Learn, DeepWiki, Hugging Face - each answered `initialize`, `tools/list` and a call through the Hub's own
+`McpManager` from the build machine on 2026-11-25; Context7 without a key said "Monthly quota exceeded" there, so its
+free key is offered) and Paste a configuration (`mcp_import.read_config`: JSON, TOML, `claude mcp add`, a URL, an
+npx/uvx command - the key it needs asked for, Docker and the like refused with why). Seen in the dev server: the paste
+dialog, a key filled in and stored, the docker server left out, Context7 added from the list. Not on the VM: whether the
+Hub container reaches the five hosts from his network, and how a local model chooses among 15 more tools. To try
+after the update: add MDN and Context7 (with a key from context7.com/dashboard), then in a SLQ-Game-Lobby chat "Look
+up on MDN ..." / "Use Context7 to find how three.js ... works". Forgejo issues and pull requests (forgejo-mcp, Go, its
+own HTTP mode) need a container next to Forgejo - not built; the paste dialog takes its config once one runs.
+
+The paragraphs below were written at 0.85.0 and before.
 
 **0.85.0 (2026-11-25): MCP tools on demand, and an error that says what fills a request - pushed, not yet
 installed.** Søren's turn in SLQ-Game-Lobby with Gemma 4 31B (U) ended in llama-server's "request (48158 tokens)
@@ -172,7 +188,7 @@ finds them and fingers still come out wrong). Decided: no Facebook posting (he c
 
 Known flake: tests/test_training.py::test_the_trainer_stops_a_job fails now and then in a full run and passes alone.
 
-## State (0.85.0, 2026-11-25)
+## State (0.86.0, 2026-11-25)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -1531,6 +1547,7 @@ the host if the VM ever stops by itself.
 | Scheduler | 14 unit tests: priorities, aging, slots, affinity, leases with in-lease switching (two leases that both want ComfyUI, a full residency), cancellation, preload, a crashed model server noticed and loaded again. |
 | Model APIs | 29 tests against a fake llama-server: Ollama (chat, generate, show, tags, embed, key in the path, `HEAD /`), OpenAI (chat, stream, tools, images, the extra fields of `/v1/models`), Anthropic (messages, stream, tools, thinking), LAN guard, CORS, key priority, the `/chat` route, the home network for keys, keys that work away from home (through the proxy only - not from a direct outside peer or the sandbox; a wrong key from outside gets the same 403; an address list still applies; last used only once let in; switched back), every key from outside still only through the proxy. |
 | Agent | 62 tests: plain turns, the files a turn made or changed (by a tool and by a command; scratch files removed again, `.hub` and untouched files left out; newest first) as a run step, served for the card (a range for the player, a download, PDFs without the sandbox CSP), the folder snapshot's ignores (node_modules, `.pyc`, links) and its limit, the local time each user message was sent (in the message, the same text in later turns; summer and winter time, `TZ`), tools in chat and project folders, revisions, stopping (in a tool and while writing), retry/edit, SSE replay, messages sent while a turn works (read after a tool step, while the last answer is written, after the end, with Stop), attachments, project files put in a message (text inline and fenced, too big or binary as pointers, pictures as images, refused paths, the pointer once the message is old), image generation switching the card and back, MCP over HTTP (approval, always-allow, masked secrets) and over stdio in the sandbox, MCP on demand (0.85.0: only mcp_tools and mcp_call in the request, their listing, description and errors, mcp_call's arguments three ways, the schema with a tool's first failure, a call by the tool's own name), the error that says what fills a request too big after the refit, escalation (explicit and automatic), subagents, compaction (and a summary request that fits the context: 40 big results before the new question, 8K context), a long single turn that stays inside a 14K context (12 results of 9,000 characters, tool definitions counted), the loop guard (the same search refused, a failing read retried once then refused, the forced answer without tools and its notice, repeats with new words, the same bash step three times, a read after an edit running again), hand-over to the stronger local model (a loop, three failed calls, the escalate tool; the card switches within the lease; its own system prompt and note, no reasoning of the other model; nobody to hand over to; local first, then the cloud), what each step was sent and why it stopped, a model's own thinking and sampling, system prompts stored once and removed with the chat, the note when a picture call names another model than the chat's, skills, memory, artifacts. |
+| MCP import | 19 tests (0.86.0): one remote server in seven clients' words (Cursor, Windsurf, Gemini CLI, Codex's TOML, `claude mcp add`, amp, a README block with a comment and a trailing comma), a key in a command line moved into the environment (four forms), VS Code's inputs and settings fragment, Zed, a bare URL, `add-json`, what cannot run (Docker, Go), `/sse` and `localhost` notes, a path on another computer, a host to fill in, `mcp-remote` replaced by its URL, unique names and servers set up already, the command line run through bash with `$HOME`, backticks and quotes left as text, the catalog, the routes (no secret in their answers). |
 | SLQ Sync (gone in 0.84.0; tests/test_history.py keeps the history's 6) | 8 tests (one: writes never follow a symlink planted in the folder), including a round trip with the real `slq_sync.py` client from the SLQ Companion repo against a live server (clone, both-way edits, a conflict, its release). Skipped when that file is not next to this repo. |
 | Libraries | 5 tests with keyword-hashing fake embedders: text and page-image indexing, fused search, re-ranking, replacing and deleting documents, GPU indexing through the queue, broken files. |
 | Web UI | `tsc` + `vite build`; every page and the main flows clicked through in Chromium (Playwright) against `python -m tests.devserver` (the Hub with fake services): sign-in, chat with markdown/maths/code, tool strip, artifact panel, approvals, subagent, image tool, projects (files, editor, settings, sync), libraries, all settings tabs, dark mode, phone width. |
@@ -2223,6 +2240,13 @@ the host if the VM ever stops by itself.
       converter's cases are ComfyUI 0.42.3's own templates; files from other sites (Civitai, OpenArt) are
       untried - an export is the way to see what went wrong. When COMFYUI_REF changes, the editor's format may
       too: tools/workflow_oracle/ (convert.js, compare.py) is how the converter was checked - run it again.
+104. **More MCP servers (0.86.0)** - the catalog's servers answered from the build machine, not from the VM:
+    - **The suggested servers on the VM**: Add MDN, Context7, Microsoft Learn, DeepWiki, Hugging Face - each "ready" with
+      its tools (the Hub container must reach mcp.mdn.mozilla.net, mcp.context7.com, learn.microsoft.com,
+      mcp.deepwiki.com and huggingface.co over HTTPS). Context7 with and without a key.
+    - **Paste a configuration** with what real pages give: a block from mcpservers.org, a README with prose around the
+      code, a server that needs a key - the key asked for, stored masked, the server connecting.
+    - **A local model with 20 tools on demand**: does it pick MDN for a web question and Context7 for three.js?
 103. **MCP tools on demand (0.85.0)** - only in the tests and the dev server:
     - **With a real model**: MCP servers on, Gemma 4 31B in SLQ-Game-Lobby - the turn starts (no "exceeds the
       available context size"); a task that needs a server's tool: does it call `mcp_tools` first, or `mcp_call`

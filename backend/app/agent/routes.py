@@ -243,6 +243,25 @@ async def mcp_reload(request: Request):
     return mcp.status()
 
 
+class McpConfigText(BaseModel):
+    text: str
+
+
+@router.post("/mcp/read-config")
+async def mcp_read_config(body: McpConfigText, request: Request):
+    """A server's configuration as its page gives it (0.86.0) - JSON, TOML, a command or a URL - as the Hub's own
+    server settings, to review and add in Settings. Reads the text only."""
+    from . import mcp_import
+    return mcp_import.read_config(body.text, get_hub(request).settings.get("mcp", "servers") or [])
+
+
+@router.get("/mcp/catalog")
+async def mcp_catalog(request: Request):
+    """Servers checked against the Hub's client (0.86.0), each with the name it is set up under, if it is."""
+    from . import mcp_import
+    return mcp_import.catalog(get_hub(request).settings.get("mcp", "servers") or [])
+
+
 @router.get("/tools")
 async def tools(request: Request):
     from .loop import _ensure_tools_loaded

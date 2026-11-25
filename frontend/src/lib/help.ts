@@ -943,8 +943,16 @@ export const SECTIONS: HelpSection[] = [
       {
         id: "mcp",
         title: "Tools from MCP servers",
-        what: "Servers added under Settings, MCP servers give it more tools, which it uses like its own.",
-        examples: [{ text: "Which tools do you have from the MCP servers, and what can they do?" }],
+        what: "Servers added under Settings, MCP servers give it more tools, which it looks up when it needs them.",
+        examples: [
+          { text: "Which tools do you have from the MCP servers, and what can they do?" },
+          { text: "Look up on MDN which browsers support the Popover API" },
+          { text: "Use Context7 to find how three.js InstancedMesh is updated each frame" },
+        ],
+        tips: ["Settings, MCP servers suggests a few servers that work with the Hub, added with one click: MDN, "
+          + "Context7, Microsoft Learn, DeepWiki and Hugging Face.", "For any other server, Paste a configuration "
+          + "takes what its page gives - the JSON for Claude Desktop, Cursor or VS Code, a claude mcp add command or "
+          + "its URL - and asks for the key it needs."],
         needs: ["mcp"],
         owner: true,
       },
