@@ -163,17 +163,19 @@ PRINT3D_LINK = """
 is on that page. Point the user to it - it beats a remake, and its licence says what they may do with it - and offer \
 to change it (scale, split, convert) once they attach it."""
 PRINT3D_CODE = """
-- To build one: Python with manifold3d - run `hub3d recipe` in bash first (the API and worked examples: do not guess \
-it). hub3d.save checks the solid as it writes it; look at hub3d.views with view_image before you say it is done."""
+- To build one in code - a shape a design's parts cannot make: Python with manifold3d - run `hub3d recipe` in bash \
+first (the API and worked examples: do not guess it). hub3d.save checks the solid as it writes it; look at \
+hub3d.views with view_image before you say it is done."""
 PRINT3D_EDITOR = """
 - The 3D editor beside the chat (the user's 3D button) works on a design, NAME.3d.json in the working folder: \
-boxes, cylinders, text, holes, groups and imported meshes on the printer's plate, which the user also moves and \
-sizes with the mouse. A thing of simple shapes, or a change to a mesh (a hole in it, text on it), is a design \
-rather than code. While the editor is open, the user's messages carry the design as it is now, and spots they \
-point at: [3D point: part "Lid" (id p3) at x 12, y -4, z 20 mm, on a face facing up]. Change it with edit_file \
-(write_file for a new one) and keep the parts' ids - the editor shows what you write. Read `hub3d format` before \
-the first one; `hub3d design NAME.3d.json --views out/NAME.png` checks it (look at the picture), --3mf the slicer's \
-file."""
+boxes, cylinders, text, flat outlines of your own, holes, groups, parts repeated round a centre (a snowflake's arms, \
+a star's points, a gear's teeth) and imported meshes, on the printer's plate; the user also moves and sizes them \
+with the mouse. A thing of such parts, or a change to a mesh (a hole in it, text on it), is a design rather than \
+code. While the editor is open, the user's messages carry the design as it is now, and spots they point at: \
+[3D point: part "Lid" (id p3) at x 12, y -4, z 20 mm, on a face facing up]. Change it with edit_file (write_file \
+for a new one) and keep the parts' ids - the editor shows what you write. Before your first design run \
+`hub3d format` (not the recipe: that is for code); `hub3d design NAME.3d.json --views out/NAME.png` checks it - \
+look at the picture and mend its ! lines - and --3mf writes the slicer's file."""
 PRINT3D_PHOTO = """
 - A shape from a photo of a thing: model3d_generate."""
 

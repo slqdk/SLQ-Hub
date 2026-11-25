@@ -3,7 +3,8 @@
     cd backend && python -m tests.devserver [--port 8080] [--data /tmp/hub-dev]
 
 Signs in as soren / "correct horse battery". The fake model answers by
-keyword: "files" (writes and runs a script), "key tag" (a design: the 3D editor opens; "bigger hole" changes it), "ask me" (a question card it waits for), "install" (code that needs the
+keyword: "files" (writes and runs a script), "key tag" (a design: the 3D editor opens; "bigger hole" changes it),
+"snowflake" (a design with an outline repeated round a centre), "ask me" (a question card it waits for), "install" (code that needs the
 internet), "read dr.dk" (web_fetch), "jingle" (a command makes a
 sound, a PDF and notes: the card under the answer), "announce" (speech),
 "song" (music), "horn" (a sound effect), "video" (Wan 2.2 5B: ffmpeg's test
@@ -204,6 +205,15 @@ KEY_TAG = """{
   ]
 }
 """
+
+
+def _snowflake() -> str:
+    """hub3d format's snowflake, from the sandbox's hub3d.py (its own example, built by its self-test)."""
+    text = (Path(__file__).resolve().parents[2] / "services" / "sandbox" / "hub3d.py").read_text(encoding="utf-8")
+    return text.split('DESIGN_SNOWFLAKE = """\\\n', 1)[1].split('"""', 1)[0]
+
+
+SNOWFLAKE = _snowflake()
 
 
 def responder(body: dict) -> dict:
@@ -412,6 +422,11 @@ def responder(body: dict) -> dict:
             return {"content": "A key tag as a design.", "tool_calls": [{"name": "write_file", "arguments": {
                 "path": "key-tag.3d.json", "content": KEY_TAG}}]}
         return {"content": "The key tag is open in the 3D editor: 50 x 22 mm, a 5 mm hole for the ring and SLQ on top."}
+    if "snowflake" in low:                              # 0.88.0: outlines and a repeat - hub3d format's own example
+        if tools_done == 0:
+            return {"content": "A snowflake: one arm, repeated six times.", "tool_calls": [{"name": "write_file",
+                    "arguments": {"path": "snowflake.3d.json", "content": SNOWFLAKE}}]}
+        return {"content": "The snowflake is open in the 3D editor: 120 mm across, 3 mm thick, flat on the plate."}
     if "bigger hole" in low:                            # ... and a change to it while it is open
         if tools_done == 0:
             return {"content": "Making the hole 8 mm.", "tool_calls": [{"name": "edit_file", "arguments": {

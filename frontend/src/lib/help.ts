@@ -731,12 +731,15 @@ export const SECTIONS: HelpSection[] = [
         examples: [
           { text: "Make a key tag as a 3D design: 50 x 22 mm, a hole for the ring and my name on top" },
           { text: "Make the walls 2 mm thicker and round the top edges" },
+          { text: "Make a snowflake for the Christmas tree as a 3D design, 10 cm across, with a hole to hang it by" },
         ],
         how: ["3D at the top of the chat opens a new design or one in the folder. An STL, 3MF or OBJ opens there too, "
           + "as a design with the mesh in it - to put a hole in it or text on it.",
           "Click a part to pick it, Shift-click to pick more, double-click a part inside a group, and drag a picked "
           + "part to move it on the plate. G, R and S switch the handles between moving, turning and sizing.",
           "A hole cuts the solids beside it. Group parts (Ctrl+G) to keep a hole to them.",
+          "Pattern repeats a part or a group round a point or in a row: one arm of a snowflake becomes six, one hole "
+          + "a ring of holes. The assistant can also draw flat outlines of its own - stars, leaves, letters' shapes.",
           "Point at puts a spot on the model into your message, so you can say what should change there.",
           "Export downloads a 3MF or an STL, or saves it in the folder."],
         tips: ["While the editor is open, the design goes with every message: the assistant sees it as it is now.",

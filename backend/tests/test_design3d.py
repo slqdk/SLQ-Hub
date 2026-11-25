@@ -78,9 +78,16 @@ ODD = {"format": "slq-hub-3d", "version": 1, "printer": "bambu-p2s", "bed": [256
     {"id": "t", "shape": "text", "size": [0, 8, 1.5], "text": 7},
     {"id": "m", "shape": "mesh"},
     {"id": "g", "shape": "group", "at": [5, 5, 5], "size": [9, 9, 9], "parts": [
-        {"id": "s", "shape": "sphere", "sides": 2.5, "hidden": True}, "not a part"]}]}
+        {"id": "s", "shape": "sphere", "sides": 2.5, "hidden": True}, "not a part"]},
+    # 0.88.0: outlines, repeats, and keys a model guessed (chat 328: type, radius, height, position, rotation)
+    {"id": "o", "shape": "outline", "points": [[0, 0], [10, 0], [5, 8]], "holes": [[[4, 2], [6, 2], [5, 4]], [[1, 1]]],
+     "size": [0, -3, 2.5], "repeat": {"count": 6.4, "angle": 720, "around": [1, 2]}},
+    {"id": "o2", "shape": "outline", "points": [[0, 0], [1, 1]], "repeat": {"count": 1}},
+    {"id": "row", "shape": "box", "repeat": {"count": 500, "step": [10, 0, 0], "around": [9, 9]}},
+    {"id": "bad", "shape": "box", "repeat": "six", "type": "cylinder", "position": [1, 2, 3]},
+    {"id": "gr", "shape": "group", "repeat": {"count": 3, "angle": 90}, "radius": 4, "parts": []}]}
 GEOMETRIC = ("id", "shape", "size", "at", "rotate", "mirror", "hole", "hidden", "sides", "radius", "top", "text",
-             "file")
+             "file", "points", "holes", "repeat")
 
 
 def flat(parts: list) -> list[dict]:
@@ -97,7 +104,18 @@ def test_both_read_a_design_with_the_same_defaults(h3):
                 "text: G.writeDesign(r.design)}));", ODD)
     py, problems = h3.read_design(json.dumps(ODD))
     assert flat(js["parts"]) == flat(py["parts"])
-    assert len(js["problems"]) == len(problems) == 3
+    assert len(js["problems"]) == len(problems) == 7, (js["problems"], problems)
+    assert problems[0] == js["problems"][0] == ("1 part has keys the format does not use (position, type) - run "
+                                                "hub3d format: shape, size, at, rotate ...")
+    # chat 328's first try: 31 parts in words of its own - two lines, not 31
+    guessed = {"parts": [{"id": f"arm_{i}", "type": "cylinder", "radius": 3, "height": 100, "position": [0, 0, 0],
+                          "rotation": [0, 90, 0]} for i in range(31)]}
+    _, said = h3.read_design(json.dumps(guessed))
+    js_said = run_js("process.stdout.write(JSON.stringify(G.readDesign(JSON.stringify(input)).problems));", guessed)
+    assert said == [("31 parts have keys the format does not use (height, position, rotation, type) - run hub3d "
+                     "format: shape, size, at, rotate ..."),
+                    "31 parts have no shape the format knows (arm_0, arm_1, arm_2 ...) - taken as boxes"]
+    assert js_said == [said[0], said[1] + "."]
     by_id = {p["id"]: p for p in flat(py["parts"])}
     assert by_id["a"]["size"] == [20, 20, 20] and by_id["a"]["at"] == [0, 0, 10]
     assert by_id["p2"]["size"] == [10, 4, 0.01] and by_id["p2"]["sides"] == 8 and by_id["p2"]["radius"] == 2
@@ -105,10 +123,19 @@ def test_both_read_a_design_with_the_same_defaults(h3):
     assert by_id["c"]["top"] == 1 and by_id["c"]["sides"] == 256 and by_id["c"]["mirror"] and by_id["c"]["hole"]
     assert by_id["t"]["size"] == [0, 8, 1.5] and by_id["t"]["text"] == "Text"
     assert by_id["s"]["sides"] == 3 and by_id["s"]["hidden"]
+    o = by_id["o"]                         # an outline: 0 keeps its points' size; a hole of one point left out
+    assert o["size"] == [0, 0, 2.5] and o["at"] == [0, 0, 1.25] and len(o["holes"]) == 1
+    assert o["repeat"] == {"count": 6, "around": [1, 2]}                       # 720 degrees: all round
+    assert "points" not in by_id["o2"] and "repeat" not in by_id["o2"]           # too few points; one copy is none
+    assert by_id["row"]["repeat"] == {"count": 100, "step": [10, 0, 0]}          # a row: around means nothing
+    assert "repeat" not in by_id["bad"] and by_id["gr"]["repeat"] == {"count": 3, "angle": 90}
+    assert "radius" not in by_id["gr"]
     # What the editor writes reads back as it was, and a group keeps no place of its own.
     again, _ = h3.read_design(js["text"])
     assert flat(again["parts"]) == flat(py["parts"])
     assert '"size": [20, 20, 20]' in js["text"] and '"at": [5, 5, 5]' not in js["text"]
+    assert '"points": [[0, 0], [10, 0], [5, 8]]' in js["text"] and '"holes": [\n' in js["text"]
+    assert '"around": [1, 2]' in js["text"] and '"angle"' not in js["text"].split('"id": "o"')[1].split('"id"')[0]
 
 
 SAMPLE = {"format": "slq-hub-3d", "version": 1, "bed": [256, 256, 256], "parts": [
@@ -128,6 +155,35 @@ SAMPLE = {"format": "slq-hub-3d", "version": 1, "bed": [256, 256, 256], "parts":
     {"id": "cube", "shape": "mesh", "file": "cube.stl", "size": [10, 10, 5], "at": [-25, 15, 2.5],
      "rotate": [0, 0, 30], "mirror": True},
     {"id": "sheet", "shape": "mesh", "file": "open.stl", "size": [8, 8, 1], "at": [-25, -15, 0.5]}]}
+
+
+# 0.88.0: outlines (holes, scaled, turned, mirrored, drawn either way round, crossing themselves), repeats (round, over
+# an angle, in a row, of a hole, within a repeated group) - and a group of solids alone in the design, which built
+# different triangles in the two before every join was worked out where it is made.
+MORE = [
+    {"parts": [{"id": "o", "shape": "outline", "points": [[0, 0], [30, 0], [30, 20], [15, 30], [0, 20]],
+                "holes": [[[5, 5], [10, 5], [10, 10], [5, 10]], [[20, 12], [22, 18], [25, 12]]],
+                "size": [45, 0, 4], "at": [5, -3, 2], "rotate": [0, 0, 20], "mirror": True},
+               {"id": "bow", "shape": "outline", "points": [[0, 0], [10, 10], [10, 0], [0, 10]], "size": [0, 0, 2],
+                "at": [-30, 0, 1]},
+               {"id": "cw", "shape": "outline", "points": [[0, 0], [0, 8], [8, 8], [8, 0]], "at": [-30, 20, 1],
+                "holes": [[[2, 2], [6, 2], [6, 6], [2, 6]]]}]},
+    {"parts": [{"id": "plate", "shape": "cylinder", "size": [60, 60, 3], "at": [0, 0, 1.5]},
+               {"id": "h", "shape": "cylinder", "size": [5, 5, 5], "at": [22, 0, 1.5], "hole": True,
+                "repeat": {"count": 8, "around": [0, 0]}},
+               {"id": "fan", "shape": "box", "size": [20, 4, 3], "at": [15, 0, 4.5],
+                "repeat": {"count": 4, "angle": 90, "around": [0, 0]}},
+               {"id": "row", "shape": "cylinder", "size": [6, 6, 10], "at": [-25, -40, 5],
+                "repeat": {"count": 5, "step": [12, 0, 0]}}]},
+    {"parts": [{"id": "g", "shape": "group", "repeat": {"count": 3, "around": [0, 0]}, "parts": [
+        {"id": "rung", "shape": "box", "size": [10, 2, 2], "at": [20, 0, 1], "repeat": {"count": 4, "step": [0, 4, 0]}},
+        {"id": "self", "shape": "wedge", "size": [8, 6, 4], "at": [32, 3, 2], "rotate": [0, 0, 30],
+         "repeat": {"count": 5}}]}]},
+    {"parts": [{"id": "base", "shape": "box", "size": [40, 40, 4], "at": [0, 0, 2]},
+               {"id": "g", "shape": "group", "parts": [
+                   {"id": "a", "shape": "box", "size": [10, 10, 10], "at": [10, 10, 8]},
+                   {"id": "b", "shape": "sphere", "size": [12, 12, 12], "at": [-10, -10, 8]}]}]},
+]
 
 
 def write_stl(path: Path, v: np.ndarray, f: np.ndarray) -> None:
@@ -170,7 +226,9 @@ def test_the_editor_and_hub3d_build_the_same_solid(h3, tmp_path):
                 {"parts": [{"id": "w", "shape": "wedge", "size": [30, 10, 20], "rotate": [90, 0, 0], "at": [1, 2, 3]},
                            {"id": "h", "shape": "sphere", "size": [10, 10, 10], "at": [1, 2, 3], "hole": True}]},
                 {"parts": [{"id": "only-hole", "shape": "box", "hole": True}]},
-                json.loads(h3.DESIGN_EXAMPLE)]                  # hub3d format's example
+                json.loads(h3.DESIGN_EXAMPLE),                  # hub3d format's examples
+                json.loads(h3.DESIGN_SNOWFLAKE),
+                *MORE]
     js = run_js(BUILD_JS, {"files": files, "designs": variants})
     for d, j in zip(variants, js):
         design, _ = h3.read_design(json.dumps(d))
@@ -192,6 +250,10 @@ def test_the_editor_and_hub3d_build_the_same_solid(h3, tmp_path):
     sample = js[0]
     assert sample["loose"] == ["sheet"] and sample["volume"] > 25_000
     assert {"base", "hole", "label", "slot", "bore", "cube"} <= set(sample["owners"]) and "gone" not in sample["owners"]
+    snow = js[5]                                      # every copy's triangles are its part's
+    assert {"core", "window", "spine", "twig1", "twig2", "twig3", "twig4", "gem", "eye"} == set(snow["owners"])
+    assert np.allclose(snow["box"], [[-60, -51.9615, 0], [60, 51.9615, 3]], atol=1e-3), snow["box"]
+    assert js[7]["volume"] > 0 and {"plate", "h", "fan", "row"} == set(js[7]["owners"])
 
 
 MOVES_JS = """
@@ -278,14 +340,102 @@ def test_hub3d_format_is_what_both_read(h3, capsys):
     """`hub3d format`'s example reads without a problem in the editor and in hub3d, and names what the prompt does."""
     assert h3.main(["format"]) == 0
     guide = capsys.readouterr().out
-    assert guide == h3.DESIGN_GUIDE and h3.DESIGN_EXAMPLE in guide
-    _, problems = h3.read_design(h3.DESIGN_EXAMPLE)
-    assert problems == []
-    js = run_js("""process.stdout.write(JSON.stringify(G.readDesign(input.text).problems));""",
-                {"text": h3.DESIGN_EXAMPLE})
-    assert js == []
-    for shape in ("box", "cylinder", "cone", "sphere", "wedge", "text", "mesh", "group"):
-        assert f"  {shape} " in guide or f"| {shape}" in guide
+    assert guide == h3.DESIGN_GUIDE and h3.DESIGN_EXAMPLE in guide and h3.DESIGN_SNOWFLAKE in guide
+    for example in (h3.DESIGN_EXAMPLE, h3.DESIGN_SNOWFLAKE):
+        _, problems = h3.read_design(example)
+        assert problems == []
+        js = run_js("""process.stdout.write(JSON.stringify(G.readDesign(input.text).problems));""", {"text": example})
+        assert js == []
+    for shape in ("box", "cylinder", "cone", "sphere", "wedge", "text", "outline", "mesh", "group"):
+        assert f"  {shape} " in guide and f"| {shape}" in guide or shape == "box"
+    assert "  repeat    copies of the part" in guide and "linear_extrude(size z, center=true) polygon(points)" in guide
+    assert "Not cylinders lying down" in guide                         # chat 328
+    keys = (ROOT / "frontend" / "src" / "model3d" / "geometry.ts").read_text()
+    assert all(f'"{k}"' in keys for k in h3.PART_KEYS)                  # the two know the same keys
+    assert h3.MAX_COPIES == 100 and "export const MAX_COPIES = 100;" in keys
     printers = (ROOT / "frontend" / "src" / "model3d" / "printers.ts").read_text()
     for pid in ("bambu-p2s", "bambu-p1s", "bambu-x1", "bambu-a1", "bambu-a1-mini", "bambu-h2s", "bambu-h2d"):
         assert f'id: "{pid}"' in printers and pid in guide
+
+
+REPEAT_MOVES_JS = """
+const fan = { id: "fan", shape: "box", size: [20, 4, 3], at: [15, 0, 1.5], rotate: [0, 0, 0],
+  repeat: { count: 4, angle: 90, around: [0, 0] } };
+const arm = { id: "arm", shape: "outline", size: [0, 0, 3], at: [0, 0, 1.5], rotate: [0, 0, 0],
+  points: [[0, -2], [40, -2], [44, 0], [40, 2], [0, 2]], repeat: { count: 6 } };
+const g = { id: "g", shape: "group", size: [0, 0, 0], at: [0, 0, 0], rotate: [0, 0, 0], repeat: { count: 3 },
+  parts: [{ id: "b", shape: "box", size: [10, 3, 3], at: [12, 0, 1.5], rotate: [0, 0, 0] }] };
+const kit = { wasm, font, meshes: new Map() };
+const one = (p) => { const b = G.build({ format: G.FORMAT, version: 1, parts: [p] }, kit); return { volume: b.volume,
+  box: b.box, tri: b.triangles.length / 3, rests: b.rests }; };
+const turn = G.rotation([0, 0, 30]);
+const out = {};
+for (const [name, p] of Object.entries({ fan, arm, g })) {
+  out[name] = { plain: one(p), extent: G.extent(p),
+    moved: one(G.transformPart(p, [0, 0, 0], [30, -20, 5], null)),
+    turned: one(G.transformPart(p, [10, 10, 0], [0, 0, 0], turn)),
+    bigger: one(G.transformPart(p, [0, 0, 0], [0, 0, 0], null, 2)),
+    mirrored: one(G.mirrorPart(p, 0, [5, 0, 0])), mirroredY: one(G.mirrorPart(p, 1, [0, 7, 0])),
+    movedRepeat: G.transformPart(p, [0, 0, 0], [30, -20, 5], null).repeat,
+    size: G.partSize(p) };
+}
+process.stdout.write(JSON.stringify(out));
+"""
+
+
+def test_copies_move_turn_grow_and_mirror_with_their_part():
+    """Moving, turning, sizing or mirroring a repeated part or group in the editor takes its copies along: the solid
+    keeps its volume and moves as a whole (its centre of turning, or its row, is changed with it)."""
+    out = run_js(REPEAT_MOVES_JS, {})
+    for name, r in out.items():
+        v = r["plain"]["volume"]
+        assert r["moved"]["volume"] == pytest.approx(v, rel=1e-6) and r["turned"]["volume"] == pytest.approx(v, rel=1e-6)
+        assert r["mirrored"]["volume"] == pytest.approx(v, rel=1e-6) == r["mirroredY"]["volume"], name
+        assert r["bigger"]["volume"] == pytest.approx(v * 8, rel=1e-4), name
+        lo, hi = r["plain"]["box"]
+        mlo, mhi = r["moved"]["box"]
+        assert np.allclose(np.array(mlo) - lo, [30, -20, 5], atol=1e-3) and np.allclose(np.array(mhi) - hi, [30, -20, 5],
+                                                                                         atol=1e-3), name
+        xlo, xhi = r["mirrored"]["box"]                                   # mirrored through x = 5
+        assert xlo[0] == pytest.approx(10 - hi[0], abs=1e-3) and xhi[0] == pytest.approx(10 - lo[0], abs=1e-3), name
+        elo, ehi = r["extent"]                                            # the editor's box of it holds the solid
+        assert all(elo[i] <= lo[i] + 1e-3 and hi[i] <= ehi[i] + 1e-3 for i in range(3)), name
+    assert out["fan"]["movedRepeat"] == {"count": 4, "angle": 90, "around": [30, -20]}
+    assert out["g"]["movedRepeat"] == {"count": 3, "around": [30, -20]}         # a group's 0, 0 became a point
+    assert out["arm"]["movedRepeat"] == {"count": 6}                            # a part's own at moves with it
+    assert out["arm"]["size"] == [44, 4, 3]                                     # an outline's 0s: as drawn
+    assert out["arm"]["plain"]["rests"]["contact"] == pytest.approx(out["arm"]["plain"]["rests"]["footprint"], rel=1e-6)
+
+
+def test_what_a_solid_stands_on(h3, tmp_path, capsys, monkeypatch):
+    """Chat 328: a snowflake of 31 cylinders lying down, centred at z 2 - 6 mm thick, 1 mm below the plate - came out
+    "READY for the slicer". hub3d now says what it stands on, and a design that leaves the plate; the editor
+    measures the same."""
+    pytest.importorskip("manifold3d")
+    monkeypatch.setenv("MPLCONFIGDIR", str(tmp_path / "mpl"))
+    rods = {"parts": [{"id": f"rod{i}", "shape": "cylinder", "size": [6, 6, 100], "at": [0, 0, 2],
+                       "rotate": [0, 90, 60 * i]} for i in range(3)]}
+    flat = {"parts": [{"id": "plate", "shape": "box", "size": [60, 40, 3], "at": [0, 0, 1.5], "radius": 0.6}]}
+    high = {"parts": [{"id": "plate", "shape": "box", "size": [60, 40, 3], "at": [0, 0, 4]}]}
+    reports = []
+    for name, d in (("rods", rods), ("flat", flat), ("high", high)):
+        f = tmp_path / f"{name}.3d.json"
+        f.write_text(json.dumps(d))
+        assert h3.main(["design", str(f)]) == 0
+        reports.append(capsys.readouterr().out)
+    rods_out, flat_out, high_out = reports
+    assert "! it stands on" in rods_out and "round or pointed underneath" in rods_out
+    assert "! its lowest point is at z -1.00 mm, below the plate" in rods_out and "READY" not in rods_out
+    assert "stands on" not in flat_out and "lowest point" not in flat_out and "READY for the slicer." in flat_out
+    assert "! its lowest point is at z 2.50 mm, above the plate" in high_out
+    report = h3.check(h3.design(tmp_path / "rods.3d.json", quiet=True))
+    assert 0 < report.contact < 0.4 * report.footprint
+    js = run_js("""const out = input.map((d) => { const { design } = G.readDesign(JSON.stringify(d));
+      return G.build(design, { wasm, font, meshes: new Map() }).rests; }); process.stdout.write(JSON.stringify(out));""",
+                [rods, flat])
+    assert js[0]["contact"] == pytest.approx(report.contact, rel=1e-3)
+    assert js[0]["footprint"] == pytest.approx(report.footprint, rel=1e-3)
+    assert js[1]["contact"] == pytest.approx(js[1]["footprint"], rel=0.05)
+    # a file of its own (an STL) is told the same - but not where it lies: slicers put it on the plate themselves
+    pen = h3.check(h3.design(tmp_path / "flat.3d.json", quiet=True))
+    assert not any("stands on" in w for w in pen.warnings)

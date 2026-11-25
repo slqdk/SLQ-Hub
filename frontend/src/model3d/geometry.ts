@@ -1,9 +1,11 @@
 // The 3D editor's designs (0.87.0): the .3d.json format, and the one solid a design makes, built with manifold-3d.
 //
 // A design is a list of parts in millimetres, Z up, the plate at z = 0 with its centre at x = y = 0. Each part is a
-// shape (box, cylinder, cone, sphere, wedge, text, an imported mesh, or a group of parts) as big as `size` (its
-// bounding box before it is turned), mirrored in its own X when `mirror`, turned by `rotate` (degrees: first about X,
-// then Y, then Z - as OpenSCAD's rotate) and moved so its centre is at `at`. Parts that are holes are cut out of
+// shape (box, cylinder, cone, sphere, wedge, text, an outline, an imported mesh, or a group of parts) as big as
+// `size` (its bounding box before it is turned), mirrored in its own X when `mirror`, turned by `rotate` (degrees:
+// first about X, then Y, then Z - as OpenSCAD's rotate) and moved so its centre is at `at` - an outline (0.88.0) so
+// its points' 0,0 is there, as OpenSCAD's translate(at) rotate(r) linear_extrude(center = true) polygon(points). A
+// part or group can be repeated: copies turned about the up axis, or in a row. Parts that are holes are cut out of
 // the solids beside them - in their group, or in the design itself - as in Tinkercad.
 //
 // Nothing here imports anything (manifold-3d and the font are handed in), so the browser and a test run with node
@@ -16,8 +18,23 @@ export const DEFAULT_SIDES = 64;
 export const MIN_SIZE = 0.01;
 
 export type Vec3 = [number, number, number];
-export type Shape = "box" | "cylinder" | "cone" | "sphere" | "wedge" | "text" | "mesh" | "group";
-export const SHAPES: readonly Shape[] = ["box", "cylinder", "cone", "sphere", "wedge", "text", "mesh", "group"];
+export type Shape = "box" | "cylinder" | "cone" | "sphere" | "wedge" | "text" | "outline" | "mesh" | "group";
+export const SHAPES: readonly Shape[] = ["box", "cylinder", "cone", "sphere", "wedge", "text", "outline", "mesh", "group"];
+export const MAX_COPIES = 100;
+/** The keys a part may have; others are said once (a model guessing the format: "type", "radius", "position"). */
+export const PART_KEYS = ["id", "name", "shape", "size", "at", "rotate", "mirror", "hole", "hidden", "color", "sides",
+  "radius", "top", "text", "points", "holes", "file", "repeat", "parts"];
+
+export type Point2 = [number, number];
+
+/** Copies of a part or a group, joined to it (0.88.0): `count` in all, turned about the up axis through `around` -
+ *  evenly all round, or over `angle` degrees - or each moved on by `step`. */
+export interface Repeat {
+  count: number;
+  around?: Point2;            // default: the part's at (a group's: 0, 0)
+  angle?: number;             // default 360: all round
+  step?: Vec3;                // a row instead of a circle
+}
 export const ROUND: readonly Shape[] = ["cylinder", "cone", "sphere"];
 
 export interface Part {
@@ -35,7 +52,10 @@ export interface Part {
   radius?: number;            // box: rounded edges, mm
   top?: number;               // cone: the top's diameter as a share of the bottom's (0: a point)
   text?: string;              // text
+  points?: Point2[];          // outline: its shape, mm, around its own 0,0 (which `at` places)
+  holes?: Point2[][];         // outline: shapes cut out of it
   file?: string;              // mesh: an STL, 3MF or OBJ in the working folder
+  repeat?: Repeat;            // copies of it
   parts?: Part[];             // group
 }
 
@@ -72,40 +92,91 @@ export function readDesign(text: string): { design: Design; problems: string[] }
   const seen = new Set<string>();
   const parts = Array.isArray(d.parts) ? d.parts : [];
   if (!Array.isArray(d.parts)) problems.push('It has no "parts" list.');
-  const design: Design = { format: FORMAT, version: VERSION, parts: readParts(parts, seen, problems) };
+  const odd: Odd = { parts: 0, keys: new Set<string>(), shapes: [] };
+  const design: Design = { format: FORMAT, version: VERSION, parts: readParts(parts, seen, problems, odd) };
+  // A model that guessed the format: what it did not know first, once - not a line for each of its parts.
+  const first: string[] = [];
+  if (odd.parts) {
+    first.push(`${odd.parts} part${odd.parts > 1 ? "s have" : " has"} keys the format does not use (`
+      + `${[...odd.keys].sort().join(", ")}) - run hub3d format: shape, size, at, rotate ...`);
+  }
+  if (odd.shapes.length > 3) {
+    first.push(`${odd.shapes.length} parts have no shape the format knows (${odd.shapes.slice(0, 3).map(([id]) => id)
+      .join(", ")} ...) - taken as boxes.`);
+  } else odd.shapes.forEach(([id, shape]) => first.push(`${id}: no shape ${JSON.stringify(shape)} - taken as a box.`));
+  problems.unshift(...first);
   if (typeof d.printer === "string" && d.printer) design.printer = d.printer;
   if (Array.isArray(d.bed) && d.bed.length === 3 && d.bed.every((x) => num(x) && x > 0)) design.bed = vec(d.bed, [1, 1, 1]);
   return { design, problems };
 }
 
-function readParts(list: unknown[], seen: Set<string>, problems: string[]): Part[] {
+type Odd = { parts: number; keys: Set<string>; shapes: [string, unknown][] };
+
+function readParts(list: unknown[], seen: Set<string>, problems: string[], odd: Odd): Part[] {
   const out: Part[] = [];
   for (const item of list) {
     if (!item || typeof item !== "object" || Array.isArray(item)) {
       problems.push("A part that is not an object was left out.");
       continue;
     }
-    out.push(readPart(item as Record<string, unknown>, seen, problems, out.length));
+    out.push(readPart(item as Record<string, unknown>, seen, problems, out.length, odd));
   }
   return out;
 }
 
-function readPart(p: Record<string, unknown>, seen: Set<string>, problems: string[], index: number): Part {
+/** An outline's points: three or more [x, y]; null otherwise. */
+function pointsOf(v: unknown): Point2[] | null {
+  if (!Array.isArray(v) || v.length < 3) return null;
+  const out: Point2[] = [];
+  for (const q of v) {
+    if (!Array.isArray(q) || q.length !== 2 || !num(q[0]) || !num(q[1])) return null;
+    out.push([q[0], q[1]]);
+  }
+  return out;
+}
+
+function readRepeat(v: unknown, id: string, problems: string[]): Repeat | undefined {
+  if (v === undefined) return undefined;
+  const r = v as Record<string, unknown>;
+  if (!r || typeof r !== "object" || Array.isArray(r) || !num(r.count)) {
+    problems.push(`${id}: "repeat" needs a "count" - left out.`);
+    return undefined;
+  }
+  const count = Math.max(1, Math.min(MAX_COPIES, Math.round(r.count)));
+  if (count < 2) return undefined;
+  const out: Repeat = { count };
+  if (Array.isArray(r.step) && r.step.length === 3 && r.step.every(num)) {
+    out.step = [r.step[0], r.step[1], r.step[2]];
+    return out;
+  }
+  if (Array.isArray(r.around) && r.around.length === 2 && r.around.every(num)) out.around = [r.around[0], r.around[1]];
+  if (num(r.angle) && Math.abs(r.angle) < 360) out.angle = r.angle;         // all round is the default
+  return out;
+}
+
+function readPart(p: Record<string, unknown>, seen: Set<string>, problems: string[], index: number, odd: Odd): Part {
   let id = typeof p.id === "string" && p.id.trim() ? p.id.trim() : "";
   if (!id || seen.has(id)) id = freshId(seen);
   seen.add(id);
   let shape = p.shape as Shape;
   if (!SHAPES.includes(shape)) {
-    problems.push(`${id}: no shape ${JSON.stringify(p.shape)} - taken as a box.`);
+    odd.shapes.push([id, p.shape]);
     shape = "box";
+  }
+  const unknown = Object.keys(p).filter((k) => !PART_KEYS.includes(k));
+  if (unknown.length) {
+    odd.parts += 1;
+    unknown.forEach((k) => odd.keys.add(k));
   }
   const part: Part = { id, shape, size: [20, 20, 20], at: [0, 0, 10], rotate: [0, 0, 0] };
   if (typeof p.name === "string" && p.name) part.name = p.name;
   if (shape === "group") {
-    part.parts = readParts(Array.isArray(p.parts) ? p.parts : [], seen, problems);
+    part.parts = readParts(Array.isArray(p.parts) ? p.parts : [], seen, problems, odd);
   } else {
-    const size = vec(p.size, [20, 20, shape === "text" ? 2 : 20]);
-    part.size = size.map((v, i) => (shape === "text" && i === 0 && v <= 0 ? 0 : Math.max(MIN_SIZE, Math.abs(v)))) as Vec3;
+    // 0 keeps a text's width as its letters make it, and an outline's width and depth as its points draw them
+    const auto = (i: number, v: number) => v <= 0 && ((shape === "text" && i === 0) || (shape === "outline" && i < 2));
+    const size = vec(p.size, shape === "outline" ? [0, 0, 2] : [20, 20, shape === "text" ? 2 : 20]);
+    part.size = size.map((v, i) => (auto(i, v) ? 0 : Math.max(MIN_SIZE, Math.abs(v)))) as Vec3;
     part.at = vec(p.at, [0, 0, part.size[2] / 2]);
   }
   if (shape === "group") part.size = [0, 0, 0];     // a group is where its parts are: nothing of its own
@@ -124,10 +195,23 @@ function readPart(p: Record<string, unknown>, seen: Set<string>, problems: strin
   if (shape === "box" && num(p.radius) && p.radius > 0) part.radius = p.radius;
   if (shape === "cone") part.top = num(p.top) ? Math.max(0, Math.min(1, p.top)) : 0;
   if (shape === "text") part.text = typeof p.text === "string" ? p.text : "Text";
+  if (shape === "outline") {
+    const pts = pointsOf(p.points);
+    if (pts) part.points = pts;
+    else problems.push(`${id}: an outline needs "points", three or more [x, y] - it makes nothing.`);
+    if (Array.isArray(p.holes)) {
+      const holes = p.holes.map(pointsOf);
+      if (holes.some((h) => !h)) problems.push(`${id}: a hole that is not three or more [x, y] was left out.`);
+      const kept = holes.filter((h): h is Point2[] => !!h);
+      if (kept.length) part.holes = kept;
+    }
+  }
   if (shape === "mesh") {
     if (typeof p.file === "string" && p.file) part.file = p.file;
     else problems.push(`${id}: a mesh without a "file" makes nothing.`);
   }
+  const repeat = readRepeat(p.repeat, id, problems);
+  if (repeat) part.repeat = repeat;
   return part;
 }
 
@@ -165,7 +249,18 @@ function cleanPart(p: Part): Record<string, unknown> {
   if (p.radius) o.radius = r3(p.radius);
   if (p.shape === "cone") o.top = r3(p.top ?? 0);
   if (p.shape === "text") o.text = p.text ?? "";
+  if (p.shape === "outline" && p.points) o.points = p.points.map((q) => q.map(r3));
+  if (p.shape === "outline" && p.holes?.length) o.holes = p.holes.map((h) => h.map((q) => q.map(r3)));
   if (p.shape === "mesh" && p.file) o.file = p.file;
+  if (p.repeat) {
+    const r: Record<string, unknown> = { count: p.repeat.count };
+    if (p.repeat.step) r.step = p.repeat.step.map(r3);
+    else {
+      if (p.repeat.around) r.around = p.repeat.around.map(r3);
+      if (p.repeat.angle !== undefined && Math.abs(p.repeat.angle) < 360) r.angle = r3(p.repeat.angle);
+    }
+    o.repeat = r;
+  }
   if (p.shape === "group") o.parts = (p.parts ?? []).map(cleanPart);
   return o;
 }
@@ -176,8 +271,13 @@ export function writeDesign(d: Design): string {
   if (d.printer) out.printer = d.printer;
   if (d.bed) out.bed = d.bed.map(r3);
   out.parts = d.parts.map(cleanPart);
+  const n = "-?[\\d.e+-]+";
   return JSON.stringify(out, null, 2)
-    .replace(/\[\s+(-?[\d.e+-]+),\s+(-?[\d.e+-]+),\s+(-?[\d.e+-]+)\s+\]/g, "[$1, $2, $3]") + "\n";
+    .replace(new RegExp(`\\[\\s+(${n}),\\s+(${n}),\\s+(${n})\\s+\\]`, "g"), "[$1, $2, $3]")
+    .replace(new RegExp(`\\[\\s+(${n}),\\s+(${n})\\s+\\]`, "g"), "[$1, $2]")
+    // an outline's points on one line
+    .replace(new RegExp(`\\[\\s+(\\[${n}, ${n}\\](?:,\\s+\\[${n}, ${n}\\])*)\\s+\\]`, "g"),
+      (_m, inner: string) => `[${inner.replace(/,\s+/g, ", ")}]`) + "\n";
 }
 
 export function newDesign(printer?: string, bed?: Vec3): Design {
@@ -228,12 +328,51 @@ export function angles(m: Mat3): Vec3 {
   return [deg(x), deg(y), deg(z)];
 }
 
+/** An outline's points scaled to its size (0: as drawn), its holes after them; null without points. */
+export function outlinePolygons(p: Part): number[][][] | null {
+  if (!p.points || p.points.length < 3) return null;
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const [x, y] of p.points) {
+    x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y);
+  }
+  const kx = p.size[0] > 0 && x1 - x0 > 1e-9 ? p.size[0] / (x1 - x0) : 1;
+  const ky = p.size[1] > 0 && y1 - y0 > 1e-9 ? p.size[1] / (y1 - y0) : 1;
+  return [p.points, ...(p.holes ?? [])].map((poly) => poly.map(([x, y]) => [x * kx, y * ky]));
+}
+
+/** A part's own box, before it is mirrored, turned and moved: centred on its 0,0,0 - an outline's where its points
+ *  are drawn. */
+export function ownBox(p: Part): Box3 {
+  const [sx, sy, sz] = p.size;
+  const polys = p.shape === "outline" ? outlinePolygons(p) : null;
+  if (polys) {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const [x, y] of polys[0]) {
+      x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y);
+    }
+    return [[x0, y0, -sz / 2], [x1, y1, sz / 2]];
+  }
+  return [[-sx / 2, -sy / 2, -sz / 2], [sx / 2, sy / 2, sz / 2]];
+}
+
+/** A part's size with the 0s worked out: a text's width from its letters (given the font), an outline's from its
+ *  points. */
+export function partSize(p: Part, font?: FontData): Vec3 {
+  if (p.shape === "text" && p.size[0] <= 0 && font) return [textWidth(p.text ?? "", p.size[1], font), p.size[1], p.size[2]];
+  if (p.shape === "outline" && (p.size[0] <= 0 || p.size[1] <= 0)) {
+    const [lo, hi] = ownBox(p);
+    return [hi[0] - lo[0], hi[1] - lo[1], p.size[2]];
+  }
+  return p.size;
+}
+
 /** The corners of a part's box, turned and moved: where it is in the design. */
 export function corners(p: Part): Vec3[] {
   const m = rotation(p.rotate);
+  const [lo, hi] = ownBox(p);
   const out: Vec3[] = [];
-  for (const sx of [-0.5, 0.5]) for (const sy of [-0.5, 0.5]) for (const sz of [-0.5, 0.5]) {
-    const v = apply(m, [p.size[0] * sx, p.size[1] * sy, p.size[2] * sz]);
+  for (const x of [lo[0], hi[0]]) for (const y of [lo[1], hi[1]]) for (const z of [lo[2], hi[2]]) {
+    const v = apply(m, [p.mirror ? -x : x, y, z]);
     out.push([v[0] + p.at[0], v[1] + p.at[1], v[2] + p.at[2]]);
   }
   return out;
@@ -241,16 +380,48 @@ export function corners(p: Part): Vec3[] {
 
 export type Box3 = [Vec3, Vec3];
 
-/** Where a part (a group: all its parts) reaches in the design, from its turned box. */
-export function extent(p: Part): Box3 | null {
-  if (p.shape === "group") return extentOf(p.parts ?? []);
-  const cs = corners(p);
+/** Where a repeat turns its copies about: `around`, or the part's own at (a group's: the plate's middle). */
+export function repeatAround(p: Part): Point2 {
+  return p.repeat?.around ?? (p.shape === "group" ? [0, 0] : [p.at[0], p.at[1]]);
+}
+
+/** The turn from one copy to the next, degrees: all round in even steps, or `angle` from the first to the last. */
+export function repeatStep(r: Repeat): number {
+  const a = r.angle ?? 360;
+  return Math.abs(a) >= 360 - 1e-9 ? a / r.count : r.count > 1 ? a / (r.count - 1) : 0;
+}
+
+/** Where copy `i` (1 .. count - 1) of a repeated part puts the point `v` of the part. */
+export function copyOf(p: Part, i: number, v: Vec3): Vec3 {
+  const r = p.repeat!;
+  if (r.step) return [v[0] + r.step[0] * i, v[1] + r.step[1] * i, v[2] + r.step[2] * i];
+  const [ax, ay] = repeatAround(p);
+  const t = (repeatStep(r) * i * Math.PI) / 180, c = Math.cos(t), s = Math.sin(t);
+  const x = v[0] - ax, y = v[1] - ay;
+  return [ax + c * x - s * y, ay + s * x + c * y, v[2]];
+}
+
+function boxOfPoints(points: Vec3[]): Box3 | null {
+  if (!points.length) return null;
   const lo: Vec3 = [Infinity, Infinity, Infinity], hi: Vec3 = [-Infinity, -Infinity, -Infinity];
-  for (const c of cs) for (let i = 0; i < 3; i++) {
+  for (const c of points) for (let i = 0; i < 3; i++) {
     lo[i] = Math.min(lo[i], c[i]);
     hi[i] = Math.max(hi[i], c[i]);
   }
   return [lo, hi];
+}
+
+/** Where a part (a group: all its parts; and their copies) reaches in the design, from its turned box. */
+export function extent(p: Part): Box3 | null {
+  const box = p.shape === "group" ? extentOf(p.parts ?? []) : boxOfPoints(corners(p));
+  if (!box || !p.repeat || p.repeat.count < 2) return box;
+  const cs: Vec3[] = [];
+  for (const x of [box[0][0], box[1][0]]) for (const y of [box[0][1], box[1][1]]) for (const z of [box[0][2], box[1][2]]) {
+    cs.push([x, y, z]);
+  }
+  const all = [...cs];
+  for (let i = 1; i < p.repeat.count; i++) for (const c of cs) all.push(copyOf(p, i, c));
+  return boxOfPoints(all);
 }
 
 export function extentOf(parts: Part[]): Box3 | null {
@@ -265,31 +436,73 @@ export function extentOf(parts: Part[]): Box3 | null {
 }
 
 /** A part, or a group's parts, turned by `turn` (a rotation matrix) and scaled by `k` about `centre`, then moved by
- *  `move` - kept in the file's terms: each part's centre, size and angles. */
+ *  `move` - kept in the file's terms: each part's centre, size and angles, and where its copies go. */
 export function transformPart(p: Part, centre: Vec3, move: Vec3, turn: Mat3 | null, k = 1): Part {
-  if (p.shape === "group") return { ...p, parts: (p.parts ?? []).map((c) => transformPart(c, centre, move, turn, k)) };
-  const rel: Vec3 = [p.at[0] - centre[0], p.at[1] - centre[1], p.at[2] - centre[2]];
-  const r = turn ? apply(turn, rel) : rel;
-  const at: Vec3 = [centre[0] + r[0] * k + move[0], centre[1] + r[1] * k + move[1], centre[2] + r[2] * k + move[2]];
-  const out: Part = { ...p, at };
-  if (turn) out.rotate = angles(mul(turn, rotation(p.rotate)));
-  if (k !== 1) {                         // a text's width 0 (it follows its letters) stays 0
-    out.size = p.size.map((v, i) => (p.shape === "text" && i === 0 && v <= 0 ? 0 : Math.max(MIN_SIZE, v * k))) as Vec3;
-    if (p.radius) out.radius = p.radius * k;
+  let out: Part;
+  if (p.shape === "group") out = { ...p, parts: (p.parts ?? []).map((c) => transformPart(c, centre, move, turn, k)) };
+  else {
+    const rel: Vec3 = [p.at[0] - centre[0], p.at[1] - centre[1], p.at[2] - centre[2]];
+    const r = turn ? apply(turn, rel) : rel;
+    const at: Vec3 = [centre[0] + r[0] * k + move[0], centre[1] + r[1] * k + move[1], centre[2] + r[2] * k + move[2]];
+    out = { ...p, at };
+    if (turn) out.rotate = angles(mul(turn, rotation(p.rotate)));
+    if (k !== 1) {                         // a text's width 0 (it follows its letters) stays 0, an outline's 0s too
+      const auto = (i: number, v: number) => v <= 0 && ((p.shape === "text" && i === 0) || (p.shape === "outline" && i < 2));
+      out.size = p.size.map((v, i) => (auto(i, v) ? 0 : Math.max(MIN_SIZE, v * k))) as Vec3;
+      if (p.shape === "outline" && (p.size[0] <= 0 || p.size[1] <= 0)) {
+        const drawn = partSize(p);                    // scaled: its 0s become the drawn size times k
+        out.size = [drawn[0] * k, drawn[1] * k, Math.max(MIN_SIZE, p.size[2] * k)];
+      }
+      if (p.radius) out.radius = p.radius * k;
+    }
+  }
+  if (p.repeat) {
+    const r: Repeat = { ...p.repeat };
+    if (r.step) {
+      const s = turn ? apply(turn, r.step) : r.step;
+      r.step = [s[0] * k, s[1] * k, s[2] * k];
+    } else if (r.around || p.shape === "group") {   // a part's own at is its centre of turning: that moves already
+      const [ax, ay] = repeatAround(p);
+      const rel: Vec3 = [ax - centre[0], ay - centre[1], 0];
+      const v = turn ? apply(turn, rel) : rel;
+      r.around = [centre[0] + v[0] * k + move[0], centre[1] + v[1] * k + move[1]];
+    }
+    out.repeat = r;
   }
   return out;
 }
 
-/** A part mirrored in the design's axis `axis` (0, 1, 2) through `centre`: its own X mirrored, its angles worked out. */
+/** A part mirrored in the design's axis `axis` (0, 1, 2) through `centre`: its own X mirrored, its angles worked out
+ *  (and its copies mirrored with it). */
 export function mirrorPart(p: Part, axis: number, centre: Vec3): Part {
   const flip: Mat3 = [1, 0, 0, 0, 1, 0, 0, 0, 1];
   flip[axis * 4] = -1;
-  if (p.shape === "group") return { ...p, parts: (p.parts ?? []).map((c) => mirrorPart(c, axis, centre)) };
-  const at = [...p.at] as Vec3;
-  at[axis] = 2 * centre[axis] - at[axis];
-  // M * R = (M * R * Lx) * Lx, and M * R * Lx is a rotation: the part's own X flips, its angles become M R Lx's.
-  const lx: Mat3 = [-1, 0, 0, 0, 1, 0, 0, 0, 1];
-  return { ...p, at, rotate: angles(mul(mul(flip, rotation(p.rotate)), lx)), mirror: !p.mirror || undefined };
+  let out: Part;
+  if (p.shape === "group") out = { ...p, parts: (p.parts ?? []).map((c) => mirrorPart(c, axis, centre)) };
+  else {
+    const at = [...p.at] as Vec3;
+    at[axis] = 2 * centre[axis] - at[axis];
+    // M * R = (M * R * Lx) * Lx, and M * R * Lx is a rotation: the part's own X flips, its angles become M R Lx's.
+    const lx: Mat3 = [-1, 0, 0, 0, 1, 0, 0, 0, 1];
+    out = { ...p, at, rotate: angles(mul(mul(flip, rotation(p.rotate)), lx)), mirror: !p.mirror || undefined };
+  }
+  if (p.repeat) {
+    const r: Repeat = { ...p.repeat };
+    if (r.step) {
+      const s = [...r.step] as Vec3;
+      s[axis] = -s[axis];
+      r.step = s;
+    } else if (axis < 2) {
+      if (r.around || p.shape === "group") {
+        const a = [...repeatAround(p)] as Point2;
+        a[axis] = 2 * centre[axis] - a[axis];
+        r.around = a;
+      }
+      if (r.angle !== undefined && Math.abs(r.angle) < 360) r.angle = -r.angle;   // all round: the same copies
+    }
+    out.repeat = r;
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------- text
@@ -370,6 +583,9 @@ export interface Built {
   problems: string[];
   volume: number;
   box: Box3 | null;
+  /** What the solid stands on (0.88.0): the area of its slice 0.1 mm above its lowest point, and of its shadow from
+   *  above, mm2 - round or pointed underneath when the first is a small share of the second. */
+  rests: { contact: number; footprint: number } | null;
 }
 
 /** Same triangles with each place in space once: STL repeats a corner for every triangle that has it. */
@@ -473,6 +689,13 @@ export function build(design: Design, kit: Kit): Built {
         if (!polys) return null;
         return keep(keep(keep(new CrossSection(polys, "NonZero")).extrude(sz)).translate([0, 0, -sz / 2]));
       }
+      case "outline": {                    // EvenOdd: a hole is a hole whichever way round its points run
+        const polys = outlinePolygons(p);
+        if (!polys) return null;
+        const cs = keep(new CrossSection(polys, "EvenOdd"));
+        if (cs.isEmpty()) return null;
+        return keep(keep(cs.extrude(sz)).translate([0, 0, -sz / 2]));
+      }
       case "mesh": {
         const got = p.file ? kit.meshes.get(p.file) : undefined;
         if (got === undefined) {
@@ -514,6 +737,28 @@ export function build(design: Design, kit: Kit): Built {
     return keep(keep(x.translate(p.at)).asOriginal());
   };
 
+  // Every join and cut is worked out where it is made (0.88.0): manifold-3d otherwise merges a join into the one
+  // that takes it in, when nothing else holds it - which depends on when objects are freed, so the browser and
+  // hub3d (Python frees them at once) would build the same solid out of different triangles.
+  const done = (m: Obj): Obj => {
+    m.status();
+    return m;
+  };
+
+  // A repeated part's copies keep its original id: each of their triangles is the part's.
+  const repeated = (p: Part, m: Obj): Obj => {
+    const r = p.repeat!;
+    const all: Obj[] = [m];
+    for (let i = 1; i < r.count; i++) {
+      if (r.step) all.push(keep(m.translate([r.step[0] * i, r.step[1] * i, r.step[2] * i])));
+      else {
+        const [ax, ay] = repeatAround(p);
+        all.push(keep(keep(keep(m.translate([-ax, -ay, 0])).rotate([0, 0, repeatStep(r) * i])).translate([ax, ay, 0])));
+      }
+    }
+    return done(keep(Manifold.union(all)));
+  };
+
   const level = (parts: Part[]): Obj | null => {
     const solids: Obj[] = [], holes: Obj[] = [];
     for (const p of parts) {
@@ -528,11 +773,12 @@ export function build(design: Design, kit: Kit): Built {
           owner.set(m.originalID(), p.id);
         }
       }
+      if (m && p.repeat && p.repeat.count > 1) m = repeated(p, m);
       if (m) (p.hole ? holes : solids).push(m);
     }
     if (!solids.length) return null;
-    let out = solids.length === 1 ? solids[0] : keep(Manifold.union(solids));
-    if (holes.length) out = keep(out.subtract(holes.length === 1 ? holes[0] : keep(Manifold.union(holes))));
+    let out = solids.length === 1 ? solids[0] : done(keep(Manifold.union(solids)));
+    if (holes.length) out = done(keep(out.subtract(holes.length === 1 ? holes[0] : done(keep(Manifold.union(holes))))));
     return out;
   };
 
@@ -554,12 +800,16 @@ export function build(design: Design, kit: Kit): Built {
       volume = result.volume();
     }
     let box: Box3 | null = triangles.length ? meshBox({ positions, triangles }) : null;
+    let rests: Built["rests"] = null;
+    if (result && box) {
+      rests = { contact: keep(result.slice(box[0][2] + 0.1)).area(), footprint: keep(result.project()).area() };
+    }
     for (const l of loose) {
       const b = meshBox(l.mesh);
       box = box ? [[0, 1, 2].map((i) => Math.min(box![0][i], b[0][i])) as Vec3,
         [0, 1, 2].map((i) => Math.max(box![1][i], b[1][i])) as Vec3] : b;
     }
-    return { positions, triangles, triPart, loose, problems, volume, box };
+    return { positions, triangles, triPart, loose, problems, volume, box, rests };
   } finally {
     for (const m of made) {
       try {

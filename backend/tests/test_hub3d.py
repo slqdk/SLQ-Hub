@@ -308,7 +308,9 @@ def test_what_the_assistant_is_told():
     # 0.87.0: the 3D editor's designs - the file, the marks the user's spots come as, and how to check one
     assert "NAME.3d.json in the working folder" in code and "keep the parts' ids" in code
     assert '[3D point: part "Lid" (id p3) at x 12, y -4, z 20 mm, on a face facing up]' in code
-    assert "Read `hub3d format` before the first one" in code and "hub3d design NAME.3d.json --views" in code
+    assert "Before your first design run `hub3d format` (not the recipe: that is for code)" in code
+    assert "hub3d design NAME.3d.json --views" in code and "mend its ! lines" in code
+    assert "flat outlines of your own" in code and "repeated round a centre" in code     # 0.88.0, chat 328
     photo = print3d_text(False, True)
     assert "model3d_generate" in photo and "hub3d" not in photo
     assert "hub3d for 3D models to print" in BASH_TEXT

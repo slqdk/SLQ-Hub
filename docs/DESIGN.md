@@ -3149,6 +3149,36 @@ into the Hub, Tinkercad's level, his printer a Bambu Lab P2S but chosen per desi
   larger than the plate, below it, not on it, or has a part that is not a closed solid.
 - **Export**: the built solid and the loose meshes as one binary STL or a 3MF (core spec, millimetres, one object -
   Bambu Studio opens both), downloaded or saved in the folder beside the design.
+- **Outlines and repeats (0.88.0).** Chat 328: asked for a snowflake filling 80 % of the P2S's plate, Gemma 4 31B
+  made 31 cylinders lying down (round rods, 1 mm below the plate, touching it in lines), "READY for the slicer".
+  Søren: "Kan den laves mere advanced?" - he chose better models from the assistant. Two parts to the format:
+  - `outline`: `points` (and `holes`), a flat shape drawn in mm around the part's own 0,0, extruded `size` z thick -
+    OpenSCAD's `translate(at) rotate(r) linear_extrude(center = true) polygon(points)`, which models know. Unlike the
+    other shapes `at` is where the points' 0,0 goes, so an arm drawn from 0,0 outwards turns about the snowflake's
+    middle; `size` x and y of 0 keep the points' own size, others scale them about 0,0. EvenOdd fill: a hole is a
+    hole whichever way round it runs, and a shape that crosses itself is filled as SVG's evenodd does.
+  - `repeat` on any part or group: `{"count": 6}` copies turned about the up axis through the part's `at` (a group's
+    0,0; `around` another point), evenly all round or over `angle` degrees; `{"count": 4, "step": [x, y, z]}` a row.
+    Copies are joined to the part (a hole's cut) and keep its id, so a click on a copy picks the part. In the editor
+    a repeated part moves, turns, sizes and mirrors with its copies (their `around` or `step` changes with it), its
+    handles sit in the middle of the pattern, and the inspector has Pattern: copies, angle, around or step, remove -
+    and Around / In a row to start one.
+  - `hub3d format` says when to use them ("flat things are outlines and boxes lying flat, not cylinders lying down";
+    "something that repeats round a centre is one of it, repeated") and has a snowflake as its second example, which
+    the image's self-test builds. The prompt names outlines and repeats, and says `hub3d format` comes before the
+    first design (Gemma had read `hub3d recipe`, the code guide, and guessed the format: `type`, `radius`, `position`).
+  - The readers say keys the format does not use once, first ("31 parts have keys the format does not use (height,
+    position, rotation, type) - run hub3d format: shape, size, at, rotate ..."), and more than three parts without a
+    shape they know in one line - chat 328's first try got 31 lines of "no shape None - taken as a box".
+- **What a solid stands on (0.88.0).** hub3d's check (every model, not only designs) slices the solid 0.1 mm above
+  its lowest point - about the first layer - and compares that area with its shadow from above (manifold3d `slice`,
+  `project`): under 40 % it is round or pointed underneath and the check says so, with what helps. `hub3d design` also
+  says when the design's lowest point is below the plate (the slicer lifts it) or above it. The editor measures the
+  same in its build and shows "stands on 15 % of its shadow", "below the plate" in its status line.
+- **Every join and cut is worked out where it is made (0.88.0).** manifold merges a union into the union that takes it
+  in when nothing else holds it - and Python frees objects at once while the browser keeps them until the build ends,
+  so a design with a group of solids alone at the top built different triangles in the two (the same volume). Both now
+  evaluate each level's join, its holes and each repeat as they are made; the parity test has such a group.
 
 ### Workflows (0.67.0)
 

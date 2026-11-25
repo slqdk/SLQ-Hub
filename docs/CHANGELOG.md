@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.88.0 - 2026-11-25
+
+- Designs can have flat outlines of their own - any shape, with holes in it -
+  and parts repeated round a centre or in a row. A snowflake is now one arm
+  repeated six times, a star one point, a gear one tooth, a ring of holes one
+  hole. In the editor, Pattern sets how many copies, the angle and the point
+  they turn about; moving or turning the part takes its copies along.
+- The assistant is told to build flat things - ornaments, signs, snowflakes,
+  coasters - from outlines and boxes lying flat, not from cylinders lying
+  down, and `hub3d format` shows a snowflake built that way.
+- Checking a model now says when it stands on little of itself (round or
+  pointed underneath, like rods lying down), and when a design goes below
+  the plate or floats above it. The editor's status line shows the same.
+- Keys the design format does not use are named once, with a pointer to
+  `hub3d format`, instead of one line per part.
+- Fixed: a design with a group of solids at the top level could come out of
+  slightly different triangles in the editor and in the sandbox (the same
+  shape and volume).
+
 ## 0.87.0 - 2026-11-25
 
 - A 3D editor beside the chat. 3D at the top of a chat makes a new design or

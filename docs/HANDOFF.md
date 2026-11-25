@@ -4,7 +4,25 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## Next session - start here (written 2026-11-25, at 0.87.0)
+## Next session - start here (written 2026-11-25, at 0.88.0)
+
+**0.88.0 (2026-11-25): outlines and repeats in designs, and checks for what a model stands on - pushed, not yet
+installed.** Søren updated to 0.87.0 and tried it at once (chat 328, Gemma 4 31B): "Lav er snefnug i 3D der fylder 80%
+af printpladen på en bambulab P2S" - he got 31 round cylinders lying down, 1 mm below the plate, which `hub3d design`
+called READY; the model had read `hub3d recipe` and guessed the design format first. His question, with the export:
+"Kan den laves mere advanced?"; asked, he chose "Assistentens modeller". Built (DESIGN §8 "The 3D editor", from
+"Outlines and repeats"): an `outline` shape (points and holes, OpenSCAD's polygon + linear_extrude), `repeat` on any
+part or group (round a centre, over an angle, in a row) with a Pattern section in the editor, `hub3d format` with a
+snowflake example and the rule "flat things are outlines and boxes lying flat", the check of what a solid stands on
+(slice 0.1 mm up against its shadow) and of a design leaving the plate - chat 328's file now gets "it stands on 15%"
+and "below the plate" - and guessed keys said once. Found on the way and fixed: a group of solids alone at the top
+built different triangles in the browser and the sandbox (manifold merges unshared joins; Python frees at once).
+Seen in the dev server ("snowflake" there): the snowflake, its arm group's Pattern set to 8, moved and undone, the
+spine outline's inspector, chat 328's file with both warnings. Not tried with a real model. To try after the update:
+the same message as in chat 328 - does Gemma read `hub3d format` this time, use an outline arm and a repeat, keep it
+flat on the plate, and make it 205 mm? Then "make the arms more detailed" with the editor open.
+
+The paragraphs below were written at 0.87.0 and before.
 
 **0.87.0 (2026-11-25): a 3D editor beside the chat - pushed, not yet installed.** Søren changed his mind after 0.86.0:
 "Jeg vil virkelig gerne ha en stl editor i bruwseren sammen med hub, der kan hjælpe mig"; asked, he chose "Bygget ind i
@@ -207,7 +225,7 @@ finds them and fingers still come out wrong). Decided: no Facebook posting (he c
 
 Known flake: tests/test_training.py::test_the_trainer_stops_a_job fails now and then in a full run and passes alone.
 
-## State (0.87.0, 2026-11-25)
+## State (0.88.0, 2026-11-25)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -1567,7 +1585,11 @@ the host if the VM ever stops by itself.
 | Model APIs | 29 tests against a fake llama-server: Ollama (chat, generate, show, tags, embed, key in the path, `HEAD /`), OpenAI (chat, stream, tools, images, the extra fields of `/v1/models`), Anthropic (messages, stream, tools, thinking), LAN guard, CORS, key priority, the `/chat` route, the home network for keys, keys that work away from home (through the proxy only - not from a direct outside peer or the sandbox; a wrong key from outside gets the same 403; an address list still applies; last used only once let in; switched back), every key from outside still only through the proxy. |
 | Agent | 62 tests: plain turns, the files a turn made or changed (by a tool and by a command; scratch files removed again, `.hub` and untouched files left out; newest first) as a run step, served for the card (a range for the player, a download, PDFs without the sandbox CSP), the folder snapshot's ignores (node_modules, `.pyc`, links) and its limit, the local time each user message was sent (in the message, the same text in later turns; summer and winter time, `TZ`), tools in chat and project folders, revisions, stopping (in a tool and while writing), retry/edit, SSE replay, messages sent while a turn works (read after a tool step, while the last answer is written, after the end, with Stop), attachments, project files put in a message (text inline and fenced, too big or binary as pointers, pictures as images, refused paths, the pointer once the message is old), image generation switching the card and back, MCP over HTTP (approval, always-allow, masked secrets) and over stdio in the sandbox, MCP on demand (0.85.0: only mcp_tools and mcp_call in the request, their listing, description and errors, mcp_call's arguments three ways, the schema with a tool's first failure, a call by the tool's own name), the error that says what fills a request too big after the refit, escalation (explicit and automatic), subagents, compaction (and a summary request that fits the context: 40 big results before the new question, 8K context), a long single turn that stays inside a 14K context (12 results of 9,000 characters, tool definitions counted), the loop guard (the same search refused, a failing read retried once then refused, the forced answer without tools and its notice, repeats with new words, the same bash step three times, a read after an edit running again), hand-over to the stronger local model (a loop, three failed calls, the escalate tool; the card switches within the lease; its own system prompt and note, no reasoning of the other model; nobody to hand over to; local first, then the cloud), what each step was sent and why it stopped, a model's own thinking and sampling, system prompts stored once and removed with the chat, the note when a picture call names another model than the chat's, skills, memory, artifacts. |
 | MCP import | 19 tests (0.86.0): one remote server in seven clients' words (Cursor, Windsurf, Gemini CLI, Codex's TOML, `claude mcp add`, amp, a README block with a comment and a trailing comma), a key in a command line moved into the environment (four forms), VS Code's inputs and settings fragment, Zed, a bare URL, `add-json`, what cannot run (Docker, Go), `/sse` and `localhost` notes, a path on another computer, a host to fill in, `mcp-remote` replaced by its URL, unique names and servers set up already, the command line run through bash with `$HOME`, backticks and quotes left as text, the catalog, the routes (no secret in their answers). |
-| 3D editor (0.87.0) | 7 tests (`tests/test_design3d.py`; geometry.ts runs in node 22.6 or newer, the builds need manifold3d in the venv and manifold-3d in frontend/node_modules - skipped without): the font the same in both places and in the sandbox image, both readers' defaults and problems, the same solid from the editor and from hub3d (triangle count, volume to 1e-9, box to 1e-4 mm) for five designs with every shape, æøå, nested holes, meshes that are and are not closed, and `hub3d format`'s example; mirroring, turning and scaling keep the shape (a text's auto width too); `hub3d design`'s report and files; Point at's words equal the prompt's and the format's; sandbox paths read as the Hub reads them. In the dev server ("key tag", "bigger hole") with headless Chromium: the whole flow, see "Next session". |
+| 3D editor (0.87.0, 0.88.0) | 9 tests (`tests/test_design3d.py`; geometry.ts runs in node 22.6 or newer, the builds need manifold3d in the venv and manifold-3d in frontend/node_modules - skipped without): the font the same in both places and in the sandbox image, both readers' defaults and problems, the same solid from the editor and from hub3d (triangle count, volume to 1e-9, box to 1e-4 mm) for five designs with every shape, æøå, nested holes, meshes that are and are not closed, and `hub3d format`'s example; mirroring, turning and scaling keep the shape (a text's auto width too); `hub3d design`'s report and files; Point at's words equal the prompt's and the format's; sandbox paths read as the Hub reads them. 0.88.0: outlines
+(holes, scaled, turned, mirrored, either way round, crossing themselves) and repeats (round, an angle, a row, of a hole,
+nested) built alike in both - with the snowflake and a group of solids alone at the top -; a repeated part or group
+moved, turned, grown and mirrored keeps its solid; what a solid stands on (rods 15 %, a flat plate 100 %, the editor's
+numbers equal hub3d's) and a design below or above the plate; guessed keys and shapes said once. In the dev server ("key tag", "bigger hole") with headless Chromium: the whole flow, see "Next session". |
 | SLQ Sync (gone in 0.84.0; tests/test_history.py keeps the history's 6) | 8 tests (one: writes never follow a symlink planted in the folder), including a round trip with the real `slq_sync.py` client from the SLQ Companion repo against a live server (clone, both-way edits, a conflict, its release). Skipped when that file is not next to this repo. |
 | Libraries | 5 tests with keyword-hashing fake embedders: text and page-image indexing, fused search, re-ranking, replacing and deleting documents, GPU indexing through the queue, broken files. |
 | Web UI | `tsc` + `vite build`; every page and the main flows clicked through in Chromium (Playwright) against `python -m tests.devserver` (the Hub with fake services): sign-in, chat with markdown/maths/code, tool strip, artifact panel, approvals, subagent, image tool, projects (files, editor, settings, sync), libraries, all settings tabs, dark mode, phone width. |
@@ -2260,6 +2282,13 @@ the host if the VM ever stops by itself.
       converter's cases are ComfyUI 0.42.3's own templates; files from other sites (Civitai, OpenArt) are
       untried - an export is the way to see what went wrong. When COMFYUI_REF changes, the editor's format may
       too: tools/workflow_oracle/ (convert.js, compare.py) is how the converter was checked - run it again.
+106. **Outlines and repeats (0.88.0)** - in the tests and the dev server, not with a real model:
+    - **Chat 328 again** after the update, with Gemma 4 31B and with Qwen3.8 27B: `hub3d format` before the design,
+      an outline arm repeated six times, 205 mm across, flat on the plate, no "!" lines. The export shows the steps.
+    - **The stand-on check on real files**: `hub3d check` on a TRELLIS.2 figurine and on STLs from MakerWorld - is
+      40 % of the shadow a fair line, or does it warn about models that print fine (then raise it, or say less)?
+    - **Repeats in the editor with a real mouse**: dragging a repeated part, its handles in the pattern's middle, the
+      Pattern fields; a design with 100 copies of a detailed part (every change rebuilds it all).
 105. **The 3D editor (0.87.0)** - only in the dev server's headless Chromium (SwiftShader WebGL), not on the VM:
     - **The sandbox image**: update.sh rebuilds it (hub3d.py and hub3d-font.json are copied in; `hub3d selftest` builds
       the format's example and a plate with text). Check: `sudo bash update.sh compose exec sandbox hub3d format | head`

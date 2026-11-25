@@ -68,6 +68,7 @@ class Report:
         self.cavities = 0
         self.open_edges = self.shared_edges = self.flipped_edges = 0
         self.flat = 0                     # triangles without area
+        self.contact = self.footprint = 0.0   # mm2: its slice 0.1 mm above its lowest point, its shadow from above
         self.bed: tuple[float, float, float] | None = None
         self.problems: list[str] = []     # it is not a closed solid
         self.warnings: list[str] = []     # it is one, but look
@@ -167,7 +168,32 @@ def _labels(faces: np.ndarray, n: int) -> np.ndarray:
     return lab
 
 
-def _analyse(v: np.ndarray, f: np.ndarray, name: str, kind: str = "", bed=None) -> Report:
+CONTACT_SHARE = 0.4      # below this share of its shadow on the plate, it stands on something round or pointed
+
+
+def _rests(vw: np.ndarray, fw: np.ndarray, r: Report) -> None:
+    """What a closed solid stands on (0.88.0, chat 328: a snowflake of round rods lying down, touching the plate in
+    lines): the area of its slice 0.1 mm above its lowest point - about the first layer - against its shadow."""
+    try:
+        import manifold3d as m3d
+    except ImportError:
+        return
+    g = fw[(fw[:, 0] != fw[:, 1]) & (fw[:, 1] != fw[:, 2]) & (fw[:, 2] != fw[:, 0])]
+    m = m3d.Manifold(m3d.Mesh(vert_properties=np.ascontiguousarray(vw, dtype=np.float32),
+                              tri_verts=np.ascontiguousarray(g, dtype=np.uint32)))
+    if not str(m.status()).endswith("NoError") or m.is_empty():
+        return
+    r.contact = float(m.slice(float(r.lowest[2]) + 0.1).area())
+    r.footprint = float(m.project().area())
+    if r.footprint > 1 and r.contact < CONTACT_SHARE * r.footprint:
+        r.warnings.append(f"it stands on {r.contact:,.0f} mm2 of its {r.footprint:,.0f} mm2 shadow "
+                          f"({100 * r.contact / r.footprint:.0f}%): round or pointed underneath - a cylinder or "
+                          "sphere lying down, a tip - so it may come loose and print rough below. A flat bottom "
+                          "holds: stand it on a flat face, cut it flat (trim_by_plane), make flat things of outlines "
+                          "and boxes; for an organic shape, a brim")
+
+
+def _analyse(v: np.ndarray, f: np.ndarray, name: str, kind: str = "", bed=None, rests: bool = True) -> Report:
     r = Report(name, kind)
     r.bed = _bed(bed)
     r.triangles = int(len(f))
@@ -245,6 +271,8 @@ def _analyse(v: np.ndarray, f: np.ndarray, name: str, kind: str = "", bed=None) 
                           "segments or n_divisions")
     if r.flat:
         r.notes.append(f"{r.flat:,} triangles without area - harmless, slicers drop them")
+    if r.ok and rests:
+        _rests(vw, fw, r)
     return r
 
 
@@ -482,7 +510,7 @@ def save(model, path, bed=None, strict: bool = True, quiet: bool = False) -> Rep
     if ext not in (".stl", ".3mf"):
         raise ValueError(f"save as .stl or .3mf, not {p.name}")
     v, f, _, _ = _arrays(model)
-    before = _analyse(v, f, str(p), "", bed)
+    before = _analyse(v, f, str(p), "", bed, rests=False)          # the file's own check below says it
     if strict and not before.ok:
         raise NotPrintable(str(before) + "\nNothing was written. (save(..., strict=False) writes it anyway.)")
     if p.parent != Path(""):
@@ -503,10 +531,10 @@ def solid(vertices, faces):
     v, f = _given(vertices, faces)
     vw, fw = _welded(v, f)
     fw = fw[(fw[:, 0] != fw[:, 1]) & (fw[:, 1] != fw[:, 2]) & (fw[:, 2] != fw[:, 0])]
-    report = _analyse(vw, fw, "these triangles")
+    report = _analyse(vw, fw, "these triangles", rests=False)
     if not report.ok and report.watertight and not report.flipped_edges and report.volume < 0:
         fw = fw[:, ::-1]                                                   # all of it inside out: turned round
-        report = _analyse(vw, fw, "these triangles")
+        report = _analyse(vw, fw, "these triangles", rests=False)
     if not report.ok:
         raise NotPrintable("these triangles are not a closed solid:\n" + "\n".join(f"- {p}" for p in report.problems))
     m = m3d.Manifold(m3d.Mesh(vert_properties=np.ascontiguousarray(vw, dtype=np.float32),
@@ -750,7 +778,10 @@ In bash:  hub3d check FILE [--bed 180]    hub3d views FILE OUT.png
 # step for step, so what the assistant checks is what the editor shows and exports. tests/test_design3d.py runs
 # both on the same designs.
 DESIGN_FORMAT = "slq-hub-3d"
-DESIGN_SHAPES = ("box", "cylinder", "cone", "sphere", "wedge", "text", "mesh", "group")
+DESIGN_SHAPES = ("box", "cylinder", "cone", "sphere", "wedge", "text", "outline", "mesh", "group")
+PART_KEYS = ("id", "name", "shape", "size", "at", "rotate", "mirror", "hole", "hidden", "color", "sides", "radius",
+             "top", "text", "points", "holes", "file", "repeat", "parts")
+MAX_COPIES = 100
 ROUND_SHAPES = ("cylinder", "cone", "sphere")
 DEFAULT_SIDES = 64
 MIN_SIZE = 0.01
@@ -778,6 +809,30 @@ DESIGN_EXAMPLE = """\
 }
 """
 
+DESIGN_SNOWFLAKE = """\
+{
+  "format": "slq-hub-3d",
+  "version": 1,
+  "printer": "bambu-p2s",
+  "bed": [256, 256, 256],
+  "parts": [
+    {"id": "core", "name": "Centre", "shape": "cylinder", "size": [26, 26, 3], "at": [0, 0, 1.5], "sides": 6},
+    {"id": "window", "name": "Centre hole", "shape": "cylinder", "size": [10, 10, 5], "at": [0, 0, 1.5],
+     "sides": 6, "rotate": [0, 0, 30], "hole": true},
+    {"id": "arm", "name": "Arm", "shape": "group", "repeat": {"count": 6, "around": [0, 0]}, "parts": [
+      {"id": "spine", "shape": "outline", "size": [0, 0, 3], "at": [0, 0, 1.5],
+       "points": [[0, -2], [52, -2], [60, 0], [52, 2], [0, 2]]},
+      {"id": "twig1", "shape": "box", "size": [16, 3, 3], "at": [26, 6.928, 1.5], "rotate": [0, 0, 60]},
+      {"id": "twig2", "shape": "box", "size": [16, 3, 3], "at": [26, -6.928, 1.5], "rotate": [0, 0, -60]},
+      {"id": "twig3", "shape": "box", "size": [12, 2.5, 3], "at": [41, 5.196, 1.5], "rotate": [0, 0, 60]},
+      {"id": "twig4", "shape": "box", "size": [12, 2.5, 3], "at": [41, -5.196, 1.5], "rotate": [0, 0, -60]},
+      {"id": "gem", "shape": "cylinder", "size": [10, 7, 3], "at": [50, 0, 1.5], "sides": 4},
+      {"id": "eye", "name": "Hanging hole", "shape": "cylinder", "size": [3, 3, 5], "at": [50, 0, 1.5], "hole": true}
+    ]}
+  ]
+}
+"""
+
 DESIGN_GUIDE = f"""\
 A design from the Hub's 3D editor: NAME.3d.json in the working folder. The editor beside the chat shows it and saves
 the user's changes into it; you change it by editing the file - edit_file for a few values, write_file for a new
@@ -796,14 +851,19 @@ bambu-h2d, or "custom" with its bed).
 A part:
   id        stays the part's for its life; a new part gets a new one (p1, p2 ... or a word)
   name      optional, shown in the editor
-  shape     box | cylinder | cone | sphere | wedge | text | mesh | group
+  shape     box | cylinder | cone | sphere | wedge | text | outline | mesh | group
   size      [x, y, z]: the part's own box before it is turned (cylinder, cone, sphere: the diameters and the height)
-  at        [x, y, z]: where the middle of that box is - a part standing on the plate has z = its height / 2
+  at        [x, y, z]: where the middle of that box is (an outline: its points' 0,0) - a part standing on the
+            plate has z = its height / 2
   rotate    [x, y, z] degrees about its middle: X first, then Y, then Z (as OpenSCAD's rotate); left out: [0, 0, 0]
   hole      true: cuts the solids beside it instead of adding to them
   hidden    true: left out of everything
   mirror    true: mirrored in its own X before it is turned
   color     "#rrggbb" - for the eye only: it prints in one filament
+  repeat    copies of the part (or group), joined to it: {{"count": 6}} turns copies about the up axis through the
+            part's at, evenly all round - "around": [x, y] another point (a group's default: 0, 0), "angle": 90
+            spreads them over 90 degrees; {{"count": 4, "step": [25, 0, 0]}} puts them in a row. A hole's copies are
+            holes too
 
   box       radius: rounded edges and corners (mm), sides: how round (default 64)
   cylinder  along Z; sides (default 64) - sides 6 makes a hexagon (a nut trap), 3 a triangle
@@ -813,6 +873,11 @@ A part:
   text      text: the letters (Barlow SemiBold; æøå, digits, punctuation; \\n starts a new line), lying flat and
             reading along X; size [width, letter height, thickness] - width 0: as wide as the letters at that height.
             Standing up: rotate [90, 0, 0]
+  outline   points: [[x, y], ...] - a flat shape of your own, drawn in mm around the part's 0,0 and size z thick, as
+            OpenSCAD's translate(at) rotate(rotate) linear_extrude(size z, center=true) polygon(points). So here at
+            is where the points' 0,0 goes, not the middle (left out: [0, 0, thickness / 2] - the points where they
+            are drawn, on the plate). size [0, 0, 3]: as drawn, 3 mm thick; a size x or y scales the points to that
+            width. holes: [[[x, y], ...], ...] cut out of it
   mesh      file: an STL, 3MF or OBJ, its path from the design's folder; scaled to fill size, centred on at. One that
             is not a closed solid is shown and exported as it is, but nothing joins it or cuts it
   group     parts: [...]; no size, at, rotate or color of its own
@@ -822,9 +887,17 @@ cut them; a group is built that way first and then counts as one solid (or one h
 the top cuts everything it meets; to keep a hole to some parts, put it in a group with them. Let parts that should
 be one piece overlap a little (0.2 mm or more) - only touching at a face, they may print as two.
 
+Flat things - ornaments, signs, snowflakes, stars, coasters - are outlines and boxes lying flat on the plate, a few
+mm thick. Not cylinders lying down: they touch the plate in a line, come loose and print rough below (hub3d design
+warns). Something that repeats round a centre - a snowflake's arms, a star's points, a gear's teeth, spokes, a ring
+of holes - is one of it, repeated.
+
 An example - a key tag with a hole, a name on top and a clip with its own slot:
 
-{DESIGN_EXAMPLE}"""
+{DESIGN_EXAMPLE}
+Another - a snowflake, 120 mm: one arm (an outline, twigs and a gem with a hole) repeated six times round a centre:
+
+{DESIGN_SNOWFLAKE}"""
 
 
 def _num(v) -> bool:
@@ -852,7 +925,19 @@ def read_design(text: str) -> tuple[dict, list[str]]:
     parts = data.get("parts") if isinstance(data.get("parts"), list) else []
     if not isinstance(data.get("parts"), list):
         problems.append('it has no "parts" list')
-    design = {"parts": _read_parts(parts, seen, problems)}
+    odd = {"parts": 0, "keys": set(), "shapes": []}
+    design = {"parts": _read_parts(parts, seen, problems, odd)}
+    first = []                    # a model that guessed the format: what it did not know first, once - not per part
+    if odd["parts"]:
+        n = odd["parts"]
+        first.append(f"{n} part{'s have' if n > 1 else ' has'} keys the format does not use "
+                     f"({', '.join(sorted(odd['keys']))}) - run hub3d format: shape, size, at, rotate ...")
+    if len(odd["shapes"]) > 3:
+        first.append(f"{len(odd['shapes'])} parts have no shape the format knows "
+                     f"({', '.join(pid for pid, _ in odd['shapes'][:3])} ...) - taken as boxes")
+    else:
+        first += [f"{pid}: no shape {shape!r} - taken as a box" for pid, shape in odd["shapes"]]
+    problems[:0] = first
     if isinstance(data.get("printer"), str) and data["printer"]:
         design["printer"] = data["printer"]
     bed = data.get("bed")
@@ -861,13 +946,47 @@ def read_design(text: str) -> tuple[dict, list[str]]:
     return design, problems
 
 
-def _read_parts(items: list, seen: set, problems: list) -> list[dict]:
+def _read_parts(items: list, seen: set, problems: list, odd: dict) -> list[dict]:
     out = []
     for item in items:
         if not isinstance(item, dict):
             problems.append("a part that is not an object was left out")
             continue
-        out.append(_read_part(item, seen, problems))
+        out.append(_read_part(item, seen, problems, odd))
+    return out
+
+
+def _points(v) -> list | None:
+    """An outline's points: three or more [x, y]; None otherwise."""
+    if not isinstance(v, list) or len(v) < 3:
+        return None
+    out = []
+    for q in v:
+        if not isinstance(q, list) or len(q) != 2 or not _num(q[0]) or not _num(q[1]):
+            return None
+        out.append([float(q[0]), float(q[1])])
+    return out
+
+
+def _read_repeat(v, pid: str, problems: list) -> dict | None:
+    if v is None:
+        return None
+    if not isinstance(v, dict) or not _num(v.get("count")):
+        problems.append(f'{pid}: "repeat" needs a "count" - left out')
+        return None
+    count = max(1, min(MAX_COPIES, _round(v["count"])))
+    if count < 2:
+        return None
+    out: dict = {"count": count}
+    step = v.get("step")
+    if isinstance(step, list) and len(step) == 3 and all(_num(x) for x in step):
+        out["step"] = [float(x) for x in step]
+        return out
+    around = v.get("around")
+    if isinstance(around, list) and len(around) == 2 and all(_num(x) for x in around):
+        out["around"] = [float(x) for x in around]
+    if _num(v.get("angle")) and abs(v["angle"]) < 360:                     # all round is the default
+        out["angle"] = float(v["angle"])
     return out
 
 
@@ -875,7 +994,7 @@ def _round(v: float) -> int:
     return int(math.floor(v + 0.5))                 # as JavaScript's Math.round
 
 
-def _read_part(p: dict, seen: set, problems: list) -> dict:
+def _read_part(p: dict, seen: set, problems: list, odd: dict) -> dict:
     pid = p["id"].strip() if isinstance(p.get("id"), str) and p["id"].strip() else ""
     if not pid or pid in seen:
         n = len(seen) + 1
@@ -885,17 +1004,23 @@ def _read_part(p: dict, seen: set, problems: list) -> dict:
     seen.add(pid)
     shape = p.get("shape")
     if shape not in DESIGN_SHAPES:
-        problems.append(f"{pid}: no shape {shape!r} - taken as a box")
+        odd["shapes"].append((pid, shape))
         shape = "box"
+    unknown = [k for k in p if k not in PART_KEYS]
+    if unknown:
+        odd["parts"] += 1
+        odd["keys"].update(unknown)
     part: dict = {"id": pid, "shape": shape, "size": [20.0, 20.0, 20.0], "at": [0.0, 0.0, 10.0],
                   "rotate": [0.0, 0.0, 0.0]}
     if shape == "group":
-        part["parts"] = _read_parts(p.get("parts") if isinstance(p.get("parts"), list) else [], seen, problems)
+        part["parts"] = _read_parts(p.get("parts") if isinstance(p.get("parts"), list) else [], seen, problems, odd)
         part["size"], part["at"] = [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]
     else:
-        size = _vec(p.get("size"), [20, 20, 2 if shape == "text" else 20])
-        part["size"] = [0.0 if (shape == "text" and i == 0 and v <= 0) else max(MIN_SIZE, abs(v))
-                        for i, v in enumerate(size)]
+        # 0 keeps a text's width as its letters make it, and an outline's width and depth as its points draw them
+        def auto(i: int, v: float) -> bool:
+            return v <= 0 and ((shape == "text" and i == 0) or (shape == "outline" and i < 2))
+        size = _vec(p.get("size"), [0, 0, 2] if shape == "outline" else [20, 20, 2 if shape == "text" else 20])
+        part["size"] = [0.0 if auto(i, v) else max(MIN_SIZE, abs(v)) for i, v in enumerate(size)]
         part["at"] = _vec(p.get("at"), [0, 0, part["size"][2] / 2])
         part["rotate"] = _vec(p.get("rotate"), [0, 0, 0])
     for flag in ("mirror", "hole", "hidden"):
@@ -913,12 +1038,56 @@ def _read_part(p: dict, seen: set, problems: list) -> dict:
         part["top"] = max(0.0, min(1.0, float(top))) if _num(top) else 0.0
     if shape == "text":
         part["text"] = p["text"] if isinstance(p.get("text"), str) else "Text"
+    if shape == "outline":
+        pts = _points(p.get("points"))
+        if pts:
+            part["points"] = pts
+        else:
+            problems.append(f'{pid}: an outline needs "points", three or more [x, y] - it makes nothing')
+        if isinstance(p.get("holes"), list):
+            holes = [_points(h) for h in p["holes"]]
+            if any(h is None for h in holes):
+                problems.append(f"{pid}: a hole that is not three or more [x, y] was left out")
+            kept = [h for h in holes if h is not None]
+            if kept:
+                part["holes"] = kept
     if shape == "mesh":
         if isinstance(p.get("file"), str) and p["file"]:
             part["file"] = p["file"]
         else:
             problems.append(f'{pid}: a mesh without a "file" makes nothing')
+    repeat = _read_repeat(p.get("repeat"), pid, problems)
+    if repeat:
+        part["repeat"] = repeat
     return part
+
+
+def _outline_polygons(p: dict):
+    """An outline's points scaled to its size (0: as drawn), its holes after them - the editor's outlinePolygons."""
+    pts = p.get("points")
+    if not pts or len(pts) < 3:
+        return None
+    xs, ys = [x for x, _ in pts], [y for _, y in pts]
+    x0, x1, y0, y1 = min(xs), max(xs), min(ys), max(ys)
+    kx = p["size"][0] / (x1 - x0) if p["size"][0] > 0 and x1 - x0 > 1e-9 else 1.0
+    ky = p["size"][1] / (y1 - y0) if p["size"][1] > 0 and y1 - y0 > 1e-9 else 1.0
+    return [np.array([(x * kx, y * ky) for x, y in poly], dtype=np.float64) for poly in [pts] + p.get("holes", [])]
+
+
+def _repeat_around(p: dict) -> tuple[float, float]:
+    """Where a repeat turns its copies about: around, or the part's own at (a group's: the plate's middle)."""
+    r = p["repeat"]
+    if "around" in r:
+        return r["around"][0], r["around"][1]
+    return (0.0, 0.0) if p["shape"] == "group" else (p["at"][0], p["at"][1])
+
+
+def _repeat_step(r: dict) -> float:
+    """The turn from one copy to the next, degrees - the editor's repeatStep."""
+    a = r.get("angle", 360.0)
+    if abs(a) >= 360 - 1e-9:
+        return a / r["count"]
+    return a / (r["count"] - 1) if r["count"] > 1 else 0.0
 
 
 def _font() -> dict:
@@ -1021,6 +1190,14 @@ def build_design(design: dict, folder=".") -> DesignBuild:
             if polys is None:
                 return None
             return m3d.CrossSection(polys, m3d.FillRule.NonZero).extrude(sz).translate((0, 0, -sz / 2))
+        if kind == "outline":                       # EvenOdd: a hole is a hole whichever way round its points run
+            polys = _outline_polygons(p)
+            if polys is None:
+                return None
+            cs = m3d.CrossSection(polys, m3d.FillRule.EvenOdd)
+            if cs.is_empty():
+                return None
+            return cs.extrude(sz).translate((0, 0, -sz / 2))
         if kind == "mesh":
             if not p.get("file"):
                 problems.append(f"{p['id']}: no file")
@@ -1053,6 +1230,25 @@ def build_design(design: dict, folder=".") -> DesignBuild:
             m = m.rotate(tuple(p["rotate"]))
         return m.translate(tuple(p["at"])).as_original()
 
+    def done(m):
+        """Every join and cut is worked out where it is made, as the editor does (0.88.0): manifold3d otherwise
+        merges a join into the one that takes it in when nothing else holds it - and Python frees objects at once,
+        the browser keeps them - so the same design came out of different triangles."""
+        m.status()
+        return m
+
+    def repeated(p: dict, m):
+        """The part and its copies, joined - in the editor's order, so the two build the same solid."""
+        r = p["repeat"]
+        copies = [m]
+        for i in range(1, r["count"]):
+            if "step" in r:
+                copies.append(m.translate(tuple(s * i for s in r["step"])))
+            else:
+                ax, ay = _repeat_around(p)
+                copies.append(m.translate((-ax, -ay, 0)).rotate((0, 0, _repeat_step(r) * i)).translate((ax, ay, 0)))
+        return done(M.batch_boolean(copies, m3d.OpType.Add))
+
     def level(parts: list):
         solids, holes = [], []
         for p in parts:
@@ -1063,13 +1259,15 @@ def build_design(design: dict, folder=".") -> DesignBuild:
             else:
                 s = shape(p)
                 m = place(p, s) if s is not None else None
+            if m is not None and p.get("repeat") and p["repeat"]["count"] > 1:
+                m = repeated(p, m)
             if m is not None:
                 (holes if p.get("hole") else solids).append(m)
         if not solids:
             return None
-        out = solids[0] if len(solids) == 1 else M.batch_boolean(solids, m3d.OpType.Add)
+        out = solids[0] if len(solids) == 1 else done(M.batch_boolean(solids, m3d.OpType.Add))
         if holes:
-            out = out - (holes[0] if len(holes) == 1 else M.batch_boolean(holes, m3d.OpType.Add))
+            out = done(out - (holes[0] if len(holes) == 1 else done(M.batch_boolean(holes, m3d.OpType.Add))))
         return out
 
     solid = level(design["parts"])
@@ -1128,6 +1326,14 @@ def design_report(path, bed=None, stl=None, three_mf=None, png=None) -> int:
         return 1
     model = models[0] if len(models) == 1 else models
     report = check(model, bed)
+    low = report.lowest[2]
+    if low < -0.01:              # a design is placed on its plate: the slicer moves it, so what lies there changes
+        report.warnings.append(f"its lowest point is at z {low:.2f} mm, below the plate - the slicer lifts it, so "
+                               "the bottom is not where the design has it: a part on the plate has at z = its "
+                               "height / 2")
+    elif low > 0.01:
+        report.warnings.append(f"its lowest point is at z {low:.2f} mm, above the plate - the slicer drops it onto "
+                               "the plate: let a part stand at z 0")
     print(report)
     if png:
         views(model, png)
@@ -1196,6 +1402,9 @@ def selftest() -> int:
             Path("tag.3d.json").write_text(DESIGN_EXAMPLE)          # hub3d format's example
             tag = check(design("tag.3d.json", quiet=True), bed=256)
             expect(tag.ok and tag.parts == 1 and not tag.warnings, f"hub3d format's example is not ready:\n{tag}")
+            Path("snow.3d.json").write_text(DESIGN_SNOWFLAKE)              # ... and its snowflake (outlines, repeats)
+            snow = check(design("snow.3d.json", quiet=True), bed=256)
+            expect(snow.ok and snow.parts == 1 and not snow.warnings, f"hub3d format's snowflake is not ready:\n{snow}")
         finally:
             os.chdir(here)
     import trimesh

@@ -8,16 +8,17 @@ import * as THREE from "three";
 import Module from "manifold-3d/manifold";
 import wasmUrl from "manifold-3d/manifold.wasm?url";
 import { ArrowDownToLine, Box, ChevronDown, CircleDot, Cone, Copy, Crosshair, Cylinder, Download, Eye, EyeOff,
-  FlipHorizontal2, Group, Home, Maximize2, Minimize2, Move3d, PanelBottom, Redo2, Rotate3d, Scaling, SquareDashed,
+  FlipHorizontal2, Group, Home, Maximize2, Minimize2, Move3d, PanelBottom, Redo2, Repeat2, Rotate3d, Scaling, SquareDashed,
   Trash2, Triangle, Type, Undo2, Ungroup, Upload, X } from "lucide-react";
 import fontUrl from "./font-barlow-600.json?url";
 import { api, type FileData, type TreeData } from "../lib/api";
 import { useApp } from "../state";
 import { ConfirmButton, MenuButton } from "../components/ui";
 import type { Folder } from "../components/Files";
-import { allIds, build, buildPart, COLORS, extent, extentOf, freshId, joined, MIN_SIZE, mirrorPart, newDesign,
-  readDesign, stl, textWidth, threeMf, transformPart, writeDesign, type Box3, type Built, type Design,
-  type FontData, type Kit, type Mat3, type MeshData, type Part, type Shape, type Vec3, type Wasm } from "./geometry";
+import { allIds, build, buildPart, COLORS, extent, extentOf, freshId, joined, MAX_COPIES, MIN_SIZE, mirrorPart, newDesign,
+  partSize, readDesign, repeatAround, stl, textWidth, threeMf, transformPart, writeDesign, type Box3, type Built,
+  type Design, type FontData, type Kit, type Mat3, type MeshData, type Part, type Repeat, type Shape, type Vec3,
+  type Wasm } from "./geometry";
 import { baseName, dirOf, fmt, inFolder, joinPath, MESH_FILE, pointMark, relativePath } from "./files";
 import { parseMesh } from "./meshio";
 import { lastPrinter, PRINTERS, printerOf, rememberPrinter, type Printer } from "./printers";
@@ -51,10 +52,11 @@ function quatTurn(q: THREE.Quaternion): Mat3 {
   return [e[0], e[4], e[8], e[1], e[5], e[9], e[2], e[6], e[10]];
 }
 
-/** A part's size, with a text's width worked out when it follows its letters (width 0). */
-function sized(p: Part, font: FontData): Vec3 {
-  return p.shape === "text" && p.size[0] <= 0 ? [textWidth(p.text ?? "", p.size[1], font), p.size[1], p.size[2]] : p.size;
-}
+/** A part's size, with a text's width worked out when it follows its letters, an outline's from its points. */
+const sized = (p: Part, font: FontData): Vec3 => partSize(p, font);
+
+/** A part that moves like a group: its copies go with it, and it is sized the same way in every direction. */
+const asGroup = (p: Part) => p.shape === "group" || !!p.repeat;
 
 function meshSize(m: MeshData): Vec3 {
   const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
@@ -84,8 +86,16 @@ function within(parts: Part[], outer: string, inner: string): boolean {
 /** Numbers as the file keeps them. */
 function tidy(p: Part): Part {
   const out: Part = { ...p, at: p.at.map(r3) as Vec3, rotate: p.rotate.map(r4) as Vec3 };
-  if (p.shape !== "group") out.size = p.size.map((v, i) => (p.shape === "text" && i === 0 && v <= 0 ? 0 : Math.max(MIN_SIZE, r3(v)))) as Vec3;
+  const auto = (i: number, v: number) => v <= 0 && ((p.shape === "text" && i === 0) || (p.shape === "outline" && i < 2));
+  if (p.shape !== "group") out.size = p.size.map((v, i) => (auto(i, v) ? 0 : Math.max(MIN_SIZE, r3(v)))) as Vec3;
   if (p.radius) out.radius = r3(p.radius);
+  if (p.repeat) {
+    const r = { ...p.repeat };
+    if (r.around) r.around = [r3(r.around[0]), r3(r.around[1])];
+    if (r.step) r.step = r.step.map(r3) as Vec3;
+    if (r.angle !== undefined) r.angle = r3(r.angle);
+    out.repeat = r;
+  }
   if (p.parts) out.parts = p.parts.map(tidy);
   return out;
 }
@@ -494,7 +504,7 @@ export function Editor({ folder, path, create, own = "", onPath, onClose, max, o
       v.detach();
       return;
     }
-    const one = items.length === 1 && items[0].shape !== "group" ? items[0] : null;
+    const one = items.length === 1 && !asGroup(items[0]) ? items[0] : null;
     const b = union(builts.map((x, i) => x.box ?? extent(items[i])));
     v.attach(one ? one.at : b ? centre(b) : [0, 0, 0], one ? one.rotate : null, mode, snap);
   }, [design, selected, mode, snap, ready, tool, meshTick]);
@@ -530,7 +540,7 @@ export function Editor({ folder, path, create, own = "", onPath, onClose, max, o
     }
     let parts = s.design.parts;
     const items = pick(parts, s.ids);
-    const one = items.length === 1 && items[0].shape !== "group" ? items[0] : null;
+    const one = items.length === 1 && !asGroup(items[0]) ? items[0] : null;
     if (one && !s.body) {
       const e = new THREE.Euler().setFromQuaternion(v.proxy.quaternion, "ZYX");
       const next: Part = { ...one, at: [pos.x, pos.y, pos.z],
@@ -565,7 +575,7 @@ export function Editor({ folder, path, create, own = "", onPath, onClose, max, o
       if (!s) return;
       if (v.gizmo.mode === "scale") {                  // several parts or a group: the same in every direction
         const items = pick(s.design.parts, s.ids);
-        if (items.length !== 1 || items[0].shape === "group") {
+        if (items.length !== 1 || asGroup(items[0])) {
           v.proxy.scale.setScalar(Math.max(0.01, (v.proxy.scale.x + v.proxy.scale.y + v.proxy.scale.z) / 3));
         }
       }
@@ -1023,6 +1033,9 @@ export function Editor({ folder, path, create, own = "", onPath, onClose, max, o
             {below && <span className="v3d-warn">below the plate</span>}
             {floating && <span className="v3d-warn">not on the plate</span>}
             {built?.loose.length ? <span className="v3d-warn">{built.loose.length} not a closed solid</span> : null}
+            {built?.rests && built.rests.footprint > 1 && built.rests.contact < 0.4 * built.rests.footprint && (
+              <span className="v3d-warn" title="Its first layer is a small share of its shadow from above: round or pointed underneath (a cylinder lying down, a tip). It may come loose - a flat bottom holds.">
+                stands on {Math.round((100 * built.rests.contact) / built.rests.footprint)}% of its shadow</span>)}
           </div>
         </div>
         <div className="v3d-inspector">
@@ -1119,8 +1132,9 @@ function PartFields({ part, font, lock, setLock, change, onDuplicate, onDelete, 
       s[i] = v;
       return { ...p, size: s };
     }
-    const f = v / (sized(p, font)[i] || 1);
-    return { ...p, size: p.size.map((x) => x * f) as Vec3, radius: p.radius ? p.radius * f : p.radius };
+    const f = v / (sized(p, font)[i] || 1);         // an outline's 0s become sizes; a text's width 0 stays
+    const size = (p.shape === "outline" ? sized(p, font) : p.size).map((x) => x * f) as Vec3;
+    return { ...p, size, radius: p.radius ? p.radius * f : p.radius };
   });
   const textOf = (t: string) => change((p) => {
     const follows = p.size[0] > 0 && Math.abs(p.size[0] - textWidth(p.text ?? "", p.size[1], font)) < 0.05;
@@ -1148,7 +1162,8 @@ function PartFields({ part, font, lock, setLock, change, onDuplicate, onDelete, 
           <div className="v3d-triple">
             {["X", "Y", "Z"].map((ax, i) => <Num key={ax} label={ax} value={r3(now[i])} min={MIN_SIZE} onSet={(v) => sizeOf(i, v)} />)}
           </div>
-          <div className="v3d-label"><span>Centre</span><span className="faint small">its bottom at z {fmt(box?.[0][2] ?? 0)}</span></div>
+          <div className="v3d-label"><span>{part.shape === "outline" ? "Position" : "Centre"}</span>
+            <span className="faint small">{part.shape === "outline" ? "of its points' 0,0; " : ""}its bottom at z {fmt(box?.[0][2] ?? 0)}</span></div>
           <div className="v3d-triple">
             {["X", "Y", "Z"].map((ax, i) => <Num key={ax} label={ax} value={part.at[i]}
               onSet={(v) => change((p) => { const at = [...p.at] as Vec3; at[i] = v; return { ...p, at }; })} />)}
@@ -1173,6 +1188,9 @@ function PartFields({ part, font, lock, setLock, change, onDuplicate, onDelete, 
             </label>
           )}
           {part.shape === "mesh" && <p className="v3d-note mono" title="The file, from the design's folder">{part.file}</p>}
+          {part.shape === "outline" && <p className="v3d-note">An outline of {part.points?.length ?? 0} points
+            {part.holes?.length ? `, ${part.holes.length} hole${part.holes.length > 1 ? "s" : ""} in it` : ""}, {fmt(now[2])} mm
+            thick. X and Y scale its points{part.size[0] <= 0 && part.size[1] <= 0 ? " (now as drawn)" : ""}.</p>}
         </>
       )}
       {g && box && <p className="v3d-note num">{fmt(box[1][0] - box[0][0])} x {fmt(box[1][1] - box[0][1])} x {fmt(box[1][2] - box[0][2])} mm,
@@ -1187,7 +1205,59 @@ function PartFields({ part, font, lock, setLock, change, onDuplicate, onDelete, 
         <ConfirmButton className="btn small v3d-tool" confirmText="Delete?" label="Delete" onConfirm={onDelete}><Trash2 size={15} /></ConfirmButton>
       </div>
       <Mirror onMirror={onMirror} />
+      <Pattern part={part} change={change} />
     </section>
+  );
+}
+
+/** Copies of the part or group (0.88.0): turned round a point - a snowflake's arms, a star's points - or in a row. */
+function Pattern({ part, change }: { part: Part; change: (fn: (p: Part) => Part) => void }) {
+  const r = part.repeat;
+  const set = (fn: (x: Repeat) => Repeat) => change((p) => (p.repeat ? { ...p, repeat: fn({ ...p.repeat }) } : p));
+  if (!r) {
+    const b = extent(part);
+    const w = b ? b[1][0] - b[0][0] : 20;
+    return (
+      <div className="v3d-mirror" role="group" aria-label="Pattern">
+        <span className="faint"><Repeat2 size={14} style={{ verticalAlign: -2 }} /> Pattern</span>
+        <button className="btn small" onClick={() => change((p) => ({ ...p, repeat: { count: 6 } }))}
+          title={part.shape === "group" ? "Six copies turned round the plate's middle - set Around for another point"
+            : "Six copies turned round its own position - set Around for another point"}>Around</button>
+        <button className="btn small" onClick={() => change((p) => ({ ...p, repeat: { count: 3, step: [r3(w + 5), 0, 0] } }))}
+          title="Three copies in a row">In a row</button>
+      </div>
+    );
+  }
+  const around = repeatAround(part);
+  return (
+    <div className="v3d-pattern">
+      <div className="v3d-label"><span><Repeat2 size={14} style={{ verticalAlign: -2 }} /> Pattern</span>
+        <button className="link-btn small" onClick={() => change((p) => ({ ...p, repeat: undefined }))}>remove</button></div>
+      <div className="v3d-triple">
+        <Num label="Copies" unit="in all" value={r.count} min={2}
+          onSet={(v) => set((x) => ({ ...x, count: Math.max(2, Math.min(MAX_COPIES, Math.round(v))) }))} />
+        {!r.step && <Num label="Angle" unit="° from the first to the last (360: all round)" step={15} value={r.angle ?? 360}
+          onSet={(v) => set((x) => ({ ...x, angle: Math.max(-360, Math.min(360, v)) }))} />}
+      </div>
+      {r.step ? (
+        <>
+          <div className="v3d-label"><span>Step</span><span className="faint small">from one copy to the next</span></div>
+          <div className="v3d-triple">
+            {["X", "Y", "Z"].map((ax, i) => <Num key={ax} label={ax} value={r.step![i]}
+              onSet={(v) => set((x) => { const st = [...(x.step ?? [0, 0, 0])] as Vec3; st[i] = v; return { ...x, step: st }; })} />)}
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="v3d-label"><span>Around</span>
+            <span className="faint small">{r.around ? "the point they turn about" : part.shape === "group" ? "the plate's middle" : "its own position"}</span></div>
+          <div className="v3d-triple">
+            {["X", "Y"].map((ax, i) => <Num key={ax} label={ax} value={around[i]}
+              onSet={(v) => set((x) => { const a = [...around] as [number, number]; a[i] = v; return { ...x, around: a }; })} />)}
+          </div>
+        </>
+      )}
+    </div>
   );
 }
 

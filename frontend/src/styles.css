@@ -1243,6 +1243,8 @@ div.tests-result-head { cursor: default; }
 .v3d-align .row > span, .v3d-mirror > span { width: 64px; font-size: 13px; }
 .v3d-mirror { display: flex; align-items: center; gap: 4px; }
 .v3d-mirror .btn { min-width: 34px; padding: 0 8px; box-shadow: none; }
+.v3d-pattern { display: flex; flex-direction: column; gap: 8px; padding-top: 2px; }
+.v3d-pattern .v3d-label .link-btn { font-family: var(--font); font-weight: 400; font-size: 12.5px; }
 .v3d-align .btn { padding: 0 8px; box-shadow: none; }
 .v3d-note { margin: 0; font-size: 13px; line-height: 1.45; color: var(--ink-2); overflow-wrap: anywhere; }
 .v3d-parts { display: flex; flex-direction: column; gap: 1px; margin: 0; padding: 0; list-style: none; }
