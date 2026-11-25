@@ -1236,16 +1236,16 @@ def counting(ctx: int, replies: list[dict], sizes: list, **cost):
 async def test_dense_text_is_fitted_by_the_real_token_count(signed_in, app, fakes, monkeypatch):
     """Chat 74: every character of its hex dumps cost more tokens than the estimate says (62,286 real for 45,004
     estimated), so it was never condensed and ran out of room. The last step's real count scales the estimate.
-    (14,900: the last of its eleven requests must fit - 14,600 since 0.43.0's ask_user schema; 0.67.1's 3D section
-    of the system prompt took it over that.)"""
+    (15,300: the last of its eleven requests must fit - 14,600 since 0.43.0's ask_user schema, 14,900 since 0.67.1's
+    3D section of the system prompt; 0.87.0's 3D editor line took it over that.)"""
     hub = app.state.hub
-    monkeypatch.setattr(hub.catalog, "context_per_request", lambda model_id: 14900)
+    monkeypatch.setattr(hub.catalog, "context_per_request", lambda model_id: 15300)
     c = await new_chat(signed_in)
     wd = hub.extras["agent"].workdir(chats.get_chat(c["id"]))
     for i in range(10):
         wd.write(f"dump{i}.txt", f"dump {i}\n" + "0f a3 " * 1000 + "\n", author="test", origin="test", message="dump")
     sizes: list = []
-    fakes.llama["responder"] = counting(14900, [
+    fakes.llama["responder"] = counting(15300, [
         *({"content": f"Dump {i} read.", "tool_calls": [{"name": "read_file", "arguments": {"path": f"dump{i}.txt"}}]}
           for i in range(10)), {"content": "All read."}], sizes, dense=1.6)
     run = await finish(app, await say(signed_in, c["id"], "Read every dump"))
@@ -1259,17 +1259,17 @@ async def test_dense_text_is_fitted_by_the_real_token_count(signed_in, app, fake
 async def test_a_request_the_model_server_refuses_as_too_long_is_fitted_again(signed_in, app, fakes, monkeypatch):
     """Three hex dumps arrive in one step: the last step measured plain text, so the estimate says the next request
     fits. The model server refuses it with its real size; that size sets the ratio and the request is shortened.
-    (15,200: the estimate of the second request - the base prompt and three dumps - must fit three quarters of it;
+    (15,600: the estimate of the second request - the base prompt and three dumps - must fit three quarters of it;
     0.35.0's working rule took it over 14,000's, 0.43.0's ask_user over 14,400's, 0.66.0's 3D libraries in bash's
-    description over 14,800's.)"""
+    description over 14,800's, 0.87.0's 3D editor line over 15,200's.)"""
     hub = app.state.hub
-    monkeypatch.setattr(hub.catalog, "context_per_request", lambda model_id: 15200)
+    monkeypatch.setattr(hub.catalog, "context_per_request", lambda model_id: 15600)
     c = await new_chat(signed_in)
     wd = hub.extras["agent"].workdir(chats.get_chat(c["id"]))
     for i in range(3):
         wd.write(f"hex{i}.txt", f"HEX {i}\n" + "0f a3 " * 800 + "\n", author="test", origin="test", message="hex")
     sizes: list = []
-    fakes.llama["responder"] = counting(15200, [
+    fakes.llama["responder"] = counting(15600, [
         {"content": "Reading the three dumps.",
          "tool_calls": [{"name": "read_file", "arguments": {"path": f"hex{i}.txt"}} for i in range(3)]},
         {"content": "The dumps differ at byte 4."}], sizes, hex_cost=3.0)

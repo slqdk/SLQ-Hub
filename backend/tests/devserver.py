@@ -3,7 +3,7 @@
     cd backend && python -m tests.devserver [--port 8080] [--data /tmp/hub-dev]
 
 Signs in as soren / "correct horse battery". The fake model answers by
-keyword: "files" (writes and runs a script), "ask me" (a question card it waits for), "install" (code that needs the
+keyword: "files" (writes and runs a script), "key tag" (a design: the 3D editor opens; "bigger hole" changes it), "ask me" (a question card it waits for), "install" (code that needs the
 internet), "read dr.dk" (web_fetch), "jingle" (a command makes a
 sound, a PDF and notes: the card under the answer), "announce" (speech),
 "song" (music), "horn" (a sound effect), "video" (Wan 2.2 5B: ffmpeg's test
@@ -192,6 +192,18 @@ asks what a pump alarm or error code means.
 
 
 CHECKS = {"pictures": 0}                            # Extra's picture checks so far (0.71.0)
+
+
+KEY_TAG = """{
+  "format": "slq-hub-3d",
+  "version": 1,
+  "parts": [
+    {"id": "tag", "name": "Tag", "shape": "box", "size": [50, 22, 3], "at": [0, 0, 1.5], "radius": 1, "sides": 32},
+    {"id": "ring", "shape": "cylinder", "size": [5, 5, 6], "at": [-19, 0, 1.5], "hole": true},
+    {"id": "word", "shape": "text", "text": "SLQ", "size": [0, 8, 1], "at": [-1, 0, 3.5], "color": "#d9822b"}
+  ]
+}
+"""
 
 
 def responder(body: dict) -> dict:
@@ -395,6 +407,17 @@ def responder(body: dict) -> dict:
             return {"reasoning": thought + more * 3, "pace": 0.05, "delay": 1.5,
                     "tool_calls": [{"name": name, "arguments": args}]}
         return {"content": "Done: **picture-animals** now asks which season the picture should show."}
+    if "key tag" in low:                                # 0.87.0: a design for the 3D editor, which opens beside the chat
+        if tools_done == 0:
+            return {"content": "A key tag as a design.", "tool_calls": [{"name": "write_file", "arguments": {
+                "path": "key-tag.3d.json", "content": KEY_TAG}}]}
+        return {"content": "The key tag is open in the 3D editor: 50 x 22 mm, a 5 mm hole for the ring and SLQ on top."}
+    if "bigger hole" in low:                            # ... and a change to it while it is open
+        if tools_done == 0:
+            return {"content": "Making the hole 8 mm.", "tool_calls": [{"name": "edit_file", "arguments": {
+                "path": "/workspace/chats/1/key-tag.3d.json" if "sandbox path" in low else "key-tag.3d.json",
+                "old_string": '"size": [5, 5, 6]', "new_string": '"size": [8, 8, 6]'}}]}
+        return {"content": "The hole is 8 mm now."}
     if "files" in low:
         if tools_done == 0:
             return {"content": "I will write the script first.", "tool_calls": [{"name": "write_file", "arguments": {

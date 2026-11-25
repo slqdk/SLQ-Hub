@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.87.0 - 2026-11-25
+
+- A 3D editor beside the chat. 3D at the top of a chat makes a new design or
+  opens one from the folder; the Files panel and the file card open STL, 3MF
+  and OBJ files in it too. Add boxes, cylinders, cones, spheres, wedges, text
+  and holes. Move, turn and size them with the mouse or by the numbers. Group
+  parts so a hole cuts only those parts, and align, mirror or lay a face flat
+  on the plate. Undo and redo work for your changes and the assistant's.
+- The plate is your printer's: a Bambu Lab P2S unless you choose another
+  (P1S, X1, A1, A1 mini, H2S, H2D or a custom size). The editor warns when
+  the model is larger than the plate or not on it.
+- The assistant works on the same design. While the editor is open, every
+  message carries the design as it is now, and the editor shows what the
+  assistant writes within a few seconds. Point at puts a spot on the model
+  into your message, so you can say what should change there.
+- Export a 3MF or STL for Bambu Studio, as a download or into the folder.
+- In the sandbox, `hub3d format` describes the design format and `hub3d
+  design` checks a design, draws it and writes the slicer's file. A design
+  builds to the same solid in the browser and in the sandbox.
+
 ## 0.86.0 - 2026-11-25
 
 - Settings, MCP servers suggests five servers that work with the Hub and need

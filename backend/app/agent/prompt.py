@@ -165,15 +165,25 @@ to change it (scale, split, convert) once they attach it."""
 PRINT3D_CODE = """
 - To build one: Python with manifold3d - run `hub3d recipe` in bash first (the API and worked examples: do not guess \
 it). hub3d.save checks the solid as it writes it; look at hub3d.views with view_image before you say it is done."""
+PRINT3D_EDITOR = """
+- The 3D editor beside the chat (the user's 3D button) works on a design, NAME.3d.json in the working folder: \
+boxes, cylinders, text, holes, groups and imported meshes on the printer's plate, which the user also moves and \
+sizes with the mouse. A thing of simple shapes, or a change to a mesh (a hole in it, text on it), is a design \
+rather than code. While the editor is open, the user's messages carry the design as it is now, and spots they \
+point at: [3D point: part "Lid" (id p3) at x 12, y -4, z 20 mm, on a face facing up]. Change it with edit_file \
+(write_file for a new one) and keep the parts' ids - the editor shows what you write. Read `hub3d format` before \
+the first one; `hub3d design NAME.3d.json --views out/NAME.png` checks it (look at the picture), --3mf the slicer's \
+file."""
 PRINT3D_PHOTO = """
 - A shape from a photo of a thing: model3d_generate."""
 
 
 def print3d_text(code: bool, photo: bool) -> str:
-    """The system prompt's 3D section: '' when there is nothing to make models with."""
+    """The system prompt's 3D section: '' when there is nothing to make models with. The 3D editor's designs (0.87.0)
+    go with the code: checking one takes `hub3d design` in the sandbox."""
     if not code and not photo:
         return ""
-    return PRINT3D_LINK + (PRINT3D_CODE if code else "") + (PRINT3D_PHOTO if photo else "")
+    return PRINT3D_LINK + (PRINT3D_CODE + PRINT3D_EDITOR if code else "") + (PRINT3D_PHOTO if photo else "")
 
 
 def sound_text(abilities: list[str]) -> str:

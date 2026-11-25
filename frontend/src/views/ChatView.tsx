@@ -1,6 +1,6 @@
 // A chat: history, the live turn, and the composer.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
-import { Archive, ArchiveRestore, Cloud, Copy, Download, FileText, FolderInput, FolderOpen, Menu, MessageSquarePlus, MoreHorizontal, NotebookPen, Pencil, RotateCcw, ShieldCheck, Sparkles, Square, Trash2, Volume2 } from "lucide-react";
+import { Archive, ArchiveRestore, Box, Cloud, Copy, Download, FileText, FolderInput, FolderOpen, Menu, MessageSquarePlus, MoreHorizontal, NotebookPen, Pencil, RotateCcw, ShieldCheck, Sparkles, Square, Trash2, Volume2 } from "lucide-react";
 import { archiveWithUndo, unarchive } from "../lib/archive";
 import { api, mediaUrl, type ArtifactRef, type Block, type ChatData, type ChatSettings, type Library, type Message, type ModelEntry, type ProducedFile, type RunEvent, type RunRecord, type Settings, type Lora, type LoraList, type Skill, type Upload, type AnswersBlock, answeredIn } from "../lib/api";
 import { clearDraftSkills, peekDraftSkills, setDraft as setMessageDraft } from "../lib/draft";
@@ -21,6 +21,8 @@ import { copyText, Lamp, MenuButton, Modal } from "../components/ui";
 import { download, downloadZip } from "../lib/download";
 import type { PanelState } from "../App";
 import type { Folder } from "../components/Files";
+import { DesignMenu } from "../model3d/DesignMenu";
+import { DESIGN_FILE, inFolder, OPENS_IN_3D } from "../model3d/files";
 
 let settingsCache: Settings | null = null;
 async function loadSettings(): Promise<Settings> {
@@ -31,11 +33,12 @@ export function forgetSettings() {
   settingsCache = null;
 }
 
-export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel }: { chatId?: number; projectId?: number;
+export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel, pinned }: { chatId?: number; projectId?: number;
   openPanel: (p: PanelState) => void;
   refs: string[];                                   // files of the folder picked for the next message
   onRefs: Dispatch<SetStateAction<string[]>>;
   keepPanel: () => void;                            // a new chat was saved: keep the panel on its page
+  pinned?: string | null;                           // the design open in the 3D editor: in every message (0.87.0)
 }) {
   const { models, queue, refreshLists, toast, setSidebarOpen, modelNames, projects } = useApp();
   const [data, setData] = useState<ChatData | null>(null);
@@ -60,6 +63,7 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
   const scroller = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
   const seenArtifacts = useRef(0);
+  const seenDesigns = useRef(new Set<string>());
 
   const project = data?.project ?? (projectId ? projects.find((p) => p.id === projectId) ?? null : null);
   // The folder the assistant works in: the project's, or this chat's own (once the chat exists).
@@ -235,6 +239,22 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
     }
   }, [live, chatId, openPanel]);
 
+  // A design the assistant writes during a live turn opens in the 3D editor (0.87.0) - and what it writes next shows
+  // there, as the editor follows its file.
+  useEffect(() => {
+    if (!live || !folder) return;
+    for (const item of live.items) {
+      if (item.kind !== "tools") continue;
+      for (const t of item.tools) {
+        const p = typeof t.args?.path === "string" ? t.args.path : "";
+        if (t.state !== "done" || !DESIGN_FILE.test(p) || (t.name !== "write_file" && t.name !== "edit_file")
+          || seenDesigns.current.has(t.id)) continue;
+        seenDesigns.current.add(t.id);
+        openPanel({ kind: "model3d", folder, path: inFolder(p, folder), at: Date.now() });
+      }
+    }
+  }, [live, folder, openPanel]);
+
   // Keep the newest text in view unless the reader scrolled up.
   useLayoutEffect(() => {
     const el = scroller.current;
@@ -297,7 +317,7 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
       }
       const r = await api<{ message: Message | null; run_id: string; queued?: string }>(`/hub/api/chats/${id}/messages`, {
         body: { text, attachments: uploads.map((u) => u.sha), refs, answers } });
-      onRefs([]);
+      onRefs(pinned ? [pinned] : []);                 // the open design goes with the next one too
       if (r.queued || !r.message) {                    // the turn at work reads it after the step it is on
         stick.current = true;
         return true;
@@ -437,6 +457,11 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
   const title = data?.chat.title ?? (project ? `New chat in ${project.name}` : "New chat");
   const persona = data?.persona ?? null;                 // 0.74.0: a chat with a persona
   const showFiles = (select?: string) => folder && openPanel({ kind: "files", folder, select, at: Date.now() });
+  // The 3D editor (0.87.0): a design to open, or a new one - in hub/ in a project that syncs one folder.
+  const syncs = project?.settings.sync_folder;
+  const own = syncs && syncs !== "." ? "hub/" : "";
+  const open3d = (path?: string) => folder && openPanel({ kind: "model3d", folder, path: path ?? "", create: !path, own,
+    at: Date.now() });
   const fileHandlers: FileHandlers = {
     src: fileSrc,
     download: (f) => download(`${fileSrc(f)}&download=true`, f.path.split("/").pop()),
@@ -444,7 +469,7 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
       if (folderKey) downloadZip(`/hub/api/folders/${folderKey}/zip?` + fs.map((f) => `path=${encodeURIComponent(f.path)}`)
         .join("&")).catch((e) => toast((e as Error).message, "fault"));
     },
-    open: (f) => showFiles(f.path),
+    open: (f) => (OPENS_IN_3D.test(f.path) ? open3d(f.path) : showFiles(f.path)),
     add: (f) => onRefs((r) => (r.includes(f.path) ? r.filter((x) => x !== f.path) : [...r, f.path])),
     added: (f) => refs.includes(f.path),
   };
@@ -471,6 +496,12 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
         <span className="grow" />
         {folder && <button className="btn quiet small" onClick={() => showFiles()}>
           <FolderOpen size={15} /> Files</button>}
+        {folder && (
+          <MenuButton right className="btn quiet small" title="The 3D editor: models to print, made with the assistant"
+            label={<><Box size={15} /> 3D</>} menuClassName="wide">
+            {(close) => <DesignMenu folder={folder} onNew={() => { close(); open3d(); }} onOpen={(p) => { close(); open3d(p); }} />}
+          </MenuButton>
+        )}
         {chatId && (
           <MenuButton right className="icon-btn" label={<MoreHorizontal size={18} />} title="More">
             {(close) => (

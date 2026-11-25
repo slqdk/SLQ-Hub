@@ -4,7 +4,26 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## Next session - start here (written 2026-11-25, at 0.86.0)
+## Next session - start here (written 2026-11-25, at 0.87.0)
+
+**0.87.0 (2026-11-25): a 3D editor beside the chat - pushed, not yet installed.** Søren changed his mind after 0.86.0:
+"Jeg vil virkelig gerne ha en stl editor i bruwseren sammen med hub, der kan hjælpe mig"; asked, he chose "Bygget ind i
+Hubben" and "Tinkercad-niveau", and "Min printer er en P2S fra bambulab. Men det skal man kunne vælge". Built (DESIGN
+§8 "The 3D editor"): a design is `NAME.3d.json` in the folder; the panel (`frontend/src/model3d/`, a lazy chunk with
+three.js and manifold-3d's WebAssembly) builds it with the same geometry as `hub3d design` in the sandbox (a parity
+test runs both); the assistant gets the open design with every message, writes it with edit_file/write_file, reads
+`hub3d format`, checks with `hub3d design --views`; "Point at" puts `[3D point: ...]` into the message. Seen in the
+dev server ("key tag" and "bigger hole" there): the panel opening on the assistant's write, its edit shown, a box
+added, dragged by its face and by a handle, undone, turned by the number, made a hole with H, grouped with Ctrl+G, an
+STL uploaded into it, an STL opened from Files and saved as a design at the first change, the printer changed to A1
+mini, a 3MF downloaded, dark theme, a phone's width; no console errors but the expected 404s. Not on the VM: the
+sandbox image must be rebuilt for `hub3d format`/`design` and its font (update.sh does it; `hub3d selftest` now also
+builds the format's example), and nothing has been tried with a real model or a real mouse on his screens. To try
+after the update: in a chat, "Lav en nøglering med mit navn som 3D-design, 50 x 22 mm, med hul til ringen" - does the
+model read `hub3d format`, write a design that builds, look at the views? Then change it with the mouse, "gør hullet
+større", Point at a face and ask for something there; Export -> Download 3MF into Bambu Studio on the P2S.
+
+The paragraphs below were written at 0.86.0 and before.
 
 **0.86.0 (2026-11-25): more MCP servers - five suggested in Settings, and any other pasted from its page - pushed,
 not yet installed.** Søren's first wish of the day ("Jeg kunne godt tænke mig at have nogle flere mcp servere til brug
@@ -188,7 +207,7 @@ finds them and fingers still come out wrong). Decided: no Facebook posting (he c
 
 Known flake: tests/test_training.py::test_the_trainer_stops_a_job fails now and then in a full run and passes alone.
 
-## State (0.86.0, 2026-11-25)
+## State (0.87.0, 2026-11-25)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -1548,6 +1567,7 @@ the host if the VM ever stops by itself.
 | Model APIs | 29 tests against a fake llama-server: Ollama (chat, generate, show, tags, embed, key in the path, `HEAD /`), OpenAI (chat, stream, tools, images, the extra fields of `/v1/models`), Anthropic (messages, stream, tools, thinking), LAN guard, CORS, key priority, the `/chat` route, the home network for keys, keys that work away from home (through the proxy only - not from a direct outside peer or the sandbox; a wrong key from outside gets the same 403; an address list still applies; last used only once let in; switched back), every key from outside still only through the proxy. |
 | Agent | 62 tests: plain turns, the files a turn made or changed (by a tool and by a command; scratch files removed again, `.hub` and untouched files left out; newest first) as a run step, served for the card (a range for the player, a download, PDFs without the sandbox CSP), the folder snapshot's ignores (node_modules, `.pyc`, links) and its limit, the local time each user message was sent (in the message, the same text in later turns; summer and winter time, `TZ`), tools in chat and project folders, revisions, stopping (in a tool and while writing), retry/edit, SSE replay, messages sent while a turn works (read after a tool step, while the last answer is written, after the end, with Stop), attachments, project files put in a message (text inline and fenced, too big or binary as pointers, pictures as images, refused paths, the pointer once the message is old), image generation switching the card and back, MCP over HTTP (approval, always-allow, masked secrets) and over stdio in the sandbox, MCP on demand (0.85.0: only mcp_tools and mcp_call in the request, their listing, description and errors, mcp_call's arguments three ways, the schema with a tool's first failure, a call by the tool's own name), the error that says what fills a request too big after the refit, escalation (explicit and automatic), subagents, compaction (and a summary request that fits the context: 40 big results before the new question, 8K context), a long single turn that stays inside a 14K context (12 results of 9,000 characters, tool definitions counted), the loop guard (the same search refused, a failing read retried once then refused, the forced answer without tools and its notice, repeats with new words, the same bash step three times, a read after an edit running again), hand-over to the stronger local model (a loop, three failed calls, the escalate tool; the card switches within the lease; its own system prompt and note, no reasoning of the other model; nobody to hand over to; local first, then the cloud), what each step was sent and why it stopped, a model's own thinking and sampling, system prompts stored once and removed with the chat, the note when a picture call names another model than the chat's, skills, memory, artifacts. |
 | MCP import | 19 tests (0.86.0): one remote server in seven clients' words (Cursor, Windsurf, Gemini CLI, Codex's TOML, `claude mcp add`, amp, a README block with a comment and a trailing comma), a key in a command line moved into the environment (four forms), VS Code's inputs and settings fragment, Zed, a bare URL, `add-json`, what cannot run (Docker, Go), `/sse` and `localhost` notes, a path on another computer, a host to fill in, `mcp-remote` replaced by its URL, unique names and servers set up already, the command line run through bash with `$HOME`, backticks and quotes left as text, the catalog, the routes (no secret in their answers). |
+| 3D editor (0.87.0) | 7 tests (`tests/test_design3d.py`; geometry.ts runs in node 22.6 or newer, the builds need manifold3d in the venv and manifold-3d in frontend/node_modules - skipped without): the font the same in both places and in the sandbox image, both readers' defaults and problems, the same solid from the editor and from hub3d (triangle count, volume to 1e-9, box to 1e-4 mm) for five designs with every shape, æøå, nested holes, meshes that are and are not closed, and `hub3d format`'s example; mirroring, turning and scaling keep the shape (a text's auto width too); `hub3d design`'s report and files; Point at's words equal the prompt's and the format's; sandbox paths read as the Hub reads them. In the dev server ("key tag", "bigger hole") with headless Chromium: the whole flow, see "Next session". |
 | SLQ Sync (gone in 0.84.0; tests/test_history.py keeps the history's 6) | 8 tests (one: writes never follow a symlink planted in the folder), including a round trip with the real `slq_sync.py` client from the SLQ Companion repo against a live server (clone, both-way edits, a conflict, its release). Skipped when that file is not next to this repo. |
 | Libraries | 5 tests with keyword-hashing fake embedders: text and page-image indexing, fused search, re-ranking, replacing and deleting documents, GPU indexing through the queue, broken files. |
 | Web UI | `tsc` + `vite build`; every page and the main flows clicked through in Chromium (Playwright) against `python -m tests.devserver` (the Hub with fake services): sign-in, chat with markdown/maths/code, tool strip, artifact panel, approvals, subagent, image tool, projects (files, editor, settings, sync), libraries, all settings tabs, dark mode, phone width. |
@@ -2240,6 +2260,15 @@ the host if the VM ever stops by itself.
       converter's cases are ComfyUI 0.42.3's own templates; files from other sites (Civitai, OpenArt) are
       untried - an export is the way to see what went wrong. When COMFYUI_REF changes, the editor's format may
       too: tools/workflow_oracle/ (convert.js, compare.py) is how the converter was checked - run it again.
+105. **The 3D editor (0.87.0)** - only in the dev server's headless Chromium (SwiftShader WebGL), not on the VM:
+    - **The sandbox image**: update.sh rebuilds it (hub3d.py and hub3d-font.json are copied in; `hub3d selftest` builds
+      the format's example and a plate with text). Check: `sudo bash update.sh compose exec sandbox hub3d format | head`
+      and `hub3d selftest`.
+    - **A real model**: does Qwen3.8 27B (or Gemma 4 31B) read `hub3d format` before its first design, keep ids when
+      it edits, use the `[3D point: ...]` marks, and check with `hub3d design --views`? The chat export shows it.
+    - **His browser and mouse**: WebGL on his PC and phone, the handles' feel, dragging a part by its face, the
+      speed of a design with an imported STL of 100,000+ triangles (every change rebuilds the whole design).
+    - **Bambu Studio**: the downloaded 3MF and STL open on the P2S plate at the right size (millimetres).
 104. **More MCP servers (0.86.0)** - the catalog's servers answered from the build machine, not from the VM:
     - **The suggested servers on the VM**: Add MDN, Context7, Microsoft Learn, DeepWiki, Hugging Face - each "ready" with
       its tools (the Hub container must reach mcp.mdn.mozilla.net, mcp.context7.com, learn.microsoft.com,
@@ -2605,6 +2634,7 @@ the host if the VM ever stops by itself.
 | `backend/app/sandbox_job.py`, `backend/app/audio/clips.py` | A command in the sandbox for the Hub's own jobs (Movies' preview and cut, voice clips); a clip of a real voice as the speech models take it. |
 | `backend/app/cli.py` | `selftest`, `set-password`, `create-key`, `keys`. |
 | `frontend/src/` | The UI: `views/` (chat, project, libraries, settings), `components/`, `lib/turns.ts` (the turn view model for history and live runs). |
+| `frontend/src/model3d/`, `services/sandbox/hub3d.py` | The 3D editor (0.87.0): `Editor.tsx` (the panel), `geometry.ts` (the format and the build with manifold-3d, no three.js - node runs it in the tests), `Viewport.ts` (three.js: the plate, the solid, ghosts, the handles), `tree.ts`, `printers.ts`, `meshio.ts` (STL/3MF/OBJ in), `files.ts` and `DesignMenu.tsx` (light: the chat and Files use them); hub3d's design section builds the same in the sandbox (`hub3d format`, `hub3d design`); `tools/make_3d_font.py` writes both copies of the font. |
 | `frontend/src/chat/`, `frontend/chat.html` | The phone chat page (`/chat`): its own entry, on the model API with a key (`hub.ts`), chats in IndexedDB on the device (`store.ts`). |
 | `backend/app/agent/device.py`, `backend/app/ui/people_routes.py` | People's chats (device turns: the temporary folder, the result, what is deleted) and the People settings API. `backend/app/gate.py` has `MEMBER_ROUTES`. |
 | `frontend/src/person/` | The chat a person gets (`PersonApp.tsx`), their IndexedDB store (`store.ts`), the device-turn flow (`turns.ts`). |

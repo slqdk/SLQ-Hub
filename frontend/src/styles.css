@@ -1177,3 +1177,85 @@ div.tests-result-head { cursor: default; }
 @media (max-width: 520px) {
   .pe-posts { grid-template-columns: 1fr; }
 }
+
+/* ------------------------------------------------------------ the 3D editor (0.87.0) */
+.app.with-3d { --panel-w: min(58vw, 1180px); }
+.app.with-panel.max-3d { grid-template-columns: var(--sidebar-w) minmax(0, 1fr); }
+.app.max-3d > .main { display: none; }
+.panel-3d { position: relative; }
+.v3d-head .tag { flex: none; }
+.v3d-head > svg { flex: none; }
+.v3d-bar { display: flex; align-items: center; gap: 8px; padding: 7px 12px; border-bottom: 1px solid var(--rule-2);
+  background: color-mix(in srgb, var(--wait) 10%, var(--sheet)); font-size: 13.5px; }
+.v3d-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 70px minmax(0, 1fr) 252px; }
+.v3d-palette { display: flex; flex-direction: column; gap: 4px; padding: 8px 6px; border-right: 1px solid var(--rule-2);
+  overflow-y: auto; }
+.v3d-palette hr { width: 100%; border: 0; border-top: 1px solid var(--rule-2); margin: 4px 0; }
+.v3d-palette .menu-anchor { display: flex; }
+.v3d-palette .v3d-tool { flex-direction: column; width: 100%; height: auto; padding: 6px 2px; gap: 2px; font-size: 11.5px;
+  box-shadow: none; white-space: normal; line-height: 1.15; }
+.v3d-tool.on, .v3d-seg .btn.on { color: var(--act); border-color: var(--act); background: var(--act-wash); }
+.v3d-stage { position: relative; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.v3d-toolbar { display: flex; align-items: center; gap: 4px; padding: 6px 8px; border-bottom: 1px solid var(--rule-2);
+  flex-wrap: wrap; }
+.v3d-toolbar .v3d-tool, .v3d-actions .v3d-tool { padding: 0 7px; box-shadow: none; }
+.v3d-sep { width: 1px; height: 20px; background: var(--rule-2); margin: 0 4px; }
+.v3d-snap { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ink-2); }
+.v3d-snap .select { width: auto; height: 28px; padding: 0 28px 0 8px; font-size: 13px; }
+.v3d-letter { display: inline-block; width: 16px; text-align: center; font-family: var(--font-plate); font-weight: 700;
+  font-size: 13.5px; }
+.v3d-view { position: relative; flex: 1; min-height: 0; outline: none; touch-action: none; }
+.v3d-view:focus-visible { box-shadow: inset 0 0 0 2px var(--act); }
+.v3d-view.picking { cursor: crosshair; }
+.v3d-canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
+.v3d-overlay, .v3d-empty { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); max-width: 80%;
+  padding: 10px 14px; border-radius: 8px; background: var(--sheet); box-shadow: var(--shadow); color: var(--ink-2);
+  font-size: 14px; text-align: center; pointer-events: none; }
+.panel-3d > .v3d-overlay { top: 40%; }
+.v3d-hint { position: absolute; left: 50%; top: 52px; transform: translateX(-50%); max-width: 90%; padding: 6px 12px;
+  border-radius: 6px; background: var(--act); color: var(--act-ink); font-size: 13.5px; pointer-events: none; }
+.v3d-status { display: flex; flex-wrap: wrap; gap: 2px 14px; padding: 5px 10px; border-top: 1px solid var(--rule-2);
+  font-size: 13px; color: var(--ink-2); }
+.v3d-warn { color: color-mix(in srgb, var(--wait) 60%, var(--ink)); }
+.v3d-inspector { min-width: 0; min-height: 0; overflow-y: auto; padding: 10px 12px 16px; border-left: 1px solid var(--rule-2); }
+.v3d-inspector section { display: flex; flex-direction: column; gap: 9px; }
+.v3d-inspector section + section { margin-top: 16px; }
+.v3d-inspector h3 { margin: 4px 0 0; font-family: var(--font-plate); font-weight: 600; font-size: 15px; }
+.v3d-inspector .field > span { font-size: 13px; }
+.v3d-inspector .field small { font-size: 12.5px; }
+.v3d-inspector .input, .v3d-inspector .select, .v3d-inspector .textarea { padding: 4px 8px; font-size: 14px; }
+.v3d-inspector .textarea { min-height: 52px; }
+.v3d-inspector .select { padding-right: 28px; }
+.v3d-label { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: -5px;
+  font-family: var(--font-plate); font-weight: 600; font-size: 13px; color: var(--ink-2); }
+.v3d-label label, .v3d-label > span + span { font-family: var(--font); font-weight: 400; }
+.v3d-label input { vertical-align: -2px; }
+.v3d-triple { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.v3d-num { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.v3d-num > span { font-size: 12px; color: var(--ink-3); }
+.v3d-inspector .v3d-num .input { padding: 3px 6px; font-size: 13.5px; }
+.v3d-seg { display: flex; align-items: center; gap: 4px; }
+.v3d-seg .btn { box-shadow: none; }
+.v3d-color { width: 36px; height: 28px; margin-left: auto; padding: 0 2px; border: 1px solid var(--rule); border-radius: 6px;
+  background: var(--sheet); cursor: pointer; }
+.v3d-actions { display: flex; flex-wrap: wrap; gap: 4px; }
+.v3d-align { display: flex; flex-direction: column; gap: 4px; }
+.v3d-align .row > span, .v3d-mirror > span { width: 64px; font-size: 13px; }
+.v3d-mirror { display: flex; align-items: center; gap: 4px; }
+.v3d-mirror .btn { min-width: 34px; padding: 0 8px; box-shadow: none; }
+.v3d-align .btn { padding: 0 8px; box-shadow: none; }
+.v3d-note { margin: 0; font-size: 13px; line-height: 1.45; color: var(--ink-2); overflow-wrap: anywhere; }
+.v3d-parts { display: flex; flex-direction: column; gap: 1px; margin: 0; padding: 0; list-style: none; }
+.v3d-parts .row { gap: 6px; min-height: 28px; }
+.v3d-parts .link-btn { text-align: left; color: var(--ink); font-size: 14px; text-decoration: none; }
+.v3d-parts .link-btn:hover { text-decoration: underline; }
+.v3d-swatch { flex: none; width: 12px; height: 12px; border: 1px solid var(--rule); border-radius: 3px; background: var(--cabinet); }
+.v3d-swatch.hole { background: repeating-linear-gradient(45deg, transparent 0 2px, var(--ink-3) 2px 3px); }
+@media (max-width: 1100px) {
+  .app.with-3d .panel-3d { width: min(1180px, 100vw); }
+}
+@media (max-width: 760px) {
+  .v3d-body { grid-template-columns: 60px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
+  .v3d-inspector { grid-column: 1 / -1; max-height: 40dvh; border-left: 0; border-top: 1px solid var(--rule-2); }
+  .v3d-palette .v3d-tool { font-size: 10.5px; }
+}

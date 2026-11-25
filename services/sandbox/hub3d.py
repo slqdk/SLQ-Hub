@@ -11,6 +11,8 @@ In bash:
     hub3d recipe                    manifold3d's API (3.5) and worked examples - read it before writing the code
     hub3d check FILE [--bed 180]    is FILE a closed solid; its size, volume and parts; does it fit the bed
     hub3d views FILE OUT.png        a picture of FILE from three sides
+    hub3d format                    the format of the Hub's 3D editor's designs (.3d.json), with an example
+    hub3d design FILE.3d.json       a design from the 3D editor: what it makes, checked (--views, --stl, --3mf)
 
 Chat 255 (0.66.0): a model guessed at manifold3d for an hour (Cylinder, union, to_stl, from_stl, a 4x4 transform
 ...), wrote STL files by hand - Bambu Studio found no geometry data in the one it called "validated" - and ended
@@ -38,7 +40,7 @@ from xml.etree import ElementTree
 import numpy as np
 from PIL import Image, ImageDraw
 
-__all__ = ["NotPrintable", "Report", "check", "load", "save", "solid", "views", "RECIPE"]
+__all__ = ["NotPrintable", "Report", "check", "design", "load", "read_design", "save", "solid", "views", "RECIPE"]
 
 MAX_TRIANGLES = 1_000_000                 # more makes slicers slow
 STL_RECORD = np.dtype([("normal", "<f4", (3,)), ("corners", "<f4", (3, 3)), ("attr", "<u2")])     # 50 bytes
@@ -739,6 +741,402 @@ In bash:  hub3d check FILE [--bed 180]    hub3d views FILE OUT.png
 """
 
 
+# ---------------------------------------------------------------- designs from the Hub's 3D editor (0.87.0)
+
+# A design (a .3d.json file) is a list of parts in mm, Z up, the plate at z = 0: each a shape as big as `size` (its
+# box before turning), mirrored in its own X when `mirror`, turned by `rotate` (degrees, X then Y then Z - as
+# OpenSCAD) and centred on `at`; holes are cut out of the solids beside them, in their group or the design. The
+# editor builds it with manifold-3d in the browser (frontend/src/model3d/geometry.ts); this builds it the same way,
+# step for step, so what the assistant checks is what the editor shows and exports. tests/test_design3d.py runs
+# both on the same designs.
+DESIGN_FORMAT = "slq-hub-3d"
+DESIGN_SHAPES = ("box", "cylinder", "cone", "sphere", "wedge", "text", "mesh", "group")
+ROUND_SHAPES = ("cylinder", "cone", "sphere")
+DEFAULT_SIDES = 64
+MIN_SIZE = 0.01
+FONT_FILE = Path(__file__).with_name("hub3d-font.json")     # Barlow SemiBold as polygons (tools/make_3d_font.py)
+_font_cache: dict = {}
+
+DESIGN_EXAMPLE = """\
+{
+  "format": "slq-hub-3d",
+  "version": 1,
+  "printer": "bambu-p2s",
+  "bed": [256, 256, 256],
+  "parts": [
+    {"id": "tag", "name": "Tag", "shape": "box", "size": [50, 22, 3], "at": [0, 0, 1.5], "radius": 1, "sides": 32,
+     "color": "#2b7bd9"},
+    {"id": "ring", "name": "Key ring hole", "shape": "cylinder", "size": [5, 5, 6], "at": [-19, 0, 1.5], "hole": true},
+    {"id": "word", "name": "Name", "shape": "text", "text": "SLQ", "size": [0, 8, 1], "at": [-1, 0, 3.5],
+     "color": "#d9822b"},
+    {"id": "clip", "name": "Clip", "shape": "group", "parts": [
+      {"id": "arm", "shape": "wedge", "size": [12, 6, 6], "at": [19, 0, 6], "rotate": [0, 0, 180]},
+      {"id": "slot", "name": "Slot in the clip only", "shape": "box", "size": [8, 2, 8], "at": [19, 0, 7],
+       "hole": true}
+    ]}
+  ]
+}
+"""
+
+DESIGN_GUIDE = f"""\
+A design from the Hub's 3D editor: NAME.3d.json in the working folder. The editor beside the chat shows it and saves
+the user's changes into it; you change it by editing the file - edit_file for a few values, write_file for a new
+design - and the editor shows what you write within seconds. Keep each part's id: the user's messages name parts by
+it ([3D point: part "Tag" (id tag) at x 3, y -11, z 1.5 mm, on a face facing -Y (front)] is a spot they pointed at).
+
+    hub3d design NAME.3d.json --views out/NAME-views.png    what it makes, checked; then look: view_image
+    hub3d design NAME.3d.json --3mf out/NAME.3mf             the file for the slicer (Bambu Studio); --stl too
+
+Millimetres. X to the right, Y to the back, Z up; x 0, y 0 is the middle of the plate and z 0 its top.
+
+The file: {{"format": "slq-hub-3d", "version": 1, "printer": ..., "bed": [x, y, z], "parts": [...]}} - printer and
+bed are optional (the editor's printer list: bambu-p2s, bambu-p1s, bambu-x1, bambu-a1, bambu-a1-mini, bambu-h2s,
+bambu-h2d, or "custom" with its bed).
+
+A part:
+  id        stays the part's for its life; a new part gets a new one (p1, p2 ... or a word)
+  name      optional, shown in the editor
+  shape     box | cylinder | cone | sphere | wedge | text | mesh | group
+  size      [x, y, z]: the part's own box before it is turned (cylinder, cone, sphere: the diameters and the height)
+  at        [x, y, z]: where the middle of that box is - a part standing on the plate has z = its height / 2
+  rotate    [x, y, z] degrees about its middle: X first, then Y, then Z (as OpenSCAD's rotate); left out: [0, 0, 0]
+  hole      true: cuts the solids beside it instead of adding to them
+  hidden    true: left out of everything
+  mirror    true: mirrored in its own X before it is turned
+  color     "#rrggbb" - for the eye only: it prints in one filament
+
+  box       radius: rounded edges and corners (mm), sides: how round (default 64)
+  cylinder  along Z; sides (default 64) - sides 6 makes a hexagon (a nut trap), 3 a triangle
+  cone      top: the top's diameter as a share of the bottom's (0: a point, 1: a cylinder)
+  sphere    sides; different sizes make an ellipsoid
+  wedge     a ramp: its full height at its -X end, sloping down to nothing at +X
+  text      text: the letters (Barlow SemiBold; æøå, digits, punctuation; \\n starts a new line), lying flat and
+            reading along X; size [width, letter height, thickness] - width 0: as wide as the letters at that height.
+            Standing up: rotate [90, 0, 0]
+  mesh      file: an STL, 3MF or OBJ, its path from the design's folder; scaled to fill size, centred on at. One that
+            is not a closed solid is shown and exported as it is, but nothing joins it or cuts it
+  group     parts: [...]; no size, at, rotate or color of its own
+
+How it is built: in each list - the design's parts, or a group's - the solids are joined and then that list's holes
+cut them; a group is built that way first and then counts as one solid (or one hole, with hole: true). So a hole at
+the top cuts everything it meets; to keep a hole to some parts, put it in a group with them. Let parts that should
+be one piece overlap a little (0.2 mm or more) - only touching at a face, they may print as two.
+
+An example - a key tag with a hole, a name on top and a clip with its own slot:
+
+{DESIGN_EXAMPLE}"""
+
+
+def _num(v) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+
+
+def _vec(v, fallback) -> list[float]:
+    if not isinstance(v, list) or len(v) != 3 or not all(_num(x) for x in v):
+        return [float(x) for x in fallback]
+    return [float(x) for x in v]
+
+
+def read_design(text: str) -> tuple[dict, list[str]]:
+    """A design from its file's text, every part complete - the editor's readDesign: missing or wrong values get
+    the same defaults, said in the list it returns."""
+    import json
+    try:
+        data = json.loads(text)
+    except ValueError as exc:
+        raise ValueError(f"the design is not JSON: {exc}") from None
+    if not isinstance(data, dict):
+        raise ValueError("the design is not a JSON object")
+    problems: list[str] = []
+    seen: set[str] = set()
+    parts = data.get("parts") if isinstance(data.get("parts"), list) else []
+    if not isinstance(data.get("parts"), list):
+        problems.append('it has no "parts" list')
+    design = {"parts": _read_parts(parts, seen, problems)}
+    if isinstance(data.get("printer"), str) and data["printer"]:
+        design["printer"] = data["printer"]
+    bed = data.get("bed")
+    if isinstance(bed, list) and len(bed) == 3 and all(_num(x) and x > 0 for x in bed):
+        design["bed"] = [float(x) for x in bed]
+    return design, problems
+
+
+def _read_parts(items: list, seen: set, problems: list) -> list[dict]:
+    out = []
+    for item in items:
+        if not isinstance(item, dict):
+            problems.append("a part that is not an object was left out")
+            continue
+        out.append(_read_part(item, seen, problems))
+    return out
+
+
+def _round(v: float) -> int:
+    return int(math.floor(v + 0.5))                 # as JavaScript's Math.round
+
+
+def _read_part(p: dict, seen: set, problems: list) -> dict:
+    pid = p["id"].strip() if isinstance(p.get("id"), str) and p["id"].strip() else ""
+    if not pid or pid in seen:
+        n = len(seen) + 1
+        while f"p{n}" in seen:
+            n += 1
+        pid = f"p{n}"
+    seen.add(pid)
+    shape = p.get("shape")
+    if shape not in DESIGN_SHAPES:
+        problems.append(f"{pid}: no shape {shape!r} - taken as a box")
+        shape = "box"
+    part: dict = {"id": pid, "shape": shape, "size": [20.0, 20.0, 20.0], "at": [0.0, 0.0, 10.0],
+                  "rotate": [0.0, 0.0, 0.0]}
+    if shape == "group":
+        part["parts"] = _read_parts(p.get("parts") if isinstance(p.get("parts"), list) else [], seen, problems)
+        part["size"], part["at"] = [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]
+    else:
+        size = _vec(p.get("size"), [20, 20, 2 if shape == "text" else 20])
+        part["size"] = [0.0 if (shape == "text" and i == 0 and v <= 0) else max(MIN_SIZE, abs(v))
+                        for i, v in enumerate(size)]
+        part["at"] = _vec(p.get("at"), [0, 0, part["size"][2] / 2])
+        part["rotate"] = _vec(p.get("rotate"), [0, 0, 0])
+    for flag in ("mirror", "hole", "hidden"):
+        if p.get(flag) is True:
+            part[flag] = True
+    radius = p.get("radius")
+    rounded = shape == "box" and _num(radius) and radius > 0
+    if shape in ROUND_SHAPES or rounded:
+        sides = p.get("sides")
+        part["sides"] = max(3, min(256, _round(sides))) if _num(sides) else DEFAULT_SIDES
+    if rounded:
+        part["radius"] = float(radius)
+    if shape == "cone":
+        top = p.get("top")
+        part["top"] = max(0.0, min(1.0, float(top))) if _num(top) else 0.0
+    if shape == "text":
+        part["text"] = p["text"] if isinstance(p.get("text"), str) else "Text"
+    if shape == "mesh":
+        if isinstance(p.get("file"), str) and p["file"]:
+            part["file"] = p["file"]
+        else:
+            problems.append(f'{pid}: a mesh without a "file" makes nothing')
+    return part
+
+
+def _font() -> dict:
+    if "font" not in _font_cache:
+        import json
+        _font_cache["font"] = json.loads(FONT_FILE.read_text(encoding="utf-8"))
+    return _font_cache["font"]
+
+
+def _text_contours(text: str, font: dict) -> list[list[tuple[float, float]]]:
+    out = []
+    line_height = 1.2 * font["unitsPerEm"]
+    for row, line in enumerate(text.split("\n")):
+        x, y = 0.0, -row * line_height
+        for ch in line:
+            g = font["glyphs"].get(ch) or font["glyphs"].get("?")
+            if not g:
+                continue
+            for c in g["c"]:
+                out.append([(c[i] + x, c[i + 1] + y) for i in range(0, len(c), 2)])
+            x += g["a"]
+    return out
+
+
+def _text_polygons(text: str, size, font: dict):
+    contours = _text_contours(text, font)
+    if not contours:
+        return None
+    xs = [x for c in contours for x, _ in c]
+    ys = [y for c in contours for _, y in c]
+    x0, x1, y0, y1 = min(xs), max(xs), min(ys), max(ys)
+    w, h = x1 - x0, y1 - y0
+    if w <= 0 or h <= 0:
+        return None
+    ky = size[1] / h
+    kx = size[0] / w if size[0] > 0 else ky
+    cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+    return [np.array([((x - cx) * kx, (y - cy) * ky) for x, y in c], dtype=np.float64) for c in contours]
+
+
+def _rotation_matrix(r) -> np.ndarray:
+    x, y, z = (math.radians(a) for a in r)
+    rx = np.array([[1, 0, 0], [0, math.cos(x), -math.sin(x)], [0, math.sin(x), math.cos(x)]])
+    ry = np.array([[math.cos(y), 0, math.sin(y)], [0, 1, 0], [-math.sin(y), 0, math.cos(y)]])
+    rz = np.array([[math.cos(z), -math.sin(z), 0], [math.sin(z), math.cos(z), 0], [0, 0, 1]])
+    return rz @ ry @ rx
+
+
+def _place_mesh(v: np.ndarray, f: np.ndarray, part: dict) -> tuple[np.ndarray, np.ndarray]:
+    lo, hi = v.min(0), v.max(0)
+    c = (lo + hi) / 2
+    ext = hi - lo
+    k = np.where(ext > 1e-9, np.array(part["size"]) / np.where(ext > 1e-9, ext, 1), 1.0)
+    w = (v - c) * k
+    if part.get("mirror"):
+        w[:, 0] = -w[:, 0]
+        f = f[:, [0, 2, 1]]
+    w = w @ _rotation_matrix(part["rotate"]).T + np.array(part["at"])
+    return w, f
+
+
+class DesignBuild:
+    """What a design makes: `solid` (a Manifold, or None), `loose` meshes that are not closed solids [(part id,
+    vertices, faces)], `problems`, and the design itself (`design`, with its `bed`)."""
+
+    def __init__(self, design: dict, solid, loose: list, problems: list[str]):
+        self.design, self.solid, self.loose, self.problems = design, solid, loose, problems
+
+
+def build_design(design: dict, folder=".") -> DesignBuild:
+    """The design's solid, as the editor builds it. Mesh parts' files are found from `folder` (the design file's)."""
+    import manifold3d as m3d
+    M = m3d.Manifold
+    problems: list[str] = []
+    loose: list = []
+    base = Path(folder)
+
+    def shape(p: dict):
+        sx, sy, sz = p["size"]
+        sides = p.get("sides", DEFAULT_SIDES)
+        kind = p["shape"]
+        if kind == "box":
+            r = min(p.get("radius", 0.0), min(sx, sy, sz) / 2 * 0.999)
+            if r <= 0:
+                return M.cube((sx, sy, sz), True)
+            balls = [M.sphere(r, sides).translate((a * (sx / 2 - r), b * (sy / 2 - r), c * (sz / 2 - r)))
+                     for a in (-1, 1) for b in (-1, 1) for c in (-1, 1)]
+            return M.batch_hull(balls)
+        if kind in ("cylinder", "cone"):
+            top = 0.5 * p.get("top", 0.0) if kind == "cone" else 0.5
+            return M.cylinder(1, 0.5, top, sides, True).scale((sx, sy, sz))
+        if kind == "sphere":
+            return M.sphere(0.5, sides).scale((sx, sy, sz))
+        if kind == "wedge":
+            x, y, z = sx / 2, sy / 2, sz / 2
+            return M.hull_points(np.array([[-x, -y, -z], [x, -y, -z], [-x, y, -z], [x, y, -z], [-x, -y, z],
+                                           [-x, y, z]], dtype=np.float64))
+        if kind == "text":
+            polys = _text_polygons(p.get("text", ""), p["size"], _font())
+            if polys is None:
+                return None
+            return m3d.CrossSection(polys, m3d.FillRule.NonZero).extrude(sz).translate((0, 0, -sz / 2))
+        if kind == "mesh":
+            if not p.get("file"):
+                problems.append(f"{p['id']}: no file")
+                return None
+            try:
+                v, f, _ = _load(base / p["file"])
+            except (OSError, ValueError) as exc:
+                problems.append(f"{p['id']}: {exc}")
+                return None
+            vw, fw = _welded(v, f)
+            fw = fw[(fw[:, 0] != fw[:, 1]) & (fw[:, 1] != fw[:, 2]) & (fw[:, 2] != fw[:, 0])]
+            m = M(m3d.Mesh(vert_properties=np.ascontiguousarray(vw, dtype=np.float32),
+                           tri_verts=np.ascontiguousarray(fw, dtype=np.uint32)))
+            status = str(m.status()).split(".")[-1]
+            if status != "NoError" or m.is_empty():
+                problems.append(f"{p['id']}: {p['file']} is not a closed solid ({status}) - shown and exported as it "
+                                "is; holes do not cut it.")
+                loose.append((p["id"], *_place_mesh(vw, fw, p)))
+                return None
+            lo, hi = vw.min(0), vw.max(0)
+            c = (lo + hi) / 2
+            k = [float(p["size"][i] / (hi[i] - lo[i])) if hi[i] - lo[i] > 1e-9 else 1.0 for i in range(3)]
+            return m.translate(tuple(float(x) for x in -c)).scale(tuple(k))
+        return None
+
+    def place(p: dict, m):
+        if p.get("mirror"):
+            m = m.mirror((1, 0, 0))
+        if any(v != 0 for v in p["rotate"]):
+            m = m.rotate(tuple(p["rotate"]))
+        return m.translate(tuple(p["at"])).as_original()
+
+    def level(parts: list):
+        solids, holes = [], []
+        for p in parts:
+            if p.get("hidden"):
+                continue
+            if p["shape"] == "group":
+                m = level(p.get("parts", []))
+            else:
+                s = shape(p)
+                m = place(p, s) if s is not None else None
+            if m is not None:
+                (holes if p.get("hole") else solids).append(m)
+        if not solids:
+            return None
+        out = solids[0] if len(solids) == 1 else M.batch_boolean(solids, m3d.OpType.Add)
+        if holes:
+            out = out - (holes[0] if len(holes) == 1 else M.batch_boolean(holes, m3d.OpType.Add))
+        return out
+
+    solid = level(design["parts"])
+    if solid is not None:
+        status = str(solid.status()).split(".")[-1]
+        if status != "NoError":
+            problems.append(f"manifold3d: {status}")
+    return DesignBuild(design, solid, loose, problems)
+
+
+def design(path, quiet: bool = False):
+    """The solid a design from the Hub's 3D editor (a .3d.json file) makes, as the editor shows and exports it. Mesh
+    parts that are not closed solids are left out of it (said); save it, check it or draw it like any solid."""
+    p = Path(path)
+    d, problems = read_design(p.read_text(encoding="utf-8"))
+    b = build_design(d, p.parent)
+    for msg in problems + b.problems:
+        if not quiet:
+            print(f"{p.name}: {msg}")
+    if b.solid is None or b.solid.is_empty():
+        raise NotPrintable(f"{p.name} makes nothing to print: no solid parts that are shown"
+                           + (" (only meshes that are not closed solids)" if b.loose else ""))
+    return b.solid
+
+
+def _count_shapes(parts: list, into: dict) -> dict:
+    for p in parts:
+        if p.get("hidden"):
+            continue
+        if p["shape"] == "group":
+            into["group"] = into.get("group", 0) + 1
+            _count_shapes(p.get("parts", []), into)
+            continue
+        key = p["shape"] + (" hole" if p.get("hole") else "")
+        into[key] = into.get(key, 0) + 1
+    return into
+
+
+def design_report(path, bed=None, stl=None, three_mf=None, png=None) -> int:
+    """`hub3d design`: what a design makes, checked against its printer's bed; writes a picture, an STL or a 3MF."""
+    p = Path(path)
+    d, problems = read_design(p.read_text(encoding="utf-8"))
+    b = build_design(d, p.parent)
+    bed = bed or d.get("bed")
+    counts = _count_shapes(d["parts"], {})
+    said = ", ".join(f"{n} {k}" for k, n in counts.items()) or "no parts"
+    where = ""
+    if d.get("printer") or bed:
+        where = "; laid out for " + (d.get("printer") or "a bed") + (f" ({_dims(_bed(bed))} mm)" if bed else "")
+    print(f"{p.name}: {said}{where}")
+    for msg in problems + b.problems:
+        print(f"- {msg}")
+    models = ([b.solid] if b.solid is not None and not b.solid.is_empty() else []) + [(v, f) for _, v, f in b.loose]
+    if not models:
+        print("It makes nothing to print.")
+        return 1
+    model = models[0] if len(models) == 1 else models
+    report = check(model, bed)
+    print(report)
+    if png:
+        views(model, png)
+    for out in (stl, three_mf):
+        if out:
+            save(model, out, bed=bed, strict=False)
+    return 0 if report.ok and not b.loose else 1
+
+
 # ---------------------------------------------------------------- self-test (when the sandbox image is built)
 
 def selftest() -> int:
@@ -787,6 +1185,17 @@ def selftest() -> int:
                 failures.append("solid() took a cube with a triangle missing")
             except NotPrintable:
                 pass
+            import json                                     # a design from the 3D editor, its text included
+            Path("plate.3d.json").write_text(json.dumps({"parts": [
+                {"id": "b", "shape": "box", "size": [30, 20, 4], "radius": 1},
+                {"id": "t", "shape": "text", "text": "Hub æøå", "size": [0, 8, 1], "at": [0, 0, 4.4]},
+                {"id": "h", "shape": "cylinder", "size": [5, 5, 10], "at": [10, 0, 2], "hole": True}]}))
+            plate = design("plate.3d.json", quiet=True)
+            expect(str(plate.status()).endswith("NoError") and len(plate.decompose()) == 1
+                   and 2000 < plate.volume() < 2500, f"the design is not one plate with its letters: {plate.volume()}")
+            Path("tag.3d.json").write_text(DESIGN_EXAMPLE)          # hub3d format's example
+            tag = check(design("tag.3d.json", quiet=True), bed=256)
+            expect(tag.ok and tag.parts == 1 and not tag.warnings, f"hub3d format's example is not ready:\n{tag}")
         finally:
             os.chdir(here)
     import trimesh
@@ -820,10 +1229,21 @@ def main(argv: list[str] | None = None) -> int:
     v.add_argument("file")
     v.add_argument("png")
     v.add_argument("--size", type=int, default=400, help="pixels a view (default 400)")
+    dz = sub.add_parser("design", help="a design from the Hub's 3D editor (.3d.json): what it makes, checked; "
+                        "--views, --stl and --3mf write it")
+    dz.add_argument("file")
+    dz.add_argument("--bed", help="the printer's bed in mm (default: the one in the design)")
+    dz.add_argument("--views", metavar="OUT.png", help="a picture of it from three sides")
+    dz.add_argument("--stl", metavar="OUT.stl")
+    dz.add_argument("--3mf", dest="three_mf", metavar="OUT.3mf")
+    sub.add_parser("format", help="the format of the 3D editor's designs (.3d.json), with an example")
     sub.add_parser("selftest", help="run the recipe's examples and check the results")
     args = ap.parse_args(argv)
     if args.cmd == "recipe":
         print(RECIPE, end="")
+        return 0
+    if args.cmd == "format":
+        print(DESIGN_GUIDE, end="")
         return 0
     if args.cmd == "selftest":
         return selftest()
@@ -832,6 +1252,8 @@ def main(argv: list[str] | None = None) -> int:
             report = check(args.file, args.bed)
             print(report)
             return 0 if report.ok else 1
+        if args.cmd == "design":
+            return design_report(args.file, args.bed, args.stl, args.three_mf, args.views)
         views(args.file, args.png, args.size)
         return 0
     except (OSError, ValueError, TypeError) as exc:              # NotPrintable is a ValueError

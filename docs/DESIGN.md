@@ -3097,6 +3097,59 @@ sound, with ComfyUI's own nodes only (the image is unchanged):
   mesh. Not checked: TRELLIS.2 itself on the card (time, memory at 1024 and
   1536, which way up its output really comes, the shapes).
 
+### The 3D editor (0.87.0)
+
+Søren (2026-11-25): "Jeg vil virkelig gerne ha en stl editor i browseren sammen med hub, der kan hjælpe mig" - built
+into the Hub, Tinkercad's level, his printer a Bambu Lab P2S but chosen per design.
+
+- **What.** A design is a file, `NAME.3d.json`, in the chat's or the project's folder, shown in a panel beside the
+  chat (`frontend/src/model3d/`, its own lazily loaded chunk: three.js r187, manifold-3d 3.5.5 as WebAssembly, a
+  flattened font - about 740 kB, 540 kB and 250 kB; the chat's 3D button and the Files panel load only `files.ts`
+  and `DesignMenu.tsx`). Parts - box (rounded edges), cylinder, cone, sphere, wedge, text, an imported STL/3MF/OBJ,
+  groups - solid or hole, on the chosen printer's plate. Mouse: click picks the top item, Shift-click adds, a double
+  click picks the part inside its group, dragging a picked part moves it on the plate (in the plane of the point
+  grabbed), the handles (three.js TransformControls on a stand-in object) move, turn and size it; G, R, S switch them,
+  snap 0.1-10 mm and 15 degrees. The inspector has the numbers (size with "keep proportions", centre, angles, radius,
+  sides, a cone's top, text), solid or hole, colour, duplicate, onto the plate (from the built solid's lowest point,
+  not the box), lay a face flat (the clicked face turned to point down), mirror X/Y/Z, hide, delete, group and
+  ungroup, align (several parts). Undo and redo: 100 steps, the assistant's changes too. New shapes go beside what is
+  there; a hole goes through the one part picked.
+- **The format** (`geometry.ts` readDesign/writeDesign, hub3d's `read_design`; `hub3d format` prints it for the
+  assistant with an example its build checks): `{"format": "slq-hub-3d", "version": 1, "printer", "bed", "parts"}`;
+  a part has an id, a shape, `size` (its own box before turning), `at` (that box's middle), `rotate` (degrees, X then
+  Y then Z, as OpenSCAD), and `hole`, `hidden`, `mirror` (its own X), `color`, `sides`, `radius`, `top`, `text` (width
+  0: as wide as the letters), `file` (a mesh, from the design's folder), `parts` (a group: nothing of its own). In
+  each list the solids are joined and then that list's holes cut them; a group is built first and counts as one
+  solid, or one hole. Millimetres, Z up, x 0 y 0 the plate's middle, z 0 its top. Missing or wrong values get
+  defaults and are said; the file is written with a fixed key order, 3 decimals, ids kept.
+- **One geometry, two places.** The browser builds the design with manifold-3d (JS) and the sandbox with manifold3d
+  (Python, `hub3d design`), the same steps in the same order: unit shapes scaled (a rounded box is the hull of eight
+  spheres), mirrored, turned, moved, `asOriginal` so every triangle knows its part (the colours, the picking), joined,
+  cut. Text is Barlow SemiBold flattened into polygons by `tools/make_3d_font.py` into two identical JSON files, one
+  for each side. A mesh that is not a closed solid is "loose": shown in amber and exported as it is, never joined or
+  cut. `tests/test_design3d.py` runs geometry.ts in node against hub3d: the same triangle count, the volume to 1e-9,
+  the box to 1e-4 mm, for designs with every shape, æøå, rounded boxes, mirrored and turned meshes, nested holes
+  and the format's example.
+- **The assistant.** While the editor is open, the design is in every message's files (App pins it in `refs`, put
+  back after each send; taken out, it is out for that message): ref_blocks copies it in as it is now. "Point at"
+  puts `[3D point: part "Lid" (id p3) at x 12, y -4, z 20 mm, on a face facing up]` where the composer's caret is
+  (`files.ts` pointMark; the prompt and `hub3d format` show the same words, a test keeps them equal). The system
+  prompt's 3D section (with code) says what a design is for, to keep the ids, to read `hub3d format` first and to
+  check with `hub3d design NAME.3d.json --views` (`--3mf`, `--stl` write the slicer's file). A design the assistant
+  writes or edits during a live turn opens in the panel (a sandbox path `/workspace/projects/3/...` is read as the
+  Hub reads it).
+- **Saving, and two writers.** The editor saves 1.2 s after a change (`PUT /file`) and reads the file every 2.5 s:
+  what someone else wrote is taken when there is nothing unsaved here (and can be undone), else a bar asks "Load it"
+  or "Keep mine". Closing saves what is not saved. An STL, 3MF or OBJ opens as a new design `NAME.3d.json` beside it,
+  written at the first change; a new design is `design.3d.json` (`design-2` ...), in `hub/` in a project that syncs
+  one folder.
+- **Printers** (`printers.ts`): Bambu Lab P2S (the default), P1S/P1P, X1C/X1E, A1 (256 mm), A1 mini (180), H2S (340
+  x 320 x 340), H2D with one nozzle (325 x 320 x 325) and a custom size - per design, the last choice remembered in
+  the browser. The plate is drawn with a 10 mm grid; the status line gives the size and volume and says when it is
+  larger than the plate, below it, not on it, or has a part that is not a closed solid.
+- **Export**: the built solid and the loose meshes as one binary STL or a 3MF (core spec, millimetres, one object -
+  Bambu Studio opens both), downloaded or saved in the folder beside the design.
+
 ### Workflows (0.67.0)
 
 - **What.** The owner's own ComfyUI workflows (Settings → Models →

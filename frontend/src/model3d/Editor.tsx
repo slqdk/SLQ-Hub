@@ -1,0 +1,1203 @@
+// The 3D editor (0.87.0): a design (.3d.json) in the chat's or the project's folder, edited Tinkercad-style beside
+// the chat - shapes, holes, groups, moving, turning, sizing, an imported STL - on the chosen printer's plate. The
+// assistant works on the same file: it reads it with every message while the editor is open, writes it with its
+// file tools (and checks it with `hub3d design`), and what it writes shows here. "Point at" puts a spot on the model
+// into the message. Loaded only when opened: three.js and manifold-3d (WebAssembly) are big.
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import * as THREE from "three";
+import Module from "manifold-3d/manifold";
+import wasmUrl from "manifold-3d/manifold.wasm?url";
+import { ArrowDownToLine, Box, ChevronDown, CircleDot, Cone, Copy, Crosshair, Cylinder, Download, Eye, EyeOff,
+  FlipHorizontal2, Group, Home, Maximize2, Minimize2, Move3d, PanelBottom, Redo2, Rotate3d, Scaling, SquareDashed,
+  Trash2, Triangle, Type, Undo2, Ungroup, Upload, X } from "lucide-react";
+import fontUrl from "./font-barlow-600.json?url";
+import { api, type FileData, type TreeData } from "../lib/api";
+import { useApp } from "../state";
+import { ConfirmButton, MenuButton } from "../components/ui";
+import type { Folder } from "../components/Files";
+import { allIds, build, buildPart, COLORS, extent, extentOf, freshId, joined, MIN_SIZE, mirrorPart, newDesign,
+  readDesign, stl, textWidth, threeMf, transformPart, writeDesign, type Box3, type Built, type Design,
+  type FontData, type Kit, type Mat3, type MeshData, type Part, type Shape, type Vec3, type Wasm } from "./geometry";
+import { baseName, dirOf, fmt, inFolder, joinPath, MESH_FILE, pointMark, relativePath } from "./files";
+import { parseMesh } from "./meshio";
+import { lastPrinter, PRINTERS, printerOf, rememberPrinter, type Printer } from "./printers";
+import { centre, copy, find, group, label, pick, remove, ungroup, update } from "./tree";
+import { Viewport, type Hit, type ViewName } from "./Viewport";
+
+type Mode = "translate" | "rotate" | "scale";
+type Status = "loading" | "new" | "saved" | "saving" | "unsaved" | "error";
+
+let kitPromise: Promise<{ wasm: Wasm; font: FontData }> | null = null;
+function loadKit(): Promise<{ wasm: Wasm; font: FontData }> {
+  kitPromise ??= Promise.all([
+    Module({ locateFile: () => wasmUrl }).then((w) => {
+      w.setup();
+      return w as Wasm;
+    }),
+    fetch(fontUrl).then((r) => r.json() as Promise<FontData>),
+  ]).then(([wasm, font]) => ({ wasm, font }));
+  kitPromise.catch(() => { kitPromise = null; });       // a failed load is tried again next time
+  return kitPromise;
+}
+
+const r3 = (v: number) => Math.round(v * 1000) / 1000 + 0;
+const r4 = (v: number) => Math.round(v * 1e4) / 1e4 + 0;
+const SNAPS = [0, 0.1, 0.5, 1, 2, 5, 10];
+const GREY = "#9aa0a3";
+
+/** A rotation as the design keeps turns (row-major). */
+function quatTurn(q: THREE.Quaternion): Mat3 {
+  const e = new THREE.Matrix4().makeRotationFromQuaternion(q).elements;
+  return [e[0], e[4], e[8], e[1], e[5], e[9], e[2], e[6], e[10]];
+}
+
+/** A part's size, with a text's width worked out when it follows its letters (width 0). */
+function sized(p: Part, font: FontData): Vec3 {
+  return p.shape === "text" && p.size[0] <= 0 ? [textWidth(p.text ?? "", p.size[1], font), p.size[1], p.size[2]] : p.size;
+}
+
+function meshSize(m: MeshData): Vec3 {
+  const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+  for (let i = 0; i < m.positions.length; i += 3) for (let k = 0; k < 3; k++) {
+    lo[k] = Math.min(lo[k], m.positions[i + k]);
+    hi[k] = Math.max(hi[k], m.positions[i + k]);
+  }
+  return [0, 1, 2].map((k) => r3(Math.max(MIN_SIZE, hi[k] - lo[k]))) as Vec3;
+}
+
+function union(boxes: (Box3 | null)[]): Box3 | null {
+  let box: Box3 | null = null;
+  for (const b of boxes) {
+    if (!b) continue;
+    box = box ? [[0, 1, 2].map((i) => Math.min(box![0][i], b[0][i])) as Vec3, [0, 1, 2].map((i) => Math.max(box![1][i], b[1][i])) as Vec3] : b;
+  }
+  return box;
+}
+
+/** Whether `inner` is `outer` or one of its parts. */
+function within(parts: Part[], outer: string, inner: string): boolean {
+  if (outer === inner) return true;
+  const f = find(parts, outer);
+  return !!f?.part.parts && !!find(f.part.parts, inner);
+}
+
+/** Numbers as the file keeps them. */
+function tidy(p: Part): Part {
+  const out: Part = { ...p, at: p.at.map(r3) as Vec3, rotate: p.rotate.map(r4) as Vec3 };
+  if (p.shape !== "group") out.size = p.size.map((v, i) => (p.shape === "text" && i === 0 && v <= 0 ? 0 : Math.max(MIN_SIZE, r3(v)))) as Vec3;
+  if (p.radius) out.radius = r3(p.radius);
+  if (p.parts) out.parts = p.parts.map(tidy);
+  return out;
+}
+
+/** One number field: typed freely, applied on Enter or when it loses focus; the arrow keys step it. */
+function Num({ value, onSet, min, label: name, unit = "mm", step = 1 }: { value: number; onSet: (v: number) => void;
+  min?: number; label: string; unit?: string; step?: number }) {
+  const [draft, setDraft] = useState(fmt(value));
+  useEffect(() => setDraft(fmt(value)), [value]);
+  const apply = (raw = draft) => {
+    const v = Number(raw.replace(",", "."));
+    if (!Number.isFinite(v) || (min !== undefined && v < min)) setDraft(fmt(value));
+    else if (Math.abs(v - value) > 1e-9) onSet(v);
+  };
+  return (
+    <label className="v3d-num" title={`${name} (${unit}) - the arrow keys step it, Shift: ten steps`}>
+      <span>{name}</span>
+      <input className="input mono" inputMode="decimal" value={draft} onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => apply()}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+          if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+            e.preventDefault();
+            const v = r3(value + (e.key === "ArrowUp" ? 1 : -1) * step * (e.shiftKey ? 10 : 1));
+            if (min === undefined || v >= min) onSet(v);
+          }
+        }} />
+    </label>
+  );
+}
+
+function Tool({ icon, title, onClick, active, disabled, children }: { icon: ReactNode; title: string; onClick: () => void;
+  active?: boolean; disabled?: boolean; children?: ReactNode }) {
+  return (
+    <button type="button" className={`btn small v3d-tool${active ? " on" : ""}`} onClick={onClick} disabled={disabled}
+      title={title} aria-label={title} aria-pressed={active}>{icon}{children}</button>
+  );
+}
+
+/** The STL, 3MF and OBJ files in the folder, to put in the design. */
+function FolderMeshes({ base, onPick, onUpload }: { base: string; onPick: (path: string) => void; onUpload: (f: File) => void }) {
+  const [files, setFiles] = useState<string[] | null>(null);
+  useEffect(() => {
+    api<TreeData>(`${base}/tree`).then((t) => setFiles(t.entries.filter((e) => !e.dir && MESH_FILE.test(e.path))
+      .map((e) => e.path).sort()), () => setFiles([]));
+  }, [base]);
+  return (
+    <>
+      <label className="menu-item"><Upload size={15} /><span>Upload from this computer<small>STL, 3MF or OBJ, into the folder</small></span>
+        <input type="file" accept=".stl,.3mf,.obj" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) onUpload(f); }} />
+      </label>
+      <div className="menu-sep" />
+      {files === null && <div className="menu-item faint">Looking in the folder</div>}
+      {files?.length === 0 && <div className="menu-item faint">No STL, 3MF or OBJ in the folder</div>}
+      {files?.map((f) => <button key={f} className="menu-item mono" onClick={() => onPick(f)}>{f}</button>)}
+    </>
+  );
+}
+
+export function Editor({ folder, path, create, own = "", onPath, onClose, max, onMax, onPin }: { folder: Folder;
+  path: string; create?: boolean; own?: string; onPath: (path: string) => void; onClose: () => void; max: boolean;
+  onMax: () => void; onPin: (path: string) => void }) {
+  const { toast } = useApp();
+  const base = `/hub/api/folders/${folder.kind}/${folder.id}`;
+  const host = useRef<HTMLDivElement>(null);
+  const vp = useRef<Viewport | null>(null);
+  const kit = useRef<Kit | null>(null);
+  const [ready, setReady] = useState(false);
+  const [design, setDesignState] = useState<Design | null>(null);
+  const designRef = useRef<Design | null>(null);
+  const [selected, setSelectedState] = useState<string[]>([]);
+  const selectedRef = useRef<string[]>([]);
+  const [mode, setMode] = useState<Mode>("translate");
+  const [snap, setSnap] = useState(1);
+  const [built, setBuilt] = useState<Built | null>(null);
+  const [status, setStatus] = useState<Status>("loading");
+  const [problems, setProblems] = useState<string[]>([]);
+  const [outside, setOutside] = useState<string | null>(null);
+  const [tool, setTool] = useState<null | "point" | "flat">(null);
+  const [failed, setFailed] = useState<string | null>(null);
+  const [meshTick, setMeshTick] = useState(0);
+  const [lock, setLock] = useState(false);
+  const meshes = useRef(new Map<string, MeshData | string>());
+  const loading = useRef(new Set<string>());
+  const past = useRef<Design[]>([]);
+  const future = useRef<Design[]>([]);
+  const saved = useRef("");                     // the file's text as this page last read or wrote it
+  const inFlight = useRef<string | null>(null);  // a save on its way
+  const dirty = useRef(false);                  // changes made here that are not saved yet
+  const saveTimer = useRef(0);
+  const dragging = useRef(false);
+  const alive = useRef(true);
+  const firstView = useRef(true);
+  const skipOpen = useRef<string | null>(null);
+  const shown3d = useRef<string[] | null>(null);      // parts just added: the view widens when they are out of it
+  const designPath = useRef(path);              // where the design is saved (an STL's: <name>.3d.json beside it)
+  const pathRef = useRef(path);
+  pathRef.current = path;
+  const shown = MESH_FILE.test(path) ? path.replace(MESH_FILE, ".3d.json") : path;
+  const printer: Printer = useMemo(() => printerOf(design?.printer, design?.bed), [design?.printer, design?.bed]);
+
+  const setDesign = useCallback((d: Design | null) => {
+    designRef.current = d;
+    setDesignState(d);
+  }, []);
+  const setSelected = useCallback((ids: string[]) => {
+    selectedRef.current = ids;
+    setSelectedState(ids);
+  }, []);
+
+  // ---------------------------------------------------------------- saving
+
+  const save = useCallback(async () => {
+    window.clearTimeout(saveTimer.current);
+    const d = designRef.current, at = designPath.current;
+    if (!d || !at) return;
+    const text = writeDesign(d);
+    if (text === saved.current) {
+      dirty.current = false;
+      setStatus("saved");
+      return;
+    }
+    setStatus("saving");
+    inFlight.current = text;
+    try {
+      await api(`${base}/file`, { method: "PUT", body: { path: at, text } });
+      if (!alive.current) return;                      // closed meanwhile: saved, nothing more to show
+      saved.current = text;
+      const same = !!designRef.current && writeDesign(designRef.current) === text;
+      if (same) dirty.current = false;
+      setStatus(same ? "saved" : "unsaved");
+      if (at !== pathRef.current) {                    // an STL's new design, now a file: the one open
+        skipOpen.current = at;
+        onPath(at);
+      }
+      onPin(at);
+    } catch (e) {
+      if (alive.current) setStatus("error");
+      toast(`The design was not saved: ${(e as Error).message}`, "fault");
+    } finally {
+      if (inFlight.current === text) inFlight.current = null;
+    }
+  }, [base, toast, onPin, onPath]);
+  const saveRef = useRef(save);
+  saveRef.current = save;
+
+  const later = useCallback(() => {
+    dirty.current = true;
+    setStatus("unsaved");
+    window.clearTimeout(saveTimer.current);
+    saveTimer.current = window.setTimeout(() => void saveRef.current(), 1200);
+  }, []);
+
+  /** A change made here: kept for Undo, shown, and saved a moment later. */
+  const commit = useCallback((next: Design) => {
+    const cur = designRef.current;
+    if (cur) {
+      past.current.push(cur);
+      if (past.current.length > 100) past.current.shift();
+    }
+    future.current = [];
+    setDesign(next);
+    later();
+  }, [setDesign, later]);
+
+  const undo = useCallback(() => {
+    const prev = past.current.pop();
+    if (!prev || !designRef.current) return;
+    future.current.push(designRef.current);
+    setDesign(prev);
+    later();
+  }, [setDesign, later]);
+  const redo = useCallback(() => {
+    const next = future.current.pop();
+    if (!next || !designRef.current) return;
+    past.current.push(designRef.current);
+    setDesign(next);
+    later();
+  }, [setDesign, later]);
+
+  useEffect(() => {
+    alive.current = true;
+    return () => {                                     // closing: what is not saved yet is saved now
+      alive.current = false;
+      if (dirty.current) void saveRef.current();
+    };
+  }, []);
+
+  // ---------------------------------------------------------------- loading
+
+  const fetchMesh = useCallback(async (full: string) => {
+    const r = await fetch(`${base}/raw?path=${encodeURIComponent(full)}`, { credentials: "same-origin" });
+    if (!r.ok) throw new Error(r.status === 404 ? `there is no ${full} in the folder` : `${full}: HTTP ${r.status}`);
+    return parseMesh(full, await r.arrayBuffer());
+  }, [base]);
+
+  const ensureMeshes = useCallback((d: Design) => {
+    const want: string[] = [];
+    const walk = (ps: Part[]) => ps.forEach((p) => {
+      if (p.shape === "mesh" && p.file && !meshes.current.has(p.file) && !loading.current.has(p.file)) want.push(p.file);
+      if (p.parts) walk(p.parts);
+    });
+    walk(d.parts);
+    for (const file of want) {
+      loading.current.add(file);
+      fetchMesh(joinPath(dirOf(designPath.current), file))
+        .then((m) => meshes.current.set(file, m), (e) => meshes.current.set(file, (e as Error).message))
+        .finally(() => {
+          loading.current.delete(file);
+          setMeshTick((t) => t + 1);
+        });
+    }
+  }, [fetchMesh]);
+
+  const adopt = useCallback((text: string, fromOutside: boolean) => {
+    const { design: d, problems: p } = readDesign(text);
+    if (fromOutside && designRef.current) {            // what the assistant wrote can be undone here
+      past.current.push(designRef.current);
+      future.current = [];
+    }
+    saved.current = text;
+    dirty.current = false;
+    window.clearTimeout(saveTimer.current);
+    setProblems(p);
+    setDesign(d);
+    setStatus("saved");
+    const ids = allIds(d.parts);
+    setSelected(selectedRef.current.filter((id) => ids.has(id)));
+    ensureMeshes(d);
+  }, [ensureMeshes, setDesign, setSelected]);
+
+  useEffect(() => {
+    let on = true;
+    loadKit().then((k) => {
+      if (!on) return;
+      kit.current = { ...k, meshes: meshes.current };
+      setReady(true);
+    }, (e) => on && setFailed(`The 3D engine did not load: ${(e as Error).message}`));
+    return () => { on = false; };
+  }, []);
+
+  useEffect(() => {
+    if (path && path === skipOpen.current) {           // the editor itself moved here (an STL's design, saved)
+      skipOpen.current = null;
+      return;
+    }
+    if (path.startsWith("/")) {                        // the sandbox's own path, as the assistant may write it
+      onPath(inFolder(path, folder));
+      return;
+    }
+    let on = true;
+    setStatus("loading");
+    setFailed(null);
+    setOutside(null);
+    past.current = [];
+    future.current = [];
+    saved.current = "";
+    dirty.current = false;
+    firstView.current = true;
+    designPath.current = path;
+    const open = async () => {
+      if (create && !path) {                           // New 3D design: a free name (hub/ in a synced project)
+        let name = "";
+        for (let n = 1; n < 100 && !name; n++) {
+          const next = `${own}${n === 1 ? "design" : `design-${n}`}.3d.json`;
+          if (!await api<FileData>(`${base}/file`, { query: { path: next } }).then(() => true, () => false)) name = next;
+        }
+        if (!name) throw new Error("There are 99 designs called design-N already: rename some.");
+        const pr = lastPrinter();
+        await api(`${base}/file`, { method: "PUT", body: { path: name, text: writeDesign(newDesign(pr.id, pr.bed)) } });
+        if (on) onPath(name);
+        return;
+      }
+      if (MESH_FILE.test(path)) {                      // an STL, 3MF or OBJ: a design with it in, beside it
+        const designName = path.replace(MESH_FILE, ".3d.json");
+        const there = await api<FileData>(`${base}/file`, { query: { path: designName } }).catch(() => null);
+        if (!on) return;
+        if (there?.text != null) {                     // made before: that one
+          onPath(designName);
+          return;
+        }
+        const m = await fetchMesh(path);
+        if (!on) return;
+        const file = baseName(path);
+        meshes.current.set(file, m);
+        const size = meshSize(m);
+        const pr = lastPrinter();
+        const d = newDesign(pr.id, pr.bed);
+        d.parts = [{ id: "p1", name: file, shape: "mesh", file, size, at: [0, 0, r3(size[2] / 2)], rotate: [0, 0, 0],
+          color: COLORS[0] }];
+        designPath.current = designName;
+        setProblems([]);
+        setDesign(d);
+        setStatus("new");
+        return;
+      }
+      const f = await api<FileData>(`${base}/file`, { query: { path } });
+      if (!on) return;
+      if (f.text == null) throw new Error(`${path} is not a text file the editor can read`);
+      adopt(f.text, false);
+      onPin(path);
+    };
+    open().catch((e) => on && setFailed((e as Error).message));
+    return () => { on = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [base, path, create]);
+
+  // What the assistant (or anyone) writes to the file shows here; with changes of one's own not saved yet, ask.
+  useEffect(() => {
+    if (status === "loading" || status === "new" || !path) return;
+    const t = window.setInterval(async () => {
+      if (document.hidden || dragging.current || outside !== null) return;
+      try {
+        const f = await api<FileData>(`${base}/file`, { query: { path: designPath.current } });
+        if (!alive.current || f.text == null || f.text === saved.current || f.text === inFlight.current) return;
+        if (designRef.current && f.text === writeDesign(designRef.current)) {
+          saved.current = f.text;
+          return;
+        }
+        if (!dirty.current) adopt(f.text, true);
+        else setOutside(f.text);
+      } catch {
+        /* gone or offline: the next look tells */
+      }
+    }, 2500);
+    return () => window.clearInterval(t);
+  }, [status, path, base, adopt, outside]);
+
+  // ---------------------------------------------------------------- the view
+
+  useEffect(() => {
+    if (!host.current) return;
+    const v = new Viewport(host.current);
+    vp.current = v;
+    v.view("home", null);
+    const theme = new MutationObserver(() => v.theme());
+    theme.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "data-theme", "style"] });
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const onMedia = () => v.theme();
+    media.addEventListener("change", onMedia);
+    return () => {
+      theme.disconnect();
+      media.removeEventListener("change", onMedia);
+      v.dispose();
+      vp.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    vp.current?.setPlate(printer.bed);
+  }, [printer.bed]);
+
+  const colorOf = useCallback((id: string) => {
+    const d = designRef.current;
+    const f = d ? find(d.parts, id) : null;
+    if (!f) return GREY;
+    if (f.part.hole) {                                 // where a hole cut: the colour of the solid beside it
+      const solid = f.siblings.find((s) => !s.hole && s.shape !== "group" && s.color);
+      return solid?.color ?? GREY;
+    }
+    return f.part.color ?? GREY;
+  }, []);
+
+  // The solid the design makes, its holes as ghosts.
+  useEffect(() => {
+    const v = vp.current, k = kit.current;
+    if (!design || !v || !k || !ready) return;
+    try {
+      const b = build(design, k);
+      setBuilt(b);
+      v.setResult(b, colorOf);
+      const holes: { part: string; built: Built }[] = [];
+      const walk = (ps: Part[]) => ps.forEach((p) => {
+        if (p.hidden) return;
+        if (p.hole) holes.push({ part: p.id, built: buildPart(p, k) });
+        else if (p.parts) walk(p.parts);
+      });
+      walk(design.parts);
+      v.setGhosts(holes);
+      if (firstView.current && (b.box || holes.length)) {
+        firstView.current = false;
+        shown3d.current = null;
+        v.view("home", union([b.box, ...holes.map((h) => h.built.box)]));
+      }
+      const added = shown3d.current;
+      shown3d.current = null;
+      const where = added && union(added.map((id) => {
+        const f = find(design.parts, id);
+        return f ? buildPart(f.part, k).box ?? extent(f.part) : null;
+      }));
+      if (where && !v.inView(where)) v.view("home", union([b.box, where]));
+    } catch (e) {
+      setBuilt(null);
+      toast(`The design could not be built: ${(e as Error).message}`, "fault");
+    }
+  }, [design, ready, meshTick, colorOf, toast]);
+
+  // The selection: outlined, and the gizmo on it.
+  useEffect(() => {
+    const v = vp.current, k = kit.current;
+    if (!v || !design || !k || !ready || dragging.current) return;
+    const items = pick(design.parts, selected);
+    const builts = items.map((p) => buildPart(p, k));
+    v.setOutline(builts);
+    if (!items.length || tool) {
+      v.detach();
+      return;
+    }
+    const one = items.length === 1 && items[0].shape !== "group" ? items[0] : null;
+    const b = union(builts.map((x, i) => x.box ?? extent(items[i])));
+    v.attach(one ? one.at : b ? centre(b) : [0, 0, 0], one ? one.rotate : null, mode, snap);
+  }, [design, selected, mode, snap, ready, tool, meshTick]);
+
+  // ---------------------------------------------------------------- dragging: the gizmo, or the part itself
+
+  const start = useRef<{ design: Design; ids: string[]; pos: THREE.Vector3; quat: THREE.Quaternion; matrix: THREE.Matrix4;
+    body?: { z: number; from: Vec3 } } | null>(null);
+
+  const beginDrag = useCallback((body?: { z: number; from: Vec3 }) => {
+    const v = vp.current, d = designRef.current, k = kit.current;
+    if (!v || !d || !k) return;
+    dragging.current = true;
+    const ids = selectedRef.current;
+    v.proxy.updateMatrixWorld(true);
+    start.current = { design: d, ids, pos: v.proxy.position.clone(), quat: v.proxy.quaternion.clone(),
+      matrix: v.proxy.matrixWorld.clone(), body };
+    v.setPreview(pick(d.parts, ids).map((p) => ({ built: buildPart(p, k), color: p.hole ? GREY : p.color ?? GREY })));
+  }, []);
+
+  const finishDrag = useCallback(() => {
+    const v = vp.current, s = start.current, k = kit.current;
+    dragging.current = false;
+    start.current = null;
+    if (!v || !s || !k) return;
+    v.setPreview(null);
+    const pos = v.proxy.position, sc = v.proxy.scale;
+    const moved = pos.distanceTo(s.pos) > 1e-6 || v.proxy.quaternion.angleTo(s.quat) > 1e-6
+      || Math.abs(sc.x - 1) + Math.abs(sc.y - 1) + Math.abs(sc.z - 1) > 1e-6;
+    if (!moved) {
+      setSelected([...s.ids]);                         // puts the gizmo back where it was
+      return;
+    }
+    let parts = s.design.parts;
+    const items = pick(parts, s.ids);
+    const one = items.length === 1 && items[0].shape !== "group" ? items[0] : null;
+    if (one && !s.body) {
+      const e = new THREE.Euler().setFromQuaternion(v.proxy.quaternion, "ZYX");
+      const next: Part = { ...one, at: [pos.x, pos.y, pos.z],
+        rotate: [(e.x * 180) / Math.PI, (e.y * 180) / Math.PI, (e.z * 180) / Math.PI] };
+      if (v.gizmo.mode === "scale") {
+        const was = sized(one, k.font), f = [Math.abs(sc.x), Math.abs(sc.y), Math.abs(sc.z)];
+        next.size = was.map((x, i) => Math.max(MIN_SIZE, x * f[i])) as Vec3;
+        const low = buildPart(one, k).box?.[0][2];
+        if (low !== undefined && Math.abs(low) < 0.01) {            // it stood on the plate: it still does
+          const now = buildPart(next, k).box?.[0][2] ?? 0;
+          next.at = [next.at[0], next.at[1], next.at[2] - now];
+        }
+      }
+      parts = update(parts, one.id, () => tidy(next));
+    } else {
+      const move: Vec3 = [pos.x - s.pos.x, pos.y - s.pos.y, pos.z - s.pos.z];
+      const dq = v.proxy.quaternion.clone().multiply(s.quat.clone().invert());
+      const turn = dq.angleTo(new THREE.Quaternion()) > 1e-9 ? quatTurn(dq) : null;
+      const f = v.gizmo.mode === "scale" && !s.body ? sc.x : 1;
+      const c: Vec3 = [s.pos.x, s.pos.y, s.pos.z];
+      for (const id of s.ids) parts = update(parts, id, (p) => tidy(transformPart(p, c, move, turn, f)));
+    }
+    commit({ ...s.design, parts });
+  }, [commit, setSelected]);
+
+  useEffect(() => {
+    const v = vp.current;
+    if (!v || !ready) return;
+    const down = () => beginDrag();
+    const change = () => {
+      const s = start.current;
+      if (!s) return;
+      if (v.gizmo.mode === "scale") {                  // several parts or a group: the same in every direction
+        const items = pick(s.design.parts, s.ids);
+        if (items.length !== 1 || items[0].shape === "group") {
+          v.proxy.scale.setScalar(Math.max(0.01, (v.proxy.scale.x + v.proxy.scale.y + v.proxy.scale.z) / 3));
+        }
+      }
+      v.proxy.updateMatrixWorld(true);
+      v.movePreview(v.proxy.matrixWorld.clone().multiply(s.matrix.clone().invert()));
+    };
+    v.gizmo.addEventListener("mouseDown", down);
+    v.gizmo.addEventListener("objectChange", change);
+    v.gizmo.addEventListener("mouseUp", finishDrag);
+    return () => {
+      v.gizmo.removeEventListener("mouseDown", down);
+      v.gizmo.removeEventListener("objectChange", change);
+      v.gizmo.removeEventListener("mouseUp", finishDrag);
+    };
+  }, [ready, beginDrag, finishDrag]);
+
+  // ---------------------------------------------------------------- the pointer on the model
+
+  const pointer = useRef<{ x: number; y: number; hit: Hit | null; body: boolean } | null>(null);
+
+  const topOf = (id: string) => {
+    const d = designRef.current;
+    return d ? find(d.parts, id)?.top.id ?? id : id;
+  };
+
+  const insertPoint = (h: Hit) => {
+    const d = designRef.current;
+    const p = d ? find(d.parts, h.part)?.part : null;
+    const text = pointMark(p ? label(p) : h.part, h.part, !!p?.hole, h.point, h.normal);
+    window.dispatchEvent(new CustomEvent("slq:compose-insert", { detail: { text } }));
+    toast("The spot is in your message", "run");
+  };
+
+  const layFlat = (h: Hit) => {
+    const d = designRef.current, k = kit.current;
+    if (!d || !k) return;
+    const id = selectedRef.current.find((s) => within(d.parts, s, h.part)) ?? topOf(h.part);
+    const item = find(d.parts, id)?.part;
+    if (!item) return;
+    const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(...h.normal).normalize(), new THREE.Vector3(0, 0, -1));
+    const b = buildPart(item, k).box ?? extent(item);
+    const turned = transformPart(item, b ? centre(b) : item.at, [0, 0, 0], quatTurn(q));
+    commit({ ...d, parts: update(d.parts, id, () => tidy(dropped(turned, k))) });
+    setSelected([id]);
+    setTool(null);
+  };
+
+  const onPointerDown = (e: React.PointerEvent) => {
+    host.current?.focus({ preventScroll: true });
+    const v = vp.current;
+    if (!v || e.button !== 0 || v.overGizmo) return;
+    const hit = v.pick(e.clientX, e.clientY);
+    const body = !tool && !!hit && !e.shiftKey && selectedRef.current.some((s) => within(designRef.current?.parts ?? [], s, hit.part));
+    pointer.current = { x: e.clientX, y: e.clientY, hit, body };
+    if (body) {
+      v.controls.enabled = false;                      // the part moves, not the view
+      (e.target as Element).setPointerCapture?.(e.pointerId);
+    }
+  };
+
+  const onPointerMove = (e: React.PointerEvent) => {
+    const v = vp.current, p = pointer.current;
+    if (!v || !p?.body || !p.hit) return;
+    if (!start.current) {
+      if (Math.hypot(e.clientX - p.x, e.clientY - p.y) < 4) return;
+      beginDrag({ z: p.hit.point[2], from: p.hit.point });
+    }
+    const s = start.current;
+    const at = s?.body ? v.onPlane(e.clientX, e.clientY, s.body.z) : null;
+    if (!s?.body || !at) return;
+    const q = (x: number) => (snap > 0 ? Math.round(x / snap) * snap : x);
+    v.proxy.position.set(s.pos.x + q(at[0] - s.body.from[0]), s.pos.y + q(at[1] - s.body.from[1]), s.pos.z);
+    v.proxy.updateMatrixWorld(true);
+    v.movePreview(v.proxy.matrixWorld.clone().multiply(s.matrix.clone().invert()));
+  };
+
+  const onPointerUp = (e: React.PointerEvent) => {
+    const v = vp.current, p = pointer.current;
+    pointer.current = null;
+    if (!v || !p) return;
+    v.controls.enabled = true;
+    if (start.current?.body) {
+      finishDrag();
+      return;
+    }
+    if (Math.hypot(e.clientX - p.x, e.clientY - p.y) > 4) return;          // the view was turned: not a click
+    const hit = p.hit;
+    if (tool === "point") {
+      if (hit) insertPoint(hit);
+      setTool(null);
+      return;
+    }
+    if (tool === "flat") {
+      if (hit) layFlat(hit);
+      return;
+    }
+    if (!hit) {
+      if (!e.shiftKey) setSelected([]);
+      return;
+    }
+    const id = topOf(hit.part);
+    if (e.shiftKey) {
+      const cur = selectedRef.current;
+      setSelected(cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]);
+    } else setSelected([id]);
+  };
+
+  const onDoubleClick = (e: React.MouseEvent) => {        // the part itself, inside its group
+    const v = vp.current;
+    if (!v || tool || v.overGizmo) return;
+    const hit = v.pick(e.clientX, e.clientY);
+    if (hit) setSelected([hit.part]);
+  };
+
+  // ---------------------------------------------------------------- changes
+
+  const parts = design?.parts ?? [];
+  const items = pick(parts, selected);
+  const one = items.length === 1 ? items[0] : null;
+  const k = kit.current;
+
+  /** The part moved up or down so its lowest point is on the plate - from what it makes, not its box. */
+  function dropped(p: Part, kk: Kit): Part {
+    const b = buildPart(p, kk).box;
+    const low = b ? b[0][2] : extent(p)?.[0][2] ?? 0;
+    return transformPart(p, [0, 0, 0], [0, 0, -low], null);
+  }
+
+  const boxOfItems = (ps: Part[]): Box3 | null => {
+    const kk = kit.current;
+    return union(ps.map((p) => (kk ? buildPart(p, kk).box : null) ?? extent(p)));
+  };
+
+  const change = (id: string, fn: (p: Part) => Part) => {
+    const d = designRef.current;
+    if (d) commit({ ...d, parts: update(d.parts, id, (p) => tidy(fn(p))) });
+  };
+
+  const add = (shape: Shape, hole = false) => {
+    const d = designRef.current, kk = kit.current;
+    if (!d || !kk) return;
+    const seen = allIds(d.parts);
+    const id = freshId(seen);
+    const size: Vec3 = hole ? (shape === "cylinder" ? [6, 6, 22] : [10, 10, 22]) : shape === "text" ? [0, 10, 2] : [20, 20, 20];
+    const p: Part = { id, name: hole ? (shape === "cylinder" ? "Round hole" : "Hole") : undefined, shape, size,
+      at: [0, 0, 0], rotate: [0, 0, 0], hole: hole || undefined, color: hole ? undefined : COLORS[seen.size % COLORS.length] };
+    if (shape === "cylinder" || shape === "cone" || shape === "sphere") p.sides = 64;
+    if (shape === "cone") p.top = 0;
+    if (shape === "text") p.text = "Text";
+    // Where: a hole through the one part picked; anything else beside what is there, on the plate.
+    const picked = pick(d.parts, selectedRef.current);
+    const through = hole && picked.length === 1 ? boxOfItems(picked) : null;
+    if (through) {
+      const c = centre(through);
+      size[2] = r3(through[1][2] - through[0][2] + 2);
+      p.at = [r3(c[0]), r3(c[1]), r3(c[2])];
+    } else {
+      const all = built?.box ?? extentOf(d.parts);
+      const w = sized(p, kk.font)[0];
+      const x = all ? Math.ceil(all[1][0] + 5 + w / 2) : 0;
+      const fits = Math.abs(x) + w / 2 <= printer.bed[0] / 2;
+      p.at = [fits ? x : 0, all && fits ? Math.round((all[0][1] + all[1][1]) / 2) : 0, hole ? size[2] / 2 - 1 : size[2] / 2];
+    }
+    shown3d.current = [id];
+    commit({ ...d, parts: [...d.parts, p] });
+    setSelected([id]);
+    setMode("translate");
+  };
+
+  const addMesh = async (file: string) => {
+    if (!designRef.current) return;
+    const rel = relativePath(dirOf(designPath.current), file);
+    try {
+      let m = meshes.current.get(rel);
+      if (!m || typeof m === "string") {
+        m = await fetchMesh(file);
+        meshes.current.set(rel, m);
+      }
+      const size = meshSize(m);
+      const cur = designRef.current!;
+      const id = freshId(allIds(cur.parts));
+      shown3d.current = [id];
+      commit({ ...cur, parts: [...cur.parts, { id, name: baseName(file), shape: "mesh", file: rel, size,
+        at: [0, 0, r3(size[2] / 2)], rotate: [0, 0, 0], color: COLORS[cur.parts.length % COLORS.length] }] });
+      setSelected([id]);
+      setMeshTick((t) => t + 1);
+    } catch (e) {
+      toast(`Could not read ${file}: ${(e as Error).message}`, "fault");
+    }
+  };
+
+  const upload = async (file: File) => {
+    const fd = new FormData();
+    fd.append("files", file);
+    fd.append("dir", dirOf(designPath.current));
+    try {
+      const r = await api<{ saved: string[] }>(`${base}/upload`, { form: fd });
+      if (r.saved[0]) await addMesh(r.saved[0]);
+    } catch (e) {
+      toast((e as Error).message, "fault");
+    }
+  };
+
+  const del = () => {
+    const d = designRef.current;
+    if (!d || !selectedRef.current.length) return;
+    commit({ ...d, parts: remove(d.parts, new Set(selectedRef.current)) });
+    setSelected([]);
+  };
+
+  const duplicate = () => {
+    const d = designRef.current;
+    if (!d || !selectedRef.current.length) return;
+    const seen = allIds(d.parts);
+    const copies = pick(d.parts, selectedRef.current).map((p) => tidy(transformPart(copy(p, seen), [0, 0, 0], [5, 5, 0], null)));
+    shown3d.current = copies.map((c) => c.id);
+    commit({ ...d, parts: [...d.parts, ...copies] });
+    setSelected(copies.map((c) => c.id));
+  };
+
+  const doGroup = () => {
+    const d = designRef.current;
+    if (!d || selectedRef.current.length < 2) return;
+    const g = group(d.parts, selectedRef.current);
+    if (!g) {
+      toast("Only parts side by side - at the top, or in the same group - can be grouped.", "fault");
+      return;
+    }
+    commit({ ...d, parts: g.parts });
+    setSelected([g.id]);
+  };
+
+  const doUngroup = () => {
+    const d = designRef.current;
+    const g = d && selectedRef.current.length === 1 ? find(d.parts, selectedRef.current[0])?.part : null;
+    if (!d || !g || g.shape !== "group") return;
+    commit({ ...d, parts: ungroup(d.parts, g.id) });
+    setSelected((g.parts ?? []).map((p) => p.id));
+  };
+
+  const mirror = (axis: number) => {
+    const d = designRef.current;
+    const list = d ? pick(d.parts, selectedRef.current) : [];
+    if (!d || !list.length) return;
+    const b = boxOfItems(list);
+    const c: Vec3 = b ? centre(b) : [0, 0, 0];
+    let ps = d.parts;
+    for (const it of list) ps = update(ps, it.id, (p) => tidy(mirrorPart(p, axis, c)));
+    commit({ ...d, parts: ps });
+  };
+
+  const drop = () => {
+    const d = designRef.current, kk = kit.current;
+    const list = d ? pick(d.parts, selectedRef.current) : [];
+    if (!d || !kk || !list.length) return;
+    let ps = d.parts;
+    for (const it of list) ps = update(ps, it.id, (p) => tidy(dropped(p, kk)));
+    commit({ ...d, parts: ps });
+  };
+
+  const align = (axis: number, where: 0 | 1 | 2) => {
+    const d = designRef.current;
+    const list = d ? pick(d.parts, selectedRef.current) : [];
+    const all = boxOfItems(list);
+    if (!d || list.length < 2 || !all) return;
+    const at = (b: Box3) => (where === 0 ? b[0][axis] : where === 2 ? b[1][axis] : (b[0][axis] + b[1][axis]) / 2);
+    let ps = d.parts;
+    for (const it of list) {
+      const b = boxOfItems([it]);
+      if (!b) continue;
+      const move: Vec3 = [0, 0, 0];
+      move[axis] = at(all) - at(b);
+      ps = update(ps, it.id, (p) => tidy(transformPart(p, [0, 0, 0], move, null)));
+    }
+    commit({ ...d, parts: ps });
+  };
+
+  const setPrinter = (p: Printer) => {
+    const d = designRef.current;
+    if (!d) return;
+    rememberPrinter(p);
+    commit({ ...d, printer: p.id, bed: [...p.bed] as Vec3 });
+  };
+
+  // ---------------------------------------------------------------- the slicer's files
+
+  const exportAs = async (kind: "stl" | "3mf", where: "download" | "folder") => {
+    if (!built || (!built.triangles.length && !built.loose.length)) {
+      toast("The design makes nothing to print yet.", "fault");
+      return;
+    }
+    const mesh = joined(built);
+    const stem = baseName(shown).replace(/\.3d\.json$/i, "") || "design";
+    const bytes = kind === "stl" ? stl(mesh, stem) : threeMf(mesh, stem);
+    const name = `${stem}.${kind}`;
+    if (where === "download") {
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(new Blob([bytes as BlobPart], { type: kind === "stl" ? "model/stl" : "model/3mf" }));
+      a.download = name;
+      a.click();
+      window.setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+      return;
+    }
+    const fd = new FormData();
+    fd.append("files", new File([bytes as BlobPart], name));
+    fd.append("dir", dirOf(designPath.current));
+    try {
+      const r = await api<{ saved: string[] }>(`${base}/upload`, { form: fd });
+      toast(`Saved ${r.saved[0] ?? name} in the folder`, "run");
+    } catch (e) {
+      toast((e as Error).message, "fault");
+    }
+  };
+
+  // ---------------------------------------------------------------- keys
+
+  const onKey = (e: React.KeyboardEvent) => {
+    const tag = (e.target as HTMLElement).tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || !designRef.current) return;
+    const mod = e.ctrlKey || e.metaKey;
+    const key = e.key.toLowerCase();
+    const step = (snap || 1) * (e.shiftKey ? 10 : 1);
+    const nudge = (m: Vec3) => {
+      const d = designRef.current;
+      if (!d || !selectedRef.current.length) return;
+      let ps = d.parts;
+      for (const id of selectedRef.current) ps = update(ps, id, (p) => tidy(transformPart(p, [0, 0, 0], m, null)));
+      commit({ ...d, parts: ps });
+    };
+    const plain: Record<string, () => void> = {
+      Delete: del, Backspace: del, Escape: () => { if (tool) setTool(null); else setSelected([]); },
+      ArrowLeft: () => nudge([-step, 0, 0]), ArrowRight: () => nudge([step, 0, 0]),
+      ArrowUp: () => nudge([0, step, 0]), ArrowDown: () => nudge([0, -step, 0]),
+      PageUp: () => nudge([0, 0, step]), PageDown: () => nudge([0, 0, -step]),
+      g: () => setMode("translate"), r: () => setMode("rotate"), s: () => setMode("scale"),
+      h: () => { if (one) change(one.id, (p) => ({ ...p, hole: !p.hole || undefined })); },
+    };
+    let run: (() => void) | undefined;
+    if (mod && key === "z") run = e.shiftKey ? redo : undo;
+    else if (mod && key === "y") run = redo;
+    else if (mod && key === "d") run = duplicate;
+    else if (mod && key === "g") run = e.shiftKey ? doUngroup : doGroup;
+    else if (!mod && !e.altKey) run = plain[e.key] ?? plain[key];
+    if (run) {
+      e.preventDefault();
+      run();
+    }
+  };
+
+  // ---------------------------------------------------------------- what is shown
+
+  const box: Box3 | null = built?.box ?? null;
+  const size = box ? box[1].map((v, i) => v - box[0][i]) : null;
+  const bed = printer.bed;
+  const tooBig = !!box && (box[0][0] < -bed[0] / 2 - 0.01 || box[1][0] > bed[0] / 2 + 0.01
+    || box[0][1] < -bed[1] / 2 - 0.01 || box[1][1] > bed[1] / 2 + 0.01 || box[1][2] > bed[2] + 0.01);
+  const below = !!box && box[0][2] < -0.01;
+  const floating = !!box && box[0][2] > 0.01;
+  const saying = { loading: "Loading", new: "Not saved yet", saved: "Saved", saving: "Saving", unsaved: "Not saved yet",
+    error: "Not saved" }[status];
+  const view = (name: ViewName) => vp.current?.view(name, built?.box ?? (design ? extentOf(design.parts) : null));
+
+  return (
+    <aside className="panel panel-3d" aria-label="3D editor" onKeyDown={onKey}>
+      <div className="panel-head v3d-head">
+        <Box size={17} className="faint" />
+        <h2 title={shown}>{baseName(shown) || "New design"}</h2>
+        <span className={`tag${status === "error" ? " fault" : status === "saved" ? " ok" : ""}`} role="status">{saying}</span>
+        <button className="icon-btn" onClick={undo} disabled={!past.current.length} aria-label="Undo" title="Undo (Ctrl+Z)"><Undo2 size={17} /></button>
+        <button className="icon-btn" onClick={redo} disabled={!future.current.length} aria-label="Redo" title="Redo (Ctrl+Shift+Z)"><Redo2 size={17} /></button>
+        <MenuButton right className="btn small" title="Files for the slicer" disabled={!built}
+          label={<><Download size={15} /> Export <ChevronDown size={13} /></>}>
+          {(close) => (
+            <>
+              <button className="menu-item" onClick={() => { close(); void exportAs("3mf", "download"); }}>
+                <span>Download 3MF<small>Opens in Bambu Studio, in millimetres</small></span></button>
+              <button className="menu-item" onClick={() => { close(); void exportAs("stl", "download"); }}>
+                <span>Download STL</span></button>
+              <div className="menu-sep" />
+              <button className="menu-item" onClick={() => { close(); void exportAs("3mf", "folder"); }}>
+                <span>Save 3MF in the folder<small>Beside the design, where the assistant sees it too</small></span></button>
+              <button className="menu-item" onClick={() => { close(); void exportAs("stl", "folder"); }}>
+                <span>Save STL in the folder</span></button>
+            </>
+          )}
+        </MenuButton>
+        <button className="icon-btn" onClick={onMax} aria-label={max ? "Show the chat" : "Use the whole width"}
+          title={max ? "Show the chat" : "Use the whole width"}>{max ? <Minimize2 size={17} /> : <Maximize2 size={17} />}</button>
+        <button className="icon-btn" onClick={onClose} aria-label="Close the 3D editor" title="Close"><X size={18} /></button>
+      </div>
+      {outside !== null && (
+        <div className="v3d-bar" role="alert">
+          <span className="grow">The design was changed in the folder - by the assistant? - while you had changes here.</span>
+          <button className="btn small primary" onClick={() => { const t = outside; setOutside(null); adopt(t, true); }}>Load it</button>
+          <button className="btn small" onClick={() => { saved.current = outside; setOutside(null); void save(); }}>Keep mine</button>
+        </div>
+      )}
+      {status === "new" && (
+        <div className="v3d-bar">
+          <span className="grow">A new design with {baseName(path)} in it. The first change saves it as {baseName(shown)}.</span>
+        </div>
+      )}
+      <div className="v3d-body">
+        <div className="v3d-palette" role="toolbar" aria-label="Add">
+          <Tool icon={<Box size={18} />} title="Box" onClick={() => add("box")}><span>Box</span></Tool>
+          <Tool icon={<Cylinder size={18} />} title="Cylinder" onClick={() => add("cylinder")}><span>Cylinder</span></Tool>
+          <Tool icon={<Cone size={18} />} title="Cone" onClick={() => add("cone")}><span>Cone</span></Tool>
+          <Tool icon={<CircleDot size={18} />} title="Sphere" onClick={() => add("sphere")}><span>Sphere</span></Tool>
+          <Tool icon={<Triangle size={18} />} title="Wedge (a ramp)" onClick={() => add("wedge")}><span>Wedge</span></Tool>
+          <Tool icon={<Type size={18} />} title="Text" onClick={() => add("text")}><span>Text</span></Tool>
+          <hr />
+          <Tool icon={<SquareDashed size={18} />} title="A box-shaped hole" onClick={() => add("box", true)}><span>Hole</span></Tool>
+          <Tool icon={<Cylinder size={18} strokeDasharray="3 2" />} title="A round hole" onClick={() => add("cylinder", true)}><span>Round hole</span></Tool>
+          <hr />
+          <MenuButton className="btn small v3d-tool" title="An STL, 3MF or OBJ into the design" menuClassName="wide"
+            label={<><Upload size={18} /><span>Import</span></>}>
+            {(close) => <FolderMeshes base={base} onPick={(f) => { close(); void addMesh(f); }}
+              onUpload={(f) => { close(); void upload(f); }} />}
+          </MenuButton>
+        </div>
+        <div className="v3d-stage">
+          <div className="v3d-toolbar" role="toolbar" aria-label="Tools">
+            <Tool icon={<Move3d size={16} />} title="Move (G)" active={mode === "translate"} onClick={() => setMode("translate")} />
+            <Tool icon={<Rotate3d size={16} />} title="Turn (R)" active={mode === "rotate"} onClick={() => setMode("rotate")} />
+            <Tool icon={<Scaling size={16} />} title="Size (S)" active={mode === "scale"} onClick={() => setMode("scale")} />
+            <span className="v3d-sep" />
+            <label className="v3d-snap" title="Moving snaps to this grid; turning snaps to 15°">
+              <span>Snap</span>
+              <select className="select" value={snap} onChange={(e) => setSnap(Number(e.target.value))}>
+                {SNAPS.map((s) => <option key={s} value={s}>{s ? `${s} mm` : "off"}</option>)}
+              </select>
+            </label>
+            <span className="v3d-sep" />
+            <Tool icon={<Home size={16} />} title="Fit the design in view" onClick={() => view("home")} />
+            <Tool icon={<span className="v3d-letter">T</span>} title="From the top" onClick={() => view("top")} />
+            <Tool icon={<span className="v3d-letter">F</span>} title="From the front" onClick={() => view("front")} />
+            <Tool icon={<span className="v3d-letter">R</span>} title="From the right" onClick={() => view("right")} />
+            <span className="grow" />
+            <Tool icon={<Crosshair size={16} />} title="Point at a spot on the model: it goes into your message to the assistant"
+              active={tool === "point"} onClick={() => setTool(tool === "point" ? null : "point")}><span>Point at</span></Tool>
+          </div>
+          <div className={`v3d-view${tool ? " picking" : ""}`} ref={host} tabIndex={0} onPointerDown={onPointerDown}
+            onPointerMove={onPointerMove} onPointerUp={onPointerUp} onDoubleClick={onDoubleClick}
+            aria-label="The design in 3D. Drag to turn the view, right-drag to pan, scroll to zoom. Click a part to pick it." />
+          {(failed || !ready || status === "loading") && <div className="v3d-overlay">{failed ?? "Loading the 3D editor"}</div>}
+          {ready && !failed && design && !parts.length && (
+            <div className="v3d-empty">Add a shape on the left, import an STL - or tell the assistant what to make.</div>)}
+          {tool && <div className="v3d-hint">{tool === "point" ? "Click the spot on the model. Esc stops."
+            : "Click the face that should lie on the plate. Esc stops."}</div>}
+          <div className="v3d-status num">
+            {size ? <span>{fmt(size[0])} x {fmt(size[1])} x {fmt(size[2])} mm</span> : <span>Nothing to print yet</span>}
+            {built?.volume ? <span>{(built.volume / 1000).toFixed(1)} cm³</span> : null}
+            <span className="faint">{printer.name}</span>
+            {tooBig && <span className="v3d-warn">larger than the plate</span>}
+            {below && <span className="v3d-warn">below the plate</span>}
+            {floating && <span className="v3d-warn">not on the plate</span>}
+            {built?.loose.length ? <span className="v3d-warn">{built.loose.length} not a closed solid</span> : null}
+          </div>
+        </div>
+        <div className="v3d-inspector">
+          {items.length > 1 && (
+            <section>
+              <h3>{items.length} parts</h3>
+              <div className="v3d-actions">
+                <Tool icon={<Group size={15} />} title="Group them (Ctrl+G): a hole in a group cuts only its parts" onClick={doGroup}><span>Group</span></Tool>
+                <Tool icon={<Copy size={15} />} title="Duplicate (Ctrl+D)" onClick={duplicate} />
+                <Tool icon={<ArrowDownToLine size={15} />} title="Onto the plate" onClick={drop} />
+                <ConfirmButton className="btn small v3d-tool" confirmText="Delete?" label="Delete" onConfirm={del}><Trash2 size={15} /></ConfirmButton>
+              </div>
+              <Mirror onMirror={mirror} />
+              <div className="v3d-align">
+                {["X", "Y", "Z"].map((ax, i) => (
+                  <div key={ax} className="row"><span className="faint">Align {ax}</span>
+                    {(["min", "middle", "max"] as const).map((w, j) => (
+                      <button key={w} className="btn small" onClick={() => align(i, j as 0 | 1 | 2)}>{w}</button>))}
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+          {one && k && <PartFields part={one} font={k.font} lock={lock} setLock={setLock} change={(fn) => change(one.id, fn)}
+            onDuplicate={duplicate} onDelete={del} onDrop={drop} onMirror={mirror} onUngroup={doUngroup}
+            onFlat={() => setTool(tool === "flat" ? null : "flat")} flat={tool === "flat"} />}
+          {!items.length && design && (
+            <section>
+              <h3>Design</h3>
+              <label className="field"><span>Printer</span>
+                <select className="select" value={printer.id} onChange={(e) => {
+                  const p = PRINTERS.find((x) => x.id === e.target.value) ?? { id: "custom", name: "Custom size", bed: printer.bed };
+                  setPrinter(p);
+                }}>
+                  {PRINTERS.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  <option value="custom">Custom size</option>
+                </select>
+                <small>Build volume {printer.bed.map(fmt).join(" x ")} mm</small>
+              </label>
+              {printer.id === "custom" && (
+                <div className="v3d-triple">
+                  {["X", "Y", "Z"].map((ax, i) => <Num key={ax} label={ax} value={printer.bed[i]} min={10}
+                    onSet={(v) => { const b = [...printer.bed] as Vec3; b[i] = v; setPrinter({ id: "custom", name: "Custom size", bed: b }); }} />)}
+                </div>
+              )}
+              <p className="v3d-note">Click a part to change it, Shift-click to pick more, double-click a part inside a
+                group. Drag a picked part to move it on the plate. A hole cuts the solids beside it - group parts to keep
+                a hole to them.</p>
+              <h3>Parts</h3>
+              <PartList parts={parts} onPick={(id) => setSelected([id])}
+                onHide={(id) => change(id, (p) => ({ ...p, hidden: !p.hidden || undefined }))} />
+              {[...problems, ...(built?.problems ?? [])].map((p, i) => <p key={i} className="v3d-note v3d-warn">{p}</p>)}
+            </section>
+          )}
+        </div>
+      </div>
+    </aside>
+  );
+}
+
+function PartList({ parts, onPick, onHide, depth = 0 }: { parts: Part[]; onPick: (id: string) => void;
+  onHide: (id: string) => void; depth?: number }) {
+  if (!parts.length && !depth) return <p className="v3d-note faint">None yet.</p>;
+  return (
+    <ul className="v3d-parts" style={depth ? { paddingLeft: 14 } : undefined}>
+      {parts.map((p) => (
+        <li key={p.id}>
+          <div className="row">
+            <span className={`v3d-swatch${p.hole ? " hole" : ""}`} style={p.hole || p.shape === "group" ? undefined : { background: p.color ?? GREY }} />
+            <button className="link-btn grow ellipsis" onClick={() => onPick(p.id)}>{label(p)}</button>
+            {p.hole && <span className="tag">hole</span>}
+            {p.shape === "group" && <span className="tag">group</span>}
+            <button className="icon-btn small" onClick={() => onHide(p.id)} aria-label={p.hidden ? `Show ${label(p)}` : `Hide ${label(p)}`}
+              title={p.hidden ? "Hidden: left out of the solid. Show it" : "Hide it: left out of the solid"}>
+              {p.hidden ? <EyeOff size={14} /> : <Eye size={14} />}</button>
+          </div>
+          {p.parts && <PartList parts={p.parts} onPick={onPick} onHide={onHide} depth={depth + 1} />}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function PartFields({ part, font, lock, setLock, change, onDuplicate, onDelete, onDrop, onMirror, onUngroup, onFlat, flat }: {
+  part: Part; font: FontData; lock: boolean; setLock: (v: boolean) => void; change: (fn: (p: Part) => Part) => void;
+  onDuplicate: () => void; onDelete: () => void; onDrop: () => void; onMirror: (axis: number) => void; onUngroup: () => void;
+  onFlat: () => void; flat: boolean }) {
+  const g = part.shape === "group";
+  const box = extent(part);
+  const now = sized(part, font);
+  const sizeOf = (i: number, v: number) => change((p) => {
+    if (!lock) {                                       // a text's width 0 stays: its letters decide it
+      const s = [...p.size] as Vec3;
+      s[i] = v;
+      return { ...p, size: s };
+    }
+    const f = v / (sized(p, font)[i] || 1);
+    return { ...p, size: p.size.map((x) => x * f) as Vec3, radius: p.radius ? p.radius * f : p.radius };
+  });
+  const textOf = (t: string) => change((p) => {
+    const follows = p.size[0] > 0 && Math.abs(p.size[0] - textWidth(p.text ?? "", p.size[1], font)) < 0.05;
+    return { ...p, text: t, size: follows ? [textWidth(t, p.size[1], font), p.size[1], p.size[2]] : p.size };
+  });
+  const kind = g ? "Group" : part.shape === "mesh" ? "Imported mesh" : part.shape[0].toUpperCase() + part.shape.slice(1);
+  return (
+    <section>
+      <h3>{kind} <span className="faint mono">{part.id}</span></h3>
+      <label className="field"><span>Name</span>
+        <input className="input" defaultValue={part.name ?? ""} key={`${part.id}:${part.name ?? ""}`} placeholder={label(part)}
+          onBlur={(e) => { if (e.target.value !== (part.name ?? "")) change((p) => ({ ...p, name: e.target.value || undefined })); }}
+          onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
+      </label>
+      <div className="v3d-seg" role="group" aria-label="Solid or hole">
+        <button className={`btn small${!part.hole ? " on" : ""}`} aria-pressed={!part.hole} onClick={() => change((p) => ({ ...p, hole: undefined }))}>Solid</button>
+        <button className={`btn small${part.hole ? " on" : ""}`} aria-pressed={!!part.hole} onClick={() => change((p) => ({ ...p, hole: true }))}>Hole</button>
+        {!g && !part.hole && <input type="color" className="v3d-color" value={part.color ?? GREY} aria-label="Colour" title="Colour (for the eye only: one colour prints)"
+          onChange={(e) => change((p) => ({ ...p, color: e.target.value }))} />}
+      </div>
+      {!g && (
+        <>
+          <div className="v3d-label"><span>Size</span>
+            <label className="faint small"><input type="checkbox" checked={lock} onChange={(e) => setLock(e.target.checked)} /> keep proportions</label></div>
+          <div className="v3d-triple">
+            {["X", "Y", "Z"].map((ax, i) => <Num key={ax} label={ax} value={r3(now[i])} min={MIN_SIZE} onSet={(v) => sizeOf(i, v)} />)}
+          </div>
+          <div className="v3d-label"><span>Centre</span><span className="faint small">its bottom at z {fmt(box?.[0][2] ?? 0)}</span></div>
+          <div className="v3d-triple">
+            {["X", "Y", "Z"].map((ax, i) => <Num key={ax} label={ax} value={part.at[i]}
+              onSet={(v) => change((p) => { const at = [...p.at] as Vec3; at[i] = v; return { ...p, at }; })} />)}
+          </div>
+          <div className="v3d-label"><span>Turned</span><span className="faint small">degrees: X, then Y, then Z</span></div>
+          <div className="v3d-triple">
+            {["X", "Y", "Z"].map((ax, i) => <Num key={ax} label={ax} unit="°" step={15} value={part.rotate[i]}
+              onSet={(v) => change((p) => { const r = [...p.rotate] as Vec3; r[i] = v; return { ...p, rotate: r }; })} />)}
+          </div>
+          {part.shape === "box" && <Num label="Rounded edges" value={part.radius ?? 0} min={0} step={0.5}
+            onSet={(v) => change((p) => ({ ...p, radius: v > 0 ? v : undefined, sides: v > 0 ? p.sides ?? 32 : undefined }))} />}
+          {(part.shape === "cylinder" || part.shape === "cone" || part.shape === "sphere" || (part.shape === "box" && !!part.radius)) &&
+            <Num label="Sides" unit="segments around" value={part.sides ?? 64} min={3} step={8}
+              onSet={(v) => change((p) => ({ ...p, sides: Math.round(Math.min(256, Math.max(3, v))) }))} />}
+          {part.shape === "cone" && <Num label="Top, % of the base" unit="%" value={(part.top ?? 0) * 100} min={0} step={10}
+            onSet={(v) => change((p) => ({ ...p, top: Math.min(1, v / 100) || undefined }))} />}
+          {part.shape === "text" && (
+            <label className="field"><span>Text</span>
+              <textarea className="textarea" rows={2} defaultValue={part.text ?? ""} key={`${part.id}:${part.text ?? ""}`}
+                onBlur={(e) => { if (e.target.value !== part.text) textOf(e.target.value); }} />
+              <small>{part.size[0] <= 0 ? "Its width follows the letters." : "Its width is fixed: X above."}</small>
+            </label>
+          )}
+          {part.shape === "mesh" && <p className="v3d-note mono" title="The file, from the design's folder">{part.file}</p>}
+        </>
+      )}
+      {g && box && <p className="v3d-note num">{fmt(box[1][0] - box[0][0])} x {fmt(box[1][1] - box[0][1])} x {fmt(box[1][2] - box[0][2])} mm,
+        {" "}{part.parts?.length ?? 0} parts. A hole in it cuts only its own parts. Double-click a part on the model to change it.</p>}
+      <div className="v3d-actions">
+        <Tool icon={<Copy size={15} />} title="Duplicate (Ctrl+D)" onClick={onDuplicate} />
+        <Tool icon={<ArrowDownToLine size={15} />} title="Onto the plate" onClick={onDrop} />
+        <Tool icon={<PanelBottom size={15} />} title="Lay a face flat: click the face that should lie on the plate" onClick={onFlat} active={flat} />
+        {g && <Tool icon={<Ungroup size={15} />} title="Ungroup (Ctrl+Shift+G)" onClick={onUngroup}><span>Ungroup</span></Tool>}
+        <Tool icon={part.hidden ? <EyeOff size={15} /> : <Eye size={15} />} title={part.hidden ? "Show it" : "Hide it: left out of the solid"}
+          onClick={() => change((p) => ({ ...p, hidden: !p.hidden || undefined }))} />
+        <ConfirmButton className="btn small v3d-tool" confirmText="Delete?" label="Delete" onConfirm={onDelete}><Trash2 size={15} /></ConfirmButton>
+      </div>
+      <Mirror onMirror={onMirror} />
+    </section>
+  );
+}
+
+function Mirror({ onMirror }: { onMirror: (axis: number) => void }) {
+  return (
+    <div className="v3d-mirror" role="group" aria-label="Mirror">
+      <span className="faint"><FlipHorizontal2 size={14} style={{ verticalAlign: -2 }} /> Mirror</span>
+      {["X", "Y", "Z"].map((ax, i) => (
+        <button key={ax} className="btn small" onClick={() => onMirror(i)}
+          title={`Mirror ${["left-right", "front-back", "up-down"][i]} (in ${ax})`}>{ax}</button>))}
+    </div>
+  );
+}

@@ -2,10 +2,11 @@
 // each file's history with restore. Beside a chat, files can also be put in
 // the next message (picked/onPick).
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDownAZ, Check, ChevronDown, ChevronRight, Clock, Download, File as FileIcon, FileArchive, FilePlus, Folder,
+import { ArrowDownAZ, Box, Check, ChevronDown, ChevronRight, Clock, Download, File as FileIcon, FileArchive, FilePlus, Folder,
   FolderPlus, History, MessageSquarePlus, Pencil, Plus, RefreshCw, Search, Trash2, Upload as UploadIcon } from "lucide-react";
 import { api, type FileData, type TreeData, type TreeEntry } from "../lib/api";
 import { downloadZip } from "../lib/download";
+import { OPENS_IN_3D } from "../model3d/files";
 import { ago, bytes } from "../lib/format";
 import { useApp } from "../state";
 import { ConfirmButton, Modal, useInterval } from "./ui";
@@ -84,12 +85,13 @@ const base = (f: Folder) => `/hub/api/folders/${f.kind}/${f.id}`;
 
 const MAX_MATCHES = 200;
 
-export function Files({ folder, projectId, select, selectAt, picked, onPick }: { folder: Folder;
+export function Files({ folder, projectId, select, selectAt, picked, onPick, onOpen3d }: { folder: Folder;
   projectId?: number | null;
   select?: string;                   // a file to show (again, when selectAt changes)
   selectAt?: number;
   picked?: string[];                 // files in the next message
   onPick?: (path: string) => void;   // puts a file in the message, or takes it out
+  onOpen3d?: (path: string) => void; // a design, STL, 3MF or OBJ into the 3D editor (0.87.0)
 }) {
   const { toast } = useApp();
   const [tree, setTree] = useState<TreeData | null>(null);
@@ -245,7 +247,7 @@ export function Files({ folder, projectId, select, selectAt, picked, onPick }: {
           <div className="file-view">
             {selected && !selected.dir ? (
               <FileView key={selected.path + selected.modified} folder={folder} entry={selected} projectId={projectId}
-                picked={pickedSet.has(selected.path)} onPick={onPick}
+                picked={pickedSet.has(selected.path)} onPick={onPick} onOpen3d={onOpen3d}
                 onChanged={refresh} onGone={() => { setSel(null); refresh(); }}
                 onRename={() => ask("Rename or move", "New path", selected.path, async (p) => {
                   await api(`${base(folder)}/move`, { body: { src: selected.path, dst: p } });
@@ -309,9 +311,9 @@ function PickButton({ path, on, onPick }: { path: string; on: boolean; onPick: (
   );
 }
 
-function FileView({ folder, entry, projectId, picked, onPick, onChanged, onGone, onRename }: { folder: Folder;
-  entry: TreeEntry; projectId?: number | null; picked: boolean; onPick?: (path: string) => void; onChanged: () => void;
-  onGone: () => void; onRename: () => void }) {
+function FileView({ folder, entry, projectId, picked, onPick, onOpen3d, onChanged, onGone, onRename }: { folder: Folder;
+  entry: TreeEntry; projectId?: number | null; picked: boolean; onPick?: (path: string) => void;
+  onOpen3d?: (path: string) => void; onChanged: () => void; onGone: () => void; onRename: () => void }) {
   const { toast } = useApp();
   const [file, setFile] = useState<FileData | null>(null);
   const [dirty, setDirty] = useState(false);
@@ -392,6 +394,10 @@ function FileView({ folder, entry, projectId, picked, onPick, onChanged, onGone,
             title={picked ? "In your next message. Click to take it out." : "Put this file in your next message"}>
             {picked ? <><Check size={14} /> In the message</> : <><MessageSquarePlus size={14} /> Add to chat</>}
           </button>
+        )}
+        {onOpen3d && OPENS_IN_3D.test(entry.path) && (
+          <button className="btn small" onClick={async () => { if (dirty) await save(); onOpen3d(entry.path); }}
+            title="Open it in the 3D editor beside the chat"><Box size={14} /> 3D editor</button>
         )}
         {file?.text != null && <button className="btn primary small" disabled={!dirty} onClick={save}>Save</button>}
         {projectId && <button className="icon-btn small" onClick={() => setHistory(true)} aria-label="History" title="History"><History size={15} /></button>}

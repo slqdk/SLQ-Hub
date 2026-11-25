@@ -158,6 +158,17 @@ export function Composer({ running, onSend, onStop, settings, onSettings, models
       }
     });
   };
+  // A spot pointed at in the 3D editor (0.87.0) goes into the message, where the caret is.
+  const insertRef = useRef(insertWord);
+  insertRef.current = insertWord;
+  useEffect(() => {
+    const on = (e: Event) => {
+      const t = (e as CustomEvent<{ text?: string }>).detail?.text;
+      if (t) insertRef.current(t);
+    };
+    window.addEventListener("slq:compose-insert", on);
+    return () => window.removeEventListener("slq:compose-insert", on);
+  }, []);
   const toggleSkill = (ref: string) => onSettings({ skills: settings.skills.includes(ref)
     ? settings.skills.filter((x) => x !== ref) : [...settings.skills, ref] });
   // Make a skill: the skill maker joins the chat, and an empty message box gets the start of the request.
