@@ -179,7 +179,8 @@ DEFAULTS: dict = {
         "server": "github",                # github | forgejo
         "url": "",                         # Forgejo's address as the Hub reaches it (https://git.example.com)
         "token": "",                       # its access token (only the repositories it may work on)
-    },
+        "admin_token": "",                 # 0.83.0, Forgejo: an administrator's write:admin token, for Settings'
+    },                                     # users list alone - never the assistant's
     "tokens": {                            # sign-ins for model downloads (0.64.0, app/tokens.py); "" = .env's, if any
         "huggingface": "",                 # a read token: gated models (FLUX.2 klein 9B, its uncensored encoder)
         "civitai": "",                     # an API key: Civitai files that want a signed-in user

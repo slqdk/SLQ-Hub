@@ -22,6 +22,7 @@ from .test_internet import answer, approvals, asking, result_of
 
 GH_TOKEN = "github_pat_11AAAATESTTOKEN0123456789"
 FJ_TOKEN = "0123456789abcdef0123456789abcdef01234567"
+ADMIN_TOKEN = "fedcba9876543210fedcba9876543210fedcba98"
 SERVERS = {"github": {"server": "github", "url": "", "token": GH_TOKEN},
            "forgejo": {"server": "forgejo", "url": "https://forgejo.test", "token": FJ_TOKEN}}
 HOST = {"github": "github.com", "forgejo": "forgejo.test"}
@@ -139,6 +140,60 @@ def make_forgejo(state: dict) -> FastAPI:
         return JSONResponse({"number": 7, "html_url": f"https://forgejo.test/{owner}/{name}/pulls/7"},
                             status_code=201)
 
+    def admin(request: Request):
+        auth = request.headers.get("authorization")
+        if auth == f"token {ADMIN_TOKEN}":
+            return None
+        if auth == f"token {FJ_TOKEN}":
+            return JSONResponse({"message": "token does not have at least one of required scope(s): [write:admin]"},
+                                status_code=403)
+        return JSONResponse({"message": "invalid token"}, status_code=401)
+
+    @app.get("/api/v1/admin/users")
+    async def users(request: Request, page: int = 1, limit: int = 0):
+        refused = admin(request)
+        if refused:
+            return refused
+        state.setdefault("pages", []).append((page, limit))
+        everyone = list(state.setdefault("users", {
+            "soren": {"login": "soren", "email": "s@slq.dk", "is_admin": True, "prohibit_login": False}}).values())
+        return everyone[(page - 1) * limit:page * limit]
+
+    @app.post("/api/v1/admin/users")
+    async def create(request: Request):
+        refused = admin(request)
+        if refused:
+            return refused
+        body = await request.json()
+        state.setdefault("created", []).append(body)
+        known = state.setdefault("users", {})
+        if body["username"].lower() in known:
+            return JSONResponse({"message": f"user already exists [name: {body['username']}]"}, status_code=422)
+        known[body["username"].lower()] = {"login": body["username"], "email": body["email"],
+                                           "full_name": body.get("full_name", ""), "is_admin": False,
+                                           "prohibit_login": False}
+        return JSONResponse(known[body["username"].lower()], status_code=201)
+
+    @app.get("/api/v1/users/{username}")
+    async def one(username: str, request: Request):
+        refused = admin(request)
+        if refused:
+            return refused
+        state.setdefault("looked_up", []).append(username)
+        user = state.setdefault("users", {}).get(username.lower())
+        return user or JSONResponse({"message": "user redirect does not exist [name: x]"}, status_code=404)
+
+    @app.patch("/api/v1/admin/users/{username}")
+    async def edit(username: str, request: Request):
+        refused = admin(request)
+        if refused:
+            return refused
+        user = state.setdefault("users", {}).get(username.lower())
+        if user is None:
+            return JSONResponse({"message": "user does not exist"}, status_code=404)
+        user.update({k: v for k, v in (await request.json()).items() if k == "prohibit_login"})
+        return user
+
     @app.get("/api/v1/repos/{owner}/{name}/pulls")
     async def list_prs(owner: str, name: str, state_: str = ""):
         state.setdefault("listed", []).append("open")
@@ -199,6 +254,7 @@ def chat_dir(app, chat_id: int) -> Path:
 @pytest.mark.parametrize("kind", ["github", "forgejo"])
 async def test_clone_work_push_and_open_a_pull_request(signed_in, app, fakes, remotes, apis, sandbox, kind):
     use(app, kind)
+    app.state.hub.settings.update("git", {"admin_token": ADMIN_TOKEN})     # Settings' alone: never the tools'
     token = SERVERS[kind]["token"]
     web = "https://github.com/octo/game" if kind == "github" else "https://forgejo.test/octo/game"
     fakes.llama["replies"] = [
@@ -240,7 +296,8 @@ async def test_clone_work_push_and_open_a_pull_request(signed_in, app, fakes, re
     assert pr["auth"] == (f"Bearer {token}" if kind == "github" else f"token {token}")
 
     # the token never reached the sandbox: no command, no file of the working copy, nothing in the Hub's mirror
-    assert all(token not in json.dumps(b) for b in sandbox)
+    assert all(token not in json.dumps(b) and ADMIN_TOKEN not in json.dumps(b) for b in sandbox)
+    assert ADMIN_TOKEN not in json.dumps(fakes.llama["requests"]) and token not in json.dumps(fakes.llama["requests"])
     work = chat_dir(app, c["id"]) / "game"
     for p in [*(work / ".git").rglob("*"), *(app.state.hub.env.git_dir).rglob("*")]:
         if p.is_file() and p.stat().st_size < 1_000_000:
@@ -370,13 +427,13 @@ async def test_asking_first_a_clone_asks_for_the_server(signed_in, app, fakes, r
 
 async def test_the_server_in_settings(signed_in, app, apis):
     assert (await signed_in.get("/hub/api/git?check=true")).json() == \
-        {"server": "github", "ready": False, "plain_http": False}
+        {"server": "github", "ready": False, "plain_http": False, "admin": False}
     r = await signed_in.put("/hub/api/settings", json={"section": "git", "values": SERVERS["forgejo"]})
     assert r.status_code == 200 and r.json()["settings"]["git"]["token"] == "********"
     r = await signed_in.put("/hub/api/settings", json={"section": "git", "values": {"token": "********"}})
     assert app.state.hub.settings.get("git", "token") == FJ_TOKEN              # the mask saved again keeps it
     check = (await signed_in.get("/hub/api/git?check=true")).json()
-    assert check == {"server": "forgejo", "ready": True, "plain_http": False,
+    assert check == {"server": "forgejo", "ready": True, "plain_http": False, "admin": False,
                      "check": {"ok": True, "server": "forgejo", "login": "octo", "kind": "", "repos": ["octo/game"],
                                "more": False}}
     assert apis["forgejo"]["repo_limit"] == 30
@@ -389,7 +446,7 @@ async def test_the_server_in_settings(signed_in, app, apis):
     assert check["check"]["ok"] is False and "does not take this token" in check["check"]["error"]
     app.state.hub.settings.update("git", {"server": "forgejo", "url": "http://192.168.1.50:3000", "token": FJ_TOKEN})
     out = (await signed_in.get("/hub/api/git")).json()
-    assert out == {"server": "forgejo", "ready": True, "plain_http": True}
+    assert out == {"server": "forgejo", "ready": True, "plain_http": True, "admin": False}
     app.state.hub.settings.update("git", {"url": "ftp://x"})
     out = (await signed_in.get("/hub/api/git")).json()
     assert out["ready"] is False and "is not an address" in out["problem"]
@@ -474,3 +531,92 @@ async def test_a_copy_not_made_by_git_clone_or_with_links_is_refused(app, tmp_pa
     (fake / ".git" / "refs" / "heads" / "x").symlink_to(secret)
     with pytest.raises(ValueError, match="link"):
         gs.branch_sha(wd, wc, "x")
+
+
+# ---------------------------------------------------------------- users on Forgejo (0.83.0)
+
+async def test_forgejo_users_from_settings(signed_in, app, apis):
+    hub = app.state.hub
+    assert (await signed_in.get("/hub/api/git/users")).status_code == 400            # no Forgejo, no admin token
+    hub.settings.update("git", {**SERVERS["forgejo"], "admin_token": ADMIN_TOKEN})
+    assert (await signed_in.get("/hub/api/git")).json()["admin"] is True
+    r = await signed_in.get("/hub/api/settings")
+    assert r.json()["settings"]["git"]["admin_token"] == "********"                  # masked like the token
+
+    users = (await signed_in.get("/hub/api/git/users")).json()["users"]
+    assert [u["login"] for u in users] == ["soren"] and users[0]["admin"] is True
+    assert apis["forgejo"]["pages"] == [(1, 50)]
+
+    r = await signed_in.post("/hub/api/git/users", json={"username": "anna", "email": "anna@example.com",
+                                                         "full_name": "  Anna   Hansen "})
+    assert r.status_code == 200, r.text
+    made = r.json()
+    password = made["password"]
+    assert made["user"]["login"] == "anna" and len(password) == 24
+    assert any(c.islower() for c in password) and any(c.isupper() for c in password)
+    assert any(c.isdigit() for c in password) and any(c in "!#%+=?@" for c in password)
+    sent = apis["forgejo"]["created"][0]
+    assert sent == {"username": "anna", "email": "anna@example.com", "full_name": "Anna Hansen",
+                    "password": password, "must_change_password": True, "send_notify": False}
+    for f in hub.env.data_dir.rglob("*"):                                    # shown once, kept nowhere
+        if f.is_file() and f.stat().st_size < 5_000_000:
+            assert password.encode() not in f.read_bytes(), f
+
+    r = await signed_in.post("/hub/api/git/users", json={"username": "Anna", "email": "a2@example.com"})
+    assert r.status_code == 409 and "user already exists" in r.json()["detail"]
+    for bad in ({"username": "-x", "email": "x@example.com"}, {"username": "a b", "email": "x@example.com"},
+                {"username": "x.", "email": "x@example.com"}, {"username": "a" * 41, "email": "x@example.com"},
+                {"username": "bob", "email": "bob"}):
+        r = await signed_in.post("/hub/api/git/users", json=bad)
+        assert r.status_code == 400, bad
+    assert gs.USERNAME_RE.match("a" * 40) and gs.USERNAME_RE.match("a") and gs.USERNAME_RE.match("anna.h-2")
+
+    r = await signed_in.patch("/hub/api/git/users/anna", json={"blocked": True})
+    assert r.status_code == 200 and r.json()["user"]["blocked"] is True
+    users = (await signed_in.get("/hub/api/git/users")).json()["users"]
+    assert [(u["login"], u["blocked"]) for u in users] == [("anna", True), ("soren", False)]
+    r = await signed_in.patch("/hub/api/git/users/anna", json={"blocked": False})
+    assert r.json()["user"]["blocked"] is False
+    assert (await signed_in.patch("/hub/api/git/users/nobody", json={"blocked": True})).status_code == 404
+    # an administrator is not blocked from here: its tokens - the Hub's admin token too - would stop working
+    r = await signed_in.patch("/hub/api/git/users/soren", json={"blocked": True})
+    assert r.status_code == 400 and "administrator" in r.json()["detail"]
+    assert apis["forgejo"]["users"]["soren"]["prohibit_login"] is False
+
+
+async def test_the_admin_token_is_settings_alone(signed_in, app, fakes, apis):
+    hub = app.state.hub
+    # an admin token without the assistant's: Settings can make users, the assistant has no git tools
+    hub.settings.update("git", {"server": "forgejo", "url": "https://forgejo.test", "token": "",
+                                "admin_token": ADMIN_TOKEN})
+    assert gs.server(hub.settings) is None and gs.admin(hub.settings) is not None
+    fakes.llama["replies"] = [{"content": "Hej."}, {"content": "Hej"}]
+    c = await new_chat(signed_in)
+    await finish(app, await say(signed_in, c["id"], "Hej"))
+    assert not {"git_clone", "git_fetch", "git_push"} & set(tools_offered(fakes))
+    assert ADMIN_TOKEN not in json.dumps(fakes.llama["requests"])
+    assert (await signed_in.get("/hub/api/git/users")).status_code == 200
+    # the assistant's token where the admin token should be: Forgejo refuses, and Settings says why
+    hub.settings.update("git", {"admin_token": FJ_TOKEN})
+    r = await signed_in.get("/hub/api/git/users")
+    assert r.status_code == 502 and "must be an administrator's, with write:admin" in r.json()["detail"]
+    # GitHub has no such thing: the admin token does nothing there
+    hub.settings.update("git", {"server": "github", "token": GH_TOKEN, "admin_token": ADMIN_TOKEN})
+    assert gs.admin(hub.settings) is None
+    assert (await signed_in.get("/hub/api/git/users")).status_code == 400
+
+
+async def test_a_person_reaches_neither_the_server_nor_its_users(signed_in, app, apis):
+    from .test_people import add_person, client_from, sign_in
+    app.state.hub.settings.update("git", {**SERVERS["forgejo"], "admin_token": ADMIN_TOKEN})
+    await add_person(signed_in)
+    async with client_from(app) as phone:
+        assert (await sign_in(phone)).status_code == 200
+        for method, path in (("GET", "/hub/api/git"), ("GET", "/hub/api/git/users"),
+                             ("POST", "/hub/api/git/users"), ("PATCH", "/hub/api/git/users/soren")):
+            r = await phone.request(method, path, json={"username": "x", "email": "x@example.com", "blocked": True},
+                                    headers={"Origin": "http://hub"})
+            assert r.status_code == 403, (method, path)
+        s = (await phone.get("/hub/api/settings")).json()
+        assert ADMIN_TOKEN not in json.dumps(s) and FJ_TOKEN not in json.dumps(s)
+    assert "created" not in apis["forgejo"]

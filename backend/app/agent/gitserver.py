@@ -17,6 +17,9 @@ which never enters the sandbox (DESIGN §6 "Git: GitHub or Forgejo").
   repository of the Hub's that borrows the working copy's objects. Never the repository's default branch, never
   forced, and the owner is asked first - the card shows the commits and the files changed. It can open the pull
   request.
+* Users on Forgejo (0.83.0; his Forgejo has no sign-up, users are made through the admin API): Settings lists them,
+  makes new ones (POST /api/v1/admin/users) and blocks or unblocks their login, with an administrator's token of
+  its own ("git.admin_token", write:admin) that the git tools never use.
 """
 from __future__ import annotations
 
@@ -27,7 +30,9 @@ import hashlib
 import logging
 import os
 import re
+import secrets
 import shutil
+import string
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -870,3 +875,142 @@ async def _open_pull_request(hub, srv: Server, plan: PushPlan) -> tuple[str, int
         if srv.kind == "github" or head.get("ref") == plan.branch:
             return str(p.get("html_url") or ""), int(p.get("number") or 0)
     return None
+
+
+# ---------------------------------------------------------------- users on Forgejo (0.83.0)
+
+USERNAME_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9_.-]{0,38}[A-Za-z0-9])?$")      # Forgejo: 40 at most
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+class AdminError(RuntimeError):
+    """What went wrong with Forgejo's users, for Settings: the message and the HTTP status the page gets."""
+
+    def __init__(self, message: str, status: int = 400):
+        super().__init__(message)
+        self.status = status
+
+
+def admin(settings) -> Server | None:
+    """Forgejo with the administrator's token (git.admin_token, write:admin) - Settings' users list alone. Never
+    the assistant's: the git tools use Server.token, from server(). None when Forgejo is not the server, has no
+    address, or there is no admin token."""
+    try:
+        s = settings.get("git") or {}
+    except Exception:  # noqa: BLE001 - a settings file from before 0.83.0
+        return None
+    tok = str(s.get("admin_token") or "").strip()
+    if str(s.get("server") or "") != "forgejo" or not tok:
+        return None
+    try:
+        url = normal_url(str(s.get("url") or ""))
+    except ValueError:
+        return None
+    return Server("forgejo", url, tok) if url else None
+
+
+def _need_admin(hub) -> Server:
+    srv = admin(hub.settings)
+    if srv is None:
+        raise AdminError("Set up Forgejo with its address and an admin token first (Settings -> Assistant -> Git "
+                         "server).")
+    return srv
+
+
+async def _admin_call(hub, method: str, path: str, body: dict | None = None,
+                      params: dict | None = None) -> httpx.Response:
+    srv = _need_admin(hub)
+    try:
+        r = await api(hub, srv, method, path, body=body, params=params)
+    except GitError as exc:
+        raise AdminError(str(exc), 502) from exc
+    if r.status_code == 401:
+        raise AdminError(f"{srv.name} does not take the admin token - wrong, expired or deleted?", 502)
+    if r.status_code == 403:
+        raise AdminError(f"{srv.name} refused: the admin token must be an administrator's, with write:admin "
+                         f"({_message(r)}).", 502)
+    return r
+
+
+def _user(u: dict) -> dict:
+    """What Settings shows of a Forgejo user (no more)."""
+    return {"login": str(u.get("login") or ""), "full_name": str(u.get("full_name") or ""),
+            "email": str(u.get("email") or ""), "admin": bool(u.get("is_admin")),
+            "blocked": bool(u.get("prohibit_login")), "active": bool(u.get("active", True)),
+            "last_login": str(u.get("last_login") or ""), "created": str(u.get("created") or "")}
+
+
+async def list_users(hub) -> list[dict]:
+    """Forgejo's users (GET /api/v1/admin/users), up to 200, by login."""
+    users: list[dict] = []
+    for page in range(1, 5):
+        r = await _admin_call(hub, "GET", "/admin/users", params={"page": str(page), "limit": "50"})
+        if r.status_code >= 400:
+            raise AdminError(f"Forgejo answered {_message(r)}", 502)
+        batch = _json(r)
+        if not isinstance(batch, list):
+            break
+        users += [_user(u) for u in batch if isinstance(u, dict)]
+        if len(batch) < 50:
+            break
+    return sorted(users, key=lambda u: u["login"].lower())
+
+
+def new_password() -> str:
+    """A password for a new account, which its owner changes at the first login: 24 characters with lower and upper
+    case letters, digits and a sign, so Forgejo's password rules take it whatever they are set to."""
+    pick = secrets.SystemRandom()
+    chars = [secrets.choice(string.ascii_lowercase), secrets.choice(string.ascii_uppercase),
+             secrets.choice(string.digits), secrets.choice("!#%+=?@")]
+    chars += [secrets.choice(string.ascii_letters + string.digits) for _ in range(20)]
+    pick.shuffle(chars)
+    return "".join(chars)
+
+
+async def create_user(hub, username: str, email: str, full_name: str = "") -> dict:
+    """POST /api/v1/admin/users: a new user with a random password that must be changed at the first login, and no
+    mail from Forgejo. Returns the user and the password - shown once by Settings, kept nowhere."""
+    username, email, full_name = username.strip(), email.strip(), " ".join(full_name.split())[:100]
+    if not USERNAME_RE.match(username):
+        raise AdminError("A user name is up to 40 letters, digits, - _ and ., starting and ending with a letter or "
+                         "digit.")
+    if not EMAIL_RE.match(email) or len(email) > 254:
+        raise AdminError("Give the user's e-mail address (Forgejo needs one, also when it sends no mail).")
+    password = new_password()
+    r = await _admin_call(hub, "POST", "/admin/users", body={
+        "username": username, "email": email, "full_name": full_name, "password": password,
+        "must_change_password": True, "send_notify": False})
+    if r.status_code != 201:
+        msg = _message(r)
+        raise AdminError(f"Forgejo did not make the user: {msg}", 409 if r.status_code == 422 else 502)
+    data = _json(r)
+    log.info("made Forgejo user %s", username)
+    return {"user": _user(data if isinstance(data, dict) else {"login": username, "email": email}),
+            "password": password}
+
+
+async def block_user(hub, username: str, blocked: bool) -> dict:
+    """PATCH /api/v1/admin/users/{username} with prohibit_login: the user cannot log in (or can again). Not an
+    administrator: a blocked account's tokens stop working too, so blocking the admin token's own account from here
+    would leave nobody to undo it but Forgejo's command line."""
+    if not USERNAME_RE.match(username):
+        raise AdminError("That is not a user name.")
+    path = quote(username, safe="")
+    if blocked:
+        r = await _admin_call(hub, "GET", f"/users/{path}")
+        if r.status_code == 404:
+            raise AdminError(f"Forgejo has no user {username}.", 404)
+        if r.status_code >= 400:
+            raise AdminError(f"Forgejo answered {_message(r)}", 502)
+        data = _json(r)
+        if not isinstance(data, dict) or data.get("is_admin") is not False:
+            raise AdminError(f"{username} is an administrator: block one on Forgejo's own Site Administration page, "
+                             "not from the Hub, which uses an administrator's token.")
+    r = await _admin_call(hub, "PATCH", f"/admin/users/{path}", body={"prohibit_login": bool(blocked)})
+    if r.status_code == 404:
+        raise AdminError(f"Forgejo has no user {username}.", 404)
+    if r.status_code >= 400:
+        raise AdminError(f"Forgejo did not change {username}: {_message(r)}", 502)
+    data = _json(r)
+    log.info("Forgejo user %s %s", username, "blocked" if blocked else "allowed to log in again")
+    return {"user": _user(data if isinstance(data, dict) else {"login": username, "prohibit_login": blocked})}

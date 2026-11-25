@@ -1677,6 +1677,34 @@ before-snapshot (`engine.state["files_before"]`), so the card under the answer -
 works from the same snapshot - show what the turn changed in the repository, not all of it. The clone is checked in
 to the project's history like any file a command made.
 
+**Users on Forgejo** (0.83.0, Søren the same day, with his Forgejo kit: the Hub's git work moves to `git.slq.dk`,
+and "Ny bruger-oprettelse sker via admin-API'et (POST /api/v1/admin/users)"). The move itself needed nothing new -
+0.82.0's Forgejo with `https://git.slq.dk` and a token. New: with Forgejo as the server, the section has a second,
+optional token, `admin_token` - an administrator's, with admin: Read and write (`write:admin`) - and under it **Users
+on Forgejo**, the owner's alone (`/hub/api/git/users`: not among the routes a person's login reaches):
+
+- the users (`GET /api/v1/admin/users`, 50 a page, up to 200, by login): login, full name, e-mail, admin, blocked, not
+  activated, last login (Forgejo's zero time, 1970, shows as "not logged in yet");
+- **Add a user** (`POST /api/v1/admin/users`): user name (up to 40 letters, digits, `-`, `_`, `.`, a letter or digit first and last), e-mail (Forgejo
+  needs one) and full name. The Hub makes the password - 24 characters with lower and upper case letters, digits and
+  a sign, so the server's complexity setting takes it - and sends `must_change_password: true` (Forgejo makes them
+  choose their own at the first login) and `send_notify: false` (the Forgejo need not have mail). The password goes to
+  the owner's browser in the answer, is shown once with Copy, and is kept nowhere (a test looks through `data/` for
+  it). A name or address Forgejo has already is its 422, shown with Forgejo's message.
+- **Block / Allow login** (`PATCH /api/v1/admin/users/{name}` with `prohibit_login`): a blocked account cannot log in,
+  and Forgejo refuses its tokens as well; its repositories stay. Blocking an administrator is refused before the
+  PATCH (the Hub looks the user up with `GET /api/v1/users/{name}` first): the Hub's admin token is an
+  administrator's, and blocking that account would leave only Forgejo's command line to undo it.
+
+Not here, on purpose: deleting a user (Forgejo then deletes or hands over what they own, and its own page asks how),
+making administrators, and passwords for existing users - Forgejo's Site Administration does those. The admin token
+is never the assistant's: the git tools take the server from `server()` with `token`; the users list from `admin()`,
+which is None for GitHub, for a Forgejo without a valid address and without an admin token. It is masked like the
+other token, and a test checks it reaches neither a sandbox call nor a model request. A token without the scope is
+Forgejo's 403, shown as "the admin token must be an administrator's, with write:admin". The Hub's VM must resolve
+`git.slq.dk` to the Forgejo it can reach - a DNS rewrite in AdGuard Home to the proxy's LAN address, or a router that
+does NAT loopback - like any LAN address it is given.
+
 **Node.js 24 in the sandbox** (0.81.0). Ubuntu 24.04's Node.js is 18.19, past its end of life; SLQ-Game-Lobby wants
 20 or newer, and its self-test fails on 18 (`performance.now` is read-only there) - 1,885 checks pass on 22. The
 sandbox image copies `node` and `npm` (and corepack, where the image has it) from the official `node:24-bookworm-slim`
@@ -1691,13 +1719,17 @@ whole way from clone to pull request on either server with the token in no comma
 nothing in `data/git`; refusing main and a non-fast-forward without asking; fetch's report; an open pull request
 named on either server; Always; ask-first naming the server's host; a clone from the other server refused; the
 server in Settings (the mask, an http address, a bad one); addresses and names; plain http only for an http Forgejo;
-a working copy that git_clone did not make, and links planted in `.git`.
+a working copy that git_clone did not make, and links planted in `.git`. 0.83.0: a fake Forgejo admin API - the users
+listed, made (what is sent, the password's make-up, a name taken, bad names and addresses), blocked and allowed again,
+an administrator not blocked; the admin token in no tool or model request, and refused with the assistant's token's
+scopes; a person's login gets 403 on the git routes.
 
 Tried in Docker outside the VM: the sandbox's Node.js layers (24.22.3 over the archive's 18.19.1; the game's
 self-test passes in them, offline, as uid 1000), git in the Hub's base image (2.47.3), and a mirror mounted read-only
 that a uid-1000 clone and fetch work from (one owned by root is refused as "dubious ownership" - so `data/git` must be
-uid 1000's). Not verified yet: a real Forgejo or GitHub (a token's clone, push and pull request), and the whole
-images on the VM.
+uid 1000's). Not verified yet: a real Forgejo or GitHub (a token's clone, push and pull request), Forgejo's admin API
+for real (0.83.0: written from Forgejo's API documentation and source; `git.slq.dk` was not reachable from where it
+was built), and the whole images on the VM.
 
 ### People's chats: device turns (0.11.0)
 
@@ -3512,6 +3544,11 @@ assistant made), each sent with every message.
   protected (rulesets need Pro), so the Hub's refusal is the only thing
   between the assistant and `main` there. A Forgejo at an http:// address
   gets the token over the network unencrypted (Settings says so).
+  0.83.0: Forgejo's admin token (`git.admin_token`, `write:admin`) can make
+  and block users on the whole Forgejo, so it is kept like the other token
+  and used only by Settings' Users on Forgejo - owner-only routes, never a
+  tool - and it cannot block an administrator from there. The passwords it
+  makes go to the owner's browser once and are not stored.
 
 - **Login.** The owner and the people the owner adds use scrypt password
   hashes. Sessions are HttpOnly cookies that last 30 days, and are `Secure`

@@ -4,7 +4,24 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## Next session - start here (written 2026-11-25, at 0.82.0)
+## Next session - start here (written 2026-11-25, at 0.83.0)
+
+**0.83.0 (2026-11-25, same chat, 10:28): Forgejo at git.slq.dk, and its users from Settings - pushed, not yet
+installed.** Søren, with the README of his Forgejo kit (made in the other claude.ai project): "SLQ hub's
+git-integration skal skifte fra GitHub til Forgejo på https://git.slq.dk. ... Ny bruger-oprettelse sker via
+admin-API'et (POST /api/v1/admin/users)." Read as: the switch is 0.82.0's settings (Forgejo, `https://git.slq.dk`, a
+token), and new is making Forgejo users from the Hub, with an admin token of its own that the assistant never gets.
+Built: `git.admin_token` and **Users on Forgejo** under Settings → Assistant → Git server - the list, Add a user (the
+Hub makes the password, shown once, changed at the first login), Block / Allow login; an administrator is not
+blocked from there, and deleting is left to Forgejo (DESIGN §6 "Users on Forgejo"). To try: update; on git.slq.dk two
+tokens - for the assistant, as the account it works as, Specific repositories with repository Read and write and user
+Read; for Settings, as the administrator, admin Read and write; in the Hub, Git server: Forgejo,
+`https://git.slq.dk`, both tokens, Check it; add a test user and log in as them. The Hub's VM must resolve
+git.slq.dk to the proxy on the LAN (an AdGuard Home rewrite, or NAT loopback on the router):
+`curl -sI https://git.slq.dk/api/v1/version` on the VM tells. Nothing here has met a real Forgejo: git.slq.dk was not
+reached from where this was built (the request waited for his approval while he was away).
+
+The paragraphs below were written at 0.82.0 and 0.81.0.
 
 **0.82.0 (2026-11-25, same chat): the git server is GitHub or Forgejo - pushed, not yet installed.** At 08:05 Søren
 said: "Vi laver noget andet i stedet for github.. Jeg har et andet project her i claude til at sætte en Forgejo
@@ -94,7 +111,7 @@ finds them and fingers still come out wrong). Decided: no Facebook posting (he c
 
 Known flake: tests/test_training.py::test_the_trainer_stops_a_job fails now and then in a full run and passes alone.
 
-## State (0.82.0, 2026-11-25)
+## State (0.83.0, 2026-11-25)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -1326,6 +1343,18 @@ fallback (GITHUB_TOKEN) is gone. Forgejo's API was read in its docs and source (
 requests; a second identical pull request is 422 "pull request already exists for these targets"); no real Forgejo
 here. Tests: tests/test_git.py (14; the whole way, an open pull request and ask-first on both servers). The dev server
 fakes a Forgejo for the card. NOT seen on the VM, and no real Forgejo yet.
+0.83.0, the same chat, at 10:28: Forgejo's users from Settings (his Forgejo is at git.slq.dk). `gitserver.admin()`
+(Forgejo, a valid address and `git.admin_token`; None otherwise, and never used by a tool) and `list_users`,
+`create_user`, `block_user` behind `/hub/api/git/users` (GET, POST, PATCH `{username}`; owner-only: gate.py's
+MEMBER_ROUTES do not list them), with `AdminError` carrying the page's status (400 not set up or a bad name, 404,
+409 for Forgejo's 422, 502 for its refusals - 401 the token, 403 the scope). The password: 24 characters from
+`secrets` with every class, `must_change_password` and `send_notify: false`, in the answer only. Block looks the user
+up first (`GET /users/{name}`) and refuses an administrator: a blocked account's tokens stop working, the Hub's admin
+token included. `GET /hub/api/git` has `admin`. Settings: the admin token field, ForgejoUsers and AddForgejoUser.
+Forgejo's API from its documentation and source only. Tests: tests/test_git.py (17: users listed, made, a name taken,
+blocked and allowed, an administrator not blocked, the admin token in no tool call or model request, a person's
+login 403 on the git routes). The dev server fakes the admin API (three users): the panel, Block, Add a user with its
+password, and a name taken (Forgejo's message in a toast) seen there. NOT seen on the VM; no real Forgejo.
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
 host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU
@@ -2103,6 +2132,18 @@ the host if the VM ever stops by itself.
       converter's cases are ComfyUI 0.42.3's own templates; files from other sites (Civitai, OpenArt) are
       untried - an export is the way to see what went wrong. When COMFYUI_REF changes, the editor's format may
       too: tools/workflow_oracle/ (convert.js, compare.py) is how the converter was checked - run it again.
+101. **Git and Forgejo (0.81.0-0.83.0)** - none of it has run on the VM or against a real server:
+    - **The update**: the Hub's git layer and the sandbox's Node.js 24 layers (about 400 MB more), `data/git` made as
+      uid 1000 and mounted read-only in the sandbox (`sudo bash update.sh compose exec sandbox ls -ld /hub-git`;
+      `node -v` in a chat's bash says v24).
+    - **The VM reaches git.slq.dk**: `curl -sI https://git.slq.dk/api/v1/version` on the VM - the name resolving to the
+      proxy on the LAN (AdGuard Home rewrite, or NAT loopback), with a certificate Python trusts.
+    - **The assistant's token**: Check it names the account and the repositories; then a clone, a branch, a push with
+      its card (commits, files) and a pull request in a project chat; the pull request on git.slq.dk; Forgejo's push
+      mirror carrying the merge to GitHub.
+    - **Users on Forgejo (0.83.0)**: with the admin token the list matches Site Administration's; a user added logs
+      in with the password shown and must change it first; Block stops their login and a token of theirs, Allow login
+      undoes it. Forgejo's answers here come from its API documentation and source, not a real server.
 100. **Hands (0.80.0, 0.80.1)**:
     - **2 MP**: seen 2026-11-05, 1280x1600 on klein 9B base with her LoRA at ×1.1: about 100 s a try, 123 s for the
       first with the switch to ComfyUI, no failure (chat 292). Not checked: "retrying with tiled" in ComfyUI's log. Does

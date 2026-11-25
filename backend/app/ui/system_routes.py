@@ -22,8 +22,8 @@ from ..images import workflows as W
 from ..state import get_hub
 
 router = APIRouter()
-SECRET_SETTINGS = {("cloud", "api_key"), ("tokens", "huggingface"), ("tokens", "civitai"),
-                   ("instagram", "app_secret"), ("git", "token")}                                         # shown masked
+SECRET_SETTINGS = {("cloud", "api_key"), ("tokens", "huggingface"), ("tokens", "civitai"),         # shown masked
+                   ("instagram", "app_secret"), ("git", "token"), ("git", "admin_token")}
 
 
 # ---------------------------------------------------------------- queue + events
@@ -222,7 +222,8 @@ async def git_status(request: Request, check: bool = False):
     s = hub.settings.get("git") or {}
     srv = gitserver.server(hub.settings)
     out: dict = {"server": str(s.get("server") or "github"), "ready": srv is not None,
-                 "plain_http": bool(srv and srv.base.startswith("http://"))}
+                 "plain_http": bool(srv and srv.base.startswith("http://")),
+                 "admin": gitserver.admin(hub.settings) is not None}
     if srv is None and str(s.get("server")) == "forgejo" and str(s.get("token") or "").strip():
         try:
             gitserver.normal_url(str(s.get("url") or ""))
@@ -232,6 +233,44 @@ async def git_status(request: Request, check: bool = False):
     if check and srv is not None:
         out["check"] = await gitserver.whoami(hub)
     return out
+
+
+class NewGitUser(BaseModel):
+    username: str
+    email: str
+    full_name: str = ""
+
+
+class GitUserLogin(BaseModel):
+    blocked: bool
+
+
+@router.get("/hub/api/git/users")
+async def git_users(request: Request):
+    """The users on the owner's Forgejo (0.83.0), with the admin token from Settings - the owner's page alone."""
+    try:
+        return {"users": await gitserver.list_users(get_hub(request))}
+    except gitserver.AdminError as exc:
+        raise HTTPException(exc.status, str(exc)) from exc
+
+
+@router.post("/hub/api/git/users")
+async def git_user_create(request: Request, body: NewGitUser):
+    """A new user on Forgejo (POST /api/v1/admin/users): a random password, changed at the first login, shown here
+    once and kept nowhere."""
+    try:
+        return await gitserver.create_user(get_hub(request), body.username, body.email, body.full_name)
+    except gitserver.AdminError as exc:
+        raise HTTPException(exc.status, str(exc)) from exc
+
+
+@router.patch("/hub/api/git/users/{username}")
+async def git_user_login(request: Request, username: str, body: GitUserLogin):
+    """Block a user's login on Forgejo, or allow it again (prohibit_login)."""
+    try:
+        return await gitserver.block_user(get_hub(request), username, body.blocked)
+    except gitserver.AdminError as exc:
+        raise HTTPException(exc.status, str(exc)) from exc
 
 
 # ---------------------------------------------------------------- models

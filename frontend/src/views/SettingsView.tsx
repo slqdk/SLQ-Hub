@@ -1526,15 +1526,17 @@ function AgentTab({ s }: { s: S }) {
   );
 }
 
-interface GitState { server: "github" | "forgejo"; ready: boolean; plain_http: boolean; problem?: string;
+interface GitState { server: "github" | "forgejo"; ready: boolean; plain_http: boolean; admin: boolean;
+  problem?: string;
   check?: { ok: boolean; error?: string; server?: string; login?: string; kind?: string; repos?: string[]; more?: boolean } }
 
 /** The assistant's git server (0.81.0 GitHub, 0.82.0 GitHub or Forgejo): git_clone, git_fetch and git_push use its
  *  token - kept on the Hub, shown masked, never given to the sandbox. The server is asked whose the token is and
- *  which repositories it reaches. */
+ *  which repositories it reaches. With Forgejo, an administrator's token as well lists its users below (0.83.0). */
 function GitServerSection({ s }: { s: S }) {
   const [state, setState] = useState<GitState | null>(null);
   const [checking, setChecking] = useState(false);
+  const [saves, setSaves] = useState(0);              // a new admin token: the users are asked for again
   const look = useCallback(async (check: boolean) => {
     setChecking(check);
     try {
@@ -1550,8 +1552,8 @@ function GitServerSection({ s }: { s: S }) {
   const name = state?.server === "forgejo" ? "Forgejo" : "GitHub";
   const reach = (c?.repos ?? []).length ? `reaching ${c!.repos!.join(", ")}${c!.more ? " and more" : ""}`
     : "reaching no repository yet";
-  return (
-    <SectionForm s={s} section="git" title="Git server" onSaved={() => look(true)}
+  return (<>
+    <SectionForm s={s} section="git" title="Git server" onSaved={() => { setSaves((n) => n + 1); look(true); }}
       intro={<>With a token the assistant clones repositories from your git server - private ones too - works on
         them with git in the sandbox, pushes a branch of its own and opens a pull request for you to merge. It never
         pushes to a repository's default branch, and asks before it pushes, showing the commits and the files. The
@@ -1567,6 +1569,9 @@ function GitServerSection({ s }: { s: S }) {
             repositories it may work on, and Contents and Pull requests: Read and write. Forgejo: Settings,
             Applications, Generate new token - Specific repositories, and the permissions repository: Read and write
             and user: Read.</> },
+        { key: "admin_token", label: "Forgejo admin token (optional)", type: "password",
+          help: <>Only for Users on Forgejo below, where you add people and block a login: an administrator's token
+            with admin: Read and write. The assistant never gets it.</> },
       ]}>
       {state && <div className="stack sign-ins">
         <small className={(c && !c.ok) || state.problem ? "warn-text" : "muted"}>
@@ -1583,6 +1588,125 @@ function GitServerSection({ s }: { s: S }) {
           can reach. A fine-grained token limited to the repositories the assistant may work on is safer.</small>}
       </div>}
     </SectionForm>
+    {state?.server === "forgejo" && state.admin && <ForgejoUsers key={saves} url={String(s.data?.settings.git?.url ?? "")} />}
+  </>);
+}
+
+interface GitUser { login: string; full_name: string; email: string; admin: boolean; blocked: boolean; active: boolean;
+  last_login: string; created: string }
+
+/** Forgejo's 1970 for "never" (a zero time) shows as no time at all. */
+const forgejoWhen = (iso: string) => (iso && Date.parse(iso) > Date.UTC(2000, 0, 1) ? iso : "");
+
+/** Users on the owner's Forgejo (0.83.0), with the admin token: add a person with a password made by the Hub (shown
+ *  once, changed at the first login), block a login or allow it again. Administrators, and deleting a user with
+ *  what they own, are left to Forgejo's own Site Administration. */
+function ForgejoUsers({ url }: { url: string }) {
+  const { toast } = useApp();
+  const [users, setUsers] = useState<GitUser[] | null>(null);
+  const [error, setError] = useState("");
+  const [adding, setAdding] = useState(false);
+  const load = useCallback(async () => {
+    try {
+      setUsers((await api<{ users: GitUser[] }>("/hub/api/git/users")).users);
+      setError("");
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+  const login = async (u: GitUser, blocked: boolean) => {
+    try {
+      await api(`/hub/api/git/users/${encodeURIComponent(u.login)}`, { method: "PATCH", body: { blocked } });
+      toast(blocked ? `${u.login} cannot log in to Forgejo now` : `${u.login} can log in to Forgejo again`, "run");
+      load();
+    } catch (e) {
+      toast((e as Error).message, "fault");
+    }
+  };
+  return (
+    <section className="stack" style={{ marginBottom: 28 }}>
+      <div className="row"><h3 style={{ margin: 0 }} className="grow">Users on Forgejo</h3>
+        <button className="btn quiet small" onClick={load} aria-label="Ask Forgejo again"><RefreshCw size={14} /></button>
+        <button className="btn small" onClick={() => setAdding(true)}><Plus size={14} /> Add a user</button></div>
+      <p className="muted" style={{ margin: 0, maxWidth: "62ch" }}>The accounts on {url ? hostOf(url) || url : "your Forgejo"},
+        with the admin token. Blocking stops their login and their tokens; their repositories stay. Administrators, and
+        deleting a user with what they own, are done on Forgejo's own Site Administration page.</p>
+      {error ? <small className="warn-text">{error}</small> : (
+        <div className="list">
+          {users === null ? <Empty>Loading</Empty> : users.length === 0 ? <Empty>No users.</Empty> : users.map((u) => (
+            <div className="list-row" key={u.login} style={{ flexWrap: "wrap" }}>
+              <span className="grow" style={{ minWidth: 180 }}><b className="mono">{u.login}</b>
+                {u.full_name && <> {u.full_name}</>}
+                {u.admin && <> <span className="tag">admin</span></>}
+                {u.blocked && <> <span className="tag fault">blocked</span></>}
+                {!u.active && <> <span className="tag">not activated</span></>}
+                <div className="meta">{u.email}{u.email ? ", " : ""}{forgejoWhen(u.last_login)
+                  ? `last logged in ${ago(u.last_login)}` : "not logged in yet"}</div></span>
+              {u.admin ? null : u.blocked
+                ? <button className="btn quiet small" onClick={() => login(u, false)}>Allow login</button>
+                : <ConfirmButton onConfirm={() => login(u, true)} confirmText="Block their login?">Block</ConfirmButton>}
+            </div>
+          ))}
+        </div>)}
+      {adding && <AddForgejoUser url={url} onClose={() => setAdding(false)} onAdded={load} />}
+    </section>
+  );
+}
+
+function AddForgejoUser({ url, onClose, onAdded }: { url: string; onClose: () => void; onAdded: () => void }) {
+  const { toast } = useApp();
+  const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [made, setMade] = useState<{ login: string; password: string } | null>(null);
+  const add = async () => {
+    setBusy(true);
+    try {
+      const r = await api<{ user: GitUser; password: string }>("/hub/api/git/users",
+        { body: { username: username.trim(), email: email.trim(), full_name: name } });
+      setMade({ login: r.user.login || username.trim(), password: r.password });
+      onAdded();
+    } catch (e) {
+      toast((e as Error).message, "fault");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const copy = async (text: string) => toast((await copyText(text)) ? "Copied" : "Copying failed", "run");
+  return (
+    <Modal title="Add a user to Forgejo" onClose={onClose} footer={made
+      ? <button className="btn primary" onClick={onClose}>Done</button>
+      : <><button className="btn" onClick={onClose}>Cancel</button>
+        <button className="btn primary" disabled={busy || !username.trim() || !email.trim()} onClick={add}>Add</button></>}>
+      {made ? (
+        <>
+          <p style={{ margin: 0 }}>The password for <b>{made.login}</b> is shown only now.</p>
+          <div className="code-line">{made.password}</div>
+          <div className="row wrap">
+            <button className="btn small" onClick={() => copy(made.password)}><Copy size={14} /> Copy the password</button>
+          </div>
+          <p className="small muted" style={{ margin: 0 }}>They log in at {url || "your Forgejo"} with the user name
+            and this password, and Forgejo has them choose their own before anything else. Forgejo sent them no
+            mail, so pass it on yourself.</p>
+        </>
+      ) : (
+        <>
+          <label className="field"><span>User name</span><input className="input mono" autoFocus value={username}
+            autoCapitalize="off" autoComplete="off" onChange={(e) => setUsername(e.target.value)} placeholder="anna" />
+            <small>Up to 40 letters, digits, - _ and ., with a letter or digit first and last. It is part of
+            their repositories' addresses.</small></label>
+          <label className="field"><span>E-mail</span><input className="input" type="email" value={email}
+            autoComplete="off" onChange={(e) => setEmail(e.target.value)} placeholder="anna@example.com" />
+            <small>Forgejo needs one; nothing is sent to it now.</small></label>
+          <label className="field"><span>Full name (optional)</span><input className="input" value={name}
+            autoComplete="off" onChange={(e) => setName(e.target.value)} placeholder="Anna Hansen" /></label>
+          <p className="small muted" style={{ margin: 0 }}>The Hub makes a password for them, shown once; Forgejo has
+            them change it at the first login.</p>
+        </>
+      )}
+    </Modal>
   );
 }
 

@@ -881,10 +881,39 @@ def main() -> None:
 def fake_git(hub) -> None:
     """0.81.0/0.82.0: a git server (a Forgejo, unless one is set up), and a push that only plans and pretends ("push
     the game"): git_push's card and answer, without a repository or a server. The other git tools are offered but reach
-    no server here."""
+    no server here. 0.83.0: Forgejo's admin API for Settings' Users on Forgejo, three users in memory."""
     from app.agent import gitserver as gs
     if not gs.configured(hub.settings):
-        hub.settings.update("git", {"server": "forgejo", "url": "https://forgejo.example", "token": "dev"})
+        hub.settings.update("git", {"server": "forgejo", "url": "https://forgejo.example", "token": "dev",
+                                    "admin_token": "dev-admin"})
+    users = {u["login"]: u for u in (
+        {"login": "soren", "full_name": "Søren", "email": "soren@example.com", "is_admin": True,
+         "prohibit_login": False, "active": True, "last_login": "2026-11-25T08:10:00+01:00"},
+        {"login": "anna", "full_name": "Anna Hansen", "email": "anna@example.com", "is_admin": False,
+         "prohibit_login": False, "active": True, "last_login": "1970-01-01T01:00:00+01:00"},
+        {"login": "bo", "full_name": "", "email": "bo@example.com", "is_admin": False, "prohibit_login": True,
+         "active": True, "last_login": "2026-11-02T19:40:00+01:00"})}
+
+    async def admin_call(_hub, method: str, path: str, body: dict | None = None,
+                         params: dict | None = None) -> httpx.Response:
+        name = path.rsplit("/", 1)[-1].lower()
+        if method == "GET" and path == "/admin/users":
+            return httpx.Response(200, json=list(users.values()) if (params or {}).get("page") == "1" else [])
+        if name not in users and method != "POST":
+            return httpx.Response(404, json={"message": "user does not exist"})
+        if method == "GET":
+            return httpx.Response(200, json=users[name])
+        if method == "PATCH":
+            users[name]["prohibit_login"] = bool((body or {}).get("prohibit_login"))
+            return httpx.Response(200, json=users[name])
+        login = str((body or {}).get("username"))
+        if login.lower() in users:
+            return httpx.Response(422, json={"message": f"user already exists [name: {login}]"})
+        users[login.lower()] = {"login": login, "full_name": (body or {}).get("full_name", ""), "is_admin": False,
+                                "email": (body or {}).get("email"), "prohibit_login": False, "active": True,
+                                "last_login": "1970-01-01T01:00:00+01:00"}
+        return httpx.Response(201, json=users[login.lower()])
+    gs._admin_call = admin_call
 
     async def plan(_hub, _wd, args: dict) -> gs.PushPlan:
         srv = gs.need(hub.settings)

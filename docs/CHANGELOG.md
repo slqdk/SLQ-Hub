@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.83.0 - 2026-11-25
+
+- Users on your Forgejo from the Hub. With Forgejo as the git server, add an
+  admin token under Settings, Assistant, Git server (an administrator's token
+  with admin: Read and write), and **Users on Forgejo** below it lists the
+  accounts, adds one and blocks or allows a login.
+- Add a user takes a user name, an e-mail address and a full name. The Hub
+  makes the password, shows it once to copy, and keeps it nowhere; Forgejo has
+  them choose their own at the first login and sends no mail.
+- Administrators are not blocked from the Hub, and deleting a user is left to
+  Forgejo's own Site Administration page.
+- The admin token is never the assistant's: the git tools still use only the
+  other token.
+
 ## 0.82.0 - 2026-11-25
 
 - The assistant's git server can now be your own Forgejo as well as GitHub.
