@@ -29,7 +29,7 @@ from .. import netfetch
 SEARCH = "internet:search"
 CODE = "internet:code"
 SITE = "internet:site:"
-TOOLS = ("web_search", "web_fetch", "bash", "windows_app", "web_app")
+TOOLS = ("web_search", "web_fetch", "bash", "windows_app", "web_app", "git_clone", "git_fetch")
 
 
 def asking(settings) -> bool:
@@ -116,6 +116,13 @@ def question(name: str, args: dict, allowed, can_block_code: bool) -> tuple[dict
             return {"kind": "internet", "key": CODE, "what": "code", "detail": shown(args.get("command"), 4000),
                     "always": "Always allow internet for code", "unblockable": not can_block_code}, True
         return None, False                             # runs offline
+    if name in ("git_clone", "git_fetch"):             # 0.81.0: the Hub fetches from GitHub (git_push asks anyway)
+        key = site_key("github.com")
+        if allowed(key):
+            return None, True
+        what = f"git clone {args.get('repo')}" if name == "git_clone" else f"git fetch {args.get('path') or ''}"
+        return {"kind": "internet", "key": key, "what": "git", "host": "github.com",
+                "detail": shown(what.strip(), 1000), "always": "Always allow github.com"}, True
     if name in ("windows_app", "web_app"):
         if allowed(CODE):
             return None, True

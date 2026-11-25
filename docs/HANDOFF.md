@@ -4,7 +4,24 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## Next session - start here (written 2026-11-05, at 0.80.6)
+## Next session - start here (written 2026-11-25, at 0.81.0)
+
+**0.81.0 (2026-11-25): GitHub for the assistant, and Node.js 24 in the sandbox - pushed, not yet installed.** In the
+claude.ai project chat of 2026-11-25 Søren asked about more MCP servers, wants the Hub to develop details in
+SLQ-Game-Lobby (github.com/slqdk/SLQ-Game-Lobby, private, ~85,000 lines of JS, three.js, Node with no packages) and
+said "Det kunne også være RIGTIG fedt hvis hub også kan skubbe til Git" - then "Ja gør det" to: clone, pull and push
+to a branch with a pull request, never main, push asks first, and Node 24 in the sandbox. Built: `git_clone`,
+`git_fetch`, `git_push` and the token in Settings → Assistant → GitHub (DESIGN §6 "Git and GitHub", §11). To try,
+with him: install (`sudo bash /opt/slq-hub/update.sh` - the disk first: about 400 MB more of images); on github.com a
+fine-grained token (Repository access: only SLQ-Game-Lobby; Permissions: Contents and Pull requests, Read and write);
+save it, press Check it (it should name slqdk/SLQ-Game-Lobby); then in a project chat "Clone slqdk/SLQ-Game-Lobby,
+change <a detail> on a new branch, run npm test and open a pull request". Not verified: anything against the real
+GitHub, the read-only `/hub-git` mount, the Node 24 layers in the real image. Told him in that chat, not built (his
+choice): GitHub's own MCP server (`https://api.githubcopilot.com/mcp/`, headers `Authorization: Bearer <token>` and
+`X-MCP-Tools`) works in the MCP tab without code, but a commit through it carries whole files through the model
+(the game's hunt.js alone is ~330 KB); Context7 (`https://mcp.context7.com/mcp`) for current library docs; the game
+repo has no short AGENTS.md, and its HANDOFF.md is ~790 KB (about 200k tokens, three times the 64K context) - the
+Hub has to grep it, never read it whole.
 
 **The Hub was down from 13:03 to about 13:28 on 2026-11-05: the VM's disk was full, and nearly still is.** `df`: 617 G, 589
 used, 0 available (28 G was ext4's reserve for root). `docker system df`: images 99.56 GB (3.6 reclaimable), build cache 106.1 GB (10.7 reclaimable, the
@@ -60,7 +77,7 @@ finds them and fingers still come out wrong). Decided: no Facebook posting (he c
 
 Known flake: tests/test_training.py::test_the_trainer_stops_a_job fails now and then in a full run and passes alone.
 
-## State (0.80.6, 2026-11-05)
+## State (0.81.0, 2026-11-25)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -1260,6 +1277,28 @@ small sample with few positives. tests/test_media_check.py (chat 299's and chat 
 box in the whole picture, the parts overlap); each part failing without it (10 mutations). `test_the_hand_count_itself`
 needs MediaPipe and did not run under pytest here; the worker was run by hand instead, 0.56 s a picture with start-up.
 Not reviewed by a separate agent. NOT seen on the card: item 100.
+0.81.0, the claude.ai project chat of 2026-11-25 (above): GitHub for the assistant. The token never enters the sandbox:
+the Hub keeps a bare mirror per repository in data/git (it alone writes there; git in the Hub's image now), runs git
+only there and in throwaway repositories of its own, with the token as `http.https://github.com/.extraheader` in git's
+environment; the sandbox mounts data/git read-only at /hub-git and clones from it, so a working copy's origin is the
+mirror. git_push reads the branch's commit from the working copy's files without following links (`open_inside`),
+pushes it from a scratch repository that borrows the working copy's objects, refuses the default branch, a
+non-fast-forward and nothing-to-push before asking, and the card shows the commits and the diffstat (`Tool.preview`,
+new: run before a tool asks; an error there asks nothing). A clone's files go into the turn's before-snapshot, so the
+files card and the review show only what the turn changed. Node.js 24 copied from node:24-bookworm-slim into the
+sandbox in layers at the end (the archive's 18 stays in /usr/bin): the game's self-test fails on 18
+(`performance.now` read-only), 1,885 checks pass on 22 - run here. Built in Docker here: the sandbox's new layers on
+ubuntu:24.04 with the archive's nodejs - `node` v24.22.3 from /usr/local/bin, npm and npx 11.19.1, corepack, the
+archive's v18.19.1 left in /usr/bin - and the game's self-test in it as uid 1000 with no network: 1,885 checks OK in
+1 min 46 s; the Hub's git layer on python:3.12-slim (Debian 13: git 2.47.3), the config in the environment and
+`protocol.allow=never` refusing file://; a mirror mounted read-only clones and fetches as uid 1000 there, `git push`
+in the clone prints the push-with-the-git_push-tool path, and a mirror owned by root is refused ("dubious ownership")
+- so data/git must be uid 1000's, which the updater makes it (FOLDERS). It leaves data/git out of the backups and
+keeps it in a restore. Tests: tests/test_git.py (10, against bare repositories as GitHub and a fake API, with a
+sandbox that runs its commands for real), each safety rule failing its test when taken out (6 mutations); the full
+suite passes (744). The approval card and Settings → Assistant → GitHub seen in the dev server (tests/devserver.py,
+"push the game": a faked plan and push). Not reviewed by a separate agent. NOT seen on the VM: anything of it, nor
+anything against the real GitHub.
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
 host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU

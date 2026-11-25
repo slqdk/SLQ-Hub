@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.81.0 - 2026-11-25
+
+- The assistant works on GitHub repositories. Add a GitHub token under
+  Settings, Assistant, GitHub (a fine-grained token that reaches only the
+  repositories it may work on, with Contents and Pull requests set to Read and
+  write), and it gets three tools: `git_clone` clones a repository - a private
+  one too - into the working folder, `git_fetch` gets what is new on GitHub,
+  and `git_push` pushes a branch and can open a pull request for you to merge.
+- It never pushes to a repository's default branch, and never forces. A push
+  asks first (unless you choose Always), and the card shows the commits and the
+  files changed.
+- The token stays on the Hub. The Hub fetches and pushes itself, from its own
+  copies of the repositories (`data/git`); the sandbox sees those copies
+  read-only and never sees the token.
+- The sandbox has Node.js 24. Ubuntu's Node.js 18 was too old for some code: a
+  game's self-test failed on it.
+- With the internet set to ask first, cloning and fetching ask for github.com.
+- This update adds a layer to the Hub's image (git) and two to the sandbox's
+  (Node.js 24), and fetches the official Node.js 24 image to copy it from:
+  about 400 MB more on the disk.
+
 ## 0.80.6 - 2026-11-05
 
 - The hand count now also looks at four overlapping parts of a picture. On the

@@ -84,7 +84,8 @@ BUILT = ("hub", "llm", "comfyui", "sandbox", "speech", "trainer")  # services wi
 # create a missing one as root, and the Hub could not download into it.
 FOLDERS = ("data", "models/llm", "models/comfy", "models/speech", "comfy/input", "comfy/output", "comfy/user",
            "windows/storage", "windows/oem", "windows/shared", "data/training", "models/hf", "models/comfy/checkpoints",
-           "data/logs/comfyui")   # ComfyUI's log (0.77.0), written by its container, read by the Hub
+           "data/logs/comfyui",   # ComfyUI's log (0.77.0), written by its container, read by the Hub
+           "data/git")            # the Hub's copies of GitHub repositories (0.81.0), the sandbox's /hub-git
 KEEP = 3
 TIMEOUT = 300
 # 2026-11-05: the build and the backup, as root, wrote into the 5% of the disk ext4 keeps for root. The Hub, which is uid
@@ -96,14 +97,15 @@ CHECK = float(os.environ.get("HUB_UPDATE_CHECK", "5"))
 BUSY_PERCENT = 10         # a Hub older than 0.26.0 cannot say what it does: the card's own load decides
 # Left out of the backups: logs, and what is downloaded or built again by itself - the sandbox's NuGet packages
 # and caches, and .NET build output (.hub/dotnet) in any working folder (0.15.1).
-BACKUP_EXCLUDE = ("./logs", "./sandbox-home/.nuget", "./sandbox-home/.local/share/NuGet")
+BACKUP_EXCLUDE = ("./logs", "./sandbox-home/.nuget", "./sandbox-home/.local/share/NuGet",
+                  "./git")    # 0.81.0: copies of GitHub repositories - fetched again, and kept by a restore
 BACKUP_EXCLUDE_ANYWHERE = ("/.hub/dotnet",)
 # LoRA trainings (0.53.0): a run's checkpoints and samples (output/) and ai-toolkit's caches beside its pictures
 # (images/_latent_cache, _t_e_cache) - gigabytes ai-toolkit makes again; with them a backup was 10.3 GB and took the
 # Hub away for ten minutes (2026-10-30). The pictures, captions and run.json are backed up; a restore leaves the
 # trainings' folders as they are and puts those back over them, so it never deletes checkpoints.
 BACKUP_EXCLUDE_RE = re.compile(r"^\./training/[^/]+/(output|images/_[^/]+)(/|$)")
-RESTORE_KEEP = {"logs", "training"}
+RESTORE_KEEP = {"logs", "training", "git"}   # git (0.81.0): not in the backups, and the working copies' origin
 
 
 class Stop(Exception):

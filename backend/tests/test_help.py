@@ -76,7 +76,7 @@ async def test_every_need_in_the_help_is_answered(signed_in):
     text = _help_text()
     union = re.search(r"export type Need = ([^;]+);", text).group(1)
     needs = re.findall(r'"([a-z.0-9]+)"', union)
-    assert len(needs) == 19
+    assert len(needs) == 20
     h = (await signed_in.get("/hub/api/help")).json()
     for n in needs:
         group, _, key = n.partition(".")

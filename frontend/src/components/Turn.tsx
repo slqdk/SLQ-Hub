@@ -450,6 +450,7 @@ const ASK_TEXT: Record<string, string> = {
   search: "wants to search the web",
   site: "wants to read a page from",
   code: "wants to run code with internet access",
+  git: "wants to fetch a repository from",
 };
 
 function Approval({ tool, answer }: { tool: ToolView;
@@ -470,12 +471,14 @@ function Approval({ tool, answer }: { tool: ToolView;
     <div className="tool-body">
       <div className="approval" role="alert">
         {ask ? <>
-          <p>The assistant {ASK_TEXT[ask.what] ?? "wants to use the internet"}{ask.what === "site" ? <> <b>{ask.host}</b></> : null}.
+          <p>The assistant {ASK_TEXT[ask.what] ?? "wants to use the internet"}{ask.what === "site" || ask.what === "git"
+            ? <> <b>{ask.host}</b></> : null}.
             {" "}You have it ask before it goes online{ask.unblockable ? " (code cannot be kept offline here, so every command asks)" : ""}.</p>
           {ask.detail && <pre>{ask.detail}</pre>}
         </> : <>
           <p><b>{toolLabel(tool.name)}</b> wants to run. It reaches outside the sandbox, so it asks first.</p>
-          {tool.args && Object.keys(tool.args).length > 0 && <pre>{JSON.stringify(tool.args, null, 2)}</pre>}
+          {tool.preview ? <pre>{tool.preview}</pre>
+            : tool.args && Object.keys(tool.args).length > 0 && <pre>{JSON.stringify(tool.args, null, 2)}</pre>}
           {tool.sends && tool.sends.length > 0 && <p>The content of {tool.sends.length === 1 ? "this file" :
             `these ${tool.sends.length} files`} from the chat's folder goes with it: <span className="mono">
             {tool.sends.join(", ")}</span></p>}

@@ -16,6 +16,13 @@ CATALOG = Path(__file__).resolve().parents[1] / "app" / "catalog" / "models.json
 
 
 @pytest.fixture(autouse=True)
+def _no_github_token_from_the_machine(monkeypatch):
+    """GITHUB_TOKEN is the assistant's GitHub token in .env (0.81.0): one in the environment the tests run in (a CI
+    runner's) must not offer the git tools in every test."""
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _tokens_forget_the_hub():
     """The download sign-ins (app/tokens.py, 0.64.0) follow the Hub built last: after each test, none - so a token one
     test saves in Settings never reaches the next, which may have no Hub of its own."""

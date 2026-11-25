@@ -72,6 +72,12 @@ class Env:
         return self.data_dir / "logs" / "comfyui" / "comfyui.log"
 
     sandbox_workspace: str = "/workspace"   # the sandbox's view of the same folder
+    sandbox_git: str = "/hub-git"           # data/git as the sandbox sees it, read-only (0.81.0)
+
+    @property
+    def git_dir(self) -> Path:
+        """The Hub's own copies of GitHub repositories (0.81.0, app/agent/github.py): only the Hub writes them."""
+        return self.data_dir / "git"
 
 
 def _read_version() -> str:
@@ -168,6 +174,9 @@ DEFAULTS: dict = {
         "app_id": "",                      # its app ID (Unified login) - or its Instagram app ID (Instagram login)
         "app_secret": "",                  # the matching secret (masked, in no export)
         "config_id": "",                   # 0.76.1: Unified login's configuration ID ("": Instagram login)
+    },
+    "github": {                            # 0.81.0: the assistant's GitHub (app/agent/github.py)
+        "token": "",                       # a token (fine-grained: the repositories it may work on); "" = .env's
     },
     "tokens": {                            # sign-ins for model downloads (0.64.0, app/tokens.py); "" = .env's, if any
         "huggingface": "",                 # a read token: gated models (FLUX.2 klein 9B, its uncensored encoder)

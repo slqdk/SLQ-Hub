@@ -1,6 +1,11 @@
 # The agent's sandbox: where bash and Python run, in /workspace (the Hub's
 # project and chat folders). No Docker socket, no GPU, uid 1000, its own
 # network that the VM's firewall keeps off the LAN.
+
+# Node.js 24 LTS from the official image (0.81.0), copied in near the end: Ubuntu 24.04's own is 18.19, which is past its
+# end of life, and code worked on here wants 20 or newer (a game's self-test failed on 18).
+FROM node:24-bookworm-slim AS node
+
 FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -120,6 +125,17 @@ RUN echo /opt/hub3d > "$(/opt/py/bin/python -c 'import sysconfig; print(sysconfi
     && printf '#!/bin/sh\nexec /opt/py/bin/python -I -m hub3d "$@"\n' > /usr/local/bin/hub3d \
     && chmod 755 /usr/local/bin/hub3d \
     && cd /tmp && runuser -u sandbox -- /usr/local/bin/hub3d selftest
+
+# Node.js 24 over the archive's 18 (0.81.0, the stage at the top), in layers of their own so the ones above are not
+# built again: /usr/local/bin comes before /usr/bin in PATH, so node, npm and npx - and MCP servers started with npx -
+# are 24's. The archive's stay in /usr/bin, unused.
+COPY --from=node /usr/local/bin/node /usr/local/bin/node
+COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN ln -sf ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && ln -sf ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
+    && if [ -f /usr/local/lib/node_modules/corepack/dist/corepack.js ]; then \
+         ln -sf ../lib/node_modules/corepack/dist/corepack.js /usr/local/bin/corepack; fi \
+    && node --version | grep -q '^v24\.' && npm --version >/dev/null && npx --version >/dev/null
 
 COPY execd.py confine.py /opt/execd/
 

@@ -143,6 +143,7 @@ def _ensure_tools_loaded() -> None:
     from .tools import (ask, audio, files, history, images, knowledge, model3d, persona, shell, video,  # noqa: F401
                         web, webapp, windows, workflows)
     from . import meta_tools  # noqa: F401
+    from .tools import git  # noqa: F401 - 0.81.0, last: the others keep their order (and the model server's cache)
 
 
 def vision(model: dict) -> bool:
@@ -658,7 +659,7 @@ class Engine:
                     if self.repeats >= LOOP_REPEATS:
                         self._stuck(f"{self.repeats} repeated tool calls", loop=True)
                     return self._finish(name, cid, args, result, t0)
-                allowed, online, once = True, True, False
+                allowed, online, once, refused = True, True, False, None
                 where = {"depth": self.depth, "parent": self.parent} if self.depth else {}
                 owner = self.device is None               # a person answers once each time
                 chat_id = self.chat.get("id") if owner else None
@@ -681,12 +682,22 @@ class Engine:
                         once = decision == "allow" or not owner
                 if allowed and tool.needs_approval and not ok_here(name):
                     sends = named_files(args, tool.sends_files)      # their content goes too: the card says so
-                    decision = await self._ask(cid, name, args, can_chat=chat_id is not None, **where,
-                                               **({"sends": sends} if sends else {}))
-                    remember(decision, name)
-                    allowed = decision in ("allow", "always", "chat")
+                    extra: dict = {"sends": sends} if sends else {}
+                    if tool.preview is not None:                     # what it would do, checked (0.81.0)
+                        try:
+                            extra["preview"] = await tool.preview(self.tool_context(cid, online), args)
+                        except asyncio.CancelledError:
+                            raise
+                        except Exception as exc:  # noqa: BLE001 - it cannot be done: the error, nothing asked
+                            refused = ToolResult(str(exc) or type(exc).__name__, is_error=True)
+                    if refused is not None:
+                        allowed = False
+                    else:
+                        decision = await self._ask(cid, name, args, can_chat=chat_id is not None, **where, **extra)
+                        remember(decision, name)
+                        allowed = decision in ("allow", "always", "chat")
                 if not allowed:
-                    result = ToolResult(DECLINED, is_error=True)
+                    result = refused or ToolResult(DECLINED, is_error=True)
                 else:
                     try:
                         result = await tool.handler(self.tool_context(cid, online, online and once), args)
@@ -1503,6 +1514,8 @@ class Agent:
             engine.notes_at = await asyncio.to_thread(notes_file.stamp, wd.own_root)
             engine.turn_options = {k: options[k] for k in ("thinking", "effort") if options.get(k) is not None}
             engine.steps.append({"type": "queue", "seconds": waited})
+            if before is not None:                        # git_clone adds the clone's files to it (0.81.0): the card
+                engine.state["files_before"] = before     # and the review show what the turn changed in them
             if persona is not None:                       # its own tools, no NOTES.md, no independent review
                 self.persona_engine(engine, persona, chat, project, wd, entry)
 

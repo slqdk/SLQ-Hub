@@ -195,6 +195,9 @@ services:
     volumes:
       - ${HUB_ROOT:-/srv/slq-hub}/data/workspace:/workspace
       - ${HUB_ROOT:-/srv/slq-hub}/data/sandbox-home:/home/sandbox
+      # The Hub's copies of GitHub repositories (0.81.0, app/agent/github.py): read-only here - a working copy's
+      # origin. Only the Hub writes them, with the GitHub token, which never comes into this container.
+      - ${HUB_ROOT:-/srv/slq-hub}/data/git:/hub-git:ro
     tmpfs:
       - /tmp:size=4g
     # Public resolvers: Docker's embedded DNS forwards from inside this

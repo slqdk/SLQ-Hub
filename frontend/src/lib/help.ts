@@ -19,12 +19,13 @@ export interface HelpCaps {
   video: { t2v: boolean; i2v: boolean; flf2v: boolean };
   model3d: boolean;           // 0.67.0: TRELLIS.2 downloaded
   workflows: number;          // the owner's ComfyUI workflows (0 in a person's chats)
+  github: boolean;            // 0.81.0: a GitHub token is set (the owner's chats)
 }
 
 export type Need = "code" | "windows" | "browser" | "libraries" | "mcp" | "handover"
   | "images.generate" | "images.edit" | "images.cutout"
   | "sound.speech" | "sound.music" | "sound.sound" | "sound.voice" | "sound.separate"
-  | "video.t2v" | "video.i2v" | "video.flf2v" | "model3d" | "workflows";
+  | "video.t2v" | "video.i2v" | "video.flf2v" | "model3d" | "workflows" | "github";
 
 export interface Example {
   text: string;
@@ -77,6 +78,7 @@ export const NEEDS: Record<Need, { missing: string; get: string; tab?: string }>
   "video.flf2v": { missing: "Needs Wan 2.2 14B picture to video", get: "Download it under Settings, Models, Video models.", tab: "models/video" },
   "model3d": { missing: "Needs TRELLIS.2", get: "Download TRELLIS.2 (picture to 3D) under Settings, Models, 3D.", tab: "models/3d" },
   "workflows": { missing: "No workflow is added", get: "Add a ComfyUI workflow under Settings, Models, Workflows.", tab: "models/workflows" },
+  "github": { missing: "No GitHub token is set", get: "Add a fine-grained token under Settings, Assistant, GitHub.", tab: "agent" },
 };
 
 export function has(caps: HelpCaps, need: Need): boolean {
@@ -917,6 +919,24 @@ export const SECTIONS: HelpSection[] = [
           { text: "Start the program in this project, click Start and tell me what happens" },
         ],
         needs: ["windows"],
+        owner: true,
+      },
+      {
+        id: "github",
+        tools: ["git_clone", "git_fetch", "git_push"],
+        title: "Work on a GitHub repository",
+        what: "With your GitHub token it clones a repository - a private one too - works on it with git in the "
+          + "sandbox, pushes a branch of its own and opens a pull request for you to review and merge. It never pushes "
+          + "to the repository's default branch, and asks before it pushes, showing the commits and the files. The "
+          + "token stays on the Hub: code in the sandbox never sees it.",
+        examples: [
+          { text: "Clone my-name/my-game, make the jump a little higher on a new branch, and open a pull request" },
+          { text: "Get what is new on GitHub in my-name/my-game and tell me what changed on main" },
+        ],
+        tips: ["Give it a fine-grained token that reaches only the repositories it may work on, with Contents and Pull "
+          + "requests set to Read and write.", "It runs the repository's tests in the sandbox before it pushes when "
+          + "you ask it to - Node.js 24, Python and .NET are there."],
+        needs: ["github"],
         owner: true,
       },
       {

@@ -13,6 +13,7 @@ from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
 from .. import auth, hf, tokens
+from ..agent import github
 from ..catalog import GROUPS
 from ..config import DEFAULTS
 from ..gpu.scheduler import SchedulerError
@@ -22,7 +23,7 @@ from ..state import get_hub
 
 router = APIRouter()
 SECRET_SETTINGS = {("cloud", "api_key"), ("tokens", "huggingface"), ("tokens", "civitai"),
-                   ("instagram", "app_secret")}                                         # shown masked
+                   ("instagram", "app_secret"), ("github", "token")}                                         # shown masked
 
 
 # ---------------------------------------------------------------- queue + events
@@ -210,6 +211,17 @@ async def download_tokens(request: Request, check: bool = False):
     out: dict = {name: {"from": tokens.where(name)} for name in tokens.ENV}
     if check and out["huggingface"]["from"]:
         out["huggingface"]["check"] = await _hf_whoami(hub)
+    return out
+
+
+@router.get("/hub/api/github")
+async def github_status(request: Request, check: bool = False):
+    """The assistant's GitHub token (0.81.0): where it comes from - "settings", "env" (GITHUB_TOKEN in .env) or "" -
+    never the token itself; check=true asks GitHub whose it is and which repositories it reaches."""
+    hub = get_hub(request)
+    out: dict = {"from": github.token_from(hub.settings)}
+    if check and out["from"]:
+        out["check"] = await github.whoami(hub)
     return out
 
 

@@ -83,7 +83,7 @@ OFFLINE_NOTE = ("(This command ran without the network - no connections, no DNS:
                 "packages, git clone, curl - run it again with internet: true, and the user is asked.)")
 BASH_TEXT = ("Run a bash command in the sandbox (Ubuntu with Python 3 + numpy/pandas/matplotlib/pillow/opencv, "
              "manifold3d/trimesh/shapely and hub3d for 3D models to print, "
-             "Node.js, the .NET 10 SDK (C#), git, curl, ImageMagick, ffmpeg, Tesseract OCR, poppler). It starts in "
+             "Node.js 24, the .NET 10 SDK (C#), git, curl, ImageMagick, ffmpeg, Tesseract OCR, poppler). It starts in "
              "the working folder, "
              "has internet access but no access to the local network, and runs as an unprivileged user. Each call "
              "is a fresh shell (cd and variables do not carry over; files do). Use it to run code, tests, "

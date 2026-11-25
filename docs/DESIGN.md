@@ -69,9 +69,9 @@ Proxmox host
     ├── speech     Text to speech on the CPU (Chatterbox, Røst; CPU PyTorch).
     │              No GPU. Internal only, no way out.
     ├── searxng    Web search for the agent. Internal only.
-    ├── sandbox    Ubuntu with Python, Node, .NET 10 (C#), ImageMagick, Tesseract, ffmpeg …
-    │              runs the agent's commands as uid 1000 in /workspace.
-    │              Own network, blocked from the LAN by the VM's firewall.
+    ├── sandbox    Ubuntu with Python, Node 24, .NET 10 (C#), ImageMagick, Tesseract, ffmpeg …
+    │              runs the agent's commands as uid 1000 in /workspace; sees data/git
+    │              read-only at /hub-git (0.81.0). Own network, blocked from the LAN.
     └── windows    Optional (0.39.0, profile "windows"): Windows in a KVM VM inside a
                    container (dockur/windows), for Windows-only tools the owner serves
                    to the Hub - an MCP server. On sbx at .30 under the sandbox's rules;
@@ -124,7 +124,7 @@ Volumes (host paths, all under `/srv/slq-hub`):
 
 | Path | Contents |
 |---|---|
-| `data/` | `hub.db`, settings, chats, uploads, generated images, project files, sync revisions, skills, memory, libraries, the sandbox's home. Backed up by `update.sh` (not the logs, the sandbox's NuGet caches or .NET build output). |
+| `data/` | `hub.db`, settings, chats, uploads, generated images, project files, sync revisions, skills, memory, libraries, the sandbox's home, the Hub's copies of GitHub repositories (`data/git`, 0.81.0). Backed up by `update.sh` (not the logs, the sandbox's NuGet caches, .NET build output or `data/git` - fetched again from GitHub, and left in place by a restore). |
 | `models/llm/` | GGUF files. Not backed up (re-downloadable). |
 | `models/comfy/` | ComfyUI model folders (`diffusion_models/`, `text_encoders/`, `vae/`, …). |
 | `models/speech/` | The speech models (made by the Hub on the first download; the speech container mounts `models/` read-only). |
@@ -703,6 +703,7 @@ message's time with the conversation.
 | `skill` | Reads one of the chosen skills: its SKILL.md, or one of its other files (`skill(name, file)`; PDF, Word, Excel and PowerPoint as text, pictures shown). Offered when the chat has skills. |
 | `skill_propose` | The skill the assistant made in the working folder: checked against the format, kept as a draft and shown as a card with Add skill (0.23.0, §6 "Skills"). Not in subagents. |
 | `memory` | One tool with commands: view, create, str_replace, insert, delete, rename. Global memory (`/memories`) plus per-project memory (`/memories/project`). |
+| `git_clone`, `git_fetch`, `git_push` | A GitHub repository in the working folder with the owner's token (0.81.0, "Git and GitHub" below): clone it, fetch what is new, push a branch of its own and open a pull request. The Hub does the network work; the sandbox never sees the token. Push asks first, never to the default branch, never forced. Only in the owner's chats, with a token set. |
 | `library_search` | Present when the chat or project has libraries: text and page-image search, with page images for the vision model. |
 | `artifact` | Create or update an HTML, React, SVG, Mermaid, Markdown or code artifact, with versions. Shown in the side panel in a sandboxed iframe. React and Babel are served locally, so it works offline. |
 | `todo_write` | A visible checklist for long tasks. It helps a 27B model keep track of them. |
@@ -1570,6 +1571,103 @@ event, `started` names the cloud model, a `cloud` step records it, there is no
 hand-over, no title (the title is made by the local model) and no independent
 review (it runs on the card) - as after a hand-over to the cloud. Subagents
 use the cloud too.
+
+### Git and GitHub (0.81.0)
+
+Søren, 2026-11-25: the Hub should be able to work on details in his games (SLQ-Game-Lobby, a private repository)
+"og ... skubbe til Git". Claude Code does it by branch and pull request, and he merges; the Hub does the same.
+
+**What the model gets.** Three tools, offered in the owner's chats when a GitHub token is set (not in a person's chat
+or a persona's task): `git_clone(repo, folder?, branch?)`, `git_fetch(path?)` and `git_push(path?, branch?,
+pull_request?, title?, body?)`. The clone is an ordinary working copy in the working folder (by default named after
+the repository, in `hub/` in a project with a synced folder): the model works in it with bash and the file tools -
+`git switch -c`, `git add`, `git commit`, tests - and the tools do what needs GitHub. A call without `path` uses the
+only working copy in the folder.
+
+**The token never enters the sandbox.** Code there runs freely and without asking (§6, Approval), the sandbox's home
+is shared by all of the owner's chats, and a repository may hold what must never be public (the game's bought
+models). So:
+
+- The token: Settings → Assistant → GitHub (`github.token`, masked, the owner's alone, in no export) or `GITHUB_TOKEN`
+  in `.env` (the one in Settings wins; `GET /hub/api/github?check=true` asks GitHub whose it is and which
+  repositories it reaches). The page asks for a fine-grained token limited to the repositories the assistant may
+  work on, with Contents and Pull requests: Read and write - GitHub enforces that, whatever the Hub does.
+- **Mirrors.** For each repository a bare copy in `data/git/<owner>/<name>.git` (lower case) holds GitHub's
+  branches and tags (`+refs/heads/*:refs/heads/*`, tags, `--prune`), and its HEAD follows GitHub's default branch
+  (`ls-remote --symref`). Only the Hub writes there: it runs `git` itself (the Hub's image has git since 0.81.0), one
+  operation at a time per mirror, with an environment of its own - no system or user config, no prompts, hooks off,
+  `https` the only protocol, `gc.auto` 0 - and the token as `http.https://github.com/.extraheader` in
+  `GIT_CONFIG_KEY_n`/`GIT_CONFIG_VALUE_n`: never in a file, a URL or a command line, and sent to github.com alone.
+  The sandbox mounts `data/git` read-only at `/hub-git` (compose; `update.sh` makes the folder as uid 1000 before
+  the services start, as Docker would make it as root).
+- **The working copy** is cloned in the sandbox from `/hub-git/<owner>/<name>.git` (`--no-hardlinks`: nothing of
+  the mirror is shared), so its `origin` is the mirror: `git fetch` and `git pull` there get what the Hub fetched
+  last, without the network. Its push address is `/hub-git/push-with-the-git_push-tool`, so a `git push` in the
+  sandbox fails with a message that says what to use. Commits are by "SLQ Hub" with the token owner's GitHub no-reply
+  address (`<id>+<login>@users.noreply.github.com`, from `GET /user`), so GitHub shows them as his.
+- **Nothing of the working copy is run by the Hub.** Its `.git/config` and hooks are the sandbox's to change: git
+  run there by the Hub could be made to run a command (a hook, `core.fsmonitor`) or to send the token elsewhere (a
+  proxy and `http.sslVerify=false`, `url.*.insteadOf`, `http.<url>.*` config more specific than the Hub's). So the
+  Hub reads the working copy's files itself - `origin`'s URL, HEAD, the branch's ref (loose or `packed-refs`), its
+  `origin/*` - each opened without following a link (`Workdir.open_inside`), and runs git only in repositories of its
+  own: for a push, a throwaway bare repository in `data/git/.scratch` whose `objects/info/alternates` names the
+  working copy's objects and the mirror's. The commit pushed is the one read from the ref, by its hash.
+
+**Push** (`app/agent/github.py` `plan_push`, then `push`):
+
+1. The working copy is one `git_clone` made: `origin` is exactly `/hub-git/<owner>/<name>.git` and that mirror is
+   there. The branch: the one named, else the one checked out (not a detached HEAD); a plain name only.
+2. The mirror is fetched, so the card shows GitHub as it is now. Refused, with what to do instead and nothing asked:
+   the default branch (or main/master when there is none yet); a branch whose commit is not in the working copy;
+   GitHub's branch having commits the working copy's lacks (never forced: `git_fetch`, merge or rebase, push
+   again); nothing to push.
+3. The card (Tool.preview, below): the repository, the branch (new, or where GitHub has it), the commits GitHub does
+   not have yet (up to 15), the diffstat against the default branch, and the pull request's title.
+4. `git push --porcelain <url> <sha>:refs/heads/<branch>` from the scratch repository; the mirror is fetched again,
+   and in the working copy `origin/<branch>` appears and becomes the branch's upstream.
+5. With `pull_request`: `POST /repos/{owner}/{name}/pulls` (head the branch, base the default branch, the title -
+   by default the first commit's subject - and the body). One already open for the branch (422 "already exists")
+   is named instead (`GET .../pulls?head=owner:branch`); a failure leaves the branch pushed and gives the compare
+   link.
+
+**The card shows what will happen** (`Tool.preview`, 0.81.0): a tool that asks first can have a preview, which the
+loop runs before it asks; its text goes with `approval_needed` as `preview` and the card shows it instead of the
+arguments. An exception there fails the call with its message and asks nothing - there is nothing to ask about.
+`git_push` keeps the plan it showed in the turn's state and pushes exactly that commit after the yes (a branch moved
+meanwhile does not change what was approved); with Always nothing is asked, and the handler plans by itself.
+
+**Fetch and clone** report what is new against what the working copy knew (its `origin/*`, read from its files):
+new branches, branches with new commits (and whether GitHub's history was rewritten), deleted ones; then the
+working copy fetches from the mirror and the answer has `git status -sb`'s first line. Nothing in the working tree
+changes - the model merges or rebases. With the internet set to ask first, `git_clone` and `git_fetch` ask for
+github.com ("wants to fetch a repository from github.com", the site's key, so "Always allow github.com" covers them
+and `web_fetch` alike); `git_push` asks anyway - its check, which fetches GitHub's branches for the card, runs before
+that question.
+
+**The files card.** A clone's files count as there before the turn: `git_clone` adds them to the turn's
+before-snapshot (`engine.state["files_before"]`), so the card under the answer - and the independent review, which
+works from the same snapshot - show what the turn changed in the repository, not all of it. The clone is checked in
+to the project's history like any file a command made.
+
+**Node.js 24 in the sandbox** (0.81.0). Ubuntu 24.04's Node.js is 18.19, past its end of life; SLQ-Game-Lobby wants
+20 or newer, and its self-test fails on 18 (`performance.now` is read-only there) - 1,885 checks pass on 22. The
+sandbox image copies `node` and `npm` (and corepack, where the image has it) from the official `node:24-bookworm-slim`
+into `/usr/local`, in layers at the end, so the layers above are not built again; `/usr/local/bin` comes first in
+PATH, so `node`, `npm`, `npx` - and MCP servers started with `npx` - are 24's, and the archive's 18 stays in
+`/usr/bin`, unused.
+
+Tests (`tests/test_git.py`): bare repositories in a folder stand in for GitHub (`github.GITHUB` is a `file://`
+address there, so `protocol.file.allow` is on only then), a fake API answers `/user`, `/user/repos` and the pull
+requests, and a sandbox that runs its commands for real, with its paths the Hub's: the whole way from clone to pull
+request with the token in no command, no file of the working copy and nothing in `data/git`; refusing main and a
+non-fast-forward without asking; fetch's report; an open pull request named; Always; ask-first; the token in
+Settings; a working copy that git_clone did not make, and links planted in `.git`.
+
+Tried in Docker outside the VM: the sandbox's Node.js layers (24.22.3 over the archive's 18.19.1; the game's
+self-test passes in them, offline, as uid 1000), git in the Hub's base image (2.47.3), and a mirror mounted read-only
+that a uid-1000 clone and fetch work from (one owned by root is refused as "dubious ownership" - so `data/git` must be
+uid 1000's). Not verified on the VM yet: the real GitHub (a fine-grained token's clone, push and pull request), and
+the whole images.
 
 ### People's chats: device turns (0.11.0)
 
@@ -3370,6 +3468,20 @@ assistant made), each sent with every message.
   tools resolve, the skills cleanup removes links instead of following
   them, and Continue in a new chat copies into a fresh folder.
 
+- **The GitHub token** (0.81.0, §6 "Git and GitHub"). Kept in Settings
+  (masked, in no export) or `.env`, used only by git and the API calls the
+  Hub makes itself, for github.com alone - in git's environment, never in a
+  file, a URL or a command line. The sandbox sees the Hub's copies of the
+  repositories read-only and never the token; the Hub runs no git in a
+  folder the sandbox can change, and reads a working copy's few files
+  without following links. Pushes never go to the default branch and never
+  force; each asks first unless the owner chose Always. The token's own
+  limits (a fine-grained token: which repositories, which permissions) are
+  the outer fence: GitHub enforces them. On GitHub Free a private
+  repository's default branch cannot be protected (rulesets need Pro), so
+  the Hub's refusal is the only thing between the assistant and `main`
+  there.
+
 - **Login.** The owner and the people the owner adds use scrypt password
   hashes. Sessions are HttpOnly cookies that last 30 days, and are `Secure`
   behind HTTPS. Failed sign-ins are throttled per address.
@@ -3667,6 +3779,13 @@ whether the work lives up to what is expected.
 
 ## 13. Risks and things not yet verified on the hardware
 
+- **GitHub** (0.81.0). Tested against bare repositories and a fake API only:
+  a real fine-grained token's clone, push and pull request, the read-only
+  `/hub-git` mount and the `node:24-bookworm-slim` copy into the sandbox's
+  image have not run on the VM. A large repository's first clone takes the
+  disk twice (the mirror and the working copy, plus the working copy's files
+  in the project's history); the game lobby is about 72 MB of history and
+  100 MB of files.
 - **GPU hand-over.** The 7900 XTX has a known reset problem: handing it from
   VM 104 to the new VM, or a VM reboot, may need a Proxmox host reboot.
   `create-vm.sh` sets VM 104 to `onboot 0`, so a host reboot is a clean way

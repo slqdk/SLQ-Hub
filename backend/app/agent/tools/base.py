@@ -87,6 +87,9 @@ class Tool:
     sends_files: tuple[str, ...] = ()
     # Description and parameters that depend on the turn (which models are downloaded, the chat's choice).
     dynamic: Callable[[ToolContext], tuple[str, dict]] | None = None
+    # What the call would do, for the card that asks first (0.81.0: git_push's commits and files). An exception
+    # fails the call without asking - there is nothing to ask about.
+    preview: Callable[[ToolContext, dict], Awaitable[str]] | None = None
 
     def schema(self, ctx: ToolContext | None = None) -> dict:
         description, parameters = self.description, self.parameters

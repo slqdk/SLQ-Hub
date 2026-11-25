@@ -21,11 +21,12 @@ export interface ToolView {
   ask?: AskInfo;                               // what the turn asks before this call (internet set to ask first)
   canChat?: boolean;                           // "Allow in this chat" is offered (the owner's chats)
   sends?: string[];                            // files from the chat's folder whose content goes with the call (MCP)
+  preview?: string;                            // what the call would do, checked before it asks (0.81.0: git_push)
   questions?: { question: string; options: string[]; multi?: boolean }[];   // ask_user's card, waiting (0.43.0)
 }
 
 /** Internet for the assistant, asking first: what a call wants and what "always" would allow. */
-export interface AskInfo { kind: "internet"; what: "search" | "site" | "code"; key: string; detail?: string; host?: string;
+export interface AskInfo { kind: "internet"; what: "search" | "site" | "code" | "git"; key: string; detail?: string; host?: string;
   always: string; can_always: boolean; can_chat?: boolean; unblockable?: boolean }
 
 /** An answer to a call that waits for the user: once, the rest of this chat, always, or no. */
@@ -268,6 +269,7 @@ function applyStream(items: Item[], ev: RunEvent): void {
         t.ask = d.ask;
         t.canChat = !!(d.can_chat || d.ask?.can_chat);
         t.sends = Array.isArray(d.sends) ? d.sends.map(String) : undefined;
+        t.preview = typeof d.preview === "string" ? d.preview : undefined;
       }
       break;
     }
@@ -578,6 +580,7 @@ const VERBS: Record<string, [string, string]> = {          // tool: [verb, what 
   bash: ["ran", "command"], web_search: ["searched", "the web"], web_fetch: ["read", "page"],
   image_generate: ["made", "picture"], image_edit: ["edited", "picture"], ask_user: ["asked", "you"],
   remember: ["noted", ""], post_draft: ["handed in", "post"],
+  git_clone: ["cloned", ""], git_fetch: ["fetched from GitHub", ""], git_push: ["pushed to GitHub", ""],
 };
 
 /** Finished steps in a line (0.46.0): what was done to what - "edited picture-animals/SKILL.md 2x, read it 2x,
