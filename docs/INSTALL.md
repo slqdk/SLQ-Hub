@@ -414,7 +414,8 @@ All commands run in the VM from `/opt/slq-hub`:
 
 | What | Command |
 |---|---|
-| Update (backup + automatic rollback) | `sudo bash /opt/slq-hub/update.sh` |
+| Update (backup + automatic rollback) | `sudo bash /opt/slq-hub/update.sh` - builds only the images whose files changed (0.83.1), and stops the build if less than 6 GB of the disk is left |
+| Rebuild every image (after changing build arguments in `.env`) | `sudo bash /opt/slq-hub/update.sh --force` |
 | Update without waiting until nobody uses the Hub | `sudo bash /opt/slq-hub/update.sh --now` |
 | Follow an update after its window was closed | `sudo tail -f /srv/slq-hub/update.log` |
 | Stop an update that still builds or waits | `sudo bash /opt/slq-hub/update.sh cancel` |

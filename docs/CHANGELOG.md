@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.83.1 - 2026-11-25
+
+- `update.sh` builds only the images whose files changed since the running
+  version (and any that is missing); it names the ones it keeps. The Hub's
+  image is built with every update. On 2026-11-25 Docker had lost the build
+  cache, so an update that changed only the Hub and the sandbox rebuilt
+  ComfyUI's and the trainer's PyTorch from scratch and filled the disk.
+- The build stops when less than 6 GB of the disk is left for the Hub, before
+  the running Hub runs short. The code and the images go back, and nothing
+  is stopped.
+- `update.sh --force` with nothing new still rebuilds every image.
+
 ## 0.83.0 - 2026-11-25
 
 - Users on your Forgejo from the Hub. With Forgejo as the git server, add an

@@ -91,6 +91,7 @@ TIMEOUT = 300
 # 2026-11-05: the build and the backup, as root, wrote into the 5% of the disk ext4 keeps for root. The Hub, which is uid
 # 1000, had 0 bytes left: "sqlite3.OperationalError: disk I/O error" for the new version and for the old one put back.
 MIN_FREE = 6 * 1024 ** 3   # of the disk, for a user who is not root, when the Hub is stopped: a backup, and room to run
+WATCH = float(os.environ.get("HUB_UPDATE_WATCH", "2"))    # seconds between looks at the disk while building (0.83.1)
 POLL = float(os.environ.get("HUB_UPDATE_POLL", "3"))
 QUIET = 60                # seconds the Hub must have had nothing to do before an update stops it (0.26.0)
 CHECK = float(os.environ.get("HUB_UPDATE_CHECK", "5"))
@@ -110,6 +111,14 @@ RESTORE_KEEP = {"logs", "training", "git"}   # git (0.81.0): not in the backups,
 
 class Stop(Exception):
     """A refusal with a reason the user can act on."""
+
+
+class LowDisk(Exception):
+    """A build stopped because the Hub had less than MIN_FREE of the disk left (0.83.1)."""
+
+    def __init__(self, free: int):
+        super().__init__(f"{free} bytes left")
+        self.free = free
 
 
 class Out:
@@ -193,12 +202,47 @@ def human(n: float) -> str:
     return f"{n} B"
 
 
-def run(cmd: list[str], capture: bool = True, check: bool = False) -> subprocess.CompletedProcess:
-    r = subprocess.run(cmd, cwd=str(ROOT), text=True, capture_output=capture, errors="replace")
+def run(cmd: list[str], capture: bool = True, check: bool = False,
+        watch: bool = False) -> subprocess.CompletedProcess:
+    if watch:                                          # a build: its output shown, the disk watched (0.83.1)
+        r = subprocess.CompletedProcess(cmd, watched(cmd), "", "")
+    else:
+        r = subprocess.run(cmd, cwd=str(ROOT), text=True, capture_output=capture, errors="replace")
     if check and r.returncode != 0:
         raise Stop(f"{' '.join(cmd[:4])} ... failed:\n         "
                    + ((r.stderr or r.stdout or "").strip()[-800:] if capture else "see above"))
     return r
+
+
+def watched(cmd: list[str]) -> int:
+    """Run a build with its output shown, and stop it when the Hub's disk runs low (0.83.1). On 2026-11-25 pip filled
+    the disk to its last byte, building ComfyUI's PyTorch anew while the Hub ran beside it - and on 2026-11-05 a
+    full disk kept the Hub from starting at all. Raises LowDisk once less than MIN_FREE is left for the Hub; a
+    Ctrl+C or `cancel` ends the build as subprocess.run would."""
+    child = subprocess.Popen(cmd, cwd=str(ROOT))
+    try:
+        while True:
+            try:
+                return child.wait(timeout=WATCH)
+            except subprocess.TimeoutExpired:
+                pass
+            try:
+                free = free_space()
+            except OSError:                            # cannot tell: let the build go on
+                continue
+            if free < MIN_FREE:
+                child.terminate()                      # compose cancels the build; BuildKit drops the step's files
+                try:
+                    child.wait(timeout=30)
+                except subprocess.TimeoutExpired:
+                    child.kill()
+                    child.wait()
+                raise LowDisk(free)
+    except BaseException:
+        if child.poll() is None:
+            child.kill()
+            child.wait()
+        raise
 
 
 def git(*args: str) -> subprocess.CompletedProcess:
@@ -212,8 +256,105 @@ def compose_args() -> list[str]:
     return args
 
 
-def compose(*args: str, capture: bool = True, check: bool = False) -> subprocess.CompletedProcess:
-    return run([*compose_args(), *args], capture=capture, check=check)
+def compose(*args: str, capture: bool = True, check: bool = False,
+            watch: bool = False) -> subprocess.CompletedProcess:
+    return run([*compose_args(), *args], capture=capture, check=check, watch=watch)
+
+
+# ---------------------------------------------------------------- which images an update builds (0.83.1)
+
+def build_block(text: str, service: str) -> list[str]:
+    """The lines of `service`'s build: section in a compose file, without comments ([] when it has none). The file
+    is the Hub's own, two spaces a level."""
+    found: list[str] = []
+    in_services = in_service = in_build = False
+    for raw in text.splitlines():
+        line = re.sub(r"\s+#.*$", "", raw.rstrip())
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        indent = len(line) - len(line.lstrip(" "))
+        if indent == 0:
+            in_services, in_service, in_build = stripped == "services:", False, False
+        elif in_services and indent == 2:
+            in_service, in_build = stripped == f"{service}:", False
+        elif in_service and indent == 4:
+            in_build = stripped.split(":", 1)[0] == "build"
+            if in_build:
+                found.append(stripped)
+        elif in_service and in_build and indent > 4:
+            found.append(stripped)
+    return found
+
+
+def build_paths(block: list[str]) -> list[str] | None:
+    """The repository paths an image is built from: its build context (relative to deploy/, where the compose file
+    is) and the Dockerfile it names. None when they cannot be told from the section."""
+    def value(key: str) -> str:
+        for line in block:
+            if line.startswith(f"{key}:"):
+                return line.split(":", 1)[1].strip().strip("'\"")
+        return ""
+    context = value("context") or value("build")      # build: ../services/x is the short form
+    if not context or "$" in context:
+        return None
+    root = ROOT.resolve()
+    base = (COMPOSE.parent / context).resolve()
+    try:
+        paths = [base.relative_to(root).as_posix()]
+        dockerfile = value("dockerfile")
+        if dockerfile:
+            paths.append((base / dockerfile).resolve().relative_to(root).as_posix())
+    except ValueError:                                 # outside the repository: git cannot tell
+        return None
+    return paths
+
+
+def to_build(old: str) -> tuple[list[str], list[str]] | None:
+    """The services whose image an update builds (0.83.1), and those it keeps: built are the ones whose build
+    context, or build: section in the compose file, changed since `old` - the commit the running images were built
+    from - and any without an image. The others keep theirs. On 2026-11-25 Docker had lost its build cache, so an
+    update that changed only the Hub's and the sandbox's images built ComfyUI's and the trainer's anew as well:
+    PyTorch from scratch, tens of gigabytes beside the old images (the disk ran full), and newer versions of whatever
+    their Dockerfiles do not pin. None: build them all, as before 0.83.1 - the list could not be made."""
+    services = compose("config", "--services")
+    shown = git("show", f"{old}:deploy/docker-compose.yml")
+    try:
+        now = COMPOSE.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    if services.returncode != 0 or not services.stdout.strip() or shown.returncode != 0:
+        return None
+    todo, kept = [], []
+    order = {svc: i for i, svc in enumerate(BUILT)}
+    # the services the profiles in .env turn on, as `build` builds them; in the order of BUILT (compose's varies)
+    for svc in sorted(services.stdout.split(), key=lambda svc: (order.get(svc, len(order)), svc)):
+        block = build_block(now, svc)
+        if not block:                                  # an image from a registry (searxng, windows)
+            continue
+        paths = build_paths(block)
+        if (paths is None or block != build_block(shown.stdout, svc) or image_id(svc, "latest") is None
+                or git("diff", "--quiet", old, "HEAD", "--", *paths).returncode != 0):
+            todo.append(svc)
+        else:
+            kept.append(svc)
+    return todo, kept
+
+
+def build_images(state: dict) -> int:
+    """Build what this update needs, the disk watched; the exit code. --force with nothing new builds them all."""
+    plan = None if state.get("build_all") else to_build(state["old"])
+    if plan is None:
+        return compose("build", capture=False, watch=True).returncode
+    todo, kept = plan
+    if kept:
+        out.info(f"Unchanged since {state.get('old_version') or 'the running version'}, kept as they are: "
+                 f"{', '.join(kept)}")
+    if not todo:
+        out.info("No image to build.")
+        return 0
+    out.info(f"Building: {', '.join(todo)}")
+    return compose("build", *todo, capture=False, watch=True).returncode
 
 
 def backup_dir() -> Path:
@@ -907,7 +1048,8 @@ def cmd_update(args) -> int:
     if incoming and run(["git", "merge", "--ff-only", f"origin/{branch}"], capture=False).returncode != 0:
         raise Stop("the update is not a fast-forward - the clone has commits of its own.")
     state = {"v": RESUME_VERSION, "old": old, "old_version": old_version, "new_version": new_version,
-             "target": target, "old_images": old_images}
+             "target": target, "old_images": old_images,
+             "build_all": not incoming}     # --force with nothing new: rebuild every image (0.83.1)
     if incoming and updater_changed(old):
         return hand_over(args, state)
     return finish_update(args, state)
@@ -994,7 +1136,7 @@ def _finish_update(args, state: dict) -> int:
             write_lock(state, phase)
             out.head("Building the new images (the Hub keeps running)...")
             compose("pull", "searxng", capture=False)
-            if compose("build", capture=False).returncode != 0:
+            if build_images(state) != 0:
                 quiet_signals()
                 undo_build(state)
                 raise Stop("the build failed (see above). The code is back where it was; nothing was stopped.")
@@ -1016,6 +1158,13 @@ def _finish_update(args, state: dict) -> int:
             raise Stop(f"{room} The code is back where it was; nothing was stopped. Make room and update again.")
     except Stop:
         raise
+    except LowDisk as exc:
+        quiet_signals()
+        undo_build(state)
+        run(["docker", "image", "prune", "-f"])        # images built before the stop, untagged by the undo
+        raise Stop(f"the build was stopped with {human(exc.free)} of the disk left for the Hub, so that the Hub can "
+                   "go on running. The code is back where it was; nothing was stopped. Make room and update again "
+                   f"- see what takes it: sudo docker system df, and sudo du -sh {HUB_ROOT}/*") from exc
     except (Cancelled, KeyboardInterrupt) as exc:
         quiet_signals()
         undo_build(state)

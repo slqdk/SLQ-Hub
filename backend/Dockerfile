@@ -15,7 +15,7 @@ ENV PYTHONUNBUFFERED=1 \
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates tini libegl1 libgles2 \
     && rm -rf /var/lib/apt/lists/*
 # git (0.81.0): the Hub fetches from and pushes to GitHub itself, with the token the sandbox never sees
-# (app/agent/github.py). A layer of its own, so the one above is not built again.
+# (app/agent/gitserver.py). A layer of its own, so the one above is not built again.
 RUN apt-get update && apt-get install -y --no-install-recommends git \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app

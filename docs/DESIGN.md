@@ -3657,6 +3657,31 @@ assistant made), each sent with every message.
 7. Install the firewall script and unit as the new version has them, and
    apply the rules (0.15.0; they are added only when missing).
 
+**Which images an update builds** (0.83.1, `to_build`). Only the services
+whose build context - or `build:` section in the compose file, comments aside
+- changed between the running commit and the new one, and any without an
+image; the others keep theirs, and the update names them ("Unchanged since
+0.80.2, kept as they are: llm, comfyui, speech, trainer"). The Hub's context is
+the whole repository, so its image is built with every update. Services are
+the ones `compose config --services` lists (the profiles in `.env`), as a plain
+`compose build`. When the list cannot be made (compose or git cannot tell), or
+with `--force` and nothing new to fetch, every image is built, as before. On
+2026-11-25 Docker had lost the build cache of ComfyUI's and the trainer's
+images (why is not known yet), so an update that changed only the Hub's and the
+sandbox's built their PyTorch layers from scratch, in parallel, beside the old
+images - and pip filled the disk to its last byte while the Hub ran. Building
+what did not change would also have pulled newer versions of everything their
+Dockerfiles do not pin. Not noticed: a change in `.env` or the override file
+(the owner's - `--force`, or `update.sh compose build <service>`).
+
+**The disk while building** (0.83.1, `watched`). The build runs with the disk
+watched every 2 s (`HUB_UPDATE_WATCH`): with less than `MIN_FREE` (6 GB) left
+for the Hub, compose is stopped (SIGTERM, then SIGKILL after 30 s; BuildKit
+drops the step it was in), the tags and the code go back, the images built
+before the stop are pruned, and the update says how much was left and where to
+look - nothing was stopped, and the Hub kept its room. Before, only the room
+before the update and after the build was checked (0.80.5).
+
 **Waiting for a free Hub** (0.26.0). An update may be started at any time:
 after the build it asks the running Hub, `GET /hub/api/internal/busy` (from
 the VM with `HUB_INTERNAL_TOKEN` from `.env`; refused through the proxy,

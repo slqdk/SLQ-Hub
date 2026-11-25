@@ -4,7 +4,27 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## Next session - start here (written 2026-11-25, at 0.83.0)
+## Next session - start here (written 2026-11-25, at 0.83.1)
+
+**0.83.1 (2026-11-25, from 11:43): the update to 0.83.0 filled the disk; the VM's disk is bigger now, and the
+updater builds only what changed - pushed, not yet installed.** Søren's `update.sh` (0.80.2 on the VM, as on
+2026-11-05) stopped in the build: "No space left on device" while ComfyUI's PyTorch layer (`[comfyui 4/13]`, ROCm
+7.14's `rocm-sdk-device-*` wheels for every GPU) and the trainer's (its torch-constraints.txt step) were built at
+the same time; the updater put the
+code and tags back, nothing was stopped. Neither Dockerfile had changed since 0.77.0/0.75.0, so Docker's build cache
+for them was gone - why is not known: `sudo docker system df` was asked for and has not come yet (a full or nearly
+full disk since 2026-11-05 and BuildKit's own cache cleanup is a guess, not a finding). After the failure `df` said
+617G, 608G used, 2.5G free; `vgs`: VFree 0. He grew the VM's disk in Proxmox to 730G and in the VM `growpart /dev/sda
+3`, `pvresize`, `lvextend -r -l +100%FREE /dev/ubuntu-vg/ubuntu-lv`: the root filesystem is 726.95 GiB, about 100 GB
+free. `docker image ls` (Docker's new list: DISK USAGE and CONTENT SIZE columns): comfyui 31.1 GB, llm 30.7, trainer
+24.7, sandbox 5.86, speech 2.63, hub 1.31, searxng 0.4 - `:latest` and `:rollback` the same image for each, so nothing
+old to delete. 0.83.1: `update.sh` builds only the services whose build context or compose `build:` section changed
+since the running commit, or that have no image (DESIGN §12 "Which images an update builds"), and stops the build
+below 6 GB free for the Hub ("The disk while building"). From 0.80.2 that is hub and sandbox; llm, comfyui, speech and
+trainer are kept - the update should say "Building: hub, sandbox" and "Unchanged since 0.80.2, kept as they are:
+llm, comfyui, speech, trainer". Rehearsed here with the real git history and `docker compose config` (6fa1544 ->
+HEAD); not yet on the VM. Ask for `docker system df` and `docker version` when the cause matters again: if the cache
+keeps vanishing, every Dockerfile change rebuilds its image from scratch.
 
 **0.83.0 (2026-11-25, same chat, 10:28): Forgejo at git.slq.dk, and its users from Settings - pushed, not yet
 installed.** Søren, with the README of his Forgejo kit (made in the other claude.ai project): "SLQ hub's
@@ -111,7 +131,7 @@ finds them and fingers still come out wrong). Decided: no Facebook posting (he c
 
 Known flake: tests/test_training.py::test_the_trainer_stops_a_job fails now and then in a full run and passes alone.
 
-## State (0.83.0, 2026-11-25)
+## State (0.83.1, 2026-11-25)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -1355,6 +1375,20 @@ Forgejo's API from its documentation and source only. Tests: tests/test_git.py (
 blocked and allowed, an administrator not blocked, the admin token in no tool call or model request, a person's
 login 403 on the git routes). The dev server fakes the admin API (three users): the panel, Block, Add a user with its
 password, and a name taken (Forgejo's message in a toast) seen there. NOT seen on the VM; no real Forgejo.
+0.83.1, the same day: the update to 0.83.0 filled the VM's disk (above, "Next session"). tools/hub_update.py:
+`to_build(old)` - per service from `compose config --services`, its `build:` section read from the compose file
+(`build_block`, comments left out) and its context's paths (`build_paths`, relative to deploy/; the Hub's is the
+repository), built when the section differs from `git show old:deploy/docker-compose.yml`, `git diff --quiet old HEAD
+-- <paths>` says changed, or it has no `:latest` image; None (build all) when compose or git cannot tell, and
+`build_all` in the update's state for --force with nothing new. `run(..., watch=True)` runs the build through
+`watched`: Popen, a look at the disk every 2 s, SIGTERM (SIGKILL after 30 s) and `LowDisk` below MIN_FREE, which
+`_finish_update` answers like a failed build plus `docker image prune -f`. Tests: tests/test_hub_update.py (+4:
+what each image is built from, read from the real compose file; only changed images built; a build argument
+changed; a missing image; a profile off; --force and the cases it cannot tell; the build stopped at the first look
+under 6 GB, exit codes passed on, an unreadable disk, Ctrl+C killing it; the update answering a stop), 7 mutations
+caught. Rehearsed: `to_build` against this repository's history with the real `docker compose config` (0.80.2 ->
+0.83.0: hub and sandbox built, llm, comfyui, speech, trainer kept), and `watched` with real processes (a `sleep`
+stopped at 4 GB, an exit code of 3 passed on, Ctrl+C killing the child). NOT seen on the VM.
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
 host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU

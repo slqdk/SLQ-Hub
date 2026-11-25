@@ -159,7 +159,7 @@ def test_an_update_hands_over_after_the_fast_forward(hu, monkeypatch):
     assert hu.cmd_update(args()) == 0
     assert ("run", "git", "merge", "--ff-only", "origin/main") in hu.calls
     assert handed["state"] == {"v": 1, "old": "a" * 40, "old_version": "0.16.0", "new_version": "0.16.1",
-                               "target": "b" * 40, "old_images": {"hub": "sha256:a"}}
+                               "target": "b" * 40, "old_images": {"hub": "sha256:a"}, "build_all": False}
 
 
 # ---------------------------------------------------------------- waiting until nobody uses the Hub (0.26.0)
@@ -603,3 +603,179 @@ def test_a_backup_leaves_out_what_ai_toolkit_makes_again(hu, tmp_path):
     hu.restore_data("b1")
     assert (run / "images" / "img-1.txt").read_text() == "waterx55, a park" and (data / "hub.db").read_bytes() == b"db"
     assert (run / "output" / "rikke-20261029-143312" / "rikke-20261029-143312_000000250.safetensors").is_file()
+
+
+# ---------------------------------------------------------------- the images an update builds (0.83.1)
+
+def test_what_each_image_is_built_from(hu):
+    text = hu.COMPOSE.read_text(encoding="utf-8")
+    comfy = hu.build_block(text, "comfyui")
+    assert comfy[0] == "build:" and "context: ../services/comfyui" in comfy
+    assert any(line.startswith("COMFYUI_REF:") for line in comfy)
+    assert hu.build_paths(comfy) == ["services/comfyui"]
+    assert hu.build_paths(hu.build_block(text, "hub")) == [".", "backend/Dockerfile"]     # the whole repository
+    assert hu.build_block(text, "searxng") == [] and hu.build_block(text, "windows") == []
+    for svc in hu.BUILT:                                    # every image the updater tags: its files are known
+        assert hu.build_paths(hu.build_block(text, svc)), svc
+    # a comment is not a change; an argument is
+    assert hu.build_block(text.replace("# its own PyTorch", "# PyTorch of its own"), "trainer") == \
+        hu.build_block(text, "trainer")
+    assert hu.build_block(text.replace("v0.42.3", "v0.43.0"), "comfyui") != comfy
+    # the short form, and contexts git cannot tell about
+    assert hu.build_paths(["build: ../services/llm"]) == ["services/llm"]
+    assert hu.build_paths(["build:", "context: ${ELSEWHERE}"]) is None
+    assert hu.build_paths(["build:", "context: /opt/other"]) is None
+
+
+SERVICES = "hub\nllm\ncomfyui\nspeech\nsandbox\nsearxng\ntrainer\n"
+
+
+def selective(hu, monkeypatch, old_compose: str, changed: set, services: str = SERVICES, images=None):
+    """finish_update with the compose file of the running version, the paths changed since, and the images there."""
+    fake_update(hu, monkeypatch)
+
+    def compose(*a, **k):
+        hu.calls.append(("compose", *a))
+        return subprocess.CompletedProcess(a, 0, services if a[:2] == ("config", "--services") else "", "")
+
+    def git(*a):
+        hu.calls.append(("git", *a))
+        if a[0] == "show":
+            return subprocess.CompletedProcess(a, 0, old_compose, "")
+        if a[:2] == ("diff", "--quiet") and a[3] == "HEAD":
+            return subprocess.CompletedProcess(a, 1 if changed & set(a[5:]) else 0, "", "")
+        return subprocess.CompletedProcess(a, 0, "", "")
+    monkeypatch.setattr(hu, "compose", compose)
+    monkeypatch.setattr(hu, "git", git)
+    monkeypatch.setattr(hu, "image_id", lambda svc, tag: (images or {}).get(svc, f"sha256:{svc}"))
+
+
+def builds(hu) -> list[tuple]:
+    return [c for c in hu.calls if c[:2] == ("compose", "build")]
+
+
+def test_an_update_builds_only_the_images_whose_files_changed(hu, monkeypatch, capsys):
+    """2026-11-25, 0.80.2 -> 0.83.0: only the Hub's and the sandbox's files had changed, but with Docker's build
+    cache gone the update built ComfyUI's and the trainer's PyTorch anew - and the disk ran full."""
+    text = hu.COMPOSE.read_text(encoding="utf-8")
+    selective(hu, monkeypatch, text, {".", "services/sandbox"})
+    assert hu.finish_update(args(now=True), dict(STATE)) == 0
+    assert builds(hu) == [("compose", "build", "hub", "sandbox")]
+    said = capsys.readouterr().out
+    assert "kept as they are: llm, comfyui, speech, trainer" in said and "Building: hub, sandbox" in said
+    assert ("git", "show", "a" * 40 + ":deploy/docker-compose.yml") in hu.calls
+
+    # a build argument changed in the compose file: that image is built, though its folder is the same
+    hu.calls.clear()
+    selective(hu, monkeypatch, text.replace("v0.42.3", "v0.41.0"), {"."})
+    assert hu.finish_update(args(now=True), dict(STATE)) == 0
+    assert builds(hu) == [("compose", "build", "hub", "comfyui")]
+    capsys.readouterr()
+
+    # an image that is not there is built; a service whose profile is off is neither built nor named
+    hu.calls.clear()
+    selective(hu, monkeypatch, text, {"."}, services=SERVICES.replace("trainer\n", ""), images={"speech": None})
+    assert hu.finish_update(args(now=True), dict(STATE)) == 0
+    assert builds(hu) == [("compose", "build", "hub", "speech")]
+    assert "trainer" not in capsys.readouterr().out
+
+
+def test_when_it_cannot_tell_or_is_forced_it_builds_everything(hu, monkeypatch):
+    text = hu.COMPOSE.read_text(encoding="utf-8")
+    # --force with nothing new to fetch: every image, as before 0.83.1
+    selective(hu, monkeypatch, text, set())
+    assert hu.finish_update(args(now=True), {**STATE, "build_all": True}) == 0
+    assert builds(hu) == [("compose", "build")]
+    # compose cannot list the services, or git cannot show the old compose file
+    for broken in ("services", "show"):
+        hu.calls.clear()
+        selective(hu, monkeypatch, text, set(), services="" if broken == "services" else SERVICES)
+        if broken == "show":
+            plain = hu.git
+            monkeypatch.setattr(hu, "git", lambda *a: subprocess.CompletedProcess(a, 128, "", "bad object")
+                                if a[0] == "show" else plain(*a))
+        assert hu.finish_update(args(now=True), dict(STATE)) == 0
+        assert builds(hu) == [("compose", "build")], broken
+    # nothing changed at all (a commit to the docs alone builds the Hub, whose context is the repository)
+    hu.calls.clear()
+    selective(hu, monkeypatch, text, {"."})
+    assert hu.finish_update(args(now=True), dict(STATE)) == 0
+    assert builds(hu) == [("compose", "build", "hub")]
+
+
+class Build:
+    """docker compose build, faked: `rounds` looks at the disk before it ends with `rc`."""
+    def __init__(self, rounds: int, rc: int = 0, interrupt: bool = False):
+        self.rounds, self.rc, self.interrupt, self.done, self.signals = rounds, rc, interrupt, None, []
+
+    def __call__(self, cmd, **kw):
+        self.cmd = cmd
+        return self
+
+    def wait(self, timeout=None):
+        if self.done is not None:
+            return self.done
+        if self.interrupt:
+            raise KeyboardInterrupt
+        if self.rounds == 0:
+            self.done = self.rc
+            return self.rc
+        self.rounds -= 1
+        raise subprocess.TimeoutExpired("docker compose build", timeout)
+
+    def poll(self):
+        return self.done
+
+    def terminate(self):
+        self.signals.append("TERM")
+        self.done = -15
+
+    def kill(self):
+        self.signals.append("KILL")
+        self.done = -9
+
+
+def test_a_build_is_stopped_before_it_takes_the_last_of_the_hubs_disk(hu, monkeypatch):
+    left = iter([40 * GB, 12 * GB, 5 * GB, 3 * GB])
+    monkeypatch.setattr(hu, "free_space", lambda path=None: next(left))
+    build = Build(rounds=10)
+    monkeypatch.setattr(hu.subprocess, "Popen", build)
+    with pytest.raises(hu.LowDisk) as stopped:
+        hu.run(["docker", "compose", "build"], capture=False, watch=True)
+    assert stopped.value.free == 5 * GB and build.signals == ["TERM"]      # at the first look under MIN_FREE
+    # enough room all along: its exit code, failed or not
+    monkeypatch.setattr(hu, "free_space", lambda path=None: 40 * GB)
+    for rc in (0, 1):
+        monkeypatch.setattr(hu.subprocess, "Popen", Build(rounds=3, rc=rc))
+        assert hu.run(["docker", "compose", "build"], capture=False, watch=True).returncode == rc
+    # a disk that cannot be read lets it go on
+
+    def unreadable(path=None):
+        raise OSError("gone")
+    monkeypatch.setattr(hu, "free_space", unreadable)
+    monkeypatch.setattr(hu.subprocess, "Popen", Build(rounds=3))
+    assert hu.run(["docker", "compose", "build"], capture=False, watch=True).returncode == 0
+    # Ctrl+C: the build is ended, and the Ctrl+C goes on to the undo
+    build = Build(rounds=3, interrupt=True)
+    monkeypatch.setattr(hu.subprocess, "Popen", build)
+    with pytest.raises(KeyboardInterrupt):
+        hu.run(["docker", "compose", "build"], capture=False, watch=True)
+    assert build.signals == ["KILL"]
+
+
+def test_an_update_whose_build_was_stopped_for_the_disk_stops_nothing(hu, monkeypatch):
+    fake_update(hu, monkeypatch)
+
+    def compose(*a, **k):
+        hu.calls.append(("compose", *a))
+        if a[0] == "build":
+            assert k.get("watch") is True
+            raise hu.LowDisk(5 * GB)
+        return subprocess.CompletedProcess(a, 0, "", "")
+    monkeypatch.setattr(hu, "compose", compose)
+    pruned = []
+    monkeypatch.setattr(hu, "run", lambda cmd, **k: pruned.append(cmd) or subprocess.CompletedProcess(cmd, 0, "", ""))
+    with pytest.raises(hu.Stop, match=r"stopped with 5.0 GB of the disk left for the Hub.*nothing was stopped"):
+        hu.finish_update(args(now=True), dict(STATE))
+    assert undone(hu) and ("compose", "stop") not in hu.calls and not [c for c in hu.calls if c[0] == "backup"]
+    assert ["docker", "image", "prune", "-f"] in pruned and not hu.lock_file().exists()
