@@ -76,7 +76,7 @@ class Env:
 
     @property
     def git_dir(self) -> Path:
-        """The Hub's own copies of GitHub repositories (0.81.0, app/agent/github.py): only the Hub writes them."""
+        """The Hub's own copies of git repositories (0.81.0, app/agent/gitserver.py): only the Hub writes them."""
         return self.data_dir / "git"
 
 
@@ -175,8 +175,10 @@ DEFAULTS: dict = {
         "app_secret": "",                  # the matching secret (masked, in no export)
         "config_id": "",                   # 0.76.1: Unified login's configuration ID ("": Instagram login)
     },
-    "github": {                            # 0.81.0: the assistant's GitHub (app/agent/github.py)
-        "token": "",                       # a token (fine-grained: the repositories it may work on); "" = .env's
+    "git": {                               # 0.81.0/0.82.0: the assistant's git server (app/agent/gitserver.py)
+        "server": "github",                # github | forgejo
+        "url": "",                         # Forgejo's address as the Hub reaches it (https://git.example.com)
+        "token": "",                       # its access token (only the repositories it may work on)
     },
     "tokens": {                            # sign-ins for model downloads (0.64.0, app/tokens.py); "" = .env's, if any
         "huggingface": "",                 # a read token: gated models (FLUX.2 klein 9B, its uncensored encoder)

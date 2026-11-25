@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.82.0 - 2026-11-25
+
+- The assistant's git server can now be your own Forgejo as well as GitHub.
+  Settings, Assistant, GitHub is now **Git server**: choose GitHub or Forgejo,
+  give Forgejo's address as the Hub's VM reaches it (`https://git.example.com`,
+  or `http://192.168.1.50:3000` on the LAN), and its token. On Forgejo the
+  token needs the repository permission Read and write and user Read, for the
+  repositories it may work on. Check it says whose the token is and which
+  repositories it reaches.
+- The tools, the push card and the answers name the server. Pull requests are
+  opened with Forgejo's own API, and one that is open already is named.
+- A working copy cloned from one server is not pushed to another: after a
+  switch, clone the repository again from the new server.
+- An http:// address works, and Settings warns that the token then goes over
+  the network unencrypted.
+- `GITHUB_TOKEN` in `.env` is no longer read: the token goes in Settings.
+
 ## 0.81.0 - 2026-11-25
 
 - The assistant works on GitHub repositories. Add a GitHub token under

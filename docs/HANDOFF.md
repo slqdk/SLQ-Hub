@@ -4,7 +4,24 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## Next session - start here (written 2026-11-25, at 0.81.0)
+## Next session - start here (written 2026-11-25, at 0.82.0)
+
+**0.82.0 (2026-11-25, same chat): the git server is GitHub or Forgejo - pushed, not yet installed.** At 08:05 Søren
+said: "Vi laver noget andet i stedet for github.. Jeg har et andet project her i claude til at sætte en Forgejo
+container på min proxmox op... så skifter vi til den". Asked where SLQ-Game-Lobby lives then (Claude Code in the cloud
+works only against GitHub), he chose **"Forgejo er master"**: the Hub pushes to Forgejo, Forgejo mirrors to GitHub,
+which Claude Code then only reads. He sets Forgejo up in that other claude.ai project; its address is not known here.
+Built: Settings → Assistant → **Git server** (GitHub | Forgejo, Forgejo's address, the token; DESIGN §6 "Git: GitHub
+or Forgejo"). To try once Forgejo runs: install (`sudo bash /opt/slq-hub/update.sh`, the disk first); in Forgejo,
+Settings → Applications → a token for the repositories the Hub may touch (repository Read and write, user Read); in
+the Hub, Git server: Forgejo, the address as the VM reaches it, the token, Check it; then "Clone <owner>/SLQ-Game-Lobby
+from Forgejo, ... on a new branch, run npm test and open a pull request". Worth telling him with the Forgejo setup:
+a push mirror to GitHub with "sync when commits are pushed" keeps GitHub's main current, so the lobby's `lobby-update`
+(which pulls from GitHub) can stay as it is - or it pulls from Forgejo with a read token; and a push mirror replaces
+what is on GitHub, so nothing should be pushed there any more. Not verified: a real Forgejo.
+
+The paragraph below was written at 0.81.0, before the switch; Settings → Assistant → GitHub there is Git server now,
+and `GITHUB_TOKEN` in `.env` is no longer read.
 
 **0.81.0 (2026-11-25): GitHub for the assistant, and Node.js 24 in the sandbox - pushed, not yet installed.** In the
 claude.ai project chat of 2026-11-25 Søren asked about more MCP servers, wants the Hub to develop details in
@@ -77,7 +94,7 @@ finds them and fingers still come out wrong). Decided: no Facebook posting (he c
 
 Known flake: tests/test_training.py::test_the_trainer_stops_a_job fails now and then in a full run and passes alone.
 
-## State (0.81.0, 2026-11-25)
+## State (0.82.0, 2026-11-25)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -1299,6 +1316,16 @@ sandbox that runs its commands for real), each safety rule failing its test when
 suite passes (744). The approval card and Settings → Assistant → GitHub seen in the dev server (tests/devserver.py,
 "push the game": a faked plan and push). Not reviewed by a separate agent. NOT seen on the VM: anything of it, nor
 anything against the real GitHub.
+0.82.0, the same chat, at 08:05: Forgejo on his Proxmox instead of GitHub, "Forgejo er master". The git module is
+`app/agent/gitserver.py` now (github.py is gone): a `Server` (github | forgejo, its address, the token) from Settings →
+Assistant → Git server (section `git`: server, url, token; `GET /hub/api/git[?check=true]`), mirrors per host in
+data/git/<host>/<owner>/<name>.git, the tools' texts naming the server (`Tool.dynamic`), Forgejo's API (`/api/v1`,
+`Authorization: token`, `limit`, a pull request open already found by `head.ref`), http allowed only for an http
+Forgejo address (Settings warns), a clone from the other server refused, ask-first keyed on the server's host. The env
+fallback (GITHUB_TOKEN) is gone. Forgejo's API was read in its docs and source (token scopes: repository covers pull
+requests; a second identical pull request is 422 "pull request already exists for these targets"); no real Forgejo
+here. Tests: tests/test_git.py (14; the whole way, an open pull request and ask-first on both servers). The dev server
+fakes a Forgejo for the card. NOT seen on the VM, and no real Forgejo yet.
 
 **It runs on the real hardware since 2026-10-22**: VM 222 on Søren's Proxmox
 host, installed with `install.sh` 0.1.3. The self-test passed: database, GPU

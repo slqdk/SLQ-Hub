@@ -32,7 +32,7 @@ from ..projects import store as projects
 from ..state import Hub
 from . import cloud as cloudmod
 from . import context as C
-from . import internet
+from . import gitserver, internet
 from .prompt import device_folder_text, folder_text, system_prompt
 from .runs import Run, RunRegistry
 from .tools import REGISTRY, Tool, ToolContext, ToolResult
@@ -673,7 +673,9 @@ class Engine:
                     elif owner and decision == "chat" and chat_id is not None:
                         remember_in_chat(chat_id, key)
                 if name in internet.TOOLS and internet.asking(self.hub.settings) and name not in self.internet_granted:
-                    ask, online = internet.question(name, args, ok_here, await internet.code_can_go_offline(self.hub))
+                    srv = gitserver.server(self.hub.settings) if name in ("git_clone", "git_fetch") else None
+                    ask, online = internet.question(name, args, ok_here, await internet.code_can_go_offline(self.hub),
+                                                    git_host=srv.host if srv else None)
                     if ask is not None:
                         decision = await self._ask(
                             cid, name, args, ask={**ask, "can_always": owner, "can_chat": chat_id is not None}, **where)

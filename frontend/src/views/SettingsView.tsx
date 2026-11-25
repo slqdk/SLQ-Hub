@@ -1486,7 +1486,7 @@ function AgentTab({ s }: { s: S }) {
         { key: "timeout_s", label: "Default time limit for a command (seconds)", type: "number", min: 5, max: 3600 },
         { key: "max_timeout_s", label: "Longest a command may run (seconds)", type: "number", min: 10, max: 7200 },
       ]} />
-      <GitHubSection s={s} />
+      <GitServerSection s={s} />
       {soundModels.length > 0 && <SectionForm s={s} section="sound" title="Sound" fields={[
         { key: "music_model", label: "Model for music", type: "select", options: soundOptions("music"),
           help: "Songs, instrumentals and remakes (music_generate, music_remake). The assistant can still use another downloaded model if you name it." },
@@ -1526,19 +1526,19 @@ function AgentTab({ s }: { s: S }) {
   );
 }
 
-interface GitHubState { from: "settings" | "env" | "";
-  check?: { ok: boolean; error?: string; login?: string; kind?: string; repos?: string[]; more?: boolean } }
+interface GitState { server: "github" | "forgejo"; ready: boolean; plain_http: boolean; problem?: string;
+  check?: { ok: boolean; error?: string; server?: string; login?: string; kind?: string; repos?: string[]; more?: boolean } }
 
-/** The assistant's GitHub (0.81.0): the token git_clone, git_fetch and git_push use - kept on the Hub, shown masked,
- *  never given to the sandbox. GITHUB_TOKEN in .env works too; one saved here wins. GitHub is asked whose it is and
+/** The assistant's git server (0.81.0 GitHub, 0.82.0 GitHub or Forgejo): git_clone, git_fetch and git_push use its
+ *  token - kept on the Hub, shown masked, never given to the sandbox. The server is asked whose the token is and
  *  which repositories it reaches. */
-function GitHubSection({ s }: { s: S }) {
-  const [state, setState] = useState<GitHubState | null>(null);
+function GitServerSection({ s }: { s: S }) {
+  const [state, setState] = useState<GitState | null>(null);
   const [checking, setChecking] = useState(false);
   const look = useCallback(async (check: boolean) => {
     setChecking(check);
     try {
-      setState(await api<GitHubState>(`/hub/api/github${check ? "?check=true" : ""}`));
+      setState(await api<GitState>(`/hub/api/git${check ? "?check=true" : ""}`));
     } catch {
       setState(null);
     } finally {
@@ -1547,29 +1547,38 @@ function GitHubSection({ s }: { s: S }) {
   }, []);
   useEffect(() => { look(false); }, [look]);
   const c = state?.check;
+  const name = state?.server === "forgejo" ? "Forgejo" : "GitHub";
   const reach = (c?.repos ?? []).length ? `reaching ${c!.repos!.join(", ")}${c!.more ? " and more" : ""}`
     : "reaching no repository yet";
   return (
-    <SectionForm s={s} section="github" title="GitHub" onSaved={() => look(true)}
-      intro={<>With a token the assistant clones repositories - private ones too - works on them with git in the
-        sandbox, pushes a branch of its own and opens a pull request for you to merge. It never pushes to a
-        repository's default branch, and asks before it pushes, showing the commits and the files. The token stays on
-        the Hub: code in the sandbox never sees it.</>}
+    <SectionForm s={s} section="git" title="Git server" onSaved={() => look(true)}
+      intro={<>With a token the assistant clones repositories from your git server - private ones too - works on
+        them with git in the sandbox, pushes a branch of its own and opens a pull request for you to merge. It never
+        pushes to a repository's default branch, and asks before it pushes, showing the commits and the files. The
+        token stays on the Hub: code in the sandbox never sees it.</>}
       fields={[
-        { key: "token", label: "GitHub token", type: "password",
-          help: <>A fine-grained token: github.com, Settings, Developer settings, Personal access tokens, Fine-grained
-            tokens. Repository access: only the repositories it may work on. Permissions: Contents and Pull requests,
-            Read and write.</> },
+        { key: "server", label: "Server", type: "select", options: [{ value: "github", label: "GitHub" },
+          { value: "forgejo", label: "Forgejo (your own)" }] },
+        { key: "url", label: "Forgejo's address", type: "text",
+          help: <>Only for Forgejo: as the Hub's VM reaches it, e.g. https://git.example.com or
+            http://192.168.1.50:3000.</> },
+        { key: "token", label: "Token", type: "password",
+          help: <>GitHub: a fine-grained token (Settings, Developer settings, Personal access tokens) with only the
+            repositories it may work on, and Contents and Pull requests: Read and write. Forgejo: Settings,
+            Applications, Generate new token - Specific repositories, and the permissions repository: Read and write
+            and user: Read.</> },
       ]}>
       {state && <div className="stack sign-ins">
-        <small className={c && !c.ok ? "warn-text" : "muted"}>
-          {!state.from ? "No token yet - the assistant has no git tools."
-            : checking ? "Asking GitHub..."
-              : c ? (c.ok ? `GitHub takes it: ${c.login ? `${c.login}'s ` : ""}${c.kind === "fine-grained"
-                ? "fine-grained " : ""}token, ${reach}${state.from === "env" ? " (GITHUB_TOKEN in .env)" : ""}.` : c.error)
-                : <>{state.from === "env" ? "GITHUB_TOKEN in .env on the VM is used; a token saved here is used instead."
-                  : "Saved."} <button type="button" className="link-btn" onClick={() => look(true)}>Check it</button></>}
+        <small className={(c && !c.ok) || state.problem ? "warn-text" : "muted"}>
+          {state.problem ? state.problem
+            : !state.ready ? "Not set up yet - the assistant has no git tools."
+              : checking ? `Asking ${name}...`
+                : c ? (c.ok ? `${name} takes it: ${c.login ? `${c.login}'s ` : ""}${c.kind === "fine-grained"
+                  ? "fine-grained " : ""}token, ${reach}.` : c.error)
+                  : <>Saved. <button type="button" className="link-btn" onClick={() => look(true)}>Check it</button></>}
         </small>
+        {state.plain_http && <small className="warn-text">The address is http://, so the token goes over your network
+          unencrypted. Fine on a LAN you trust; https:// (through Nginx Proxy Manager, say) is better.</small>}
         {c?.ok && c.kind === "classic" && <small className="warn-text">A classic token reaches every repository you
           can reach. A fine-grained token limited to the repositories the assistant may work on is safer.</small>}
       </div>}

@@ -6,7 +6,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Request
 
 from .. import auth
-from ..agent import github, internet
+from ..agent import gitserver, internet
 from ..agent.loop import local_target
 from ..agent.tools import webapp as webapp_tool
 from ..agent.tools import windows as windows_tool
@@ -60,7 +60,7 @@ async def capabilities(hub, user) -> dict:
         "projects": not member,
         "libraries": not member and bool(libs and libs.available()),
         "mcp": 0 if member or mcp is None else len(mcp.tools()),
-        "github": not member and bool(github.token(hub.settings)),     # 0.81.0: git_clone, git_fetch, git_push
+        "git": not member and gitserver.configured(hub.settings),     # 0.81.0: git_clone, git_fetch, git_push
         "handover": _handover(hub),
         "images": {"generate": bool(images and images.available()),
                    "edit": bool(images and images.installed("edit")),

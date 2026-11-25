@@ -95,9 +95,11 @@ def shown(text: str, limit: int) -> str:
     return text[:limit] + f"\n... ({len(text) - limit} more characters: open the call to see all of it)"
 
 
-def question(name: str, args: dict, allowed, can_block_code: bool) -> tuple[dict | None, bool]:
+def question(name: str, args: dict, allowed, can_block_code: bool,
+             git_host: str | None = None) -> tuple[dict | None, bool]:
     """(what to ask before this call - None when nothing - and whether the call may use the internet).
-    `allowed(key)` says whether the owner always allows it (always False in a person's chat)."""
+    `allowed(key)` says whether the owner always allows it (always False in a person's chat). git_host: the git
+    server's host (github.com, git.slq.dk), for git_clone and git_fetch (0.81.0)."""
     if name == "web_search":
         if allowed(SEARCH):
             return None, True
@@ -116,13 +118,15 @@ def question(name: str, args: dict, allowed, can_block_code: bool) -> tuple[dict
             return {"kind": "internet", "key": CODE, "what": "code", "detail": shown(args.get("command"), 4000),
                     "always": "Always allow internet for code", "unblockable": not can_block_code}, True
         return None, False                             # runs offline
-    if name in ("git_clone", "git_fetch"):             # 0.81.0: the Hub fetches from GitHub (git_push asks anyway)
-        key = site_key("github.com")
+    if name in ("git_clone", "git_fetch"):             # 0.81.0: the Hub fetches from its git server (push asks anyway)
+        if git_host is None:
+            return None, True                          # not set up: the tool says so itself
+        key = site_key(git_host)
         if allowed(key):
             return None, True
         what = f"git clone {args.get('repo')}" if name == "git_clone" else f"git fetch {args.get('path') or ''}"
-        return {"kind": "internet", "key": key, "what": "git", "host": "github.com",
-                "detail": shown(what.strip(), 1000), "always": "Always allow github.com"}, True
+        return {"kind": "internet", "key": key, "what": "git", "host": git_host,
+                "detail": shown(what.strip(), 1000), "always": f"Always allow {git_host}"}, True
     if name in ("windows_app", "web_app"):
         if allowed(CODE):
             return None, True

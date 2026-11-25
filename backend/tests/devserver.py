@@ -20,7 +20,7 @@ thinking, streamed slowly), "search" (web search), "web picture" (a picture
 from the web in the answer), "picture" (an image), "darker" (edits the newest picture it made, by its file),
 "hand it over" (Qwen3.6 35B-A3B hands the turn to Qwen3.8 27B, which the chat then keeps), "plc build" (writes
 src/Main.st and gives it to the fake MCP server's build tool, which takes files: asked first, the question lists it),
-"push the game" (git_push's card with the commits and files, then the pull request - GitHub faked),
+"push the game" (git_push's card with the commits and files, then the pull request - the server faked),
 "loop" (repeats the same searches until the Hub makes it answer), "long chat" (a long answer with a big
 tool result, to fill the context: Continue in a new chat is offered), "make a skill" (writes a skill and shows its
 card with Add skill), "window" (writes a
@@ -866,7 +866,7 @@ def main() -> None:
                    speech=router, trainer=router)
     app = create_app(env, t, startup=False)
     hub = app.state.hub
-    fake_github(hub)
+    fake_git(hub)
 
     async def read_power() -> None:                    # the card's power, as in production (the fake reads 280 W)
         import asyncio
@@ -878,23 +878,27 @@ def main() -> None:
     uvicorn.run(app, host="127.0.0.1", port=a.port, log_level="warning", proxy_headers=False)   # as in production
 
 
-def fake_github(hub) -> None:
-    """0.81.0: a GitHub token, and a push that only plans and pretends ("push the game"): git_push's card and answer,
-    without a repository or GitHub. The other git tools are offered but reach no GitHub here."""
-    from app.agent import github as gh
-    if not gh.token(hub.settings):
-        hub.settings.update("github", {"token": "github_pat_dev"})
+def fake_git(hub) -> None:
+    """0.81.0/0.82.0: a git server (a Forgejo, unless one is set up), and a push that only plans and pretends ("push
+    the game"): git_push's card and answer, without a repository or a server. The other git tools are offered but reach
+    no server here."""
+    from app.agent import gitserver as gs
+    if not gs.configured(hub.settings):
+        hub.settings.update("git", {"server": "forgejo", "url": "https://forgejo.example", "token": "dev"})
 
-    async def plan(_hub, _wd, args: dict) -> gh.PushPlan:
-        return gh.PushPlan("game", "octo", "game", "octo/game", "cheaper-beer", "1" * 40, "main", None,
+    async def plan(_hub, _wd, args: dict) -> gs.PushPlan:
+        srv = gs.need(hub.settings)
+        return gs.PushPlan("game", "octo", "game", "octo/game", "cheaper-beer", "1" * 40, "main", None,
                            ["a1b2c3d Cheaper beer", "9f8e7d6 Test the bar's prices"], 2,
                            " 2 files changed, 14 insertions(+), 3 deletions(-)\n public/js/bar.js  |  4 ++--\n"
                            " tools/selftest.mjs | 13 +++++++++++-", bool(args.get("pull_request")),
-                           str(args.get("title") or "Test the bar's prices"), str(args.get("body") or ""))
+                           str(args.get("title") or "Test the bar's prices"), str(args.get("body") or ""),
+                           srv.name, srv.web("octo", "game"))
 
-    async def push(_hub, _wd, p: gh.PushPlan) -> gh.Pushed:
-        return gh.Pushed(p, True, "https://github.com/octo/game/pull/7" if p.pr else "", 7 if p.pr else 0, p.pr)
-    gh.plan_push, gh.push = plan, push
+    async def push(_hub, _wd, p: gs.PushPlan) -> gs.Pushed:
+        url = gs.need(hub.settings).web("octo", "game") + "/pulls/7"
+        return gs.Pushed(p, True, url if p.pr else "", 7 if p.pr else 0, p.pr)
+    gs.plan_push, gs.push = plan, push
 
 
 if __name__ == "__main__":
