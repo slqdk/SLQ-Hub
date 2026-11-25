@@ -1,4 +1,5 @@
-"""Accounts, sessions, API keys and sync device tokens.
+"""Accounts, sessions and API keys (SLQ Sync's device tokens went with it in 0.84.0; their table stays, unused, so
+an older version can still be gone back to).
 
 One admin account (the owner), created from HUB_ADMIN_USER /
 HUB_ADMIN_PASSWORD_HASH on the first start (install.sh writes the hash).
@@ -6,8 +7,7 @@ The owner can add people (role "member"): they sign in with their own user
 name and password, use the chat from their device (their chats are kept
 there, not on the Hub), and may be limited to the home network. Browser
 sessions are random tokens in an HttpOnly cookie; only their SHA-256 is
-stored. API keys (slqhub_...) and sync tokens (slqsync_...) are shown once
-and stored hashed.
+stored. API keys (slqhub_...) are shown once and stored hashed.
 """
 from __future__ import annotations
 
@@ -30,7 +30,6 @@ log = logging.getLogger("hub.auth")
 SESSION_COOKIE = "hub_session"
 SESSION_DAYS = 30
 API_KEY_PREFIX = "slqhub_"
-SYNC_TOKEN_PREFIX = "slqsync_"
 PRIORITIES = ("interactive", "normal", "background")
 MEMBER = "member"
 USERNAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{1,39}$")
@@ -373,41 +372,3 @@ def touch_api_key(key_id: int) -> None:
     _last_used_write[key_id] = time.time()
     with db.connect() as con:
         con.execute("UPDATE api_keys SET last_used=? WHERE id=?", (db.utcnow(), key_id))
-
-
-
-# ---------------------------------------------------------------- sync device tokens
-
-def create_sync_token(user_id: int, name: str) -> dict:
-    name = " ".join((name or "").split())[:60] or "device"
-    raw = SYNC_TOKEN_PREFIX + secrets.token_urlsafe(30)
-    with db.connect() as con:
-        cur = con.execute("INSERT INTO sync_tokens (user_id, name, token_hash, created_at) VALUES (?,?,?,?)",
-                          (user_id, name, _sha(raw), db.utcnow()))
-    return {"id": cur.lastrowid, "name": name, "token": raw}
-
-
-def list_sync_tokens(user_id: int) -> list[dict]:
-    with db.connect() as con:
-        rows = con.execute("SELECT id, name, created_at, last_used FROM sync_tokens WHERE user_id=?"
-                           " ORDER BY id", (user_id,)).fetchall()
-    return [dict(r) for r in rows]
-
-
-def revoke_sync_token(user_id: int, token_id: int) -> bool:
-    with db.connect() as con:
-        return con.execute("DELETE FROM sync_tokens WHERE user_id=? AND id=?",
-                           (user_id, token_id)).rowcount > 0
-
-
-def user_for_sync_token(raw: str | None) -> dict | None:
-    if not raw or not raw.startswith(SYNC_TOKEN_PREFIX):
-        return None
-    with db.connect() as con:
-        r = con.execute("SELECT t.id tid, u.id, u.username, u.role, u.display_name, u.away, u.may_run_code"
-                        " FROM sync_tokens t JOIN users u ON u.id=t.user_id WHERE t.token_hash=?",
-                        (_sha(raw),)).fetchone()
-        if not r:
-            return None
-        con.execute("UPDATE sync_tokens SET last_used=? WHERE id=?", (db.utcnow(), r["tid"]))
-    return public_user(r)

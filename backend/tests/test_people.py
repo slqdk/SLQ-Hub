@@ -134,7 +134,7 @@ async def test_a_person_reaches_only_what_the_chat_needs(signed_in, app, api_key
         assert (await sign_in(phone)).status_code == 200
         for path in ("/hub/api/chats", "/hub/api/projects", "/hub/api/libraries", "/hub/api/keys", "/hub/api/people",
                      "/hub/api/memory", "/hub/api/mcp", "/hub/api/system", "/hub/api/connection", "/hub/api/runs",
-                     "/hub/api/skills/anything", "/hub/api/sync-tokens", "/hub/api/models/hf/search?q=x"):
+                     "/hub/api/skills/anything", "/hub/api/projects/1/repo", "/hub/api/models/hf/search?q=x"):
             r = await phone.get(path)
             assert r.status_code == 403 and "owner" in r.json()["detail"], path
         for method, path in (("PUT", "/hub/api/settings"), ("POST", "/hub/api/chats"), ("POST", "/hub/api/projects"),
@@ -142,7 +142,7 @@ async def test_a_person_reaches_only_what_the_chat_needs(signed_in, app, api_key
                              ("DELETE", "/hub/api/models/qwen3.8-27b"), ("POST", "/hub/api/models/unload")):
             r = await phone.request(method, path, json={}, headers={"Origin": "http://hub"})
             assert r.status_code == 403, (method, path)
-        assert (await phone.get("/api/sync/projects")).status_code == 401
+        assert (await phone.get("/api/sync/projects")).status_code == 410      # SLQ Sync is gone (0.84.0)
         s = (await phone.get("/hub/api/settings")).json()["settings"]
         assert set(s) == {"models", "agent", "images"} and "sk-secret" not in json.dumps(s)
         assert (await phone.get("/hub/api/models")).status_code == 200

@@ -32,6 +32,7 @@ served when it exists; otherwise use `npm run dev` in frontend/.
 from __future__ import annotations
 
 import argparse
+import os
 import io
 import json
 import math
@@ -886,6 +887,28 @@ def fake_git(hub) -> None:
     if not gs.configured(hub.settings):
         hub.settings.update("git", {"server": "forgejo", "url": "https://forgejo.example", "token": "dev",
                                     "admin_token": "dev-admin"})
+    # 0.84.0: the server's repositories are bare ones in the data folder - adminsorenlyder/SLQ-Game-Lobby with a
+    # game in it, and an empty one - so a project links, pulls and pushes with git for real.
+    remotes = hub.env.data_dir / "dev-remotes"
+    gs.GIT_OVERRIDE = f"file://{remotes}"
+    lobby = remotes / "adminsorenlyder" / "slq-game-lobby.git"
+    if not lobby.exists():
+        import subprocess
+        import tempfile
+        env = {**os.environ, "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_AUTHOR_NAME": "Søren",
+               "GIT_AUTHOR_EMAIL": "soren@example.com", "GIT_COMMITTER_NAME": "Søren",
+               "GIT_COMMITTER_EMAIL": "soren@example.com"}
+        for bare in (lobby, remotes / "adminsorenlyder" / "empty.git"):
+            bare.parent.mkdir(parents=True, exist_ok=True)
+            subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(bare)], check=True, env=env)
+        with tempfile.TemporaryDirectory() as seed:
+            subprocess.run(["git", "clone", "-q", str(lobby), seed], check=True, env=env)
+            (Path(seed) / "index.html").write_text("<!doctype html><title>SLQ Game Lobby</title>\n")
+            (Path(seed) / "lobby.js").write_text("const beer = 10;\n")
+            (Path(seed) / ".gitignore").write_text("node_modules/\n")
+            subprocess.run(["git", "add", "."], cwd=seed, check=True, env=env)
+            subprocess.run(["git", "commit", "-qm", "The lobby"], cwd=seed, check=True, env=env)
+            subprocess.run(["git", "push", "-q", "origin", "main"], cwd=seed, check=True, env=env)
     users = {u["login"]: u for u in (
         {"login": "soren", "full_name": "Søren", "email": "soren@example.com", "is_admin": True,
          "prohibit_login": False, "active": True, "last_login": "2026-11-25T08:10:00+01:00"},

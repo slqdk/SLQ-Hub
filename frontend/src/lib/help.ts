@@ -353,13 +353,14 @@ export const SECTIONS: HelpSection[] = [
         id: "projects",
         title: "Projects",
         what: "A project keeps files, instructions and chats together (the + beside Projects in the sidebar). Its "
-          + "instructions are followed in every chat in it, and SLQ Sync keeps a folder on your PC in step with it.",
+          + "instructions are followed in every chat in it, and its folder can be a clone of a git repository: the Hub "
+          + "pulls and pushes by itself, and your PC clones the repository.",
         examples: [
           { text: "Read the files in this project and write a README that explains them" },
           { text: "Update the price list with the new prices from the attached offer", attach: "an offer" },
         ],
-        how: ["The project's page has its chats, its files, its settings (the instructions), its history and Sync "
-          + "to a PC.",
+        how: ["The project's page has its chats, its files, its settings (the instructions, and the repository its "
+          + "folder is a clone of) and its history.",
           "A chat outside a project moves into one from its ⋯ menu: Move to a project - a new one or one there is. "
             + "Its files go into the project's folder; nothing there is overwritten."],
         owner: true,

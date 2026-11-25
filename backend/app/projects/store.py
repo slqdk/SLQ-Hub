@@ -4,14 +4,16 @@
                                       /workspace/projects/<id>/)
     <data>/workspace/chats/<id>/      scratch folder of a chat outside a project
 
-Every write to a project folder through the Hub is checked in as a sync
-revision, so it can be restored and the Windows client picks it up.
+Every write to a project folder through the Hub is checked in as a revision
+of the project's history, so it can be restored - and, in a project linked
+to a repository (0.84.0, repo.py), goes to the repository a while after.
 """
 from __future__ import annotations
 
 import codecs
 import errno
 import json
+import logging
 import mimetypes
 import os
 import re
@@ -24,6 +26,12 @@ from pathlib import Path
 
 from .. import db
 from . import syncstore
+
+log = logging.getLogger("hub.projects")
+
+# Called after every check-in of a project's folder - (project id, origin, message) - from any thread: the
+# repository link (0.84.0, projects/repo.py) syncs a while after the last one.
+CHECKIN_HOOKS: list = []
 
 PROJECT_DEFAULTS = {"model": None, "cloud_escalation": False, "skills": [], "libraries": [], "thinking": None,
                     "image_model": None, "level": None}    # level (0.38.0): the project's effort; None = Settings'
@@ -129,6 +137,14 @@ def update_project(pid: int, name: str | None = None, instructions: str | None =
     sets = ", ".join(f"{k}=?" for k in fields)
     with db.connect() as con:
         con.execute(f"UPDATE projects SET {sets} WHERE id=?", (*fields.values(), pid))
+    return get_project(pid)
+
+
+def set_settings(pid: int, settings: dict) -> dict | None:
+    """The project's settings as they are given - for what PATCH does not set (the repository link, 0.84.0)."""
+    with db.connect() as con:
+        con.execute("UPDATE projects SET settings=?, updated_at=? WHERE id=?",
+                    (json.dumps(settings), db.utcnow(), pid))
     return get_project(pid)
 
 
@@ -356,6 +372,11 @@ class Workdir:
             return None
         rev = syncstore.snapshot(self.project_id, self.root, author=author, origin=origin, message=message)
         touch_project(self.project_id)
+        for hook in CHECKIN_HOOKS:
+            try:
+                hook(self.project_id, origin, message)
+            except Exception:  # noqa: BLE001
+                log.exception("a check-in hook failed")
         return rev
 
 

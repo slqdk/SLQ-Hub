@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.84.0 - 2026-11-25
+
+- A project's files folder can be a clone of a repository on the git
+  server. Set it in the project's Settings, Repository, as owner/name, for
+  example adminsorenlyder/SLQ-Game-Lobby, and the Hub clones it into the
+  folder.
+- The Hub pulls when the project opens and before each answer. It commits
+  and pushes what changed after an answer, after a change in Files, or with
+  the Sync button in the project's top bar.
+- Each commit is titled after its chat. If the repository and the folder
+  changed the same file, the folder's version goes to a branch
+  slqhub/conflict-... on the server, and the folder takes the repository's
+  version.
+- Deleting many files waits for the Sync button. Files over 50 MB stay in
+  the folder only.
+- The token is the one in Settings, Assistant, Git server. It never lands in
+  the folder or in git's config, and git never works in the folder itself.
+- A folder that already has files links only to an empty repository (its
+  files become the first commit), or to one it is a part of, file for file.
+- SLQ Sync is gone: SLQSync.exe, its device tokens and the "Sync to a PC"
+  tab. Clone the repository on the PC instead. Files, History keeps every
+  version, as before.
+- In a linked project the assistant is told about the repository, and its
+  git_clone, git_fetch and git_push tools are not offered.
+
 ## 0.83.1 - 2026-11-25
 
 - `update.sh` builds only the images whose files changed since the running

@@ -194,15 +194,16 @@ function NewProject({ onClose, onCreated, onError }: { onClose: () => void; onCr
       <label className="field"><span>Name</span>
         <input className="input" autoFocus value={name} onChange={(e) => setName(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && create()} /></label>
-      <label className="field"><span>Synced folder</span>
+      <label className="field"><span>Folder for the project's files</span>
         <input className="input" value={shownFolder} placeholder={folderFromName(name) || "files"}
           onChange={(e) => setFolder(e.target.value)} />
-        <small>Your files, synced with your PC by SLQ Sync. Beside it, hub/ holds the assistant's notes, working files
-          and your attachments - those stay on the Hub. The name is set now and cannot be changed later.</small></label>
+        <small>Your files - the clone of a git repository, once you link one in the project's settings. Beside it, hub/
+          holds the assistant's notes, working files and your attachments - those stay on the Hub. The name is set now
+          and cannot be changed later.</small></label>
       <label className="field"><span>Instructions for the assistant</span>
         <textarea className="textarea" rows={4} value={instructions} onChange={(e) => setInstructions(e.target.value)}
           placeholder="What this project is about, how answers should look, what to keep in mind." />
-        <small>You can change these later. Files and sync devices are set up on the project page.</small></label>
+        <small>You can change these later. Files and the repository are set up on the project page.</small></label>
     </Modal>
   );
 }

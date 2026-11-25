@@ -1185,6 +1185,11 @@ class Agent:
                       or s.get("agent", "effort"))
         return entry, thinking, effort
 
+    def _repo_history(self, project: dict | None) -> str:
+        """The project's repository as the sandbox sees it, for git log (0.84.0) - "" without one."""
+        from ..projects.repo import link_of, sandbox_git_dir
+        return sandbox_git_dir(self.hub, project["id"]) if link_of(project) is not None else ""
+
     def user_name(self) -> str:
         return self.hub.settings.get("agent", "user_name") or (self.hub.env.admin_user or "the user").title()
 
@@ -1284,7 +1289,8 @@ class Agent:
         return system_prompt(user=user, model_name=Catalog.label(entry),
                              folder_text=folder_text(project, wd.sandbox_path, wd.own + notes.name if notes else "",
                                                      moved, renamed if isinstance(renamed, dict) else None,
-                                                     sync_folder=wd.sync_folder),
+                                                     sync_folder=wd.sync_folder,
+                                                     history=self._repo_history(project)),
                              sandbox_path=wd.sandbox_path, memory_index=mem, skills=skills, project=project,
                              summary="" if subagent else chat.get("summary") or "",
                              images_available=bool(images and images.available()),
@@ -1466,6 +1472,9 @@ class Agent:
             entry, thinking, effort = self.resolve(chat, project, options)
             chats.run_started(run.id, chat["id"], entry["id"])
             wd = self.workdir(chat)
+            repos = self.hub.extras.get("repos")
+            if project and repos is not None:             # the repository's news first (0.84.0): not the turn's
+                await repos.before_turn(project, chat["id"])
             before = await asyncio.to_thread(projects.snapshot, wd.root)     # what the turn makes is shown after it
             from .skills import materialize                # the chosen skills' files, for code (.hub/skills/)
             await asyncio.to_thread(materialize, self.hub.extras["skills"], self.skills_for(chat, project), wd.root)
@@ -1561,6 +1570,14 @@ class Agent:
                     pass
             if engine is not None and wd is not None and before is not None:
                 await self._note_files(engine, wd, before)
+            if project and self.hub.extras.get("repos") is not None:
+                try:                                      # to the repository shortly, with the chat's title (0.84.0)
+                    from ..projects.repo import link_of
+                    if link_of(project) is not None:
+                        title = (chats.get_chat(run.chat_id) or {}).get("title") or ""
+                        self.hub.extras["repos"].turn_ended(project["id"], "" if title == "New chat" else title)
+                except Exception:  # noqa: BLE001
+                    log.exception("could not plan the repository's sync")
             usage_now = engine.usage if engine else {}
             try:                                          # the card's energy and its cost (0.24.0)
                 from .. import usage

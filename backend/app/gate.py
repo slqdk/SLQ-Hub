@@ -7,7 +7,8 @@ straight through).
   x-api-key or path) or a signed-in browser, CORS for the origins listed in
   Settings. From outside, only through the trusted proxy: with a key set to
   work away from home, or with any key when Settings allows it for all.
-* sync API (/api/sync/*) - a slqsync_ device token or a signed-in browser.
+* /api/sync/* - SLQ Sync's API until 0.84.0: answered 410, with what replaced
+  it (a project's repository) in words SLQSync.exe shows.
 * UI API (/hub/api/*) - a signed-in browser, except login/status/health;
   state-changing requests from another origin are refused.
 * everything else - the web app's files.
@@ -177,16 +178,8 @@ class Gate:
                 return await self.app(scope, receive, send_cors)
             return await self.app(scope, receive, send)
 
-        if kind == "sync":
-            raw = _bearer(headers)
-            user = auth.user_for_sync_token(raw) if raw else None
-            user = _signed_in(user or auth.session_user(_cookie(headers, auth.SESSION_COOKIE)), lan)
-            if user is None or auth.is_member(user):            # people have no projects to sync
-                why = _sync_refusal(raw, user)
-                log.warning("sync request %s %s from %s refused: %s", method, path, ip, why)
-                return await _json(send, 401, {"detail": why})
-            state["user"] = user
-            return await self.app(scope, receive, send)
+        if kind == "sync":                                    # SLQ Sync was replaced by repositories (0.84.0)
+            return await _json(send, 410, {"detail": "SLQ Sync is gone (0.84.0): git clone the project's repo"})
 
         if kind in ("ui", "public", "media"):
             user = _signed_in(auth.session_user(_cookie(headers, auth.SESSION_COOKIE)), lan)
@@ -215,19 +208,6 @@ def _with_version(send, version: str):
             message = {**message, "headers": [*(message.get("headers") or []), extra]}
         await send(message)
     return wrapped
-
-
-def _sync_refusal(raw: str | None, user: dict | None) -> str:
-    """Why a sync request was refused, short enough for SLQ Sync's window (it shows about 60 characters after the
-    route) and never the token itself (0.48.1: Søren's PC got "sign in with a sync device token" and nothing said
-    which of these it was)."""
-    if user is not None:
-        return "sync is for the Hub's owner, not a person's account"
-    if not raw:
-        return "no token arrived - a proxy may drop the Authorization header"
-    if not raw.startswith(auth.SYNC_TOKEN_PREFIX):
-        return "not a device token - they start with slqsync_"
-    return "unknown token - removed on the Hub? Add the device again"
 
 
 def _signed_in(user: dict | None, lan: bool) -> dict | None:

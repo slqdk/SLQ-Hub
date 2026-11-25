@@ -349,13 +349,20 @@ class Git:
 
 
 async def git(hub, srv: Server, args: list[str], *, git_dir: Path | None = None, tok: str = "",
-              timeout: float = LOCAL_S, check: bool = True) -> Git:
+              timeout: float = LOCAL_S, check: bool = True, work_tree: Path | None = None,
+              env: dict | None = None) -> Git:
     """git with the Hub's environment, in one of the Hub's own repositories (git_dir). check: raise GitError when it
-    fails, with what git said (never the token: it is in no argument, and git does not print its headers)."""
-    env = _env(hub, srv, tok)
+    fails, with what git said (never the token: it is in no argument, and git does not print its headers).
+    work_tree: a working tree only the Hub writes (a project's copy, projects/repo.py), never one in the workspace;
+    env: more of git's environment (who commits)."""
+    environ = _env(hub, srv, tok)
     if git_dir is not None:
-        env["GIT_DIR"] = str(git_dir)
-    proc = await asyncio.create_subprocess_exec("git", *args, env=env, cwd=str(hub.env.git_dir),
+        environ["GIT_DIR"] = str(git_dir)
+    if work_tree is not None:
+        environ["GIT_WORK_TREE"] = str(work_tree)
+    environ.update(env or {})
+    proc = await asyncio.create_subprocess_exec("git", *args, env=environ,
+                                                cwd=str(work_tree if work_tree is not None else hub.env.git_dir),
                                                 stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
                                                 stderr=asyncio.subprocess.PIPE)
     try:

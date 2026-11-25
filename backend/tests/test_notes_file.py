@@ -221,7 +221,7 @@ async def test_moving_a_chat_into_a_new_project(signed_in, app, fakes):
     await finish(app, await say(signed_in, c["id"], "Hvor er filerne?"))
     system = fakes.llama["requests"][-1]["messages"][0]["content"]
     assert (f'You work in the files of the project "CM98" ({hub.env.sandbox_workspace}/projects/{p["id"]}), in two '
-            "folders:\n- CM98/ is the user's.") in system
+            "folders:\n- CM98/ is the user's: their project's own files.") in system
     assert (f"This chat was moved into the project from its own folder ({old.sandbox_path}): the files the "
             "conversation above shows there are in hub/ now, its attachments in hub/attachments/.") in system
     assert "- hub/NOTES.md in the working folder holds the notes of this work" in system
@@ -413,7 +413,8 @@ async def test_in_a_project_that_syncs_one_folder_the_assistant_keeps_to_hub(sig
     req = fakes.llama["requests"][0]["messages"]
     assert "hub/attachments/photo.png" in req[-1]["content"][2]["text"]
     system = req[0]["content"]
-    assert "in two folders:\n- Garage/ is the user's. SLQ Sync keeps it the same as a folder on their PC" in system
+    assert "in two folders:\n- Garage/ is the user's: their project's own files. Change in it what the user asks " \
+        "for and put nothing else there.\n" in system and "SLQ Sync" not in system and "clone of" not in system
     assert "- hub/ is yours and never leaves the Hub: your notes (hub/NOTES.md)" in system
     r = await signed_in.put(f"/hub/api/chats/{c['id']}/notes", json={"text": "## Goal\n- tidy the garage"})
     assert r.status_code == 200 and "tidy the garage" in (top / "hub" / "NOTES.md").read_text()

@@ -44,7 +44,7 @@ decided and how the pieces fit; `docs/INSTALL.md` is the step-by-step guide.
 | Agent tools | Web search + fetch (own SearXNG), code execution in a sandbox, project files, MCP servers. |
 | Harness features | Skills, memory, artifacts (live HTML/React), subagents + context compaction. |
 | Approval | Runs freely inside the sandbox. Asks only for actions outside it (MCP tools; with the internet set to ask first, also going online): Allow once, Allow in this chat, Always, Deny. |
-| File sync | SLQ Sync ported with the **same protocol**, so the existing SLQSync.exe works against the Hub. |
+| File sync | A project's folder can be the clone of a repository on the git server (0.84.0): the Hub pulls, commits and pushes, and a PC clones the repository. SLQ Sync (SLQ Companion's protocol and SLQSync.exe) did this until 0.83.x; its history store stayed as the Hub's own. |
 | UI language | English. The model answers in the language it is spoken to. |
 | Mobile | Responsive layout + installable PWA from the start. |
 | Document libraries | Yes, multimodal RAG with citations. |
@@ -124,7 +124,7 @@ Volumes (host paths, all under `/srv/slq-hub`):
 
 | Path | Contents |
 |---|---|
-| `data/` | `hub.db`, settings, chats, uploads, generated images, project files, sync revisions, skills, memory, libraries, the sandbox's home, the Hub's copies of git repositories (`data/git`, 0.81.0). Backed up by `update.sh` (not the logs, the sandbox's NuGet caches, .NET build output or `data/git` - fetched again from the server, and left in place by a restore). |
+| `data/` | `hub.db`, settings, chats, uploads, generated images, project files, sync revisions, skills, memory, libraries, the sandbox's home, the Hub's copies of git repositories (`data/git`, 0.81.0; a linked project's in `data/git/projects/<id>`, 0.84.0). Backed up by `update.sh` (not the logs, the sandbox's NuGet caches, .NET build output or `data/git` - fetched again from the server, and left in place by a restore). |
 | `models/llm/` | GGUF files. Not backed up (re-downloadable). |
 | `models/comfy/` | ComfyUI model folders (`diffusion_models/`, `text_encoders/`, `vae/`, …). |
 | `models/speech/` | The speech models (made by the Hub on the first download; the speech container mounts `models/` read-only). |
@@ -703,7 +703,7 @@ message's time with the conversation.
 | `skill` | Reads one of the chosen skills: its SKILL.md, or one of its other files (`skill(name, file)`; PDF, Word, Excel and PowerPoint as text, pictures shown). Offered when the chat has skills. |
 | `skill_propose` | The skill the assistant made in the working folder: checked against the format, kept as a draft and shown as a card with Add skill (0.23.0, §6 "Skills"). Not in subagents. |
 | `memory` | One tool with commands: view, create, str_replace, insert, delete, rename. Global memory (`/memories`) plus per-project memory (`/memories/project`). |
-| `git_clone`, `git_fetch`, `git_push` | A repository from the owner's git server - GitHub or Forgejo - in the working folder with the owner's token (0.81.0, 0.82.0, "Git: GitHub or Forgejo" below): clone it, fetch what is new, push a branch of its own and open a pull request. The Hub does the network work; the sandbox never sees the token. Push asks first, never to the default branch, never forced. Only in the owner's chats, with a server set up. |
+| `git_clone`, `git_fetch`, `git_push` | A repository from the owner's git server - GitHub or Forgejo - in the working folder with the owner's token (0.81.0, 0.82.0, "Git: GitHub or Forgejo" below): clone it, fetch what is new, push a branch of its own and open a pull request. The Hub does the network work; the sandbox never sees the token. Push asks first, never to the default branch, never forced. Only in the owner's chats, with a server set up - not in a project linked to a repository (0.84.0: the Hub commits and pushes there itself, section 7). |
 | `library_search` | Present when the chat or project has libraries: text and page-image search, with page images for the vision model. |
 | `artifact` | Create or update an HTML, React, SVG, Mermaid, Markdown or code artifact, with versions. Shown in the side panel in a sandboxed iframe. React and Babel are served locally, so it works offline. |
 | `todo_write` | A visible checklist for long tasks. It helps a 27B model keep track of them. |
@@ -1095,7 +1095,7 @@ extracted or converted data in `data/`, the scripts that make it in
 docs?"), the structure that is there already followed; a single file and
 NOTES.md at the top), do not move the user's own files unless asked, and put
 scratch and test files in `.hub/tmp/` - which Files, the card under the answer
-and SLQ Sync leave out. An existing folder is tidied by asking for it.
+and a project's repository leave out. An existing folder is tidied by asking for it.
 Since 0.35.0 a sixth, from chat 135. To make something look like a picture the
 user gave, that picture is the reference, never one made with image_generate.
 Measure it with one script (its size, the colours and places of its parts, the
@@ -1581,7 +1581,7 @@ pushes there, Forgejo mirrors to GitHub, which Claude Code then only reads), so 
 GitHub, or a Forgejo at an address the owner gives.
 
 **What the model gets.** Three tools, offered in the owner's chats when a git server is set up (not in a person's chat
-or a persona's task): `git_clone(repo, folder?, branch?)`, `git_fetch(path?)` and `git_push(path?, branch?,
+or a persona's task, nor - 0.84.0 - in a project linked to a repository, whose folder the Hub syncs itself): `git_clone(repo, folder?, branch?)`, `git_fetch(path?)` and `git_push(path?, branch?,
 pull_request?, title?, body?)`. Their descriptions name the server ("GitHub", "Forgejo (git.slq.dk)": `Tool.dynamic`).
 The clone is an ordinary working copy in the working folder (by default named after the repository, in `hub/` in a
 project with a synced folder): the model works in it with bash and the file tools - `git switch -c`, `git add`,
@@ -1958,7 +1958,7 @@ is theirs to see. Settings → Skills is gone; its address opens this page.
 
 ---
 
-## 7. Projects and files (SLQ Sync)
+## 7. Projects and files
 
 A project is a set of instructions, files, chats, skills used in all its chats,
 memory and settings (default model, cloud escalation). Its files live in
@@ -1982,49 +1982,155 @@ gives way to a pointer once the message is older than the last twelve
 stored messages; compaction treats it the same way. Paths are checked
 against the folder (`Workdir.resolve`); at most 20 files per message.
 
-`backend/app/projects/syncstore.py` is SLQ Companion's `syncstore.py`:
+**The history** (`backend/app/projects/syncstore.py`, SLQ Companion's
+`syncstore.py`):
 
 - **History.** Each project has a linear revision history. Contents live in a
   content-addressed blob store (`data/blobs/<sha256>`). A revision lists only
   the files that changed.
-- **Snapshots.** The server folder is the head: it is snapshotted after every
-  Hub write and before every client request.
-- **Conflicts** are decided per file by the client's base sha. Nothing is
-  overwritten; the client gets the server's version beside its own as
-  `*.slqconflict-r<rev>.*`.
+- **Snapshots.** The folder is the head: it is snapshotted after every Hub
+  write (`Workdir.checkin`) and after the repository brings changes.
 
-The routes are identical: `/api/sync/whoami`, `/api/sync/projects`, and
-`/api/sync/projects/{id}/head|changes|blob/{sha}|checkin|revisions`, with
-`Authorization: Bearer slqsync_…` device tokens. The existing SLQSync.exe and
-`slq_sync.py` therefore work against the Hub. The server-side ignore list is
-generic (`.git`, `node_modules`, `__pycache__`, `.venv`, `*.tmp`, `*.bak`,
-`~$*`, `thumbs.db`, …). The TwinCAT patterns are not included.
+Until 0.83.x it was also the server side of SLQ Sync's Windows client
+(`/api/sync/*`, `slqsync_` device tokens, conflicts as `*.slqconflict-r<rev>.*`
+beside the client's copy). 0.84.0 took that out - a project's repository does
+it now, below (Søren, 2026-11-25: "Det skal så erstatte den eksisterende git
+sync (slq sync)") - and kept the history: Files -> History, Restore. `/api/sync/*`
+answers 410 with "SLQ Sync is gone (0.84.0): git clone the project's repo", which
+SLQSync.exe's window shows; the `sync_tokens` table stays, unused, so an older
+version can still be gone back to.
 
-**The synced folder (0.40.0).** A project made since 0.40.0 has two folders:
-its synced folder (`settings.sync_folder`, named when the project is made -
-from the project's name unless the user types one - and never changed after)
-and `hub/`. The PC's folder is the synced folder: `sync_routes.py` takes the
-prefix off the paths it sends (`head`, `changes`, `revisions`, check-in
-results) and puts it on the paths it gets (check-in), and leaves out what lies
-outside. The history and the blob store keep the whole project, so `hub/` has
-history too, and SLQSync.exe needs no change. `hub/` is the assistant's: the
+**The files folder (0.40.0).** A project made since 0.40.0 has two folders:
+its own files' folder (`settings.sync_folder` - the synced folder while SLQ
+Sync synced it; named when the project is made, from the project's name unless
+the user types one, and never changed after) and `hub/`. That folder is what a
+repository is cloned into (0.84.0); `hub/` never leaves the Hub. The history
+and the blob store keep the whole project, so `hub/` has history too. `hub/`
+is the assistant's: the
 system prompt names both folders, attachments go to `hub/attachments/` (shown
 in Files, unlike `.hub/attachments/`), the notes file is `hub/NOTES.md`,
 pictures, sound and video default to `hub/images|audio|video/`, an upload to
 no folder lands in `hub/`, and a chat moved into such a project brings its
 files to `hub/` (`move.to_path`) with its messages pointed there. Files will
-not delete or rename the two folders - an emptied synced folder would empty
-the PC's. A project from before (no `sync_folder`, or ".") syncs as a whole,
-as it did. Søren, 2026-10-28: "chat relatede filer bliver blandet med twincat
-project filer".
+not delete or rename the two folders - an emptied files folder would empty the
+repository. A project from before (no `sync_folder`, or ".") is one folder, as
+it was: linked to a repository, all of it goes there, the assistant's notes
+and pictures too (Settings says so). Søren, 2026-10-28: "chat relatede filer
+bliver blandet med twincat project filer".
 
-The UI gets a file tree with preview and editor, the revision list with
-restore, and the sync devices. Each row of the tree says when the file last
+The UI gets a file tree with preview and editor, and the revision list with
+restore. Each row of the tree says when the file last
 changed (0.33.0, Søren: the clock today, the day this year, the month before;
 the whole date and time on hover); a folder is as new as the newest thing in
 it. A button beside the ZIP turns the order to the newest first - folders
 still first, each by its newest change - and back to by name; the choice is
 kept in the browser (local storage) and applies to Find a file too.
+
+**A project's repository** (0.84.0, `backend/app/projects/repo.py`; Søren,
+2026-11-25: "Hvert projekt kan kobles til et repo på https://git.slq.dk (fx
+adminsorenlyder/SLQ-Game-Lobby). Projektets filmappe er så en git-clone af
+repoet. Hubben laver git pull ved åbning og commit + git push når filer
+ændres, eller via en knap. Login sker med Forgejo-brugeren slqhub og et token
+... Tokenet gemmes ét sted i hubbens indstillinger. Projektindstillinger får et
+felt Repo." Then: it replaces SLQ Sync). Settings -> Repository takes
+`owner/name` or the repository's address on the git server set up in Settings
+-> Assistant -> Git server (GitHub or Forgejo, 0.82.0; its one token - on
+git.slq.dk the user `slqhub`'s). The files folder (the whole project for one
+from before 0.40.0) becomes the clone; `settings.repo` is `{repo, branch,
+server}`, the branch the repository's default.
+
+*Where git works.* Not in the folder: sandboxed code writes it with the Hub's
+uid and could put a link where a folder was while git runs, and git - with the
+Hub's data in view - would read or write through it (a link in place of the
+folder: `git add -A` would have pushed the Hub's settings). git works in a
+copy only the Hub writes, `data/git/projects/<id>/`: `repo.git` (init'ed
+without a working tree in its config; `core.symlinks false`, so the copy never
+holds a link), `tree/` (its working tree, a copy of the folder) and
+`state.json` (each file's size, time and mode as the copy last saw them, and
+the last sync's outcome). `data/git` is mounted read-only in the sandbox at
+`/hub-git`, so the assistant reads the history (`git --git-dir=/hub-git/
+projects/<id>/repo.git log`).
+
+*Linking.* The folder must be empty; or the repository empty - then the
+folder's files are its first commit ("<project>: the files from SLQ Hub"); or
+the folder a part of the repository, file for file (unlinked and linked again,
+or copied in by hand) - then what it lacks comes. Anything else is refused
+(409) with the files that differ. Unlinking keeps the folder's files and the
+repository, and deletes the copy; so does deleting the project.
+
+*A sync* (one at a time per project, never while a chat of the project works
+on an answer):
+1. in: the folder's changed files into `tree/` - each folder opened from the
+   one before with `O_NOFOLLOW`, regular files only (a link is left out and
+   named), not what the Hub always left out (`syncstore.IGNORE_DIRS` and
+   `IGNORE_GLOBS`: node_modules, .hub, *.tmp, ...), not deeper than 64 folders,
+   not above 50 MB (`MAX_FILE`: kept in the folder, named in the status), at
+   most 20,000 files; a file gone from the folder is deleted from `tree/` -
+   not one in a folder that is a link now, or unreadable;
+2. `git add -A` (the repository's `.gitignore` applies) and a commit when
+   anything changed: "SLQ Hub" with the token's user's address (gitserver
+   `identity`), the subject the chat's title when an answer made the change,
+   else "Update a, b, c and 2 more", and in the body what the history noted
+   ("bash: ...", "wrote ...", "uploaded ..."). A sync started by a change or an
+   answer that would delete at least 10 files and more than half waits
+   (`waiting`) for the Sync button - an emptied folder is not pushed by
+   itself;
+3. fetch the branch; when the server's is ahead, a fast-forward; when both
+   have new commits, a rebase onto the server's (one line of history, no merge
+   commits). A conflict: the rebase is aborted, the folder's commits are pushed
+   to a branch of their own, `slqhub/conflict-<time>`, and the copy takes the
+   server's branch - the status names the files and the branch;
+4. out: what the server brought (git's difference in the copy before and
+   after) into the folder the same way - folders opened with `O_NOFOLLOW` and
+   made a level at a time, each file a temp file of its own (`*.hub-tmp`, which
+   the copy leaves out) renamed into place, its mode kept. A file the folder
+   changed since step 1 is left alone (the next sync takes it in); a link or a
+   submodule from the repository is not written. What came is checked into the
+   history (author and origin "git");
+5. push, never forced; a push refused because the server moved on meanwhile
+   syncs again a second later.
+A sync cut off (the Hub stopped, a timeout) leaves nothing in the way: the next
+aborts a rebase or merge halfway and removes an old index lock.
+
+*When.* When the project page opens; before each answer in a chat of the
+project (so the assistant starts from what is there - at most 45 s, then the
+answer goes on beside it; and only when no other chat of the project works);
+3 s after an answer, with its title; 20 s after the last change through the
+Hub (`Workdir.checkin`: the editor, uploads, the assistant's bash and files,
+moves - `store.CHECKIN_HOOKS`); and the Sync button (the top bar and
+Settings), which also confirms a waiting delete. While a chat of the project
+works, a sync waits for it to end.
+
+*The assistant.* The system prompt says the files folder is a clone of the
+repository, that the Hub pulls before each answer and commits and pushes after
+it, not to run git to commit, pull or push, nor to clone other repositories
+into it, and where its history is. git_clone, git_fetch and git_push (section
+6) are not offered in a linked project.
+
+Routes (the owner's, like every project route): `GET|PUT|DELETE
+/hub/api/projects/{id}/repo` (the view: linked, repo, branch, web address,
+status, the server; link; unlink), `POST /hub/api/projects/{id}/repo/sync`
+(`force`: the waiting delete; 409 while a chat of the project works). The UI:
+Settings -> Repository (Link, then Sync now, Unlink, the last sync's outcome,
+what was too big or left alone, the `git clone` line for the PC), and in the
+top bar a lamp, the repository and the outcome ("synced 2 min ago", "sync
+failed", "conflict", "waits for you") with Sync; the page asks for a sync when
+it opens and for the outcome every 10 s.
+
+Tests: tests/test_repo.py, against bare repositories in a folder standing in
+for the server (test_git's), and a fake Forgejo API for the identity: linking
+(the token in no file, history recorded, other servers refused), a folder with
+files (an empty repository takes them; the same files take what is missing;
+different ones refused), both ways (a Hub write, a sandbox write, a delete; the
+server's changes in; a rebase in one line), a conflict (the branch, the
+server's untouched, the folder the server's), what stays out (a link to a
+file of the Hub's data, a link to its data folder, a big file, node_modules,
+`.gitignore`), a link in place of the folder (nothing synced, nothing deleted),
+the waiting delete and the button, an answer and a change syncing by
+themselves (the chat's title in the commit, no git tools offered, the prompt),
+waiting while a chat works, unlink and delete, a changed server, a person
+refused, SLQ Sync's 410, and step 4 alone (no link followed, a changed file
+left, the mode kept). Mutation-checked (see HANDOFF).
 
 **Download as ZIP** (0.29.0; Søren, chat 79: a browser game is four files and
 a data folder, downloaded one by one). `GET /hub/api/folders/{kind}/{id}/zip`
@@ -3420,7 +3526,8 @@ running, amber waiting, blue your action is needed (a tool asks), red fault.
   shows PDFs (served without the `sandbox` CSP the other files get, which
   the browser's PDF viewer cannot run under).
 - **Project page.** Chats, files (tree, CodeMirror editor, upload, history and
-  restore per file), settings, revisions, sync devices.
+  restore per file), settings (with the repository, 0.84.0), revisions; the
+  repository's sync in the top bar.
 - **Libraries.** Documents with indexing progress and a search to try.
 
 Settings: models (download with progress, load, free the GPU, rename, order,
@@ -3575,8 +3682,19 @@ assistant made), each sent with every message.
   out of MCP arguments; they belong in its environment). The daemon is not
   dumpable (its token), and kills whatever a confined command leaves running
   (its process group and anything carrying the command's mark).
-- **Keys and tokens.** API keys and sync tokens are stored only as hashes and
-  shown once.
+- **Keys and tokens.** API keys are stored only as hashes and shown once.
+- **A project's repository** (0.84.0, section 7). git never works in the
+  project's folder, which sandboxed code writes with the Hub's uid: it works in
+  a copy only the Hub writes (`data/git/projects/<id>/`), and the folder is
+  read and written from the workspace down with `O_NOFOLLOW` at every step - a
+  link put in place of the folder, of a folder in it or of a file is refused or
+  left alone, never followed, so neither the Hub's data nor anything outside
+  the folder can reach the repository, and nothing from the repository lands
+  outside the folder. git checks links out as plain files in the copy
+  (`core.symlinks false`), and a link or submodule from the repository is not
+  written into the folder. The token is git's for one command, as a header in
+  its environment (gitserver `_env`) - never in `.git/config`, a URL or a file.
+  The routes are the owner's (projects).
 - **Sandbox.** The sandbox has:
   - no Docker socket;
   - uid 1000;
@@ -3879,6 +3997,13 @@ whether the work lives up to what is expected.
   first clone takes the disk twice (the mirror and the working copy, plus
   the working copy's files in the project's history); the game lobby is
   about 72 MB of history and 100 MB of files.
+- **A project's repository** (0.84.0). Tested against bare repositories in a
+  folder and a fake Forgejo API only; not against git.slq.dk, not on the VM.
+  The Hub's copy holds the folder's files again (`data/git/projects/<id>/tree`,
+  plus the repository's objects), so a linked folder takes its size about
+  three times on the disk with the project's history. Not noticed by a sync: a
+  change only in what the Hub always leaves out (a `*.bak` the repository
+  tracks, say) - it is written into the folder but never taken back.
 - **GPU hand-over.** The 7900 XTX has a known reset problem: handing it from
   VM 104 to the new VM, or a VM reboot, may need a Proxmox host reboot.
   `create-vm.sh` sets VM 104 to `onboot 0`, so a host reboot is a clean way

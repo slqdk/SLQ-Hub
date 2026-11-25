@@ -231,7 +231,17 @@ export interface ChatData { chat: Chat; messages: Message[]; artifacts: Artifact
 
 export interface ProjectSettings { model: string | null; cloud_escalation: boolean; skills: string[]; libraries: number[];
   thinking: boolean | null; image_model: string | null; level?: string | null;
-  sync_folder?: string | null }   // 0.40.0: the folder synced to the PC, hub/ beside it; "." or none = all of it
+  sync_folder?: string | null;    // 0.40.0: the project's own files, hub/ beside it; "." or none = all of it
+  repo?: RepoLink | null }        // 0.84.0: the repository that folder is a clone of
+/** A project's repository (0.84.0): owner/name on the git server, its branch, and the server's address. */
+export interface RepoLink { repo: string; branch: string; server: string }
+/** The last sync of a project's folder with its repository: ok, syncing, error, conflict (the folder's version kept on
+ *  `branch` on the server), waiting (many files deleted: the Sync button decides). */
+export interface RepoStatus { state?: "ok" | "syncing" | "error" | "conflict" | "waiting"; at?: string; since?: string;
+  message?: string; pulled?: number; pushed?: number; big?: { path: string; size: number }[]; left?: string[];
+  branch?: string; files?: string[]; deleted?: number; pending?: boolean }
+export interface RepoView { linked: boolean; server: string; ready: boolean; folder: string; whole: boolean;
+  repo?: string; branch?: string; status?: RepoStatus; history?: string; web?: string }
 export interface Project { id: number; name: string; instructions: string; settings: ProjectSettings; created_at: string;
   updated_at: string; archived?: number; chats?: number; head?: number; usage?: UsageTotals }
 /** What was used of the card (0.24.0): answers, other jobs, tokens read / written / from the cache, energy (Wh), cost
@@ -414,13 +424,14 @@ export interface Revision { rev: number; author: string; origin: string; message
 
 export type Settings = Record<string, Record<string, any>>;
 
-/** A project's synced folder (0.40.0), or "" when the whole project is synced (one from before). */
+/** A project's own files' folder (0.40.0; a clone of its repository since 0.84.0), or "" for a project from before
+ *  that keeps everything in one folder. */
 export const syncFolderOf = (p: Project): string => {
   const f = p.settings?.sync_folder;
   return f && f !== "." ? f : "";
 };
 
-/** The synced folder's name the Hub makes from a project's name: letters, digits, _ - and . (a space becomes -). */
+/** The files folder's name the Hub makes from a project's name: letters, digits, _ - and . (a space becomes -). */
 export const folderFromName = (s: string): string =>
   s.trim().replace(/\s+/g, "-").replace(/[^\p{L}\p{N}_.-]/gu, "").replace(/^[.-]+|[.-]+$/g, "").slice(0, 60)
     .replace(/[.-]+$/g, "");

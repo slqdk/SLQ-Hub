@@ -19,9 +19,13 @@ WORK = ("Work in it with bash (cwd: {rel}): git switch -c <a-short-branch-name> 
 
 
 def _available(ctx: ToolContext) -> bool:
-    """The owner's chats, with a git server set up - not a person's chat, not a persona's task."""
+    """The owner's chats, with a git server set up - not a person's chat, not a persona's task, and not a project
+    whose folder is a clone of its repository (0.84.0): the Hub commits and pushes there itself."""
     eng = ctx.engine
     if eng is not None and (getattr(eng, "device", None) is not None or getattr(eng, "persona", None) is not None):
+        return False
+    from ...projects.repo import link_of
+    if link_of(ctx.project) is not None:
         return False
     return gs.configured(ctx.settings)
 

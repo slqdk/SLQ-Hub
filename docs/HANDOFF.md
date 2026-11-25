@@ -4,7 +4,32 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## Next session - start here (written 2026-11-25, at 0.83.1)
+## Next session - start here (written 2026-11-25, at 0.84.0)
+
+**0.84.0 (2026-11-25, 13:51): a project's folder is a clone of its repository on the git server, and SLQ Sync is
+gone - pushed, not yet installed.** Søren: "Hvert projekt kan kobles til et repo på https://git.slq.dk (fx
+adminsorenlyder/SLQ-Game-Lobby). Projektets filmappe er så en git-clone af repoet. Hubben laver git pull ved åbning
+og commit + git push når filer ændres, eller via en knap. Login sker med Forgejo-brugeren slqhub og et token ...
+Tokenet gemmes ét sted i hubbens indstillinger. Projektindstillinger får et felt Repo." Four minutes later: "Det skal
+så erstatte den eksisterende git sync (slq sync)". Asked which feature to replace (SLQ Sync, the assistant's git
+tools, or both), he answered with the model again ("the hub should clone the git project.. and then have project
+files as working folder... and then push commit aso") - read as: SLQ Sync goes, the git tools stay (but are not
+offered in a linked project), Files -> History stays. Told him before building: the token goes as a header per
+command, not in `.git/config` as `https://slqhub:<token>@...` would put it; git's own folder lives outside the
+project folder; the files folder (not `hub/`) is the clone; a folder with files links only to an empty repository;
+a conflict keeps the folder's version on a branch `slqhub/conflict-...`. Built (DESIGN §7 "A project's repository"):
+git never works in the folder - a copy only the Hub writes (`data/git/projects/<id>/`), the folder read and written
+with `O_NOFOLLOW` from the workspace down; pull on open, before each answer, after an answer (its title in the
+commit), 20 s after a change through the Hub, and the Sync button; a rebase onto the server's commits; many deletes
+wait for the button; 50 MB files stay out. Seen in the dev server (bare repositories as the server): Settings ->
+Repository, Link, the top bar's "synced just now", an edit and Sync, the commit on the "server". Not against
+git.slq.dk, not on the VM. To try after the update: Settings -> Assistant -> Git server is Forgejo at
+`https://git.slq.dk` with slqhub's token (repository Read and write on the repositories); a new project, Settings ->
+Repository `adminsorenlyder/SLQ-Game-Lobby`, Link; a chat that changes a file; the commit on git.slq.dk, titled
+after the chat. Projects that used SLQ Sync (the TwinCAT ones): an empty repository on Forgejo each, linked - the
+Hub pushes the folder as the first commit - and `git clone` on the PC.
+
+The paragraphs below were written at 0.83.1 and before.
 
 **0.83.1 (2026-11-25, from 11:43): the update to 0.83.0 filled the disk; the VM's disk is bigger now, and the
 updater builds only what changed - pushed, not yet installed.** Søren's `update.sh` (0.80.2 on the VM, as on
@@ -131,11 +156,12 @@ finds them and fingers still come out wrong). Decided: no Facebook posting (he c
 
 Known flake: tests/test_training.py::test_the_trainer_stops_a_job fails now and then in a full run and passes alone.
 
-## State (0.83.1, 2026-11-25)
+## State (0.84.0, 2026-11-25)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
-with all its tools, projects with SLQ Sync, images through ComfyUI, libraries
+with all its tools, projects (their folders clones of git repositories since 0.84.0; SLQ Sync until 0.83.x),
+images through ComfyUI, libraries
 (multimodal RAG), MCP, cloud escalation, the web UI (responsive, PWA) and the
 command line self-test. Since 0.8.0 there is also a chat page for phones
 (`/chat`) on the model API, for the rest of the household. A chat that behaves
@@ -1375,6 +1401,21 @@ Forgejo's API from its documentation and source only. Tests: tests/test_git.py (
 blocked and allowed, an administrator not blocked, the admin token in no tool call or model request, a person's
 login 403 on the git routes). The dev server fakes the admin API (three users): the panel, Block, Add a user with its
 password, and a name taken (Forgejo's message in a toast) seen there. NOT seen on the VM; no real Forgejo.
+0.84.0, the same day at 13:51: a project's repository, and SLQ Sync out ("Next session" above; DESIGN §7).
+`app/projects/repo.py` (`Repos` in hub.extras["repos"]: link, unlink, forget, sync, the timers; `copy_in`, `copy_out`
+and `open_folder` doing the folder with dir file descriptors and `O_NOFOLLOW`), `repo_routes.py`
+(`/hub/api/projects/{id}/repo`, `/repo/sync`), `store.CHECKIN_HOOKS` (Workdir.checkin calls them; the startup hook
+`bind_repos` puts `Repos.changed` there), `store.set_settings`, gitserver.git's `work_tree` and `env`. The agent:
+`before_turn` before the turn's snapshot, `turn_ended` in its `finally`; `prompt.repo_text` in the folder's lines;
+tools/git.py's `_available` says no in a linked project. Out: `projects/sync_routes.py`, the sync-token and
+sync-client routes, auth's sync tokens (the table stays for a step back), syncstore's `checkin`, `changes_since`,
+`in_view`; the gate answers `/api/sync/*` 410. UI: Settings -> Repository and the top bar's `RepoBar` in
+ProjectView, the "Sync to a PC" tab gone, the new-project dialog's folder text, the help page. Tests:
+tests/test_repo.py (13), tests/test_history.py (was test_sync.py, 6 left), test_people's person checks; 8 mutations
+of repo.py caught (the folder or a link in it followed, the delete guard, the conflict branch, a changed file
+overwritten, a link from the repository written, a big file taken in, a link on the way of a write). The dev server's
+git server has bare repositories (`data/dev-remotes`: adminsorenlyder/SLQ-Game-Lobby with a game, and an empty one):
+Link, edit, Sync and the commit seen there with Chromium. NOT seen on the VM; no real Forgejo.
 0.83.1, the same day: the update to 0.83.0 filled the VM's disk (above, "Next session"). tools/hub_update.py:
 `to_build(old)` - per service from `compose config --services`, its `build:` section read from the compose file
 (`build_block`, comments left out) and its context's paths (`build_paths`, relative to deploy/; the Hub's is the
@@ -1474,7 +1515,7 @@ the host if the VM ever stops by itself.
 | Scheduler | 14 unit tests: priorities, aging, slots, affinity, leases with in-lease switching (two leases that both want ComfyUI, a full residency), cancellation, preload, a crashed model server noticed and loaded again. |
 | Model APIs | 29 tests against a fake llama-server: Ollama (chat, generate, show, tags, embed, key in the path, `HEAD /`), OpenAI (chat, stream, tools, images, the extra fields of `/v1/models`), Anthropic (messages, stream, tools, thinking), LAN guard, CORS, key priority, the `/chat` route, the home network for keys, keys that work away from home (through the proxy only - not from a direct outside peer or the sandbox; a wrong key from outside gets the same 403; an address list still applies; last used only once let in; switched back), every key from outside still only through the proxy. |
 | Agent | 43 tests: plain turns, the files a turn made or changed (by a tool and by a command; scratch files removed again, `.hub` and untouched files left out; newest first) as a run step, served for the card (a range for the player, a download, PDFs without the sandbox CSP), the folder snapshot's ignores (node_modules, `.pyc`, links) and its limit, the local time each user message was sent (in the message, the same text in later turns; summer and winter time, `TZ`), tools in chat and project folders, revisions, stopping (in a tool and while writing), retry/edit, SSE replay, messages sent while a turn works (read after a tool step, while the last answer is written, after the end, with Stop), attachments, project files put in a message (text inline and fenced, too big or binary as pointers, pictures as images, refused paths, the pointer once the message is old), image generation switching the card and back, MCP over HTTP (approval, always-allow, masked secrets) and over stdio in the sandbox, escalation (explicit and automatic), subagents, compaction (and a summary request that fits the context: 40 big results before the new question, 8K context), a long single turn that stays inside a 14K context (12 results of 9,000 characters, tool definitions counted), the loop guard (the same search refused, a failing read retried once then refused, the forced answer without tools and its notice, repeats with new words, the same bash step three times, a read after an edit running again), hand-over to the stronger local model (a loop, three failed calls, the escalate tool; the card switches within the lease; its own system prompt and note, no reasoning of the other model; nobody to hand over to; local first, then the cloud), what each step was sent and why it stopped, a model's own thinking and sampling, system prompts stored once and removed with the chat, the note when a picture call names another model than the chat's, skills, memory, artifacts. |
-| SLQ Sync | 8 tests (one: writes never follow a symlink planted in the folder), including a round trip with the real `slq_sync.py` client from the SLQ Companion repo against a live server (clone, both-way edits, a conflict, its release). Skipped when that file is not next to this repo. |
+| SLQ Sync (gone in 0.84.0; tests/test_history.py keeps the history's 6) | 8 tests (one: writes never follow a symlink planted in the folder), including a round trip with the real `slq_sync.py` client from the SLQ Companion repo against a live server (clone, both-way edits, a conflict, its release). Skipped when that file is not next to this repo. |
 | Libraries | 5 tests with keyword-hashing fake embedders: text and page-image indexing, fused search, re-ranking, replacing and deleting documents, GPU indexing through the queue, broken files. |
 | Web UI | `tsc` + `vite build`; every page and the main flows clicked through in Chromium (Playwright) against `python -m tests.devserver` (the Hub with fake services): sign-in, chat with markdown/maths/code, tool strip, artifact panel, approvals, subagent, image tool, projects (files, editor, settings, sync), libraries, all settings tabs, dark mode, phone width. |
 | Files card (0.12.0) | In Chromium against the dev server ("jingle": its fake sandbox writes a real 1.2 s WAV and a PDF, then notes are written) (14 checks): three files listed newest first with folder and "new", the sound playing in the card (duration 1.2 s), Download saving `jingle.wav`, the PDF's Open aiming at the raw file served as a PDF without the sandbox CSP (headless Chromium has no PDF viewer), Open showing a file in the side panel, Add to chat putting it in the composer, the panel's player, the card after a reload, no sideways scroll at phone width, the buttons moving under the name when the chat is narrow beside the panel; a person's card (her `fib.py`): listed, downloaded from the device's store, Open showing the chat's files, no Add to chat. |
@@ -2063,7 +2104,7 @@ the host if the VM ever stops by itself.
     is broken") would show it: the export's `web_app` calls and their reports.
     Also: Download all on Søren's phone (Chrome on Android saves the ZIP), a
     whole-folder ZIP of chat 79's folder (some 30 MB of DB1 files and JSON).
-81. **0.40.0's synced folder with the real SLQSync.exe**: tested here with
+81. **0.40.0's synced folder with the real SLQSync.exe** (moot since 0.84.0 - SLQ Sync is gone): tested here with
     `slq_sync.py` (the Python client) in a round trip against both layouts,
     and the API by hand - not with the Windows tray app. Check on the PC: a
     new project (say `TwinCAT HUB Project 2`, synced folder `twincat`), link an
@@ -2166,6 +2207,17 @@ the host if the VM ever stops by itself.
       converter's cases are ComfyUI 0.42.3's own templates; files from other sites (Civitai, OpenArt) are
       untried - an export is the way to see what went wrong. When COMFYUI_REF changes, the editor's format may
       too: tools/workflow_oracle/ (convert.js, compare.py) is how the converter was checked - run it again.
+102. **A project's repository (0.84.0)** - not on the VM, not against git.slq.dk:
+    - **Linking**: Settings -> Repository with `adminsorenlyder/SLQ-Game-Lobby` - the folder fills with the game, the
+      top bar says "synced"; `data/git/projects/<id>/` owned by uid 1000; the token in no file there
+      (`sudo grep -rl <token> /srv/slq-hub/data/git` finds nothing).
+    - **Both ways**: a chat that changes a file - the commit on git.slq.dk 3 s after the answer, titled after the chat,
+      by "SLQ Hub" with slqhub's address; a push from the PC - in the folder when the project opens, and in Files ->
+      History as "from <repo>"; both at once on different files - one line of history; the same file - the branch
+      `slqhub/conflict-...` on git.slq.dk, the folder the server's.
+    - **Forgejo's push mirror** carrying the Hub's commits to GitHub, so Claude Code sees them.
+    - **The TwinCAT projects** that used SLQ Sync: an empty repository each, linked (the folder as the first commit),
+      cloned on the PC. A big file (a TwinCAT boot image over 50 MB?) is named in the status and stays out.
 101. **Git and Forgejo (0.81.0-0.83.0)** - none of it has run on the VM or against a real server:
     - **The update**: the Hub's git layer and the sandbox's Node.js 24 layers (about 400 MB more), `data/git` made as
       uid 1000 and mounted read-only in the sandbox (`sudo bash update.sh compose exec sandbox ls -ld /hub-git`;

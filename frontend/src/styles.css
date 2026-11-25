@@ -945,7 +945,7 @@ div.tests-result-head { cursor: default; }
 }
 @media (max-width: 520px) {
   /* The picture and thinking chips show their icon only (the menu and the tooltip name the choice). */
-  .composer-bar .hide-narrow, .skill-row .hide-narrow { display: none; }
+  .composer-bar .hide-narrow, .skill-row .hide-narrow, .repo-bar .hide-narrow { display: none; }
   .skill-row { gap: 8px; padding: 10px; }
 }
 @media (min-width: 861px) { .scrim { display: none; } }

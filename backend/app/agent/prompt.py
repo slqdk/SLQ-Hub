@@ -332,17 +332,33 @@ def device_folder_text(sandbox_path: str, code: bool = False, left: list | None 
     return text
 
 
+def repo_text(project: dict | None, history: str = "") -> str:
+    """A sentence on the project's repository (0.84.0) - "" when it has none. history: the repository as the sandbox
+    sees it, read-only, for git log."""
+    link = ((project or {}).get("settings") or {}).get("repo")
+    if not isinstance(link, dict) or not link.get("repo"):
+        return ""
+    where = link.get("server", "").split("://", 1)[-1]
+    text = (f" It is a clone of the repository {link['repo']} on {where} (branch {link.get('branch')}): the Hub pulls "
+            "the repository's changes before each answer and commits and pushes what you change there after it - "
+            "do not run git to commit, pull or push yourself, and do not clone other repositories into it.")
+    if history:
+        text += f" Its history, read-only: git --git-dir={history} log (or show, diff)."
+    return text
+
+
 def folder_text(project: dict | None, sandbox_path: str, notes: str = "", moved_from: str = "",
-                renamed: dict | None = None, sync_folder: str = "") -> str:
+                renamed: dict | None = None, sync_folder: str = "", history: str = "") -> str:
     """The working folder's first lines. notes: the notes file's path when the folder has one (0.31.0) - one short
     line that changes only when the file appears, so the model server's prompt cache holds. moved_from: the chat's
     own folder before it was moved into the project (0.31.0) - the conversation shows paths there. sync_folder: the
-    project's folder that is synced to the PC (0.40.0) - hub/ beside it is the assistant's."""
+    project's own files' folder (0.40.0) - hub/ beside it is the assistant's; a clone of the project's repository
+    when it has one (0.84.0, history: its git directory as the sandbox sees it)."""
+    repo = repo_text(project, history)
     if project and sync_folder:
         text = (f"You work in the files of the project \"{project['name']}\" ({sandbox_path}), in two folders:\n"
-                f"- {sync_folder}/ is the user's. SLQ Sync keeps it the same as a folder on their PC: their project's "
-                "own files, as they use them there. Change in it what the user asks for and put nothing else there - "
-                "everything you write there appears on their PC.\n"
+                f"- {sync_folder}/ is the user's: their project's own files. Change in it what the user asks for and "
+                "put nothing else there." + (repo or "") + "\n"
                 "- hub/ is yours and never leaves the Hub: your notes (hub/NOTES.md), working copies, drafts, scripts, "
                 "and what you make for the chat (pictures, sound, video, files to download). The user's attachments "
                 "are in hub/attachments/.\n"
@@ -356,7 +372,7 @@ def folder_text(project: dict | None, sandbox_path: str, notes: str = "", moved_
                          + ", ".join(f"{a} is now {b}" for a, b in renamed.items()) + ".")
     elif project:
         text = (f"You work in the files of the project \"{project['name']}\" ({sandbox_path}). Every change is kept "
-                "in the project's history and synced to the user's PC.")
+                "in the project's history." + repo.replace(" It is a clone", " The folder is a clone"))
         if moved_from:
             text += (f" This chat was moved into the project from its own folder ({moved_from}): the files the "
                      "conversation above shows there are in the project's folder now.")

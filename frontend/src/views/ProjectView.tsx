@@ -1,22 +1,49 @@
-// A project: its chats, files, settings, history and sync devices.
+// A project: its chats, files, settings (with its repository, 0.84.0) and history.
 import { LEVEL_OPTIONS } from "../lib/effort";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ChevronDown, ChevronRight, Download, Menu, MessageSquarePlus, Plus } from "lucide-react";
-import { api, syncFolderOf, type ChatListItem, type Library, type Project, type Revision, type Skill } from "../lib/api";
+import { ChevronDown, ChevronRight, Menu, MessageSquarePlus, RefreshCw } from "lucide-react";
+import { api, syncFolderOf, type ChatListItem, type Library, type Project, type RepoStatus, type RepoView, type Revision,
+  type Skill } from "../lib/api";
 import { byCategory, NO_CATEGORY, useFolders } from "../lib/skills";
 import { ago, bytes, energy, money, tokens, worked } from "../lib/format";
 import { linkProps, navigate } from "../lib/router";
 import { useApp } from "../state";
 import { Files } from "../components/Files";
-import { ConfirmButton, Empty, Lamp, Modal, SwitchRow, Tabs, copyText } from "../components/ui";
+import { ConfirmButton, Empty, Lamp, SwitchRow, Tabs, useInterval, type LampState } from "../components/ui";
 
-type Tab = "chats" | "files" | "settings" | "history" | "sync";
+type Tab = "chats" | "files" | "settings" | "history";
 
 export function ProjectView({ id, tab }: { id: number; tab?: string }) {
   const { toast, setSidebarOpen, refreshLists } = useApp();
   const [project, setProject] = useState<Project | null>(null);
   const [missing, setMissing] = useState(false);
-  const current = (["chats", "files", "settings", "history", "sync"].includes(tab ?? "") ? tab : "chats") as Tab;
+  const current = (["chats", "files", "settings", "history"].includes(tab ?? "") ? tab : "chats") as Tab;
+  const [repo, setRepo] = useState<RepoView | null>(null);
+  const loadRepo = useCallback(async () => {
+    try {
+      setRepo(await api<RepoView>(`/hub/api/projects/${id}/repo`));
+    } catch { /* the settings say it where it matters */ }
+  }, [id]);
+  // Sync now: the Sync button (force - many files deleted - when the last sync waits for it), and the page opening.
+  const syncRepo = useCallback(async (force = false, quiet = false) => {
+    setRepo((r) => (r?.linked ? { ...r, status: { ...(r.status ?? {}), state: "syncing" } } : r));
+    try {
+      setRepo(await api<RepoView>(`/hub/api/projects/${id}/repo/sync${force ? "?force=true" : ""}`, { method: "POST" }));
+    } catch (e) {
+      if (!quiet) toast((e as Error).message, (e as { status?: number }).status === 409 ? "info" : "fault");
+      loadRepo();
+    }
+  }, [id, loadRepo, toast]);
+  useEffect(() => {                  // opened: the repository's news in, the folder's last changes out (0.84.0)
+    let gone = false;
+    api<RepoView>(`/hub/api/projects/${id}/repo`).then((v) => {
+      if (gone) return;
+      setRepo(v);
+      if (v.linked) syncRepo(false, true);
+    }, () => undefined);
+    return () => { gone = true; };
+  }, [id, syncRepo]);
+  useInterval(loadRepo, repo?.linked ? 10000 : null);
 
   const load = useCallback(async () => {
     try {
@@ -41,21 +68,22 @@ export function ProjectView({ id, tab }: { id: number; tab?: string }) {
       <div className="topbar">
         <button className="icon-btn menu-btn" onClick={() => setSidebarOpen(true)} aria-label="Open the menu"><Menu size={18} /></button>
         <h1 className="ellipsis">{project.name}</h1>
+        {repo?.linked && <RepoBar repo={repo} onSync={(force) => syncRepo(force)} />}
       </div>
       <div className="scroll" style={current === "files" ? { overflow: "hidden", display: "flex", flexDirection: "column" } : undefined}>
         <div className="page" style={current === "files" ? { maxWidth: "none", width: "100%", paddingBottom: 0, flex: 1, display: "flex", flexDirection: "column", minHeight: 0 } : undefined}>
           <Tabs<Tab> value={current} onChange={setTab} tabs={[
             { id: "chats", label: "Chats" }, { id: "files", label: "Files" }, { id: "settings", label: "Settings" },
-            { id: "history", label: "History" }, { id: "sync", label: "Sync to a PC" }]} />
+            { id: "history", label: "History" }]} />
           {current === "chats" && <ProjectChats project={project} />}
           {current === "files" && (
             <div style={{ flex: 1, minHeight: 0, border: "1px solid var(--rule)", borderRadius: 8, background: "var(--sheet)", marginBottom: 16, overflow: "hidden" }}>
               <Files folder={{ kind: "project", id }} projectId={id} />
             </div>
           )}
-          {current === "settings" && <ProjectSettings project={project} onSaved={(p) => { setProject(p); refreshLists(); }} />}
+          {current === "settings" && <ProjectSettings project={project} onSaved={(p) => { setProject(p); refreshLists(); }}
+            repo={repo} onRepo={(v) => { setRepo(v); load(); }} onSync={(force) => syncRepo(force)} />}
           {current === "history" && <ProjectHistory id={id} />}
-          {current === "sync" && <SyncDevices project={project} />}
         </div>
       </div>
     </div>
@@ -134,7 +162,109 @@ function ProjectChats({ project }: { project: Project }) {
   );
 }
 
-function ProjectSettings({ project, onSaved }: { project: Project; onSaved: (p: Project) => void }) {
+const REPO_SAID: Record<string, string> = { ok: "synced", syncing: "syncing", error: "sync failed",
+  conflict: "conflict", waiting: "waits for you" };
+
+/** The repository in the project's top bar (0.84.0): how the last sync went, and Sync. */
+function RepoBar({ repo, onSync }: { repo: RepoView; onSync: (force: boolean) => void }) {
+  const st = repo.status ?? {};
+  const state = st.state ?? "ok";
+  const lamp: LampState = state === "syncing" ? "act" : state === "ok" ? "run" : state === "error" ? "fault" : "wait";
+  const said = state === "ok" && st.at ? `synced ${ago(st.at)}` : REPO_SAID[state] ?? state;
+  return (
+    <div className="row repo-bar" style={{ gap: 8, marginLeft: "auto", flexShrink: 0 }}>
+      <Lamp state={lamp} pulse={state === "syncing"} title={st.message || said} />
+      <span className="faint hide-narrow" title={st.message || undefined}>
+        <a href={repo.web} target="_blank" rel="noreferrer">{repo.repo}</a> · {said}</span>
+      <button className="btn small" disabled={state === "syncing"} onClick={() => onSync(state === "waiting")}
+        title={state === "waiting" ? "Delete those files in the repository too" : "Pull the repository's changes and push the folder's"}>
+        <RefreshCw size={14} /> {state === "waiting" ? "Sync anyway" : "Sync"}</button>
+    </div>
+  );
+}
+
+function RepoStatusText({ status }: { status?: RepoStatus }) {
+  if (!status?.message && !status?.big?.length && !status?.left?.length) return null;
+  const warn = status.state === "error" || status.state === "conflict" || status.state === "waiting";
+  return (
+    <div className="stack" style={{ gap: 2 }}>
+      {status.message && <small className={warn ? "warn-text" : undefined}>{status.at ? `${ago(status.at)}: ` : ""}
+        {status.message}</small>}
+      {!!status.big?.length && <small className="faint">Too big for the repository, kept in the folder only: {status.big
+        .map((b) => `${b.path} (${bytes(b.size)})`).join(", ")}</small>}
+      {!!status.left?.length && <small className="faint">Left alone (a link, or changed while it synced - the next sync
+        takes it): {status.left.join(", ")}</small>}
+    </div>
+  );
+}
+
+/** Settings -> Repository (0.84.0): link the project's files folder to a repository on the git server, or unlink. */
+function RepoSection({ project, repo, onChanged, onSync }: { project: Project; repo: RepoView | null;
+  onChanged: (v: RepoView) => void; onSync: (force: boolean) => void }) {
+  const { toast } = useApp();
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const folder = syncFolderOf(project);
+  const link = async () => {
+    setBusy(true);
+    try {
+      onChanged(await api<RepoView>(`/hub/api/projects/${project.id}/repo`, { method: "PUT", body: { repo: text.trim() } }));
+      setText("");
+      toast("Linked", "run");
+    } catch (e) {
+      toast((e as Error).message, "fault");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const unlink = async () => {
+    try {
+      onChanged(await api<RepoView>(`/hub/api/projects/${project.id}/repo`, { method: "DELETE" }));
+      toast("Unlinked - the files stay, and so does the repository", "run");
+    } catch (e) {
+      toast((e as Error).message, "fault");
+    }
+  };
+  if (!repo) return null;
+  const where = folder ? <code>{folder}/</code> : "The project's folder";
+  return (
+    <div className="field"><span>Repository</span>
+      {repo.linked ? (
+        <>
+          <div className="row wrap" style={{ gap: 8 }}>
+            <span className="grow">{where} is a clone of <a href={repo.web} target="_blank" rel="noreferrer">
+              <b>{repo.repo}</b></a> on {repo.server}, branch <code>{repo.branch}</code>.</span>
+            <button className="btn small" disabled={repo.status?.state === "syncing"}
+              onClick={() => onSync(repo.status?.state === "waiting")}><RefreshCw size={14} /> Sync now</button>
+            <ConfirmButton onConfirm={unlink} confirmText="Unlink? The files stay">Unlink</ConfirmButton>
+          </div>
+          <RepoStatusText status={repo.status} />
+          <small>On your PC: <code>git clone {repo.web}.git</code> - the Hub pulls when the project opens and before each
+            answer, and commits and pushes what changes in the folder.</small>
+        </>
+      ) : !repo.ready ? (
+        <small>Set up the git server first: <a {...linkProps("/settings/agent")}>Settings, Assistant, Git server</a>.</small>
+      ) : (
+        <>
+          <div className="row" style={{ gap: 8 }}>
+            <input className="input mono grow" value={text} onChange={(e) => setText(e.target.value)} autoCapitalize="off"
+              placeholder="owner/name, or its address" onKeyDown={(e) => e.key === "Enter" && text.trim() && !busy && link()} />
+            <button className="btn" disabled={busy || !text.trim()} onClick={link}>{busy ? "Linking" : "Link"}</button>
+          </div>
+          <small>{where} becomes a clone of the repository on {repo.server}: the Hub pulls when you open the project and
+            before each answer, and commits and pushes what changes - after an answer, a change in Files, or with Sync.
+            The folder must be empty, or the repository (then the folder's files are its first commit), or the folder a
+            part of the repository. On your PC you clone the repository from the server.
+            {repo.whole && " This project keeps everything in one folder (it is from before 0.40.0): all of it goes into "
+              + "the repository, the assistant's notes and pictures too."}</small>
+        </>
+      )}
+    </div>
+  );
+}
+
+function ProjectSettings({ project, onSaved, repo, onRepo, onSync }: { project: Project; onSaved: (p: Project) => void;
+  repo: RepoView | null; onRepo: (v: RepoView) => void; onSync: (force: boolean) => void }) {
   const { toast, models } = useApp();
   const [name, setName] = useState(project.name);
   const [instructions, setInstructions] = useState(project.instructions);
@@ -174,6 +304,7 @@ function ProjectSettings({ project, onSaved }: { project: Project; onSaved: (p: 
   return (
     <div className="stack" style={{ maxWidth: "44rem", gap: 18 }}>
       <label className="field"><span>Name</span><input className="input" value={name} onChange={(e) => setName(e.target.value)} /></label>
+      <RepoSection project={project} repo={repo} onChanged={onRepo} onSync={onSync} />
       <label className="field"><span>Instructions for the assistant</span>
         <textarea className="textarea" rows={7} value={instructions} onChange={(e) => setInstructions(e.target.value)}
           placeholder="What the project is, who it is for, how answers should look." />
@@ -270,93 +401,6 @@ function ProjectHistory({ id }: { id: number }) {
         ))}
       </div>
       {last && last.rev > 1 && data.revisions.length % 50 === 0 && <button className="btn" onClick={() => load(last.rev)}>Older revisions</button>}
-    </div>
-  );
-}
-
-function SyncDevices({ project }: { project: Project }) {
-  const { toast } = useApp();
-  const [tokens, setTokens] = useState<{ id: number; name: string; created_at: string; last_used: string | null }[]>([]);
-  const [client, setClient] = useState<{ exe: boolean; exeSize: number } | null>(null);
-  const [adding, setAdding] = useState(false);
-  const [name, setName] = useState("");
-  const [made, setMade] = useState<string | null>(null);
-  const load = useCallback(async () => {
-    try {
-      setTokens(await api("/hub/api/sync-tokens"));
-      setClient(await api("/hub/api/sync-client/info"));
-    } catch (e) {
-      toast((e as Error).message, "fault");
-    }
-  }, [toast]);
-  useEffect(() => {
-    load();
-  }, [load]);
-  const create = async () => {
-    try {
-      const t = await api<{ token: string }>("/hub/api/sync-tokens", { body: { name } });
-      setMade(t.token);
-      setName("");
-      load();
-    } catch (e) {
-      toast((e as Error).message, "fault");
-    }
-  };
-  const revoke = async (tid: number) => {
-    try {
-      await api(`/hub/api/sync-tokens/${tid}`, { method: "DELETE" });
-      load();
-    } catch (e) {
-      toast((e as Error).message, "fault");
-    }
-  };
-  const server = location.origin;
-  return (
-    <div className="stack" style={{ maxWidth: "48rem" }}>
-      <p className="lead">SLQ Sync keeps a folder on a Windows PC in step with {syncFolderOf(project)
-        ? <>this project's <code>{syncFolderOf(project)}/</code> folder</> : "this project"}, both ways, with every
-        revision kept here. It is the same client as before: point it at this Hub with a device token.</p>
-      {syncFolderOf(project) && <p className="faint" style={{ margin: 0 }}>
-        <code>hub/</code> beside it - the assistant's notes, working files and your attachments - stays on the Hub.</p>}
-      <div className="callout">
-        <div className="label">Set up a PC</div>
-        <ol style={{ margin: "6px 0 0", paddingLeft: 20 }}>
-          <li>{client?.exe ? <a href="/hub/api/sync-client/exe"><Download size={14} /> Download SLQSync.exe</a>
-            : "Copy SLQSync.exe to the Hub's data/sync-client folder to offer it here, or use the one you have."}
-            {client?.exe ? <span className="faint"> ({bytes(client.exeSize)})</span> : null}</li>
-          <li>Make a device token below and run: <div className="code-line">SLQSync.exe setup --server {server} --token slqsync_...</div></li>
-          <li>Link the folder: <div className="code-line">SLQSync.exe link {project.id} "C:\Path\To\{project.name}"</div></li>
-          <li>Then <code>SLQSync.exe sync --watch 5</code>, or the tray app, keeps it in step.</li>
-        </ol>
-      </div>
-      <div className="row"><h3 style={{ margin: 0 }} className="grow">Devices</h3>
-        <button className="btn small" onClick={() => { setAdding(true); setMade(null); }}><Plus size={14} /> Add a device</button></div>
-      <div className="list">
-        {tokens.length === 0 ? <Empty>No devices yet.</Empty> : tokens.map((t) => (
-          <div className="list-row" key={t.id}>
-            <span className="grow"><b>{t.name}</b><div className="meta">added {ago(t.created_at)}, {t.last_used ? `last synced ${ago(t.last_used)}` : "never used"}</div></span>
-            <ConfirmButton onConfirm={() => revoke(t.id)} confirmText="Remove access?">Remove</ConfirmButton>
-          </div>
-        ))}
-      </div>
-      {adding && (
-        <Modal title="Add a device" onClose={() => setAdding(false)} footer={made
-          ? <button className="btn primary" onClick={() => setAdding(false)}>Done</button>
-          : <><button className="btn" onClick={() => setAdding(false)}>Cancel</button>
-            <button className="btn primary" disabled={!name.trim()} onClick={create}>Make a token</button></>}>
-          {made ? (
-            <>
-              <p style={{ margin: 0 }}>The token is shown only now. It reaches the sync API and nothing else.</p>
-              <div className="code-line">{made}</div>
-              <button className="btn small" onClick={async () => toast((await copyText(made)) ? "Copied" : "Copying failed", "run")}>Copy the token</button>
-            </>
-          ) : (
-            <label className="field"><span>Name of the PC</span>
-              <input className="input" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Work laptop"
-                onKeyDown={(e) => e.key === "Enter" && name.trim() && create()} /></label>
-          )}
-        </Modal>
-      )}
     </div>
   );
 }

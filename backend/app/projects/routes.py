@@ -1,5 +1,5 @@
 """UI routes: projects, and the files of a project or a chat folder
-(tree, read, write, upload, move, delete, history, restore), sync devices."""
+(tree, read, write, upload, move, delete, history, restore)."""
 from __future__ import annotations
 
 import asyncio
@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 from starlette.background import BackgroundTask
 
-from .. import auth, db
+from .. import db
 from ..state import Hub, get_hub
 from . import store, syncstore
 
@@ -75,6 +75,9 @@ async def delete_project(pid: int, request: Request):
     hub = get_hub(request)
     if not store.delete_project(pid, hub.env.workspace_dir, hub.env.data_dir / "trash"):
         raise HTTPException(404, "No such project.")
+    repos = hub.extras.get("repos")
+    if repos is not None:                         # the Hub's copy of its repository (0.84.0); the server keeps it
+        repos.forget(pid)
     return {"ok": True}
 
 
@@ -316,40 +319,3 @@ async def restore(pid: int, body: RestoreIn, request: Request):
     data = _safe(syncstore.blob, pid, sha)
     _safe(wd.write, body.path, data, "user", "web", f"restored {body.path} from r{body.rev}")
     return {"ok": True, "head": syncstore.head(pid)}
-
-
-# ---------------------------------------------------------------- sync devices
-
-class TokenIn(BaseModel):
-    name: str
-
-
-@router.get("/hub/api/sync-tokens")
-async def list_tokens(request: Request):
-    return auth.list_sync_tokens(request.state.user["id"])
-
-
-@router.post("/hub/api/sync-tokens")
-async def create_token(body: TokenIn, request: Request):
-    return auth.create_sync_token(request.state.user["id"], body.name)
-
-
-@router.delete("/hub/api/sync-tokens/{token_id}")
-async def revoke_token(token_id: int, request: Request):
-    if not auth.revoke_sync_token(request.state.user["id"], token_id):
-        raise HTTPException(404, "No such device.")
-    return {"ok": True}
-
-
-@router.get("/hub/api/sync-client/info")
-async def client_info(request: Request):
-    exe = get_hub(request).env.data_dir / "sync-client" / "SLQSync.exe"
-    return {"exe": exe.is_file(), "exeSize": exe.stat().st_size if exe.is_file() else 0}
-
-
-@router.get("/hub/api/sync-client/exe")
-async def client_exe(request: Request):
-    exe = get_hub(request).env.data_dir / "sync-client" / "SLQSync.exe"
-    if not exe.is_file():
-        raise HTTPException(404, "SLQSync.exe is not on this Hub - copy it to <data>/sync-client/.")
-    return FileResponse(exe, media_type="application/vnd.microsoft.portable-executable", filename="SLQSync.exe")

@@ -1,22 +1,15 @@
-"""Project sync: the Hub's own check-in history, shared with SLQSync.exe.
+"""A project's history: every change to its folder, kept by the Hub (Files -> History, Restore).
 
-Ported from SLQ Companion's syncstore.py (2.64.0) with the same protocol, so
-the existing Windows tray app works against the Hub. The TwinCAT-specific
-ignore patterns are left out; the client keeps its own list.
+Ported from SLQ Companion's syncstore.py (2.64.0), where it was also the server side of SLQ Sync's Windows client;
+that went in 0.84.0 - a project's folder reaches a PC through its repository now (repo.py) - and the history stayed.
 
 * Linear history per project. Revision 1, 2, 3 ... Each revision records
   only the files that changed (path -> sha256, or None for a delete). The
   state at revision R is, per path, the newest change at or before R.
   Contents live in the blob store, so a file is stored once.
-* The server folder is the head. snapshot() compares it with the head and
-  checks in the difference - after the Hub writes, and before every client
-  request, so nothing written on the server side is missed.
-* Conflicts are per file, decided by the client's base. A client sends each
-  changed file with the sha it was based on. If the server's current sha is
-  that base (or already the new content) the change is accepted; if the
-  server changed the file differently meanwhile, it is a conflict and
-  NOTHING is overwritten - the client keeps its copy and gets the server's
-  beside it.
+* The folder is the head. snapshot() compares it with the head and checks in
+  the difference - after the Hub writes, and after the repository brings
+  changes - so nothing written in the folder is missed.
 """
 from __future__ import annotations
 
@@ -128,25 +121,6 @@ def manifest(pid: int, rev: int | None = None) -> dict[str, str]:
     return {r["path"]: r["sha"] for r in rows if r["sha"]}
 
 
-def changes_since(pid: int, since: int) -> dict:
-    h = head(pid)
-    if since > h:
-        raise SyncError(f"Revision {since} does not exist yet (head is {h}).")
-    with db.connect() as con:
-        paths = [r[0] for r in con.execute(
-            "SELECT DISTINCT path FROM sync_changes WHERE project_id=? AND rev>?", (pid, since))]
-    now = manifest(pid, h)
-    return {"head": h, "since": since, "changes": {p: now.get(p) for p in paths}}
-
-
-def in_view(changes: dict, prefix: str) -> dict:
-    """path -> value of what lies under prefix (a synced folder and "/", 0.40.0), named as the PC names it - without
-    the prefix. prefix "": all of it, as it is."""
-    if not prefix:
-        return changes
-    return {k[len(prefix):]: v for k, v in changes.items() if k.startswith(prefix) and len(k) > len(prefix)}
-
-
 def revisions(pid: int, limit: int = 50, before: int | None = None, prefix: str = "") -> list[dict]:
     """The newest revisions first. prefix (a synced folder and "/", 0.40.0): only those that changed something
     under it, their files named without it - what the PC sees."""
@@ -228,55 +202,6 @@ def snapshot(pid: int, workdir: Path, author: str = "hub", origin: str = "hub", 
     new revision number, or None when nothing changed."""
     with lock(pid):
         return _snapshot_locked(pid, Path(workdir), author, origin, message)
-
-
-def checkin(pid: int, workdir: Path, files: list[dict], author: str, origin: str, message: str = "") -> dict:
-    """A client's changes: [{path, baseSha, sha (None = deleted), content (bytes)}]."""
-    workdir = Path(workdir)
-    accepted: dict[str, str | None] = {}
-    conflicts: list[dict] = []
-    with lock(pid):
-        _snapshot_locked(pid, workdir, "hub", "hub", "Server changes before a check-in")
-        current = manifest(pid)
-        for f in files:
-            path = clean_path(f.get("path") or "")
-            if ignored(path):
-                continue
-            new_sha = f.get("sha")
-            content = f.get("content")
-            if new_sha is not None:
-                if content is None:
-                    raise SyncError(f"{path}: no content sent.")
-                if len(content) > MAX_FILE_BYTES:
-                    raise SyncError(f"{path}: larger than {MAX_FILE_BYTES // (1024 * 1024)} MB.")
-                if hashlib.sha256(content).hexdigest() != new_sha:
-                    raise SyncError(f"{path}: content does not match its sha.")
-            server_sha = current.get(path)
-            if server_sha == new_sha:
-                continue
-            if server_sha != f.get("baseSha"):
-                conflicts.append({"path": path, "serverSha": server_sha})
-                continue
-            target = workdir / path
-            if not target.resolve().is_relative_to(workdir.resolve()):
-                raise SyncError(f"{path}: outside the project.")
-            accepted[path] = new_sha
-            if new_sha is None:
-                if target.exists():
-                    target.unlink()
-            else:
-                blobs.store(content)
-                from .store import safe_write
-                try:
-                    safe_write(workdir, target, content)
-                except ValueError as exc:
-                    raise SyncError(str(exc)) from exc
-        rev = None
-        if accepted:
-            with db.connect() as con:
-                rev = _record(con, pid, accepted, author, origin, message or f"{len(accepted)} file(s) from {origin}")
-        h = head(pid)
-    return {"head": h, "rev": rev, "accepted": sorted(accepted), "conflicts": conflicts}
 
 
 def reset_cache() -> None:

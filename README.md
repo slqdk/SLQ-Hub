@@ -17,7 +17,9 @@ other app on the network calls models through the Hub's queue.
   the Hub keeps nothing of them.
 - **Chat page for phones** (`/chat`): chat, photos and pictures with an app
   key, no login; the chats stay on the phone.
-- **SLQ Sync** for project files, protocol-compatible with SLQSync.exe.
+- **Projects as git clones**: a project's folder can be the clone of a
+  repository on your git server (GitHub or Forgejo); the Hub pulls, commits
+  and pushes, and your PC clones the repository.
 - **Models**: Qwen3.8-27B and Qwen3.6-35B-A3B on llama.cpp (ROCm), Qwen-Image
   2.1 on ComfyUI, Qwen3 embeddings for document libraries; optional sound
   models - Røst v3 and Chatterbox for speech (on the CPU), ACE-Step 1.5 for
