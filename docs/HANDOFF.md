@@ -4,7 +4,17 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## Next session - start here (written 2026-11-26, at 0.93.0)
+## Next session - start here (written 2026-11-26, at 0.93.1)
+
+**0.93.1 (2026-11-26): standing things in `hub3d format` - pushed, not yet installed.** Søren, 08:47, with Sanne's
+tree (Gemma 4 31B, 6 min: three cones running into one, a star lying flat on the point, a thin trunk under the flat
+bottom of the lowest tier): "Er det her det bedste den kan lave? når man spørger efter et juletræ?" No - the format
+made a far better one here (DESIGN §8 "Standing things (0.93.1)": four tiers stepping out with chamfered undersides,
+an upright outline star on a stem, baubles repeated, a foot; one part, 180 mm, READY), and `hub3d format` now says how
+and has that tree as its third example (self-test and parity test build it). Not seen: whether Gemma - or Qwen3.8 -
+designs better with it; ask him for the next tree's views (and an export if it is still poor). An overhang check in
+`hub3d design` (faces down steeper than 45 degrees above the plate, by connected area so small baubles pass) would
+catch the flat undersides; not built.
 
 **0.93.0 (2026-11-26): the 3D editor for people too, and Make 3D model on every new chat - pushed, not yet
 installed.** Søren, 08:33, with Sanne's chat (a person's: "lav en 3D model af et juletræ med en stjerne på toppen.

@@ -244,7 +244,8 @@ def test_the_editor_and_hub3d_build_the_same_solid(h3, tmp_path):
                 {"parts": [{"id": "only-hole", "shape": "box", "hole": True}]},
                 json.loads(h3.DESIGN_EXAMPLE),                  # hub3d format's examples
                 json.loads(h3.DESIGN_SNOWFLAKE),
-                *MORE]
+                *MORE,
+                json.loads(h3.DESIGN_TREE)]
     js = run_js(BUILD_JS, {"files": files, "designs": variants})
     for d, j in zip(variants, js):
         design, _ = h3.read_design(json.dumps(d))
@@ -358,8 +359,8 @@ def test_hub3d_format_is_what_both_read(h3, capsys):
     """`hub3d format`'s example reads without a problem in the editor and in hub3d, and names what the prompt does."""
     assert h3.main(["format"]) == 0
     guide = capsys.readouterr().out
-    assert guide == h3.DESIGN_GUIDE and h3.DESIGN_EXAMPLE in guide and h3.DESIGN_SNOWFLAKE in guide
-    for example in (h3.DESIGN_EXAMPLE, h3.DESIGN_SNOWFLAKE):
+    assert guide == h3.DESIGN_GUIDE and all(x in guide for x in (h3.DESIGN_EXAMPLE, h3.DESIGN_SNOWFLAKE, h3.DESIGN_TREE))
+    for example in (h3.DESIGN_EXAMPLE, h3.DESIGN_SNOWFLAKE, h3.DESIGN_TREE):
         _, problems = h3.read_design(example)
         assert problems == []
         js = run_js("""process.stdout.write(JSON.stringify(G.readDesign(input.text).problems));""", {"text": example})
@@ -368,6 +369,7 @@ def test_hub3d_format_is_what_both_read(h3, capsys):
         assert f"  {shape} " in guide and f"| {shape}" in guide or shape == "box"
     assert "  repeat    copies of the part" in guide and "linear_extrude(size z, center=true) polygon(points)" in guide
     assert "Not cylinders lying down" in guide                         # chat 328
+    assert "tiers that step out" in guide and '{"bottom": 17}' in guide   # 0.93.1: the tree
     keys = (ROOT / "frontend" / "src" / "model3d" / "geometry.ts").read_text()
     assert all(f'"{k}"' in keys for k in h3.PART_KEYS)                  # the two know the same keys
     assert h3.MAX_COPIES == 100 and "export const MAX_COPIES = 100;" in keys

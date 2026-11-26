@@ -3170,6 +3170,15 @@ into the Hub, Tinkercad's level, his printer a Bambu Lab P2S but chosen per desi
     (`slq:3d-save`), so the message carries the design as it is - a person's files are read at that moment.
   - The assistant's 3D section is in a person's prompt only with "May run code" (it needs `hub3d`); without, the
     editor is hers by hand.
+- **Standing things (0.93.1).** Sanne's first tree (Gemma 4 31B, 0.93.0's dev time): three cones that ran into one
+  smooth cone, the star lying flat on its point, the lowest tier's flat underside over a thin trunk - "READY", and
+  nothing looked like a Christmas tree. Søren: "Er det her det bedste den kan lave?" The same format makes a far
+  better one, so `hub3d format` says how: things that stand are built up from a wide flat foot, what makes them look
+  like themselves is made big (tiers that step out, not one smooth cone), an underside that sticks out slopes 45
+  degrees or more - a bottom chamfer as wide as it sticks out - and a star or sign on top stands up (an outline turned
+  rotate [90, 0, 0]) overlapping what holds it. Its third example is that tree (`DESIGN_TREE`: a foot, four cone tiers
+  with chamfered bottoms, a stem, an upright outline star, baubles repeated round it; 104 x 104 x 180 mm, one part,
+  printable without supports), built by the image's self-test and by the parity test in both builders.
 - **Outlines and repeats (0.88.0).** Chat 328: asked for a snowflake filling 80 % of the P2S's plate, Gemma 4 31B
   made 31 cylinders lying down (round rods, 1 mm below the plate, touching it in lines), "READY for the slicer".
   Søren: "Kan den laves mere advanced?" - he chose better models from the assistant. Two parts to the format:

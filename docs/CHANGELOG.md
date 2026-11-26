@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.93.1 - 2026-11-26
+
+- The assistant's 3D designs of things that stand look and print better:
+  `hub3d format` says to build them on a wide foot, to make what they are
+  known by big (a Christmas tree's tiers stepping out), to slope what sticks
+  out underneath so it prints without supports, and to stand a star or a
+  sign up on top. Its new example is an 18 cm Christmas tree.
+
 ## 0.93.0 - 2026-11-26
 
 - Make 3D model, under "What are we working on?" on every new chat - the

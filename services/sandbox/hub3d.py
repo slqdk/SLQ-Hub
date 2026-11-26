@@ -885,6 +885,39 @@ DESIGN_SNOWFLAKE = """\
 }
 """
 
+# 0.93.1: Gemma 4 31B's Christmas tree for a person - three cones that ran into one smooth cone, a star lying flat on
+# its point, the lowest tier's flat underside over a thin trunk. Søren: "Er det her det bedste den kan lave?"
+DESIGN_TREE = """\
+{
+  "format": "slq-hub-3d",
+  "version": 1,
+  "printer": "bambu-p2s",
+  "bed": [256, 256, 256],
+  "parts": [
+    {"id": "foot", "name": "Foot", "shape": "cylinder", "size": [104, 104, 4], "at": [0, 0, 2],
+     "chamfer": {"bottom": 0.6}, "fillet": {"top": 1.5}, "color": "#6d4c41"},
+    {"id": "t1", "name": "Tier 1", "shape": "cone", "size": [100, 100, 54], "top": 0.3, "at": [0, 0, 30],
+     "color": "#2e7d32"},
+    {"id": "t2", "name": "Tier 2", "shape": "cone", "size": [84, 84, 48], "top": 0.3, "at": [0, 0, 66],
+     "chamfer": {"bottom": 17}, "color": "#2e7d32"},
+    {"id": "t3", "name": "Tier 3", "shape": "cone", "size": [66, 66, 44], "top": 0.28, "at": [0, 0, 100],
+     "chamfer": {"bottom": 13}, "color": "#2e7d32"},
+    {"id": "t4", "name": "Tier 4", "shape": "cone", "size": [48, 48, 40], "at": [0, 0, 132],
+     "chamfer": {"bottom": 9}, "color": "#2e7d32"},
+    {"id": "stem", "shape": "cylinder", "size": [6, 6, 14], "at": [0, 0, 155], "color": "#f9a825"},
+    {"id": "star", "name": "Star", "shape": "outline", "size": [0, 0, 5], "at": [0, 0, 165], "rotate": [90, 0, 0],
+     "points": [[0, 15], [-3.76, 5.18], [-14.27, 4.64], [-6.09, -1.98], [-8.82, -12.14], [0, -6.4],
+                [8.82, -12.14], [6.09, -1.98], [14.27, 4.64], [3.76, 5.18]], "color": "#f9a825"},
+    {"id": "b1", "name": "Baubles", "shape": "sphere", "size": [7, 7, 7], "at": [36.2, 0, 22],
+     "repeat": {"count": 6, "around": [0, 0]}, "color": "#e53935"},
+    {"id": "b2", "name": "Baubles", "shape": "sphere", "size": [7, 7, 7], "at": [22.9, 16.6, 62],
+     "repeat": {"count": 5, "around": [0, 0]}, "color": "#fbc02d"},
+    {"id": "b3", "name": "Baubles", "shape": "sphere", "size": [7, 7, 7], "at": [21, 7.6, 95],
+     "repeat": {"count": 4, "around": [0, 0]}, "color": "#1e88e5"}
+  ]
+}
+"""
+
 DESIGN_GUIDE = f"""\
 A design from the Hub's 3D editor: NAME.3d.json in the working folder. The editor beside the chat shows it and saves
 the user's changes into it; you change it by editing the file - edit_file for a few values, write_file for a new
@@ -955,12 +988,23 @@ mm thick. Not cylinders lying down: they touch the plate in a line, come loose a
 warns). Something that repeats round a centre - a snowflake's arms, a star's points, a gear's teeth, spokes, a ring
 of holes - is one of it, repeated.
 
+Things that stand - a tree, a figure, a vase, a tower - are built up from a wide, flat foot on the plate, and what
+makes them look like themselves is made big: a Christmas tree is tiers that step out, each wider at its foot than
+the tier below is there - not one smooth cone. A part that sticks out over the one below prints without supports
+when its underside slopes 45 degrees or more: chamfer its bottom edge by about how far it sticks out ("chamfer":
+{{"bottom": 17}} on a tier); a flat underside in the air needs supports. A star, a heart or a sign on top stands up -
+an outline or a text turned rotate [90, 0, 0] - and overlaps what holds it by a few mm.
+
 An example - a key tag with a hole, a name on top and a clip with its own slot:
 
 {DESIGN_EXAMPLE}
 Another - a snowflake, 120 mm: one arm (an outline, twigs and a gem with a hole) repeated six times round a centre:
 
-{DESIGN_SNOWFLAKE}"""
+{DESIGN_SNOWFLAKE}
+And a Christmas tree, 18 cm: tiers stepping out with sloped undersides, a star standing on a stem, baubles repeated
+round it:
+
+{DESIGN_TREE}"""
 
 
 def _num(v) -> bool:
@@ -1891,6 +1935,9 @@ def selftest() -> int:
             Path("snow.3d.json").write_text(DESIGN_SNOWFLAKE)              # ... and its snowflake (outlines, repeats)
             snow = check(design("snow.3d.json", quiet=True), bed=256)
             expect(snow.ok and snow.parts == 1 and not snow.warnings, f"hub3d format's snowflake is not ready:\n{snow}")
+            Path("tree.3d.json").write_text(DESIGN_TREE)                   # ... and its tree (standing, sloped tiers)
+            tree = check(design("tree.3d.json", quiet=True), bed=256)
+            expect(tree.ok and tree.parts == 1 and not tree.warnings, f"hub3d format's tree is not ready:\n{tree}")
         finally:
             os.chdir(here)
     import trimesh
