@@ -844,26 +844,104 @@ export function toPart(p: Part, v: Vec3, copy = 0): Vec3 {
   return p.mirror ? [-l[0], l[1], l[2]] : l;
 }
 
-/** The part's own edge nearest a point on it (the editor's "Pick an edge"), with how far it is (mm) - null for a
- *  shape without named edges. A repeated part: the copy the point is on. */
-export function nearestEdge(p: Part, v: Vec3): { edge: string; distance: number } | null {
+/** A box's or wedge's edges as straight lines in its own frame. */
+function edgeSegments(p: Part): [string, Vec3, Vec3][] {
   const [sx, sy, sz] = p.size;
   const x = sx / 2, y = sy / 2, z = sz / 2;
-  let lines: [string, Vec3, Vec3][] = [];
   if (p.shape === "box") {
     const c = (a: number, b: number, d: number): Vec3 => [a * x, b * y, d * z];
-    lines = [["top-front", c(-1, -1, 1), c(1, -1, 1)], ["top-back", c(-1, 1, 1), c(1, 1, 1)],
+    return [["top-front", c(-1, -1, 1), c(1, -1, 1)], ["top-back", c(-1, 1, 1), c(1, 1, 1)],
       ["top-left", c(-1, -1, 1), c(-1, 1, 1)], ["top-right", c(1, -1, 1), c(1, 1, 1)],
       ["bottom-front", c(-1, -1, -1), c(1, -1, -1)], ["bottom-back", c(-1, 1, -1), c(1, 1, -1)],
       ["bottom-left", c(-1, -1, -1), c(-1, 1, -1)], ["bottom-right", c(1, -1, -1), c(1, 1, -1)],
       ["front-left", c(-1, -1, -1), c(-1, -1, 1)], ["front-right", c(1, -1, -1), c(1, -1, 1)],
       ["back-left", c(-1, 1, -1), c(-1, 1, 1)], ["back-right", c(1, 1, -1), c(1, 1, 1)]];
-  } else if (p.shape === "wedge") {
+  }
+  if (p.shape === "wedge") {
     const A: Vec3 = [-x, -y, -z], B: Vec3 = [x, -y, -z], C: Vec3 = [x, y, -z], D: Vec3 = [-x, y, -z], E: Vec3 = [-x, -y, z],
       F: Vec3 = [-x, y, z];
-    lines = [["bottom-left", A, D], ["bottom-front", A, B], ["bottom-back", D, C], ["bottom-slope", B, C],
+    return [["bottom-left", A, D], ["bottom-front", A, B], ["bottom-back", D, C], ["bottom-slope", B, C],
       ["left-front", A, E], ["left-back", D, F], ["left-slope", E, F], ["front-slope", E, B], ["back-slope", F, C]];
-  } else if (p.shape !== "cylinder" && p.shape !== "cone") return null;
+  }
+  return [];
+}
+
+/** Where edges are in the design (0.92.0, to draw them picked): lines through each - a box's or wedge's straight,
+ *  a cylinder's or cone's rims round, an outline's corners upright - on the part and on each of its copies. */
+export function edgeLines(p: Part, names: string[]): Vec3[][] {
+  const [sx, sy, sz] = p.size;
+  const local: Vec3[][] = [];
+  if (p.shape === "box" || p.shape === "wedge") {
+    for (const [name, a, b] of edgeSegments(p)) if (names.includes(name)) local.push([a, b]);
+  } else if (p.shape === "cylinder" || p.shape === "cone") {
+    const n = p.sides ?? DEFAULT_SIDES;
+    for (const [name, z, k] of [["bottom", -sz / 2, 1], ["top", sz / 2, p.shape === "cone" ? p.top ?? 0 : 1]] as const) {
+      if (!names.includes(name) || k <= 0) continue;
+      const ring: Vec3[] = [];
+      for (let i = 0; i <= n; i++) {
+        const t = (2 * Math.PI * i) / n;
+        ring.push([(sx / 2) * k * Math.cos(t), (sy / 2) * k * Math.sin(t), z]);
+      }
+      local.push(ring);
+    }
+  } else if (p.shape === "outline" && names.includes("vertical")) {
+    for (const poly of outlinePolygons(p) ?? []) for (const [x, y] of poly) local.push([[x, y, -sz / 2], [x, y, sz / 2]]);
+  }
+  const m = rotation(p.rotate);
+  const place = (v: Vec3): Vec3 => {
+    const w = apply(m, [p.mirror ? -v[0] : v[0], v[1], v[2]]);
+    return [w[0] + p.at[0], w[1] + p.at[1], w[2] + p.at[2]];
+  };
+  const out = local.map((line) => line.map(place));
+  const copies = p.repeat && p.repeat.count > 1 ? p.repeat.count : 1;
+  for (let i = 1; i < copies; i++) for (const line of local) out.push(line.map((v) => copyOf(p, i, place(v))));
+  return out;
+}
+
+/** The fewest names for what each edge is (0.92.0): the edges with one fillet or chamfer of one size named together -
+ *  "all", "vertical", a face - where every edge a name means has it, the rest one by one. No two names of different
+ *  treatments mean one edge, so it is what `plan` says, whatever wins. */
+export function compactEdges(shape: Shape, plan: Record<string, EdgeSpec>): { fillet?: EdgeSizes; chamfer?: EdgeSizes } {
+  const classes = new Map<string, { spec: EdgeSpec; edges: Set<string> }>();
+  for (const [edge, spec] of Object.entries(plan)) {
+    const key = `${spec.kind}:${spec.size}`;
+    if (!classes.has(key)) classes.set(key, { spec, edges: new Set() });
+    classes.get(key)!.edges.add(edge);
+  }
+  const names = shape === "outline" ? ["vertical"] : ["all", "vertical", ...(EDGE_FACES[shape] ?? [])];
+  const out: Record<EdgeKind, EdgeSizes> = { fillet: {}, chamfer: {} };
+  for (const { spec, edges } of classes.values()) {
+    const covered = new Set<string>();
+    for (const name of names) {
+      const es = edgesOf(shape, name);
+      if (!es.length || !es.every((e) => edges.has(e)) || es.every((e) => covered.has(e))) continue;
+      out[spec.kind][name] = spec.size;
+      es.forEach((e) => covered.add(e));
+    }
+    for (const e of (EDGES[shape] ?? []).filter((x) => edges.has(x) && !covered.has(x))) out[spec.kind][e] = spec.size;
+  }
+  const some = (m: EdgeSizes) => (Object.keys(m).length ? m : undefined);
+  return { fillet: some(out.fillet), chamfer: some(out.chamfer) };
+}
+
+/** A part with some of its edges given a fillet or chamfer - or none (spec null) - the rest as they were. */
+export function treatEdges(p: Part, edges: string[], spec: EdgeSpec | null): Part {
+  const plan = edgePlan(p);
+  for (const e of edges) {
+    if (spec) plan[e] = spec;
+    else delete plan[e];
+  }
+  const { fillet, chamfer } = compactEdges(p.shape, plan);
+  return { ...p, fillet, chamfer };
+}
+
+/** The part's own edge nearest a point on it (the editor's "Pick edges"), with how far it is (mm) - null for a
+ *  shape without named edges. A repeated part: the copy the point is on. */
+export function nearestEdge(p: Part, v: Vec3): { edge: string; distance: number } | null {
+  const [sx, sy, sz] = p.size;
+  const x = sx / 2, y = sy / 2, z = sz / 2;
+  const lines = edgeSegments(p);
+  if (!lines.length && p.shape !== "cylinder" && p.shape !== "cone") return null;
   const copies = p.repeat && p.repeat.count > 1 ? p.repeat.count : 1;
   let best: { edge: string; distance: number } | null = null;
   for (let i = 0; i < copies; i++) {
@@ -887,23 +965,6 @@ export function nearestEdge(p: Part, v: Vec3): { edge: string; distance: number 
     if (!best || outside + got.distance < best.distance) best = { edge: got.edge, distance: outside + got.distance };
   }
   return best;
-}
-
-/** A part with an edge name rounded or cut (the editor's Edges): names wholly within it go - it replaces them. */
-export function withEdge(p: Part, key: string, kind: EdgeKind, size: number): Part {
-  const covered = new Set(edgesOf(p.shape, key));
-  const rest = (m?: EdgeSizes) => {
-    const out = Object.fromEntries(Object.entries(m ?? {}).filter(([k]) => k !== key && !edgesOf(p.shape, k).every((e) => covered.has(e))));
-    return Object.keys(out).length ? out : undefined;
-  };
-  const other = kind === "fillet" ? "chamfer" : "fillet";
-  return { ...p, [kind]: { ...rest(p[kind]), [key]: size }, [other]: rest(p[other]) };
-}
-
-/** A part without one of its edge names. */
-export function withoutEdge(p: Part, kind: EdgeKind, key: string): Part {
-  const out = Object.fromEntries(Object.entries(p[kind] ?? {}).filter(([k]) => k !== key));
-  return { ...p, [kind]: Object.keys(out).length ? out : undefined };
 }
 
 function readEdgeSizes(v: unknown, part: Part, kind: EdgeKind, problems: string[]): EdgeSizes | undefined {
@@ -975,33 +1036,43 @@ export function textFont(p: Part, fonts: Fonts): { font: FontData; slant: number
   return font ? { font, slant } : null;
 }
 
-/** A text's outlines in font units, laid out: each letter after the last by its advance (times letter_spacing
- *  between letters), each line below the last by the font's line height (ascender to descender, times
- *  line_spacing), the lines centred on x 0 - or starting or ending there (align) - and slanted by `slant`. */
-export function textContours(p: Part, font: FontData, slant = 0): number[][][] {
-  const out: number[][][] = [];
+/** A text's letters in font units, laid out: each letter after the last by its advance (times letter_spacing between
+ *  letters), each line below the last by the font's line height (ascender to descender, times line_spacing), the
+ *  lines centred on x 0 - or starting or ending there (align) - and slanted by `slant`. Each letter's character
+ *  and outlines (a space has none). */
+export function textGlyphs(p: Part, font: FontData, slant = 0): { ch: string; contours: number[][][] }[] {
+  const out: { ch: string; contours: number[][][] }[] = [];
   const ls = p.letter_spacing ?? 1;
   const step = (font.ascender - font.descender) * (p.line_spacing ?? 1);
   (p.text ?? "").split("\n").forEach((line, row) => {
-    const placed: [number[][], number][] = [];
+    const placed: [string, number[][], number][] = [];
     let x = 0, last = 0;
     for (const ch of line) {
       const g = font.glyphs[ch] ?? font.glyphs["?"];
       if (!g) continue;
-      placed.push([g.c, x]);
+      placed.push([ch, g.c, x]);
       last = g.a;
       x += g.a * ls;
     }
     const width = placed.length ? x - last * ls + last : 0;
     const off = p.align === "left" ? 0 : p.align === "right" ? -width : -width / 2;
     const y = -row * step;
-    for (const [cs, gx] of placed) for (const c of cs) {
-      const poly: number[][] = [];
-      for (let i = 0; i < c.length; i += 2) poly.push([c[i] + gx + off + slant * c[i + 1], c[i + 1] + y]);
-      out.push(poly);
+    for (const [ch, cs, gx] of placed) {
+      const contours: number[][][] = [];
+      for (const c of cs) {
+        const poly: number[][] = [];
+        for (let i = 0; i < c.length; i += 2) poly.push([c[i] + gx + off + slant * c[i + 1], c[i + 1] + y]);
+        contours.push(poly);
+      }
+      out.push({ ch, contours });
     }
   });
   return out;
+}
+
+/** A text's outlines in font units, laid out (textGlyphs, all its letters'). */
+export function textContours(p: Part, font: FontData, slant = 0): number[][][] {
+  return textGlyphs(p, font, slant).flatMap((g) => g.contours);
 }
 
 function inkBox(contours: number[][][]): [number, number, number, number] | null {
@@ -1048,6 +1119,44 @@ export function withCapitals(p: Part, mm: number, fonts: Fonts): Part {
   if (!t || t.capitals <= 0 || mm <= 0) return p;
   const f = mm / t.capitals;
   return { ...p, size: [p.size[0] * f, p.size[1] * f, p.size[2]] };
+}
+
+/** A text part as one text part per letter, each just where it was - as SolidWorks dissolves sketch text (0.92.0, the
+ *  editor's Letters apart): the font, style, height, thickness, turn, mirror and colour kept, each letter's width
+ *  following it (unless the text was stretched: then its own), a repeat's centre kept. null while its font is not
+ *  loaded or when it draws nothing. */
+export function lettersApart(p: Part, fonts: Fonts, seen: Set<string>): Part[] | null {
+  const t = textFont(p, fonts);
+  if (!t) return null;
+  const glyphs = textGlyphs(p, t.font, t.slant);
+  const all = inkBox(glyphs.flatMap((g) => g.contours));
+  if (!all) return null;
+  const [kx, ky] = textScale(p.size, all[2] - all[0], all[3] - all[1]);
+  const cx = (all[0] + all[2]) / 2, cy = (all[1] + all[3]) / 2;
+  const m = rotation(p.rotate);
+  const stretched = Math.abs(kx - ky) > 1e-9 * Math.max(kx, ky);
+  const out: Part[] = [];
+  for (const g of glyphs) {
+    const b = inkBox(g.contours);
+    if (!b) continue;
+    const lx = ((b[0] + b[2]) / 2 - cx) * kx, ly = ((b[1] + b[3]) / 2 - cy) * ky;
+    const w = apply(m, [p.mirror ? -lx : lx, ly, 0]);
+    const id = freshId(seen);
+    seen.add(id);
+    const letter: Part = { id, name: g.ch, shape: "text", text: g.ch,
+      size: [stretched ? (b[2] - b[0]) * kx : 0, (b[3] - b[1]) * ky, p.size[2]],
+      at: [p.at[0] + w[0], p.at[1] + w[1], p.at[2] + w[2]], rotate: [...p.rotate] as Vec3 };
+    if (p.font) letter.font = p.font;
+    if (p.bold) letter.bold = true;
+    if (p.italic) letter.italic = true;
+    if (p.mirror) letter.mirror = true;
+    if (p.hole) letter.hole = true;
+    if (p.hidden) letter.hidden = true;
+    if (p.color) letter.color = p.color;
+    if (p.repeat) letter.repeat = p.repeat.step ? { ...p.repeat } : { ...p.repeat, around: repeatAround(p) };
+    out.push(letter);
+  }
+  return out.length ? out : null;
 }
 
 /** A text part with `patch` (its letters, font, style or spacing) whose capitals stay as tall as they were - the

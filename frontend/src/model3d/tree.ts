@@ -68,6 +68,11 @@ export function group(parts: Part[], ids: string[]): { parts: Part[]; id: string
   return { parts: replace(parts), id };
 }
 
+/** The tree with one part replaced by others, where it was (Letters apart). */
+export function replaceWith(parts: Part[], id: string, by: Part[]): Part[] {
+  return parts.flatMap((p) => (p.id === id ? by : p.parts ? [{ ...p, parts: replaceWith(p.parts, id, by) }] : [p]));
+}
+
 /** A group's parts in its place. */
 export function ungroup(parts: Part[], id: string): Part[] {
   return parts.flatMap((p) => (p.id === id && p.shape === "group" ? p.parts ?? []

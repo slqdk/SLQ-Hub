@@ -740,18 +740,22 @@ export const SECTIONS: HelpSection[] = [
           "The tools are in tabs at the top: Shapes adds parts and holes, Part names the picked part and makes it "
           + "solid or a hole, Size and place sets its size, centre and turn, Arrange groups, mirrors, aligns and "
           + "repeats parts, and Text appears when a text is picked. Parts lists every part, to pick or hide one.",
-          "Click a part to pick it, Shift-click to pick more, double-click a part inside a group, and drag a picked "
-          + "part to move it on the plate. The bar over the view switches the handles between Move, Turn and Size "
-          + "(or G, R and S), sets the snap and turns the camera.",
+          "Click a part to pick it, Shift-click to pick more - or turn on Pick several over the view, and each click "
+          + "picks one more - double-click a part inside a group, and drag a picked part to move it on the plate. "
+          + "Ctrl+A picks them all. The bar over the view switches the handles between Move, Turn and Size (or G, R "
+          + "and S), sets the snap and turns the camera; the arrow keys move what is picked a step.",
           "A hole cuts the solids beside it. Group parts (Ctrl+G) to keep a hole to them.",
           "Pattern repeats a part or a group round a point or in a row: one arm of a snowflake becomes six, one hole "
           + "a ring of holes. The assistant can also draw flat outlines of its own - stars, leaves, letters' shapes.",
-          "Edges rounds or cuts a part's own edges: choose Fillet or Chamfer and a size, then Top, Bottom, Vertical or "
-          + "All - or Pick an edge and click edges on the model (again to take one off). A cylinder's rims, a wedge's "
-          + "slope and an outline's corners too.",
+          "Edges rounds or cuts a part's own edges, picked first: Pick edges and click them on the model (the one "
+          + "under the pointer lights up; again to unpick), or Top, Bottom, Vertical or All. Then Fillet, Chamfer or "
+          + "Take off, the size beside them. A picked edge that has one shows its size: change it, and it is resized. "
+          + "A cylinder's rims, a wedge's slope and an outline's corners too.",
           "Text comes in six fonts - sans, serif, rounded, script, stencil and mono - bold or italic, its lines "
           + "centred, left or right. Letters sets how tall its capitals are; Spacing and Lines move letters and lines "
           + "apart. Cut through a plate, the stencil font keeps the middles of its letters.",
+          "Letters apart makes a text one part per letter, each just where it was: click one to make it bigger, move "
+          + "it or turn it - or pick several and change them together.",
           "Point at puts a spot on the model into your message, so you can say what should change there.",
           "Export downloads a 3MF or an STL, or saves it in the folder. The printer is chosen at the bottom, where "
           + "the size is."],

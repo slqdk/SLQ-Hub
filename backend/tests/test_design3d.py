@@ -724,17 +724,14 @@ process.stdout.write(JSON.stringify({
          G.nearestEdge(box, at(box, [-20, -15, 3]))],
   copy: G.nearestEdge(ring, G.copyOf(ring, 2, [20, 0, 3.9])),
   wedge: G.nearestEdge({ id: "w", shape: "wedge", size: [40, 30, 20], at: [0, 0, 10], rotate: [0, 0, 0] }, [0, -15, 10]),
-  replaced: G.withEdge({ ...box, fillet: { "top-front": 2, front: 1 }, chamfer: { top: 1 } }, "top", "fillet", 3),
-  all: G.withEdge({ ...box, fillet: { "top-front": 2 }, chamfer: { bottom: 1 } }, "all", "chamfer", 0.5),
-  off: G.withoutEdge({ ...box, fillet: { top: 2 } }, "fillet", "top"),
   ties: G.edgePlan({ ...box, fillet: { top: 2, front: 3 }, chamfer: { top: 1, left: 4 } }),
 }));
 """
 
 
 def test_edge_names_and_picking_an_edge(h3):
-    """Edge names as a model may write them; which name wins; the editor's Pick an edge on a turned, mirrored and
-    repeated part; its group buttons replace what they cover."""
+    """Edge names as a model may write them; which name wins; the editor's Pick edges on a turned, mirrored and
+    repeated part."""
     out = run_js(EDGE_JS, {})
     fillet, chamfer, corners, wedge = out["names"]
     assert fillet == {"top-front": 1, "back-left": 2, "top": 3, "vertical": 1} and chamfer == {"bottom-left": 0.5, "all": 0.2}
@@ -755,9 +752,150 @@ def test_edge_names_and_picking_an_edge(h3):
     near = [x["edge"] for x in out["near"]]
     assert near == ["top-left", "back-right", "front-left"], out["near"]   # in its own frame: mirrored, turned 90
     assert out["copy"]["edge"] == "top" and out["copy"]["distance"] < 0.2 and out["wedge"]["edge"] == "front-slope"
-    r = out["replaced"]
-    assert r["fillet"] == {"front": 1, "top": 3} and "chamfer" not in r or r.get("chamfer") is None
-    assert out["all"].get("fillet") is None and out["all"]["chamfer"] == {"all": 0.5} and out["off"].get("fillet") is None
+
+
+# 0.92.0: "I would like to pick a line FIRST, and then pick what happens to it (resize, fillet and so on)". The editor
+# keeps picked edges by part; Fillet, Chamfer and Take off rewrite the part's names with treatEdges.
+TREAT_JS = """
+const box = { id: "b", shape: "box", size: [40, 30, 20], at: [5, -3, 10], rotate: [0, 0, 90], mirror: true };
+const wedge = { id: "w", shape: "wedge", size: [40, 30, 20], at: [0, 0, 10], rotate: [0, 0, 0] };
+const cyl = { id: "c", shape: "cylinder", size: [10, 10, 4], at: [20, 0, 2], rotate: [0, 0, 0] };
+const outline = { id: "o", shape: "outline", points: [[0, 0], [9, 0], [9, 6], [0, 6]], size: [0, 0, 3], at: [0, 0, 1.5], rotate: [0, 0, 0] };
+const pick = (p, edges, spec) => { const q = G.treatEdges(p, edges, spec); return { fillet: q.fillet ?? null, chamfer: q.chamfer ?? null }; };
+const fillet = (size) => ({ kind: "fillet", size }), chamfer = (size) => ({ kind: "chamfer", size });
+// every way of treating a box's or wedge's edges - two kinds, three sizes or none - comes back as the same plan
+let seed = 7, wrong = 0, tried = 0;
+const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+for (const p of [box, wedge]) for (let n = 0; n < 400; n++) {
+  const plan = {};
+  for (const e of G.EDGES[p.shape]) { const r = rnd(); if (r < 0.45) plan[e] = { kind: rnd() < 0.5 ? "fillet" : "chamfer", size: [1, 2, 3][Math.floor(rnd() * 3)] }; }
+  const back = G.edgePlan({ ...p, ...G.compactEdges(p.shape, plan) });
+  tried++;
+  if (JSON.stringify(Object.entries(back).sort()) !== JSON.stringify(Object.entries(plan).sort())) wrong++;
+}
+const lines = (p, names) => G.edgeLines(p, names).map((l) => l.map((v) => v.map((x) => Math.round(x * 1e6) / 1e6)));
+const at = (p, v) => { const w = G.apply(G.rotation(p.rotate), [p.mirror ? -v[0] : v[0], v[1], v[2]]);
+  return [w[0] + p.at[0], w[1] + p.at[1], w[2] + p.at[2]].map((x) => Math.round(x * 1e6) / 1e6); };
+const ring = { ...cyl, sides: 8, repeat: { count: 4, around: [0, 0] } };
+process.stdout.write(JSON.stringify({
+  wrong, tried,
+  top: pick({ ...box, fillet: { "top-front": 2, front: 1 }, chamfer: { top: 1 } }, G.edgesOf("box", "top"), fillet(3)),
+  all: pick({ ...box, fillet: { "top-front": 2 }, chamfer: { bottom: 1 } }, G.EDGES.box, chamfer(0.5)),
+  off: pick({ ...box, fillet: { top: 2 } }, ["top-front"], null),
+  none: pick({ ...box, fillet: { top: 2 } }, G.edgesOf("box", "top"), null),
+  vertical: pick(box, G.edgesOf("box", "vertical"), fillet(4)),
+  mixed: pick(box, ["top-front", "top-back", "top-left", "top-right", "front-left"], chamfer(1)),
+  slope: pick(wedge, G.edgesOf("wedge", "slope"), chamfer(1)),
+  rims: pick(cyl, ["top", "bottom"], fillet(1)),
+  corners: pick(outline, ["vertical"], fillet(1)),
+  resized: pick({ ...box, fillet: { vertical: 4, "top-front": 4 }, chamfer: { bottom: 1 } }, ["front-left", "top-front"], fillet(2)),
+  topFront: lines(box, ["top-front"]), ends: [at(box, [-20, -15, 10]), at(box, [20, -15, 10])],
+  slopeLines: lines(wedge, ["front-slope", "back-slope"]).length,
+  rings: lines(ring, ["top"]), corner: lines(outline, ["vertical"]),
+  unknown: lines(box, ["nonsense", "top", "top-back"]).length,
+}));
+"""
+
+
+def test_edges_picked_first_then_treated(h3):
+    """Pick edges first (0.92.0): treatEdges sets or takes off a fillet or chamfer on just the picked edges and writes
+    the part's names afresh - the fewest, none overlapping - so every plan reads back as it was, in both readers;
+    edgeLines draws the picked edges where they are."""
+    out = run_js(TREAT_JS, {})
+    assert out["wrong"] == 0 and out["tried"] == 800
+    assert out["top"] == {"fillet": {"top": 3, "bottom-front": 1, "front-left": 1, "front-right": 1}, "chamfer": None}
+    assert out["all"] == {"fillet": None, "chamfer": {"all": 0.5}}
+    assert out["off"] == {"fillet": {"top-back": 2, "top-left": 2, "top-right": 2}, "chamfer": None}
+    assert out["none"] == {"fillet": None, "chamfer": None}
+    assert out["vertical"] == {"fillet": {"vertical": 4}, "chamfer": None}
+    assert out["mixed"] == {"fillet": None, "chamfer": {"top": 1, "front-left": 1}}
+    assert out["slope"] == {"fillet": None, "chamfer": {"slope": 1}}
+    assert out["rims"] == {"fillet": {"all": 1}, "chamfer": None} and out["corners"] == {"fillet": {"vertical": 1}, "chamfer": None}
+    r = out["resized"]                        # a new size for two of them: the rest keep theirs
+    assert r == {"fillet": {"top-front": 2, "front-left": 2, "front-right": 4, "back-left": 4, "back-right": 4},
+                 "chamfer": {"bottom": 1}}, r
+    f, c = (lambda n: ("fillet", n)), (lambda n: ("chamfer", n))
+    tops = ["top-front", "top-back", "top-left", "top-right"]
+    for got, plan in ((out["top"], {**{e: f(3) for e in tops}, "bottom-front": f(1), "front-left": f(1), "front-right": f(1)}),
+                      (out["mixed"], {**{e: c(1) for e in tops}, "front-left": c(1)}),
+                      (out["resized"], {"top-front": f(2), "front-left": f(2), "front-right": f(4), "back-left": f(4),
+                                        "back-right": f(4), **{e: c(1) for e in h3.EDGES["box"] if e.startswith("bottom")}})):
+        part = {"id": "b", "shape": "box", "size": [40, 30, 20], **{k: v for k, v in got.items() if v}}
+        design, problems = h3.read_design(json.dumps({"parts": [part]}))     # hub3d reads what the editor writes
+        assert problems == [] and h3._edge_plan(design["parts"][0]) == plan, got
+    assert out["topFront"] == [out["ends"]]                        # turned 90 and mirrored, as it is drawn
+    assert out["slopeLines"] == 2 and out["unknown"] == 1              # edges by their own names only
+    rings = out["rings"]                       # a cylinder's top rim on each of its four copies, round the plate's middle
+    assert len(rings) == 4 and all(len(r) == 9 for r in rings)
+    assert all(v[2] == 4 for r in rings for v in r)
+    assert np.allclose(np.mean([v[:2] for v in rings[0][:8]], 0), [20, 0], atol=1e-6)
+    assert np.allclose(np.mean([v[:2] for v in rings[2][:8]], 0), [-20, 0], atol=1e-6)
+    assert len(out["corner"]) == 4 and all(line[0][2] == 0 and line[1][2] == 3 for line in out["corner"])
+
+
+# 0.92.0: "Is it not possible to pick a single letter and change it - by clicking it?" Letters apart makes a text a
+# text part per letter, each where it was: the solid is the same.
+APART = [
+    {"parts": [{"id": "t", "shape": "text", "text": "Søren 08", "size": [0, 12, 2], "at": [0, 0, 1]}]},
+    {"parts": [{"id": "t", "shape": "text", "text": "Ab\ncDé", "font": "serif", "bold": True, "italic": True,
+                "align": "right", "letter_spacing": 1.3, "line_spacing": 0.8, "size": [0, 25, 2], "at": [3, 4, 1]}]},
+    {"parts": [{"id": "t", "shape": "text", "text": "HUB", "font": "stencil", "size": [60, 10, 1.5], "at": [0, 0, 0.75]}]},
+    {"parts": [{"id": "t", "shape": "text", "text": "Stående", "font": "rounded", "italic": True, "size": [0, 8, 1],
+                "rotate": [90, 0, 30], "at": [5, -3, 8], "mirror": True, "color": "#c0392b"}]},
+    {"parts": [{"id": "t", "shape": "text", "text": "Søren", "font": "script", "size": [0, 15, 2], "at": [0, 0, 1]}]},
+    {"parts": [{"id": "t", "shape": "text", "text": "AB", "size": [0, 6, 1], "at": [30, 0, 0.5],
+                "repeat": {"count": 3, "angle": 90}}]},
+    {"parts": [{"id": "plate", "shape": "box", "size": [80, 30, 3], "at": [0, 0, 1.5]},
+               {"id": "t", "shape": "text", "text": "CUT", "font": "mono", "size": [50, 0, 4], "at": [0, 0, 2],
+                "hole": True}]},
+]
+APART_JS = """
+const out = input.map((d) => {
+  const { design } = G.readDesign(JSON.stringify(d));
+  const kit = { wasm, fonts, meshes: new Map() };
+  const t = design.parts.find((p) => p.id === "t");
+  const letters = G.lettersApart(t, fonts, G.allIds(design.parts));
+  const apart = { ...design, parts: design.parts.flatMap((p) => (p.id === "t" ? letters : [p])) };
+  const file = G.writeDesign(apart);
+  const a = G.build(design, kit), b = G.build(apart, kit), c = G.build(G.readDesign(file).design, kit);
+  const both = G.build({ ...design, parts: [...design.parts, ...letters] }, kit);   // over the text: nothing more
+  return { was: { volume: a.volume, box: a.box }, now: { volume: b.volume, box: b.box }, both: both.volume,
+           saved: { volume: c.volume, box: c.box, triangles: c.triangles.length / 3, problems: c.problems.length }, letters, file };
+});
+process.stdout.write(JSON.stringify(out));
+"""
+
+
+def test_letters_apart_make_the_same_solid(h3):
+    """Letters apart (0.92.0): each letter a text part of its own, just where it was - in any font and style, two
+    lines aligned and spaced, stretched, turned and mirrored, joined-up script, repeated, as a hole - builds what the
+    text built, in the editor and in hub3d."""
+    pytest.importorskip("manifold3d")
+    js = run_js(APART_JS, APART)
+    for d, j in zip(APART, js):
+        assert j["now"]["volume"] == pytest.approx(j["was"]["volume"], rel=1e-7), d
+        assert np.allclose(j["now"]["box"], j["was"]["box"], atol=1e-6), d
+        assert j["both"] == pytest.approx(j["was"]["volume"], rel=1e-6), d     # each letter just where it was
+        saved = j["saved"]                            # the file keeps 0.001 mm
+        assert saved["volume"] == pytest.approx(j["was"]["volume"], rel=1e-3) and np.allclose(saved["box"], j["was"]["box"], atol=2e-3)
+        design, problems = h3.read_design(j["file"])          # and hub3d builds the letters the same
+        b = h3.build_design(design, ".")
+        mesh = b.solid.to_mesh()
+        v = np.asarray(mesh.vert_properties)[:, :3]
+        assert problems == [] and saved["problems"] == len(b.problems) == 0
+        assert saved["triangles"] == len(mesh.tri_verts), d
+        assert saved["volume"] == pytest.approx(b.solid.volume(), rel=1e-9, abs=1e-6)
+        assert np.allclose(saved["box"], [v.min(0), v.max(0)], atol=1e-4)
+    names = [[x["text"] for x in j["letters"]] for j in js]
+    assert names[0] == list("Søren08") and names[1] == list("AbcDé") and names[4] == list("Søren")
+    ids = [x["id"] for j in js for x in j["letters"]]
+    assert all(i != "t" for i in ids) and len(set(ids[:7])) == 7
+    assert all(x["size"][0] == 0 for x in js[0]["letters"])             # each one's width follows it
+    assert all(x["size"][0] > 0 for x in js[2]["letters"])              # stretched: its own
+    turned = js[3]["letters"][0]
+    assert turned["rotate"] == [90, 0, 30] and turned["mirror"] and turned["italic"] and turned["color"] == "#c0392b"
+    assert all(x["repeat"] == {"count": 3, "angle": 90, "around": [30, 0]} for x in js[5]["letters"])
+    assert all(x.get("hole") for x in js[6]["letters"]) and js[6]["now"]["volume"] < 80 * 30 * 3
     js_tables = run_js("process.stdout.write(JSON.stringify({faces: G.EDGE_FACES, edges: G.EDGES}));", {})
     assert js_tables["faces"] == {k: list(v) for k, v in h3.EDGE_FACES.items()}
     assert js_tables["edges"] == {k: list(v) for k, v in h3.EDGES.items()}

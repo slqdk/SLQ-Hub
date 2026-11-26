@@ -5,6 +5,9 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { TransformControls } from "three/addons/controls/TransformControls.js";
 import { toCreasedNormals } from "three/addons/utils/BufferGeometryUtils.js";
+import { LineMaterial } from "three/addons/lines/LineMaterial.js";
+import { LineSegments2 } from "three/addons/lines/LineSegments2.js";
+import { LineSegmentsGeometry } from "three/addons/lines/LineSegmentsGeometry.js";
 import type { Box3, Built, MeshData, Vec3 } from "./geometry";
 
 THREE.Object3D.DEFAULT_UP.set(0, 0, 1);
@@ -64,6 +67,8 @@ export class Viewport {
   private ghosts = new THREE.Group();
   private outline = new THREE.Group();
   readonly preview = new THREE.Group();
+  private marks = new THREE.Group();
+  private lineMats: LineMaterial[] = [];
   private solid: THREE.Mesh | null = null;
   private triPart: string[] = [];
   private pickables: THREE.Object3D[] = [];
@@ -89,7 +94,7 @@ export class Viewport {
     this.gizmo.addEventListener("dragging-changed", (e) => { this.controls.enabled = !(e as unknown as { value: boolean }).value; });
     this.gizmo.size = 0.8;
     this.scene.add(this.gizmo.getHelper());
-    this.scene.add(this.proxy, this.plate, this.result, this.ghosts, this.outline, this.preview);
+    this.scene.add(this.proxy, this.plate, this.result, this.ghosts, this.outline, this.preview, this.marks);
     this.preview.matrixAutoUpdate = false;
     const hemi = new THREE.HemisphereLight(0xffffff, 0x6b6f72, 1.6);
     this.scene.add(hemi);
@@ -117,7 +122,7 @@ export class Viewport {
     this.gizmo.detach();
     this.gizmo.dispose();
     this.controls.dispose();
-    for (const g of [this.plate, this.result, this.ghosts, this.outline, this.preview]) disposeGroup(g);
+    for (const g of [this.plate, this.result, this.ghosts, this.outline, this.preview, this.marks]) disposeGroup(g);
     this.renderer.dispose();
     this.renderer.domElement.remove();
   }
@@ -127,6 +132,7 @@ export class Viewport {
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
+    for (const m of this.lineMats) m.resolution.set(w, h);
     this.render();
   }
 
@@ -252,6 +258,29 @@ export class Viewport {
         depthWrite: false }));
       wash.renderOrder = 4;
       this.outline.add(wash, edges);
+    }
+    this.render();
+  }
+
+  /** Lines over the model (0.92.0): the edges picked for a fillet or chamfer, thick and green - not the picked part's
+   *  blue - and the one under the pointer thinner, amber: drawn over everything, so an edge behind shows too. */
+  setMarks(list: { lines: Vec3[][]; hover?: boolean }[]): void {
+    disposeGroup(this.marks);
+    this.lineMats = [];
+    const w = Math.max(1, this.host.clientWidth), h = Math.max(1, this.host.clientHeight);
+    for (const m of list) {
+      const pos: number[] = [];
+      for (const line of m.lines) for (let i = 0; i + 1 < line.length; i++) pos.push(...line[i], ...line[i + 1]);
+      if (!pos.length) continue;
+      const g = new LineSegmentsGeometry();
+      g.setPositions(pos);
+      const mat = new LineMaterial({ color: m.hover ? css("--wait", "#d99a00").getHex() : css("--run", "#2f9e44").getHex(),
+        linewidth: m.hover ? 3 : 6, depthTest: false, transparent: true, opacity: m.hover ? 0.85 : 0.95 });
+      mat.resolution.set(w, h);
+      const seg = new LineSegments2(g, mat);
+      seg.renderOrder = 7;
+      this.marks.add(seg);
+      this.lineMats.push(mat);
     }
     this.render();
   }

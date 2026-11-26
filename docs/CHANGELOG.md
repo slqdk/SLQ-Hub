@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.92.0 - 2026-11-26
+
+- Letters apart, in the 3D editor's Text tab: a text becomes one part per
+  letter, each just where it was. Click a single letter to make it bigger,
+  move it or turn it.
+- Pick several, over the view: each click picks one more part or takes it
+  away, as Shift-click does. Ctrl+A, and Pick all in Parts, pick every part.
+  The arrow keys move what is picked a step.
+- The Text tab works on several texts at once: font, bold, italic and the
+  capitals' height are set for each of them.
+- Edges are picked first, then rounded: click edges on the model (the one
+  under the pointer lights up) or pick Top, Bottom, Vertical or All, then
+  Fillet, Chamfer or Take off. Picked edges are drawn green. Change the size
+  with edges picked and those edges are resized.
+- Fixed: changing a text's font or turning on bold or italic kept the
+  letters' height only when that font had been used before in the session.
+
 ## 0.91.0 - 2026-11-26
 
 - Fillets and chamfers in 3D designs: a part's own edges can be rounded or

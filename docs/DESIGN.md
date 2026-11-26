@@ -3228,16 +3228,17 @@ into the Hub, Tinkercad's level, his printer a Bambu Lab P2S but chosen per desi
     sides, a cylinder's sides, a cone's top, an outline's points, a mesh's file, a group's size); Duplicate, Hide,
     Delete. Several parts: Duplicate, Delete.
   - **Size and place**: size (keep proportions), centre ("its bottom at z ..."), turned; Onto the plate, Lay flat.
-  - **Edges** (0.91.0, below): fillets and chamfers on the part's own edges, and Pick an edge.
+  - **Edges** (0.91.0, below; edges picked first since 0.92.0): fillets and chamfers on the part's own edges.
   - **Arrange**: Group, Ungroup; mirror left-right, front-back, up-down; align (two or more: left/middle/right,
     front/middle/back, bottom/middle/top); Pattern (Around, In a row - then copies, angle, the point or the step,
     Remove).
-  - **Text**, a tab of its own colour while one text is picked: its letters, font (its full name under it), Bold,
-    Italic, Capitals and Spacing (the size it comes out at under them), the lines' alignment and spacing. A tab that
-    goes (Text, when a box is picked) shows Part instead and comes back with the next text.
+  - **Text**, a tab of its own colour while one text is picked - or several, every one a text (0.92.0): its letters
+    and Letters apart, font (its full name under it), Bold, Italic, Capitals and Spacing (the size it comes out at under
+    them), the lines' alignment and spacing; for several, each gets the change. A tab that goes (Text, when a box is
+    picked) shows Part instead and comes back with the next text.
   - **Parts**, a menu at the right of the tabs: every part, nested in its groups, to pick, hide or show.
-  - **Over the view**, a heads-up bar as SolidWorks has: Move, Turn, Size, the snap, Fit, Top, Front, Right, Point at
-    (the pick hint under it). **The status line**: size, volume, the printer (a menu: the printers and a custom size),
+  - **Over the view**, a heads-up bar as SolidWorks has: Move, Turn, Size, the snap, Fit, Top, Front, Right, Pick
+    several (0.92.0), Point at (the pick hint under it). **The status line**: size, volume, the printer (a menu: the printers and a custom size),
     the warnings, and "2 problems" (a menu with what the file's reader and the build said). The head: Undo, Redo,
     Export, Full width / Show the chat, Close - all with their words. With nothing picked, Part, Size and place and
     Arrange say how to pick. On a narrow panel the ribbon scrolls sideways; on a phone the tabs wrap.
@@ -3269,8 +3270,38 @@ into the Hub, Tinkercad's level, his printer a Bambu Lab P2S but chosen per desi
     unmirrored; a repeated part's copy found) and the nearest named edge gets the treatment, or loses it when it has
     that one; and the part's names now, each a button that takes it off. A box with All rounded (its radius, in Part)
     says to set that to 0; setting it clears the fillets. Holes' and meshes' edges say they cannot be rounded yet.
-  - **Not yet - 0.92.0**: edges where parts meet (a hole's rim, a wall on a base: on the built solid, a fillet's
+  - **Not yet - 0.93.0**: edges where parts meet (a hole's rim, a wall on a base: on the built solid, a fillet's
     cutter or filler swept along the picked crease) and straight sharp edges of imported meshes.
+- **Picking first (0.92.0).** Søren, 07:23: "Er det ikke muligt at vælge et enkelt bogstav og ændre på det ? altså ved
+  at klikke på bogstavet ? Og hvis jeg så vil ændre på flere, så kan jeg vælge en mode for at vælge flere" - one letter
+  bigger, or moved a little, or two of them - and at 07:25, with the Edges tab whose Pick an edge filleted at once: "jeg
+  kunne også godt tænke mig at jeg FØRST vælger en streg, og så derefter vælger hvad der skal ske med den... (resize,
+  fillet osv)". So, as in SolidWorks, what is changed is picked first, then what happens to it:
+  - **Letters apart** (the Text tab, and Part's Text group): a text becomes a text part per letter, each just where it
+    was - SolidWorks' Dissolve Sketch Text. `lettersApart` lays the text out as the build does (`textGlyphs`: each
+    letter's outlines, placed), scales it as the build does (the whole text's ink box into its size), and gives each
+    letter its ink box's centre - turned, mirrored and moved as the part is - as its `at`; its height as its size y, its
+    width 0 (it follows the letter) unless the text was stretched (then the width it had); font, bold, italic, turn,
+    mirror, colour, hole and hidden kept, a repeat's centre fixed where the text's was; named by its letter, all
+    picked, the view focused (Esc, the arrow keys). Letters that touched (script) still do: the union is the same. In
+    the file they are plain text parts - the assistant and hub3d need nothing new. The solid is the text's, to the
+    file's 0.001 mm (tested: union with the text adds nothing, in seven designs).
+  - **Picking several**: Pick several, over the view, makes every click add or take away a part, as Shift-click does
+    (and in Parts too); Ctrl+A and Parts' Pick all pick every part. A click on a part that is one of several picked
+    picks it alone (a drag moves them all). The Text tab for several texts changes each one: font, Bold, Italic,
+    Capitals (each one's), spacing, lines. A new font or style keeps the capitals' height measured in the new font,
+    so its file is loaded first (before 0.92.0 a font not yet loaded kept the size instead).
+  - **Edges, picked first**: Pick edges (a tool: Esc stops it) - a click picks the edge nearest it (`nearestEdge`; an
+    outline: its corners) or unpicks it, and the edge under the pointer is drawn amber as it moves; Top, Bottom,
+    Vertical, All (a wedge's Slope, a cylinder's Both, an outline's Corners) pick or unpick those of the picked part.
+    Picked edges are kept by part (several parts at once), drawn thick and green over everything (`edgeLines`:
+    a box's or wedge's lines, rims round, an outline's corners upright, on every copy; `Viewport.setMarks`, three's
+    screen-space lines) while the Edges tab is shown. Then **Fillet**, **Chamfer** or **Take off**, with the size beside
+    them; a picked edge that has one puts its size in the field, and a new size **resizes** the picked edges that have
+    one, each keeping its kind. The names the part had now are chips: a click picks their edges. `treatEdges` writes
+    the part's names afresh (`compactEdges`): per kind and size the fewest names - "all", "vertical", a face, then
+    single edges - none of two treatments meaning one edge, so the plan reads back the same whichever wins (tested on
+    800 random plans, and by hub3d). Unpick all, or Esc twice, unpicks.
 
 ### Workflows (0.67.0)
 
