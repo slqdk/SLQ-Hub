@@ -3351,6 +3351,41 @@ into the Hub, Tinkercad's level, his printer a Bambu Lab P2S but chosen per desi
     amber; a click picks it as a click on the model does - Shift or Select multiple: one more - and opens its tab (a
     text's: Text) unless Lines is open, where a part is picked for its lines by name; Hide or Show on the row (Show
     always shown on a hidden one, which is grey and slanted). The menu at the right of the tabs is gone.
+- **The sketch (0.100.0).** Søren, 22:34: "Vi skal ha lavet en sketch sektion, ligesom i solid works, hvor man kan
+  tegne en 2D tegning, og så boss extrude den. Kan det lade sig gøre? Så kan man tegne lidt i frihånd med streger og
+  cirkler før man extruder... Og så skal man også kunne mate i 3D" (mates: next, his choice asked).
+  - **Planes** (`sketch.ts` planeFrame): the plate (Top: z = 0), the Front plane (y = 0, out toward the viewer: -Y),
+    the Right plane (x = 0, out: +X) - Insert's Sketch menu - and a box's face, from Sketch in its Face tab (0.98.0's
+    frame: its middle, across U, up V, out N). The view turns straight at it (`Viewport.lookFrom`: any direction,
+    `view` now calls it); "Look at it" turns it back.
+  - **Drawing** (a mode: the Sketch tab alone in the bar, the Pick/Line/Rectangle/Circle pill over the view instead
+    of Select/Move, no parts tree): Line - click each corner, the first again closes it, the last again or Esc ends it
+    open; Rectangle - two corners across; Circle - the middle, then the edge. The pointer's ray meets the plane
+    (`rayOnPlane`); the point snaps to a corner, end or middle within 10 px (a face's corners, edge middles and middle
+    too), else to the whole millimetre - on a face from its lower left corner, so distances from its edges come out
+    whole. Typed while drawing, as SketchUp's Measurements box: a line's next length toward the pointer (a whole 15°
+    when within 4), "width;height" (or "x", "*", a space - a comma is a decimal point), a diameter; Enter puts it
+    down. Pick (no tool, Esc) picks the shape whose lines are within 8 px: Delete or Backspace takes it away; a
+    rectangle's Width, Height and middle, a circle's Diameter and middle can be typed. Ctrl+Z undoes a shape; L, R
+    and C pick the tools; the editor's other keys wait. Drawn: closed shapes blue, an open line amber, the picked one
+    green, corners as dots, the one a click would take filled, lengths and sizes beside what is drawn - and what
+    Extrude would make, standing as it would, the rest faded (`setPreview`).
+  - **Regions** (`sketchRegions`, SolidWorks' reading): a closed shape with every corner inside a bigger one lies in
+    it - in an outline it is a hole, in a hole an island; shapes apart or crossing are a region each (as parts they
+    join where they meet). An open line makes nothing.
+  - **Extrude and Cut** (`sketchParts`): an `outline` per region, its points about the region's middle - "Sketch 1",
+    "Sketch 1 (2)" (numbered on from the design's sketches). Extrude: so thick (Thickness) out of the plane - on the
+    plate standing on it, on the front or right plane out toward you; Cut: a hole into what is there, through all or
+    so deep (from 0.2 mm behind the plane; through all on a plane of the design: as far as the design reaches, both
+    ways). On a box's face each part is kept on it (`on`, 0.98.0: so many mm from the face's edges - the middle stays
+    the middle - its depth, through for a cut through the box), beside the box in the tree so a cut cuts what the box
+    is in; its spot is the face's own (a mirrored box's own x runs the other way: U = V x N). Extruded parts take the
+    box's colour. Nothing closed: said, the sketch stays. Cancel throws the sketch away (asked once when there is
+    something drawn). The sketch is the editor's: the design gets outline parts, which hub3d reads and builds as it
+    always has (the parity test: a turned, mirrored box's face cut and extruded).
+  - **Not yet**: arcs, splines, dimensions and relations kept with the sketch (Smart Dimension, horizontal,
+    parallel...), editing the sketch after Extrude (the outline's points are what is kept), sketching on the faces
+    of other shapes.
 - **On a face of a box, kept there (0.98.0).** Søren, 13:57: "Hvad gør jeg hvis jeg gerne vil lave en 2D cirkel et sted
   på kassen, og derefter skære hullet ud hele vejen igennem kassen ? Ligesom i solid works ? Hvor jeg tegner en cirkel
   på den side jeg ønsker, og så låser afstandene til kanterne? Og så Boss Extrude ?" - and, asked whether the distances
@@ -3432,7 +3467,7 @@ into the Hub, Tinkercad's level, his printer a Bambu Lab P2S but chosen per desi
   - **A hole's fillet rounds what it cut.** The cutter rounded on its upright edges leaves the pocket round inside
     corners, on its bottom edges a rounded floor edge - its edges inside the part. On its edges at the opening the
     cutter rounded cuts less there, so a lip is left round the opening (rounding the rim itself is a fillet where the
-    hole meets the part: 0.100.0). So a hole's lines are picked as a part's - clicked, by name, Resized - and Fillet
+    hole meets the part: later). So a hole's lines are picked as a part's - clicked, by name, Resized - and Fillet
     and Chamfer go to those inside it only (`holeEdges`); the others are named in a toast. Take off takes off any.
   - **Inside or at an opening** (`holeEdges`; hub3d's `hole_edges`, the same): points 0.2 mm off the edge, out
     between its two faces (`edgeOutside`: along a straight edge at its eighths, round a rim at eight places, up each of
@@ -3482,7 +3517,7 @@ into the Hub, Tinkercad's level, his printer a Bambu Lab P2S but chosen per desi
     that one; and the part's names now, each a button that takes it off. A box with All rounded (its radius, in Part)
     says to set that to 0; setting it clears the fillets. Holes' and meshes' edges say they cannot be rounded yet
     (a hole's can since 0.95.0, inside the part).
-  - **Not yet - 0.100.0**: edges where parts meet (the rim of a hole's opening, a wall on a base: on the built solid, a
+  - **Not yet**: edges where parts meet (the rim of a hole's opening, a wall on a base: on the built solid, a
     fillet's cutter or filler swept along the picked crease) and straight sharp edges of imported meshes.
 - **Picking first (0.92.0).** Søren, 07:23: "Er det ikke muligt at vælge et enkelt bogstav og ændre på det ? altså ved
   at klikke på bogstavet ? Og hvis jeg så vil ændre på flere, så kan jeg vælge en mode for at vælge flere" - one letter

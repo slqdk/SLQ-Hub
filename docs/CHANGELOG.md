@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.100.0 - 2026-11-26
+
+- Sketch, as in SolidWorks: draw lines, rectangles and circles on the plate,
+  the front or right plane, or a box's face (Insert > Sketch, or Sketch in
+  the Face tab), then Extrude them into a part or Cut them into what is
+  there. A shape inside another becomes a hole.
+- Points snap to whole millimetres and to nearby corners; type a length,
+  width;height or diameter while drawing and press Enter for an exact one.
+  Pick a shape to change its size or delete it.
+- The view turns to look straight at the sketch, and a preview shows what
+  Extrude will make. On a box's face the result stays on the face when the
+  box moves or grows.
+
 ## 0.99.0 - 2026-11-26
 
 - Ten more fonts for text in the 3D editor, sixteen in all: Oswald

@@ -10,7 +10,7 @@ import Module from "manifold-3d/manifold";
 import wasmUrl from "manifold-3d/manifold.wasm?url";
 import { AlignCenter, AlignLeft, AlignRight, ArrowDownToLine, ArrowDownUp, Bold, Box, ChevronDown, CircleDashed, CircleDot,
   Columns3, Cone, Copy, Crosshair, Cylinder, Download, Eraser, Eye, EyeOff, FlipHorizontal2, FlipVertical2, Group, Italic,
-  ListTree, Maximize2,
+  ListTree, Maximize2, PencilRuler, PenLine, RectangleHorizontal, Circle, ArrowUpFromLine,
   MessageSquareShare, Minimize2, MousePointer2, MousePointerClick, Move3d, PanelBottom, Printer as PrinterIcon,
   Redo2, Repeat2, Rotate3d, RotateCcw, RotateCw, Ruler, Scaling, Shapes, Split, SquareDashed, SquareMousePointer,
   SquareRoundCorner, Stamp, Trash2,
@@ -21,16 +21,18 @@ import { ConfirmButton, MenuButton } from "../components/ui";
 import type { DesignFolder } from "./folder";
 import { allIds, build, buildPart, COLORS, edgeLength, edgeLines, edgePlan, EDGES, edgesOf, extent, extentOf, FACE_FRAMES,
   faceAngle, faceAt, faceFrame, faceMarks, FONT_FAMILIES, fontFile, follows, freshId, holeEdges, joined, lettersApart,
-  MAX_COPIES, MIN_SIZE, mirrorPart, nearestEdge, nearestToRay, newDesign, onFace, partSize, readDesign, repeatAround, respot,
+  MAX_COPIES, MIN_SIZE, mirrorPart, nearestEdge, nearestToRay, newDesign, onFace, partSize, placeOn, readDesign, repeatAround, respot,
   retext, settle, SPACING, spotAt, stl, textGlyphs, textMeasure, threeMf, transformPart, treatEdges, turned90, withCapitals,
   withEdgeLength, writeDesign, type Align, type Anchor, type Box3, type Built, type Design, type EdgeKind, type FaceName,
-  type FontData, type FontIndex, type Fonts, type Kit, type Mat3, type MeshData, type Part, type Repeat, type Shape,
-  type Vec3, type Wasm } from "./geometry";
+  type FontData, type FontIndex, type Fonts, type Kit, type Mat3, type MeshData, type Part, type Point2, type Repeat,
+  type Shape, type Vec3, type Wasm } from "./geometry";
 import { baseName, dirOf, fmt, joinPath, MESH_FILE, pointMark, relativePath } from "./files";
 import { parseMesh } from "./meshio";
 import { lastPrinter, PRINTERS, printerOf, rememberPrinter, type Printer } from "./printers";
 import { centre, copy, cuts, cutters, find, group, insertAfter, label, onCopies, pick, remove, replaceWith, riders, ungroup,
   update } from "./tree";
+import { distanceTo, loopOf, planeFrame, planeName, rayOnPlane, sketchParts, sketchRegions, snapPoints, strokesOf, to3d,
+  type PlaneFrame, type SketchPlane, type SketchShape } from "./sketch";
 import { Viewport, type Hit, type ViewName } from "./Viewport";
 
 // Select (0.96.0): a click only picks - no handles, nothing moves; Move, Turn and Size show their handles.
@@ -246,6 +248,15 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
   // A box's face clicked (0.98.0): the spot on it, and what the Face tab puts there - kept from one face to the next.
   const [faceSel, setFaceSel] = useState<FacePick | null>(null);
   const [feature, setFeature] = useState<Feature>({ round: true, size: 6, through: true, depth: 5, height: 5 });
+  // A sketch being drawn (0.100.0): its plane, its shapes, the tool, what is half drawn - and the point a click would
+  // put down, snapped; and what Extrude and Cut make of it, kept from one sketch to the next.
+  const [sketch, setSketch] = useState<SketchState | null>(null);
+  const sketchRef = useRef<SketchState | null>(null);
+  sketchRef.current = sketch;
+  const [hoverPt, setHoverPt] = useState<{ p: Point2; snapped: boolean } | null>(null);
+  const hoverRef = useRef<{ p: Point2; snapped: boolean } | null>(null);
+  hoverRef.current = hoverPt;
+  const [sketchMake, setSketchMake] = useState<SketchMake>({ height: 5, through: true, depth: 5 });
   // The parts' tree over the view (0.96.1): open or folded, kept for next time - folded at first on a phone.
   const [treeOpen, setTreeOpenState] = useState(() => {
     try {
@@ -624,8 +635,49 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
     const v = vp.current;
     if (!v || !ready) return;
     const list: { lines: Vec3[][]; hover?: boolean; face?: number }[] = [];
-    const words: { at: Vec3; text: string }[] = [];
-    if (design) {
+    const words: { at: Vec3; text: string; kind?: "dot" | "snap" | "typed" }[] = [];
+    const at = sketch ? sketchFrame(sketch) : null;
+    if (sketch && at) {                                // a sketch (0.100.0): its shapes in blue, an open line amber
+      const f = at.f, w3 = (pts: Point2[]) => pts.map((q) => to3d(f, q));
+      if (at.box && sketch.plane.kind === "face") {
+        list.push({ lines: [faceMarks(at.box, sketch.plane.face, undefined, true, 0).outline], face: 1.5 });
+      } else if (sketch.plane.kind !== "top") {        // the front or right plane: a frame to draw in, on the plate
+        list.push({ lines: [w3([[-110, 0], [110, 0], [110, 110], [-110, 110], [-110, 0]])], face: 1 });
+      }
+      const closed: Vec3[][] = [], open: Vec3[][] = [], picked: Vec3[][] = [];
+      sketch.shapes.forEach((sh, i) => (i === sketch.picked ? picked : loopOf(sh) ? closed : open).push(w3(strokesOf(sh))));
+      if (closed.length) list.push({ lines: closed, face: 2.5 });
+      if (open.length) list.push({ lines: open, hover: true });
+      if (picked.length) list.push({ lines: picked });
+      for (const q of snapPoints(sketch.shapes)) words.push({ at: to3d(f, q), text: "", kind: "dot" });
+      const d = sketch.draft, to = hoverPt?.p;
+      const mid = (a: Point2, b: Point2): Vec3 => to3d(f, [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]);
+      if (d) {
+        const rubber: Point2[][] = [];
+        if (d.kind === "line") {
+          rubber.push(to ? [...d.pts, to] : d.pts);
+          for (const q of d.pts) words.push({ at: to3d(f, q), text: "", kind: "dot" });
+          const last = d.pts[d.pts.length - 1];
+          if (to && (to[0] !== last[0] || to[1] !== last[1])) words.push({ at: mid(last, to), text: fmt(Math.hypot(to[0] - last[0], to[1] - last[1])) });
+        } else if (d.kind === "rect" && to) {
+          const [x0, y0] = d.a, [x1, y1] = to;
+          rubber.push([[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]]);
+          words.push({ at: mid(d.a, to), text: `${fmt(Math.abs(x1 - x0))} x ${fmt(Math.abs(y1 - y0))}` });
+        } else if (d.kind === "circle" && to) {
+          const r = Math.hypot(to[0] - d.c[0], to[1] - d.c[1]);
+          if (r > 0) {
+            rubber.push(strokesOf({ kind: "circle", c: d.c, r }));
+            words.push({ at: to3d(f, d.c), text: `Ø${fmt(2 * r)}` });
+          }
+        }
+        list.push({ lines: rubber.map(w3), face: 1.5 });
+      }
+      const sh = sketch.picked !== null ? sketch.shapes[sketch.picked] : null;
+      if (sh?.kind === "rect") words.push({ at: mid(sh.a, sh.b), text: `${fmt(Math.abs(sh.b[0] - sh.a[0]))} x ${fmt(Math.abs(sh.b[1] - sh.a[1]))}` });
+      if (sh?.kind === "circle") words.push({ at: to3d(f, sh.c), text: `Ø${fmt(2 * sh.r)}` });
+      if (to) words.push({ at: to3d(f, to), text: "", kind: hoverPt?.snapped ? "snap" : "dot" });
+      if (sketch.typed && to) words.push({ at: to3d(f, to), text: `${sketch.typed}|`, kind: "typed" });
+    } else if (design) {
       for (const [id, edges] of Object.entries(edgeSel)) {
         const f = find(design.parts, id);
         if (f) list.push({ lines: edgeLines(f.part, edges) });
@@ -655,7 +707,23 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
     }
     v.setMarks(list);
     v.setLabels(words);
-  }, [design, edgeSel, hoverEdge, ready, facing, faceBox, faceSel, feature.round, feature.size, tab, selected]);
+  }, [design, edgeSel, hoverEdge, ready, facing, faceBox, faceSel, feature.round, feature.size, tab, selected, sketch, hoverPt]);
+
+  // What Extrude would make of the sketch (0.100.0), shown as it would stand - the rest faded while there is any.
+  useEffect(() => {
+    const v = vp.current, k = kit.current;
+    if (!v || !ready || !k || !sketch) return;
+    const at = sketchFrame(sketch);
+    if (!at || !sketchRegions(sketch.shapes).length) {
+      v.setPreview(null);
+      return;
+    }
+    let n = 0;
+    const made = sketchParts(sketch.plane, sketch.shapes, at.box, { cut: false, depth: sketchMake.height, through: false,
+      reach: 0 }, () => `preview${++n}`, "Sketch");
+    v.setPreview(made.map((p) => ({ built: buildPart(p.on && at.box ? placeOn(p, at.box) : p, k),
+      color: at.box?.color ?? "#e8a33d" })));
+  }, [sketch?.shapes, sketch?.plane, sketchMake.height, design, ready]);
 
   useEffect(() => {                                   // Pick lines belongs to the Lines tab
     if (tab !== "lines" && tool === "edge") setTool(null);
@@ -853,6 +921,221 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
     host.current?.focus({ preventScroll: true });     // its button is gone: Esc and the arrow keys work on
   };
 
+  // ---------------------------------------------------------------- the sketch (0.100.0)
+
+  /** A sketch's plane where it is now - a box's face goes where the box goes - or null, its box gone. */
+  const sketchFrame = (s: SketchState | null): { f: PlaneFrame; box: Part | null } | null => {
+    const d = designRef.current;
+    if (!s || !d) return null;
+    const box = s.plane.kind === "face" ? find(d.parts, s.plane.part)?.part ?? null : null;
+    const f = planeFrame(s.plane, box);
+    return f ? { f, box } : null;
+  };
+
+  /** Sketch on a plane: nothing picked, the view turned straight at it, Line ready to draw. */
+  const startSketch = (plane: SketchPlane) => {
+    const d = designRef.current, v = vp.current, k = kit.current;
+    const box = plane.kind === "face" && d ? find(d.parts, plane.part)?.part ?? null : null;
+    const f = d ? planeFrame(plane, box) : null;
+    if (!d || !f) return;
+    let n = 0;                                         // Sketch 1, 2 ... as SolidWorks numbers them
+    const count = (list: Part[]) => list.forEach((p) => {
+      const m = /^Sketch (\d+)/.exec(p.name ?? "");
+      if (m) n = Math.max(n, Number(m[1]));
+      if (p.parts) count(p.parts);
+    });
+    count(d.parts);
+    setSketch({ plane, shapes: [], tool: "line", draft: null, picked: null, typed: "", past: [], n: n + 1 });
+    setHoverPt(null);
+    setSelected([]);
+    setEdgeSel({});
+    setFaceSel(null);
+    setTool(null);
+    setHoverEdge(null);
+    setMode("select");
+    setTab("sketch");
+    if (v) {
+      if (box && k) v.lookFrom(f.N, buildPart(box, k).box);
+      else v.view(plane.kind === "face" ? "top" : plane.kind, built?.box ?? extentOf(d.parts));
+    }
+    host.current?.focus({ preventScroll: true });
+  };
+
+  /** The point on the sketch's plane under the pointer, as a click would put it down: a corner, an end or a middle
+   *  within 10 px (a face's corners and middle too) - else the nearest whole millimetre (on a face, from its lower
+   *  left corner, so its distances from the edges are whole). */
+  const sketchAt = (x: number, y: number): { p: Point2; snapped: boolean } | null => {
+    const v = vp.current, s = sketchRef.current, at = sketchFrame(s), r = host.current?.getBoundingClientRect();
+    if (!v || !s || !at || !r) return null;
+    const { origin, dir } = v.rayAt(x, y);
+    const raw = rayOnPlane(at.f, origin, dir);
+    if (!raw) return null;
+    const near: Point2[] = [...snapPoints(s.shapes)];
+    if (s.draft?.kind === "line") near.push(...s.draft.pts);
+    else if (s.draft) near.push(s.draft.kind === "rect" ? s.draft.a : s.draft.c);
+    const w = (at.f.W ?? 0) / 2, h = (at.f.H ?? 0) / 2;
+    if (at.f.W) near.push([0, 0], [-w, -h], [w, -h], [w, h], [-w, h], [0, -h], [0, h], [-w, 0], [w, 0]);
+    let best: Point2 | null = null, gap = 10;
+    for (const c of near) {
+      const sp = v.toScreen(to3d(at.f, c));
+      const g = sp ? Math.hypot(sp[0] - (x - r.left), sp[1] - (y - r.top)) : Infinity;
+      if (g < gap) {
+        gap = g;
+        best = c;
+      }
+    }
+    if (best) return { p: best, snapped: true };
+    return { p: [Math.round(raw[0] + w) - w + 0, Math.round(raw[1] + h) - h + 0], snapped: false };
+  };
+
+  /** A shape added: what it was kept for Undo, nothing half drawn any more. */
+  const withShape = (s: SketchState, shape: SketchShape): SketchState =>
+    ({ ...s, shapes: [...s.shapes, shape], past: [...s.past, s.shapes], draft: null, typed: "", picked: null });
+
+  /** A click in the sketch: the tool's next point - or, with no tool, the shape there picked. */
+  const sketchClick = (pt: Point2) => {
+    const s = sketchRef.current, v = vp.current, at = sketchFrame(s);
+    if (!s || !v || !at) return;
+    const same = (a: Point2, b: Point2) => Math.abs(a[0] - b[0]) < 1e-6 && Math.abs(a[1] - b[1]) < 1e-6;
+    const d = s.draft;
+    if (!s.tool) {                                     // within 8 px of a shape's lines: that one
+      const tol = 8 * v.mmPerPx(to3d(at.f, pt));
+      let picked: number | null = null, gap = tol;
+      s.shapes.forEach((sh, i) => {
+        const g = distanceTo(sh, pt);
+        if (g < gap) {
+          gap = g;
+          picked = i;
+        }
+      });
+      setSketch({ ...s, picked });
+      return;
+    }
+    if (s.tool === "line") {
+      if (d?.kind !== "line") return setSketch({ ...s, draft: { kind: "line", pts: [pt] }, typed: "", picked: null });
+      const pts = d.pts;
+      if (pts.length >= 3 && same(pt, pts[0])) return setSketch(withShape(s, { kind: "line", pts, closed: true }));
+      if (pts.length === 2 && same(pt, pts[0])) return;          // back to the first of two: no shape yet
+      if (same(pt, pts[pts.length - 1])) {           // the same spot again: the line ends there
+        return setSketch(pts.length >= 2 ? withShape(s, { kind: "line", pts, closed: false }) : { ...s, draft: null });
+      }
+      return setSketch({ ...s, draft: { kind: "line", pts: [...pts, pt] }, typed: "" });
+    }
+    if (s.tool === "rect") {
+      if (d?.kind !== "rect") return setSketch({ ...s, draft: { kind: "rect", a: pt }, typed: "", picked: null });
+      if (d.a[0] === pt[0] || d.a[1] === pt[1]) return;
+      return setSketch(withShape(s, { kind: "rect", a: d.a, b: pt }));
+    }
+    if (d?.kind !== "circle") return setSketch({ ...s, draft: { kind: "circle", c: pt }, typed: "", picked: null });
+    const rad = Math.hypot(pt[0] - d.c[0], pt[1] - d.c[1]);
+    if (rad >= 0.25) setSketch(withShape(s, { kind: "circle", c: d.c, r: r3(rad) }));
+  };
+
+  /** What is typed while drawing, put down (as SketchUp's Measurements box): a line's next length, toward the
+   *  pointer (a whole 15 degrees when within 4); a rectangle's "width;height" (one number: a square); a circle's
+   *  diameter. */
+  const sketchTyped = (s: SketchState): SketchState | null => {
+    const nums = s.typed.split(/[;x* ]+/i).filter(Boolean).map((t) => Number(t.replace(",", ".")));
+    if (!nums.length || nums.some((x) => !Number.isFinite(x) || x <= 0) || !s.draft) return null;
+    const to = hoverRef.current?.p;
+    const d = s.draft;
+    if (d.kind === "line") {
+      const last = d.pts[d.pts.length - 1];
+      let a = to ? Math.atan2(to[1] - last[1], to[0] - last[0]) : 0;
+      if (!to || (to[0] === last[0] && to[1] === last[1])) a = 0;
+      const deg = (a * 180) / Math.PI, step = Math.round(deg / 15) * 15;
+      if (Math.abs(deg - step) < 4) a = (step * Math.PI) / 180;
+      const pt: Point2 = [r3(last[0] + nums[0] * Math.cos(a)), r3(last[1] + nums[0] * Math.sin(a))];
+      return { ...s, draft: { kind: "line", pts: [...d.pts, pt] }, typed: "" };
+    }
+    if (d.kind === "rect") {
+      const sx = to && to[0] < d.a[0] ? -1 : 1, sy = to && to[1] < d.a[1] ? -1 : 1;
+      const [wd, ht] = [nums[0], nums[1] ?? nums[0]];
+      return withShape(s, { kind: "rect", a: d.a, b: [r3(d.a[0] + sx * wd), r3(d.a[1] + sy * ht)] });
+    }
+    return withShape(s, { kind: "circle", c: d.c, r: r3(nums[0] / 2) });
+  };
+
+  /** Esc in the sketch: what is half drawn ends (a line of two corners or more stays, open); then the tool is put
+   *  down; then nothing is picked. The sketch stays - Extrude, Cut or Cancel leaves it. */
+  const sketchEscape = (s: SketchState): SketchState => {
+    if (s.draft?.kind === "line" && s.draft.pts.length >= 2) return withShape(s, { kind: "line", pts: s.draft.pts, closed: false });
+    if (s.draft || s.typed) return { ...s, draft: null, typed: "" };
+    if (s.tool) return { ...s, tool: null };
+    return { ...s, picked: null };
+  };
+
+  /** The keys while sketching: L, R and C draw lines, rectangles and circles; numbers are typed for the next length;
+   *  Enter puts that down (or ends a line); Backspace takes back what was typed, or a line's last corner, or the
+   *  shape picked, as Delete does; Ctrl+Z undoes the last shape. The editor's other keys wait. */
+  const sketchKey = (e: React.KeyboardEvent | KeyboardEvent, s: SketchState): void => {
+    const k = e.key, ctrl = e.ctrlKey || e.metaKey;
+    const set = (next: SketchState | null) => {
+      e.preventDefault();
+      if (next) setSketch(next);
+    };
+    if (ctrl && k.toLowerCase() === "z") {
+      const before = s.past[s.past.length - 1];
+      return set(before ? { ...s, shapes: before, past: s.past.slice(0, -1), draft: null, typed: "", picked: null } : null);
+    }
+    if (ctrl || e.altKey) return;
+    if (s.draft && /^[0-9.,;x* ]$/i.test(k)) return set({ ...s, typed: s.typed + k });
+    if (k === "Enter") {
+      if (s.typed) return set(sketchTyped(s) ?? { ...s, typed: "" });
+      return set(s.draft?.kind === "line" ? sketchEscape(s) : null);
+    }
+    if (k === "Escape") return set(sketchEscape(s));
+    if (k === "Backspace" && s.typed) return set({ ...s, typed: s.typed.slice(0, -1) });
+    if (k === "Backspace" && s.draft?.kind === "line") {
+      return set({ ...s, draft: s.draft.pts.length > 1 ? { kind: "line", pts: s.draft.pts.slice(0, -1) } : null });
+    }
+    if ((k === "Delete" || k === "Backspace") && s.picked !== null) {
+      return set({ ...s, shapes: s.shapes.filter((_, i) => i !== s.picked), past: [...s.past, s.shapes], picked: null });
+    }
+    const tools: Record<string, SketchTool> = { l: "line", r: "rect", c: "circle" };
+    if (tools[k.toLowerCase()]) return set({ ...s, tool: tools[k.toLowerCase()], draft: null, typed: "", picked: null });
+  };
+
+  /** Extrude or Cut: the sketch's regions made into parts - on a box's face kept on it, beside it in the tree so a cut
+   *  cuts what the box is in - picked; the sketch over. */
+  const endSketch = (cut: boolean) => {
+    const d = designRef.current, s = sketchRef.current, at = sketchFrame(s), v = vp.current;
+    if (!d || !s || !at) return;
+    const seen = allIds(d.parts);
+    const id = () => {
+      const x = freshId(seen);
+      seen.add(x);
+      return x;
+    };
+    const b = built?.box ?? extentOf(d.parts);
+    const reach = b ? Math.max(...b[0].map(Math.abs), ...b[1].map(Math.abs)) + 10 : 100;
+    const made = sketchParts(s.plane, s.shapes, at.box, { cut, depth: cut ? sketchMake.depth : sketchMake.height,
+      through: cut && sketchMake.through, reach }, id, `Sketch ${s.n}${cut ? " cut" : ""}`,
+    cut ? undefined : at.box?.color ?? COLORS[seen.size % COLORS.length]);
+    if (!made.length) {
+      toast("Nothing closed to make yet - a line back to its first corner, a rectangle or a circle.", "fault");
+      return;
+    }
+    let ps = d.parts;
+    if (at.box) for (const p of [...made].reverse()) ps = insertAfter(ps, at.box.id, p);
+    else ps = [...ps, ...made];
+    shown3d.current = made.map((p) => p.id);
+    commit({ ...d, parts: ps });
+    setSketch(null);
+    setHoverPt(null);
+    v?.setPreview(null);
+    setSelected(made.map((p) => p.id));
+    setTab("part");
+    host.current?.focus({ preventScroll: true });
+  };
+
+  const cancelSketch = () => {
+    setSketch(null);
+    setHoverPt(null);
+    vp.current?.setPreview(null);
+    setTab("insert");
+  };
+
   /** Turn (0.97.0): each part picked turned 90 degrees about X, Y or Z through its middle, as Office's Rotate. */
   const turn90 = (axis: 0 | 1 | 2, sign: 1 | -1) => {
     const d = designRef.current, k = kit.current;
@@ -866,6 +1149,10 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
     host.current?.focus({ preventScroll: true });
     const v = vp.current;
     if (!v || e.button !== 0 || v.overGizmo) return;
+    if (sketchRef.current) {                           // sketching: a click draws, a drag turns the view
+      pointer.current = { x: e.clientX, y: e.clientY, hit: null, body: false };
+      return;
+    }
     const hit = v.pick(e.clientX, e.clientY);
     const body = mode === "translate" && !tool && !!hit && !e.shiftKey   // dragging a picked part moves it: Move only
       && selectedRef.current.some((s) => within(designRef.current?.parts ?? [], s, hit.part));
@@ -878,6 +1165,16 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
 
   const onPointerMove = (e: React.PointerEvent) => {
     const v = vp.current, p = pointer.current;
+    if (sketchRef.current) {                           // sketching: where a click would put its point
+      if (p) return;
+      const x = e.clientX, y = e.clientY;
+      cancelAnimationFrame(hoverFrame.current);
+      hoverFrame.current = requestAnimationFrame(() => {
+        const at = sketchAt(x, y);
+        setHoverPt((cur) => (at && cur && cur.snapped === at.snapped && cur.p[0] === at.p[0] && cur.p[1] === at.p[1] ? cur : at));
+      });
+      return;
+    }
     if (v && !p && (!tool || tool === "edge")) {        // the line a click would pick, shown
       const x = e.clientX, y = e.clientY;
       cancelAnimationFrame(hoverFrame.current);
@@ -1110,6 +1407,14 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
       return;
     }
     if (Math.hypot(e.clientX - p.x, e.clientY - p.y) > 4) return;          // the view was turned: not a click
+    if (sketchRef.current) {
+      const at = sketchAt(e.clientX, e.clientY);
+      if (at) {
+        setHoverPt(at);
+        sketchClick(at.p);
+      }
+      return;
+    }
     const hit = p.hit;
     if (tool === "point") {
       if (hit) insertPoint(hit);
@@ -1396,6 +1701,10 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
   const onKey = (e: React.KeyboardEvent | KeyboardEvent) => {
     const tag = (e.target as HTMLElement).tagName;
     if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || !designRef.current) return;
+    if (sketchRef.current) {                           // sketching: its keys only (0.100.0)
+      sketchKey(e, sketchRef.current);
+      return;
+    }
     const mod = e.ctrlKey || e.metaKey;
     const key = e.key.toLowerCase();
     const step = SNAP * (e.shiftKey ? 10 : 1);
@@ -1468,7 +1777,8 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
     error: "Not saved" }[status];
   const view = (name: ViewName) => vp.current?.view(name, built?.box ?? (design ? extentOf(design.parts) : null));
   const texts = items.length && items.every((p) => p.shape === "text") ? items : null;
-  const shownTab: Tab = (tab === "text" && !texts) || (tab === "face" && !faceBox) ? "part" : tab;
+  const shownTab: Tab = sketch ? "sketch" : (tab === "text" && !texts) || (tab === "face" && !faceBox) || tab === "sketch"
+    ? "part" : tab;
   const pickedEdges = Object.entries(edgeSel).reduce((n, [id, es]) => n + (find(parts, id) ? es.length : 0), 0);
   const oneLine = (() => {                             // the one line picked: how long it is (Resize)
     const all = Object.entries(edgeSel).flatMap(([id, es]) => es.map((e) => [id, e] as const));
@@ -1477,6 +1787,7 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
   })();
   // What the band shows: a change folds its groups afresh to the room there is (0.94.0).
   const fitKey = [shownTab, faceSel?.face, feature.round, feature.through, one?.on ? `${one.on.face}${one.on.through ? "t" : ""}` : "",
+    sketch ? `${sketch.picked !== null ? sketch.shapes[sketch.picked]?.kind : "-"}${sketchMake.through}${sketch.shapes.length > 0}` : "",
     selected.join(","), items.map((x) => `${x.shape}${x.radius ? "r" : ""}${x.repeat ? (x.repeat.step ? "s" : "a")
     : ""}${x.hole ? "h" : ""}`).join(","), pickedEdges, one ? (edgeSel[one.id] ?? []).length : 0, oneLine ? 1 : 0].join("|");
   const allProblems = [...problems, ...(built?.problems ?? [])];
@@ -1528,10 +1839,14 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
       <div className="v3d-ribbon">
         <div className="v3d-tabs">
           <div className="v3d-tablist" role="tablist" aria-label="Tools">
-            {TABS.map(([id, name]) => (
+            {!sketch && TABS.map(([id, name]) => (
               <button key={id} type="button" role="tab" aria-selected={shownTab === id} className={`v3d-tab${shownTab === id ? " on" : ""}`}
                 onClick={() => setTab(id)}>{name}</button>
             ))}
+            {sketch && (
+              <button type="button" role="tab" aria-selected className="v3d-tab context on"
+                title={`Sketching on ${planeName(sketch.plane, sketchFrame(sketch)?.box)} - Extrude, Cut or Cancel leaves it`}>Sketch</button>
+            )}
             {texts && (
               <button type="button" role="tab" aria-selected={shownTab === "text"} className={`v3d-tab context${shownTab === "text" ? " on" : ""}`}
                 onClick={() => setTab("text")} title={texts.length > 1 ? "The picked texts: their font and letters"
@@ -1543,7 +1858,20 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
             )}
           </div>
         </div>
-        <Band label={shownTab === "text" ? "Text" : shownTab === "face" ? "Face" : TABS.find(([id]) => id === shownTab)?.[1]} fit={fitKey}>
+        <Band label={shownTab === "text" ? "Text" : shownTab === "face" ? "Face" : shownTab === "sketch" ? "Sketch"
+          : TABS.find(([id]) => id === shownTab)?.[1]} fit={fitKey}>
+          {shownTab === "sketch" && sketch && (
+            <SketchBand sketch={sketch} where={planeName(sketch.plane, sketchFrame(sketch)?.box)} make={sketchMake}
+              onMake={(m) => setSketchMake((cur) => ({ ...cur, ...m }))} closed={sketchRegions(sketch.shapes).length}
+              onTool={(t) => setSketch({ ...sketch, tool: t, draft: null, typed: "", picked: null })}
+              onDelete={() => sketch.picked !== null && setSketch({ ...sketch, shapes: sketch.shapes.filter((_, i) => i !== sketch.picked),
+                past: [...sketch.past, sketch.shapes], picked: null })}
+              onUndo={() => sketch.past.length && setSketch({ ...sketch, shapes: sketch.past[sketch.past.length - 1],
+                past: sketch.past.slice(0, -1), draft: null, typed: "", picked: null })}
+              onShape={(sh) => sketch.picked !== null && setSketch({ ...sketch, shapes: sketch.shapes.map((x, i) => (i === sketch.picked ? sh : x)),
+                past: [...sketch.past, sketch.shapes] })}
+              onExtrude={() => endSketch(false)} onCut={() => endSketch(true)} onCancel={cancelSketch} />
+          )}
           {shownTab === "insert" && (
             <>
               <Grp label="Solids">
@@ -1559,6 +1887,9 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
                 <Big tone="grey" icon={<SquareDashed size={20} />} label="Hole" title="A box-shaped hole - through the part picked" onClick={() => add("box", true)} />
                 <Big tone="grey" icon={<Cylinder size={20} strokeDasharray="3 2" />} label="Round hole" title="A round hole - through the part picked"
                   onClick={() => add("cylinder", true)} />
+              </Grp>
+              <Grp label="Sketch" fold={3} icon={<PencilRuler size={20} />}>
+                <SketchButton onPick={startSketch} />
               </Grp>
               <Grp label="From a file" fold={1} icon={<Upload size={20} />}>
                 <MenuButton fixed className="btn v3d-big tone-green" title="An STL, 3MF or OBJ into the design" menuClassName="wide"
@@ -1613,7 +1944,8 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
             change={(fn) => (texts.length > 1 ? changeEach(texts.map((t) => t.id), fn) : change(texts[0].id, fn))} />}
           {shownTab === "face" && faceBox && faceSel && (
             <FaceBand box={faceBox} spot={faceSel} feature={feature} onFeature={(f) => setFeature((cur) => ({ ...cur, ...f }))}
-              onFrom={(from) => setFaceSel({ ...faceSel, from })} onMake={onTheFace} />
+              onFrom={(from) => setFaceSel({ ...faceSel, from })} onMake={onTheFace}
+              onSketch={() => startSketch({ kind: "face", part: faceBox.id, face: faceSel.face })} />
           )}
           {shownTab === "lines" && (
             <LinesBand part={one} many={items.length > 1} picked={pickedEdges} pickedOn={one ? edgeSel[one.id] ?? [] : []}
@@ -1655,6 +1987,24 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
         <div className="v3d-top">
           <div className="v3d-heads-row">
             <div className="v3d-left">
+            {sketch && (
+              <div className="v3d-heads" role="toolbar" aria-label="Sketch">
+                <Tool icon={<MousePointer2 size={16} />} title="Pick a shape: Delete takes it away, its size in the Sketch tab (Esc)"
+                  active={!sketch.tool} onClick={() => setSketch({ ...sketch, tool: null, draft: null, typed: "" })}><span>Pick</span></Tool>
+                <Tool icon={<PenLine size={16} />} title="Line: click each corner (L)" active={sketch.tool === "line"}
+                  onClick={() => setSketch({ ...sketch, tool: "line", draft: null, typed: "", picked: null })}><span>Line</span></Tool>
+                <Tool icon={<RectangleHorizontal size={16} />} title="Rectangle: two corners across (R)" active={sketch.tool === "rect"}
+                  onClick={() => setSketch({ ...sketch, tool: "rect", draft: null, typed: "", picked: null })}><span>Rectangle</span></Tool>
+                <Tool icon={<Circle size={16} />} title="Circle: its middle, then its edge (C)" active={sketch.tool === "circle"}
+                  onClick={() => setSketch({ ...sketch, tool: "circle", draft: null, typed: "", picked: null })}><span>Circle</span></Tool>
+                <span className="v3d-sep" />
+                <Tool icon={<Crosshair size={16} />} title="Look straight at the sketch again" onClick={() => {
+                  const at = sketchFrame(sketch), v = vp.current, k = kit.current;
+                  if (at && v) v.lookFrom(at.f.N, at.box && k ? buildPart(at.box, k).box : built?.box ?? null);
+                }}><span>Look at it</span></Tool>
+              </div>
+            )}
+            {!sketch && (
             <div className="v3d-heads" role="toolbar" aria-label="Pick and handles">
               <Tool icon={<MousePointer2 size={16} />} title="Select: a click picks a part or a line - no handles, nothing moves (Q, or Esc with nothing picked)"
                 active={mode === "select"} onClick={() => setMode("select")}><span>Select</span></Tool>
@@ -1670,7 +2020,8 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
               <Tool icon={<Scaling size={16} />} title="Size: handles on what is picked make it longer or shorter, 1 mm at a time (S)"
                 active={mode === "scale"} onClick={() => setMode("scale")}><span>Size</span></Tool>
             </div>
-            {parts.length > 0 && (
+            )}
+            {parts.length > 0 && !sketch && (
               <PartTree parts={parts} selected={selected} open={treeOpen} onOpen={setTreeOpen} onHide={hide}
                 onPickAll={() => { setSelected(parts.map((x) => x.id)); setEdgeSel({}); }} onPick={pickFromTree} />
             )}
@@ -1682,6 +2033,7 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
               <Tool icon={<ViewIcon face="right" />} title="From the right" onClick={() => view("right")}><span>Right</span></Tool>
             </div>
           </div>
+          {sketch && <div className="v3d-hint">{sketchHint(sketch, planeName(sketch.plane, sketchFrame(sketch)?.box))}</div>}
           {tool && <div className="v3d-hint">{tool === "face" ? "Click the face it should lie on - a text's letters on it, upright on a wall. Esc leaves it where it is."
             : tool === "point" ? "Click the spot on the model to send it to the chat. Esc stops."
             : tool === "edge" ? "Click lines to pick them - again to unpick - then Fillet, Chamfer, Take off or Resize above. Esc stops."
@@ -1737,11 +2089,20 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
 // 0.94.0: Insert (was Shapes); Part - with Size and place and Arrange in it; Lines (was Edges). Søren: "Shapes skal
 // hedde Insert ... Parts menuen skal også inkludere Size, place, arrange (alle på en tab) ... Hvis man klikker på en
 // streg, så skal menuen Lines komme frem".
-type Tab = "insert" | "part" | "lines" | "text" | "face";
+type Tab = "insert" | "part" | "lines" | "text" | "face" | "sketch";
 /** A box's face clicked (0.98.0): which, and the spot on it - so many mm from its edges (none: the middle). */
 type FacePick = { part: string; face: FaceName; from?: Record<string, number> };
 /** What the Face tab puts on a face: round or square, how wide; a hole through all or so deep; a boss so high. */
 type Feature = { round: boolean; size: number; through: boolean; depth: number; height: number };
+/** A sketch (0.100.0): its plane and shapes; the tool drawing (none: a click picks a shape); what is half drawn - a
+ *  line's corners so far, a rectangle's first corner, a circle's middle; the shape picked; what is typed for the next
+ *  length; what it was before each shape (Undo); its number, for its parts' names. */
+type SketchTool = "line" | "rect" | "circle";
+type Draft = { kind: "line"; pts: Point2[] } | { kind: "rect"; a: Point2 } | { kind: "circle"; c: Point2 };
+type SketchState = { plane: SketchPlane; shapes: SketchShape[]; tool: SketchTool | null; draft: Draft | null;
+  picked: number | null; typed: string; past: SketchShape[][]; n: number };
+/** What Extrude and Cut make of a sketch: so high out of its plane; a cut through all, or so deep. */
+type SketchMake = { height: number; through: boolean; depth: number };
 const TABS: [Tab, string][] = [["insert", "Insert"], ["part", "Part"], ["lines", "Lines"]];
 const ALIGNS: [string, string[]][] = [["X", ["Left", "Middle", "Right"]], ["Y", ["Front", "Middle", "Back"]],
   ["Z", ["Bottom", "Middle", "Top"]]];
@@ -2314,9 +2675,9 @@ function FromRow({ face, axis, size, from, onSet }: { face: FaceName; axis: 0 | 
 /** The Face tab (0.98.0): the face picked on a box and the spot on it - so many mm from two of its edges, as a sketch
  *  on a face is dimensioned in SolidWorks - and what goes there: a round or a square hole through all of the box or
  *  so deep (an extruded cut), a boss so high (a boss extrude), or a text. Each is kept there: it goes with the box. */
-function FaceBand({ box, spot, feature, onFeature, onFrom, onMake }: { box: Part; spot: FacePick; feature: Feature;
+function FaceBand({ box, spot, feature, onFeature, onFrom, onMake, onSketch }: { box: Part; spot: FacePick; feature: Feature;
   onFeature: (f: Partial<Feature>) => void; onFrom: (from: Record<string, number> | undefined) => void;
-  onMake: (kind: "hole" | "boss" | "text") => void }) {
+  onMake: (kind: "hole" | "boss" | "text") => void; onSketch: () => void }) {
   const F = faceFrame(box, spot.face);
   const name = spot.face[0].toUpperCase() + spot.face.slice(1);
   const across = feature.round ? `round, ${fmt(feature.size)} mm across` : `square, ${fmt(feature.size)} mm wide`;
@@ -2349,6 +2710,8 @@ function FaceBand({ box, spot, feature, onFeature, onFrom, onMake }: { box: Part
         </Stack>
       </Grp>
       <Grp label="Cut or add">
+        <Big tone="violet" icon={<PencilRuler size={20} />} label="Sketch" onClick={onSketch}
+          title="Draw on this face - lines, rectangles, circles - then Extrude or Cut it, kept on the face" />
         <Big tone="grey" icon={feature.round ? <CircleDashed size={20} /> : <SquareDashed size={20} />} label="Cut hole"
           onClick={() => onMake("hole")} title={`A hole here, ${across}, ${feature.through ? "through all of the box"
             : `${fmt(feature.depth)} mm deep`} - ${keeps}`} />
@@ -2364,6 +2727,125 @@ function FaceBand({ box, spot, feature, onFeature, onFrom, onMake }: { box: Part
           <Field label="Height" unit="mm" value={feature.height} min={0.1} step={1} width={44}
             title="How far the boss stands out of the face, mm" onSet={(v) => onFeature({ height: Math.max(0.1, v) })} />
         </Stack>
+      </Grp>
+    </>
+  );
+}
+
+/** Insert's Sketch (0.100.0): on the plate, the front plane or the right plane - on a box's face from its Face tab. */
+function SketchButton({ onPick }: { onPick: (plane: SketchPlane) => void }) {
+  return (
+    <MenuButton fixed className="btn v3d-big tone-violet" title="Sketch: draw lines, rectangles and circles on a plane, then Extrude or Cut them"
+      label={<><PencilRuler size={20} /><span>Sketch <ChevronDown size={11} /></span></>}>
+      {(close) => (
+        <>
+          <button className="menu-item" onClick={() => { close(); onPick({ kind: "top" }); }}><ViewIcon face="top" />
+            <span>On the plate<small>The top plane - what you draw stands on the plate</small></span></button>
+          <button className="menu-item" onClick={() => { close(); onPick({ kind: "front" }); }}><ViewIcon face="front" />
+            <span>On the front plane<small>Seen from the front - it stands up, out toward you</small></span></button>
+          <button className="menu-item" onClick={() => { close(); onPick({ kind: "right" }); }}><ViewIcon face="right" />
+            <span>On the right plane<small>Seen from the right - out toward you</small></span></button>
+          <div className="menu-item faint"><Box size={15} /><span>On a box's face<small>Click the face in Select, then Sketch in
+            its Face tab</small></span></div>
+        </>
+      )}
+    </MenuButton>
+  );
+}
+
+/** What to do next in a sketch, said under the bar. */
+function sketchHint(s: SketchState, where: string): string {
+  const typed = s.typed ? ` Typed: ${s.typed} - Enter puts it down.` : "";
+  if (s.tool === "line") {
+    return s.draft ? `Line: click the next corner - the first one again closes it, the last one again (or Esc) ends it. `
+      + `Type a length and Enter for an exact one.${typed}` : `Line on ${where}: click its first corner. Points snap to whole `
+      + "millimetres, and to the corners and middles near the pointer.";
+  }
+  if (s.tool === "rect") return s.draft ? `Rectangle: click the corner across - or type width;height and Enter.${typed}` : `Rectangle on ${where}: click a corner.`;
+  if (s.tool === "circle") return s.draft ? `Circle: click its edge - or type its diameter and Enter.${typed}` : `Circle on ${where}: click its middle.`;
+  return "Click a shape to pick it - Delete takes it away; L, R and C draw. Extrude or Cut makes the closed shapes into parts.";
+}
+
+/** The Sketch tab (0.100.0): what draws - Line, Rectangle, Circle; Pick, Delete, Undo; the picked shape's size; and
+ *  what leaves the sketch - Extrude (so high), Cut (through all or so deep), Cancel. */
+function SketchBand({ sketch, where, make, onMake, closed, onTool, onDelete, onUndo, onShape, onExtrude, onCut, onCancel }: {
+  sketch: SketchState; where: string; make: SketchMake; onMake: (m: Partial<SketchMake>) => void; closed: number;
+  onTool: (t: SketchTool | null) => void; onDelete: () => void; onUndo: () => void; onShape: (s: SketchShape) => void;
+  onExtrude: () => void; onCut: () => void; onCancel: () => void }) {
+  const sh = sketch.picked !== null ? sketch.shapes[sketch.picked] : null;
+  const rect = sh?.kind === "rect" ? { c: [(sh.a[0] + sh.b[0]) / 2, (sh.a[1] + sh.b[1]) / 2], w: Math.abs(sh.b[0] - sh.a[0]),
+    h: Math.abs(sh.b[1] - sh.a[1]) } : null;
+  const box = (c: number[], w: number, h: number): SketchShape => ({ kind: "rect", a: [r3(c[0] - w / 2), r3(c[1] - h / 2)],
+    b: [r3(c[0] + w / 2), r3(c[1] + h / 2)] });
+  const xy = "from the plane's 0,0 - a face's middle";
+  return (
+    <>
+      <Grp label="Draw">
+        <Big icon={<PenLine size={20} />} label="Line" active={sketch.tool === "line"} onClick={() => onTool("line")}
+          title="Line: click each corner - the first again closes it (L)" />
+        <Big icon={<RectangleHorizontal size={20} />} label="Rectangle" active={sketch.tool === "rect"} onClick={() => onTool("rect")}
+          title="Rectangle: two corners across (R)" />
+        <Big icon={<Circle size={20} />} label="Circle" active={sketch.tool === "circle"} onClick={() => onTool("circle")}
+          title="Circle: its middle, then its edge (C)" />
+      </Grp>
+      <Grp label="Change" fold={1} icon={<Undo2 size={20} />}>
+        <Stack>
+          <Small icon={<MousePointer2 size={16} />} label="Pick" active={!sketch.tool} onClick={() => onTool(null)}
+            title="Click a shape to pick it (Esc)" />
+          <Small icon={<Trash2 size={16} />} label="Delete" disabled={!sh} onClick={onDelete} title="Take the picked shape away (Delete)" />
+          <Small icon={<Undo2 size={16} />} label="Undo" disabled={!sketch.past.length} onClick={onUndo} title="Undo the last shape (Ctrl+Z)" />
+        </Stack>
+      </Grp>
+      {sh && (
+        <Grp label="Picked" fold={2} icon={sh.kind === "circle" ? <Circle size={20} /> : sh.kind === "rect" ? <RectangleHorizontal size={20} /> : <PenLine size={20} />}>
+          {rect && (
+            <>
+              <Stack>
+                <Field label="Width" unit="mm" value={r3(rect.w)} min={0.1} step={1} width={44} onSet={(v) => onShape(box(rect.c, Math.max(0.1, v), rect.h))} />
+                <Field label="Height" unit="mm" value={r3(rect.h)} min={0.1} step={1} width={44} onSet={(v) => onShape(box(rect.c, rect.w, Math.max(0.1, v)))} />
+              </Stack>
+              <Stack>
+                <Field label="X" unit="mm" value={r3(rect.c[0])} step={1} width={44} title={`Its middle, ${xy}`} onSet={(v) => onShape(box([v, rect.c[1]], rect.w, rect.h))} />
+                <Field label="Y" unit="mm" value={r3(rect.c[1])} step={1} width={44} title={`Its middle, ${xy}`} onSet={(v) => onShape(box([rect.c[0], v], rect.w, rect.h))} />
+              </Stack>
+            </>
+          )}
+          {sh.kind === "circle" && (
+            <>
+              <Stack>
+                <Field label="Diameter" unit="mm" value={r3(2 * sh.r)} min={0.1} step={1} width={44} onSet={(v) => onShape({ ...sh, r: r3(Math.max(0.1, v) / 2) })} />
+              </Stack>
+              <Stack>
+                <Field label="X" unit="mm" value={r3(sh.c[0])} step={1} width={44} title={`Its middle, ${xy}`} onSet={(v) => onShape({ ...sh, c: [v, sh.c[1]] })} />
+                <Field label="Y" unit="mm" value={r3(sh.c[1])} step={1} width={44} title={`Its middle, ${xy}`} onSet={(v) => onShape({ ...sh, c: [sh.c[0], v] })} />
+              </Stack>
+            </>
+          )}
+          {sh.kind === "line" && (
+            <Stack>
+              <span className="v3d-col-strong">A line, {sh.pts.length} corners</span>
+              <small className="v3d-col-note">{sh.closed ? "Closed: it makes a part" : "Open: close it to make a part"}</small>
+            </Stack>
+          )}
+        </Grp>
+      )}
+      <Grp label={closed ? `Make - ${closed} ${closed > 1 ? "shapes" : "shape"} closed` : "Make - nothing closed yet"}>
+        <Big tone="orange" icon={<ArrowUpFromLine size={20} />} label="Extrude" disabled={!closed} onClick={onExtrude}
+          title={`Boss extrude: what is closed, ${fmt(make.height)} mm thick out of ${where} - a part`} />
+        <Big tone="grey" icon={<SquareDashed size={20} />} label="Cut" disabled={!closed} onClick={onCut}
+          title={`Extruded cut: what is closed, cut into what is there - ${make.through ? "through all" : `${fmt(make.depth)} mm deep`}`} />
+        <Stack>
+          <Field label="Thickness" unit="mm" value={make.height} min={0.1} step={1} width={44}
+            title="Extrude: how thick the part is - how far out of the plane, mm" onSet={(v) => onMake({ height: Math.max(0.1, v) })} />
+          <label className="v3d-check" title="Cut through all of it - a box's face: the box; another plane: everything, both ways">
+            <input type="checkbox" checked={make.through} onChange={(e) => onMake({ through: e.target.checked })} /> Cut through all</label>
+          {!make.through && <Field label="Depth" unit="mm" value={make.depth} min={0.1} step={1} width={44} title="Cut: how far in, mm"
+            onSet={(v) => onMake({ depth: Math.max(0.1, v) })} />}
+        </Stack>
+        {sketch.shapes.length || sketch.draft ? (
+          <ConfirmButton className="btn v3d-big tone-red" confirmText="Throw away?" label="Leave the sketch - what is drawn is thrown away"
+            onConfirm={onCancel}><X size={20} /><span>Cancel</span></ConfirmButton>
+        ) : <Big tone="red" icon={<X size={20} />} label="Cancel" onClick={onCancel} title="Leave the sketch" />}
       </Grp>
     </>
   );

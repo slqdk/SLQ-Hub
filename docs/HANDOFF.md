@@ -4,7 +4,23 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## Next session - start here (written 2026-11-26, at 0.99.0)
+## Next session - start here (written 2026-11-26, at 0.100.0)
+
+**0.100.0 (2026-11-26): the sketch - pushed, not yet installed.** Søren, 22:34: "Vi skal ha lavet en sketch sektion,
+ligesom i solid works, hvor man kan tegne en 2D tegning, og så boss extrude den. Kan det lade sig gøre? Så kan man
+tegne lidt i frihånd med streger og cirkler før man extruder... Og så skal man også kunne mate i 3D". Built (DESIGN §8
+"The sketch (0.100.0)", `frontend/src/model3d/sketch.ts`): Insert's Sketch (on the plate, the front or the right
+plane) or Sketch in a box face's Face tab turns the view straight at the plane and opens a Sketch tab: Line,
+Rectangle, Circle, snapping to whole mm and to corners near the pointer, a typed length / width;height / diameter with
+Enter, Pick to change a shape's size or delete it, Undo; Extrude (a Thickness) or Cut (through all or a Depth) makes
+the closed shapes into outline parts - a shape inside another a hole - kept on the face (`on`) when drawn on one;
+Cancel throws it away. Seen in the dev server (light and dark): a rectangle, a circle typed 10 inside it and a
+triangle on the plate (two regions), the rectangle picked and typed 40 x 30, the preview standing 6 mm, Extrude -
+"Sketch 1" with its hole and "Sketch 1 (2)"; a box's front picked, Sketch there, a circle typed 8 in its middle, Cut
+through - kept in the face's middle, through the box - no console errors; tests: regions, every plane, faces of a
+turned and mirrored box, and hub3d reading and building the parts the same. **Mates not built**: asked him to choose
+(see item 119). Not seen: his mouse and a real drawing - snapping feel, a long line of many corners, drawing on the
+front plane; editing a sketch after Extrude (not there: the parts keep the outline's points).
 
 **0.99.0 (2026-11-26): ten more fonts - pushed, not yet installed.** Søren, 15:54, with the Font box open: "Kan vi få
 nogle flere skrifttyper?" Built (DESIGN §8 "Text", "Ten more (0.99.0)"): sixteen families - condensed (Oswald),
@@ -188,7 +204,7 @@ picking the 4 edges with their size, Take off - no console errors; the band fits
 seen: on his screens, a real mouse's feel of the hover and the pick, a design with many letters (40 parts: the build
 time), letters apart on a text inside a group.
 
-**Next: 0.100.0, fillets where parts meet and on imported meshes** - unchanged from 0.91.0's plan below, now on the
+**Next: mates (0.101.0), as he chooses (item 119); then fillets where parts meet and on imported meshes** - unchanged from 0.91.0's plan below, now on the
 pick-first Lines tab: crease chains on the built mesh picked and hovered like the part's own edges (`setMarks`), then
 Fillet or Chamfer. The rim of a hole's opening is the first case (0.95.0 leaves it sharp and says so).
 
@@ -204,7 +220,7 @@ them. Seen in the dev server ("name plate"): the plate's vertical edges filleted
 the top view and picked off again, a chip taken off, a text saying it has no edges - no console errors. Not seen: with a
 real model ("rund kanterne" - does it use `fillet`?), on his screens, printed.
 
-**Next (planned as 0.92.0, then 0.95.0 to 0.99.0, now 0.100.0): fillets where parts meet and on imported meshes** - the other two of the three Søren chose ("Er det
+**Next (planned as 0.92.0, then 0.95.0 to 0.100.0; after mates now): fillets where parts meet and on imported meshes** - the other two of the three Søren chose ("Er det
 muligt at lave en funktion hvor man efterfølgende kan lave fillet på et kant/side?": the parts' own edges - done in
 0.91.0 -, also where parts meet - a hole's rim, a wall on a base -, also on imported STLs - straight sharp edges). The
 design so far: picked edges `edges: [{fillet|chamfer, path, closed, face, sides, part}]` on a group or the design (mm,
@@ -473,7 +489,7 @@ finds them and fingers still come out wrong). Decided: no Facebook posting (he c
 
 Known flake: tests/test_training.py::test_the_trainer_stops_a_job fails now and then in a full run and passes alone.
 
-## State (0.99.0, 2026-11-26)
+## State (0.100.0, 2026-11-26)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -2551,6 +2567,14 @@ flow, see "Next session". |
       converter's cases are ComfyUI 0.42.3's own templates; files from other sites (Civitai, OpenArt) are
       untried - an export is the way to see what went wrong. When COMFYUI_REF changes, the editor's format may
       too: tools/workflow_oracle/ (convert.js, compare.py) is how the converter was checked - run it again.
+119. **The sketch (0.100.0)** - in the tests and the dev server's headless Chromium:
+    - **His hand**: drawing with his mouse - is snapping to whole mm and to corners within 10 px right, is the typed
+      length (SketchUp's way) found without being told, does Esc/Enter end a line as he expects?
+    - **Mates** - his answer decides 0.101.0: kept (SolidWorks: the part follows when the other moves, listed and
+      editable; a solver for coincident, concentric, distance) or once (the part snapped into place, like Tinkercad's
+      Align - its face onto a face, its axis onto an axis - then free). On a box's face a coincident mate can be kept
+      with 0.98.0's `on` either way.
+    - **Edit sketch**: does he need a sketch back after Extrude (the outline's points as lines, circles as many corners)?
 118. **Ten more fonts (0.99.0)** - in the tests and the dev server's headless Chromium: printed at 6-10 mm capitals -
     which of the sixteen hold up on the P2S (Caveat's and Grenze Gotisch's thin strokes, Knewave's spatters)? The Font
     box on his phone: the list of sixteen scrolls.

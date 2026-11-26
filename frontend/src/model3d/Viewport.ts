@@ -295,12 +295,14 @@ export class Viewport {
   }
 
   /** Words over the model where points of it are (0.98.0: a face's distances, as SolidWorks writes its dimensions):
-   *  moved with the view, each time it is drawn. */
-  setLabels(list: { at: Vec3; text: string }[]): void {
+   *  moved with the view, each time it is drawn. `kind` (0.100.0, a sketch): "dot" a corner's dot (filled: the one
+   *  a click snaps to), "typed" what is typed for the next length. */
+  setLabels(list: { at: Vec3; text: string; kind?: "dot" | "snap" | "typed" }[]): void {
     for (const l of this.labels) l.el.remove();
-    this.labels = list.map(({ at, text }) => {
+    this.labels = list.map(({ at, text, kind }) => {
       const el = document.createElement("span");
-      el.className = "v3d-dim num";
+      el.className = kind === "dot" || kind === "snap" ? `v3d-sdot${kind === "snap" ? " snap" : ""}`
+        : `v3d-dim num${kind === "typed" ? " typed" : ""}`;
       el.textContent = text;
       this.labelBox.appendChild(el);
       return { at, el };
@@ -463,14 +465,21 @@ export class Viewport {
 
   /** Look at `box` (the design, or the plate when it is empty) from a standard side. */
   view(name: ViewName, box: Box3 | null): void {
+    const dir = { home: [0.55, -1, 0.75], top: [0, -0.0001, 1], front: [0, -1, 0.0001], right: [1, 0, 0.0001] }[name];
+    this.lookFrom(dir as Vec3, box);
+  }
+
+  /** Look at `box` from a way of its own - straight at a sketch's plane (0.100.0), from out of it. */
+  lookFrom(from: Vec3, box: Box3 | null): void {
     const [w, d, h] = this.bed;
     const lo = box ? box[0] : [-w / 4, -d / 4, 0], hi = box ? box[1] : [w / 4, d / 4, h / 6];
     const c = new THREE.Vector3((lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2);
     const r = Math.max(10, new THREE.Vector3(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]).length() / 2);
     const half = THREE.MathUtils.degToRad(this.camera.fov / 2);          // a tall view is narrower than it is high
     const dist = (r / Math.sin(Math.min(half, Math.atan(Math.tan(half) * this.camera.aspect)))) * 1.15;
-    const dir = { home: new THREE.Vector3(0.55, -1, 0.75), top: new THREE.Vector3(0, -0.0001, 1),
-      front: new THREE.Vector3(0, -1, 0.0001), right: new THREE.Vector3(1, 0, 0.0001) }[name].normalize();
+    const dir = new THREE.Vector3(from[0], from[1], from[2]);
+    if (Math.abs(dir.z) > 0.9999 * dir.length()) dir.y -= 0.0001 * Math.sign(dir.z);   // straight down: up stays up
+    dir.normalize();
     this.camera.position.copy(c).addScaledVector(dir, dist);
     this.controls.target.copy(c);
     this.camera.near = Math.max(0.1, dist / 200);

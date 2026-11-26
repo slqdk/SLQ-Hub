@@ -1353,3 +1353,90 @@ def test_both_read_on_the_same_and_say_the_same(h3):
     assert "on" not in by["f9"] and by["f10"]["on"]["part"] == "f9"          # round in a circle: the first freed
     assert by["f11"]["on"] == {"part": "b", "face": "top", "depth": 3} and by["f11"]["at"] == [0, 0, 11.4]
     assert 'on        kept on a face of a box' in h3.DESIGN_GUIDE
+
+
+# ---------------------------------------------------------------- the sketch (0.100.0)
+
+def node_module(tmp_path, name: str) -> str:
+    """A module of the editor's beside geometry.ts, its "./geometry" import a path node finds."""
+    out = tmp_path / name
+    out.write_text(GEOMETRY.with_name(name).read_text(encoding="utf-8").replace('from "./geometry"',
+                   f"from {json.dumps(str(GEOMETRY))}"), encoding="utf-8")
+    return json.dumps(str(out))
+
+
+SKETCH_JS = """
+const rect = { kind: "rect", a: [0, 0], b: [40, 20] }, hole = { kind: "circle", c: [10, 10], r: 4 };
+const island = { kind: "circle", c: [10, 10], r: 2 }, apart = { kind: "circle", c: [60, 10], r: 5 };
+const cross = { kind: "rect", a: [35, 15], b: [50, 30] }, open = { kind: "line", pts: [[0, 50], [10, 50]], closed: false };
+const tri = { kind: "line", pts: [[0, 30], [10, 30], [5, 40]], closed: true };
+const out = {};
+out.regions = S.sketchRegions([rect, hole, island, apart, cross, tri, open]).map((r) => [r.outer.length, r.holes.length]);
+let n = 0;
+const id = () => `s${++n}`;
+const make = (plane, shapes, box, how) => S.sketchParts(plane, shapes, box, { cut: false, depth: 5, through: false, reach: 100, ...how },
+  id, "Sketch 1", "#f80");
+out.planes = ["top", "front", "right"].map((kind) => make({ kind }, [rect, hole], null, {})[0]);
+out.cut = make({ kind: "top" }, [rect], null, { cut: true, depth: 3 })[0];
+out.through = make({ kind: "top" }, [rect], null, { cut: true, through: true })[0];
+out.names = make({ kind: "top" }, [rect, apart, tri], null, {}).map((p) => p.name);
+const plain = { id: "b", shape: "box", size: [80, 40, 30], at: [0, 0, 15], rotate: [0, 0, 0] };
+const turned = { id: "b", shape: "box", size: [80, 40, 30], at: [5, 3, 25], rotate: [10, 20, 33], mirror: true };
+out.faces = [];
+for (const box of [plain, turned]) for (const face of ["front", "top", "left", "bottom"]) {
+  const plane = { kind: "face", part: "b", face }, f = S.planeFrame(plane, box);
+  const parts = make(plane, [{ kind: "circle", c: [12.5, -6], r: 3 }], box, { depth: 4 });
+  const placed = G.settle([box, ...parts])[1];
+  const want = S.to3d(f, [12.5, -6]).map((v, i) => v + f.N[i] * (4.2 / 2 - 0.2));
+  out.faces.push(Math.max(...placed.at.map((v, i) => Math.abs(v - want[i]))));
+}
+out.middle = make({ kind: "face", part: "b", face: "front" }, [{ kind: "rect", a: [-5, -5], b: [5, 5] }], plain,
+  { cut: true, through: true })[0].on;
+// a ray from the camera onto a plane, back where it came from
+const fr = S.planeFrame({ kind: "face", part: "b", face: "right" }, turned);
+const spot = S.to3d(fr, [7, -3]);
+out.ray = S.rayOnPlane(fr, [spot[0] + 50 * fr.N[0], spot[1] + 50 * fr.N[1], spot[2] + 50 * fr.N[2]],
+  [-fr.N[0], -fr.N[1], -fr.N[2]]);
+out.away = S.rayOnPlane(fr, spot.map((v, i) => v + 50 * fr.N[i]), fr.N);
+out.dist = [S.distanceTo(rect, [20, -2]), S.distanceTo(hole, [10, 15]), S.distanceTo(open, [5, 53])];
+out.snaps = S.snapPoints([rect, hole]).length;
+// a face's sketch, cut and extruded, written as the editor writes it
+const design = { format: "slq-hub-3d", version: 1, parts: [turned,
+  ...make({ kind: "face", part: "b", face: "front" }, [{ kind: "rect", a: [-20, -8], b: [16, 9] }, { kind: "circle", c: [0, 0], r: 4 }],
+    turned, { cut: true, depth: 6 }),
+  ...make({ kind: "face", part: "b", face: "top" }, [{ kind: "line", pts: [[-10, -5], [12, -5], [0, 9]], closed: true }], turned, { depth: 3 })] };
+const read = G.readDesign(JSON.stringify(design));
+out.text = G.writeDesign(read.design);
+out.parts = read.design.parts;
+out.volume = G.build(read.design, { wasm, fonts, meshes: new Map() }).volume;
+process.stdout.write(JSON.stringify(out));
+"""
+
+
+def test_a_sketch_makes_parts(h3, tmp_path):
+    """A sketch (0.100.0): a closed shape in another is a hole, one in that hole an island, shapes apart or crossing a
+    part each, an open line nothing; extruded on the plate it stands on it, on the front or right plane it stands out
+    toward you, cut it goes into what is there; on a box's face - turned and mirrored too - each part is kept there
+    where it was drawn, the middle staying the middle; and hub3d reads and builds the parts the same."""
+    pytest.importorskip("manifold3d")
+    out = run_js(f"import * as S from {node_module(tmp_path, 'sketch.ts')};\n" + SKETCH_JS, {})
+    assert out["regions"] == [[4, 1], [64, 0], [64, 0], [4, 0], [3, 0]]       # the rect with its hole, the island ...
+    top, front, right = out["planes"]
+    assert top["at"] == [20, 10, 2.5] and top["rotate"] == [0, 0, 0] and top["size"] == [0, 0, 5]
+    assert top["points"] == [[-20, -10], [20, -10], [20, 10], [-20, 10]] and len(top["holes"]) == 1
+    assert front["at"] == [20, -2.5, 10] and front["rotate"] == [90, 0, 0]
+    assert right["at"] == [2.5, 20, 10] and right["rotate"] == [90, 0, 90]
+    assert out["cut"]["hole"] and out["cut"]["at"] == [20, 10, 1.4] and out["cut"]["size"] == [0, 0, 3.2]
+    assert out["through"]["at"] == [20, 10, 0] and out["through"]["size"] == [0, 0, 200.4]
+    assert out["names"] == ["Sketch 1", "Sketch 1 (2)", "Sketch 1 (3)"]
+    assert max(out["faces"]) < 1e-3                                           # where it was drawn, on every face
+    assert out["middle"] == {"part": "b", "face": "front", "through": True}   # the middle: no distances
+    assert out["ray"] == pytest.approx([7, -3]) and out["away"] is None
+    assert out["dist"] == pytest.approx([2, 1, 3]) and out["snaps"] == 6
+    assert '"on": {"part": "b", "face": "front", "from": {' in out["text"]
+    py, problems = h3.read_design(out["text"])
+    assert problems == []
+    for a, b in zip(py["parts"], out["parts"]):
+        assert a.get("on") == b.get("on") and a["at"] == pytest.approx(b["at"], abs=1e-9)
+        assert a["rotate"] == pytest.approx(b["rotate"], abs=1e-9)
+    assert out["volume"] == pytest.approx(h3.build_design(py).solid.volume(), rel=1e-9)

@@ -1470,6 +1470,12 @@ div.tests-result-head { cursor: default; }
 .v3d-dim { position: absolute; left: 0; top: 0; padding: 0 4px; border: 1px solid var(--act); border-radius: 3px;
   background: var(--sheet); color: var(--act); font-size: 11.5px; line-height: 16px; white-space: nowrap; }
 .v3d-dim[hidden] { display: none; }
+/* A sketch's corners (0.100.0): dots over the view - the one a click would snap to filled; what is typed beside it */
+.v3d-sdot { position: absolute; left: 0; top: 0; box-sizing: border-box; width: 7px; height: 7px;
+  border: 1.5px solid var(--act); border-radius: 50%; background: var(--sheet); }
+.v3d-sdot.snap { width: 11px; height: 11px; background: var(--act); }
+.v3d-sdot[hidden] { display: none; }
+.v3d-dim.typed { margin: -22px 0 0 36px; background: var(--act); color: var(--sheet); font-weight: 600; }
 .v3d-ribbon .v3d-from .select { width: 102px; padding-right: 18px; }
 .v3d-clip { max-width: 132px; overflow: hidden; text-overflow: ellipsis; }
 .v3d-overlay, .v3d-empty { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); max-width: 80%;
