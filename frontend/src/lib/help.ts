@@ -751,6 +751,9 @@ export const SECTIONS: HelpSection[] = [
           + "at a time. The arrow keys move what is picked 1 mm (Shift: 10). Fit, Top, Front and Right, at the right, "
           + "turn the camera.",
           "A hole cuts the solids beside it. Group parts (Ctrl+G) to keep a hole to them.",
+          "On a face (Part's Arrange, and Text) puts the part on a face you click - a new text asks for its face at once: "
+          + "its letters lie on it, upright on a wall, a little into it so the two print as one; a hole text sinks in "
+          + "and is cut. Turn (Arrange) turns what is picked 90° - stand a flat text up with Tip forward.",
           "Pattern repeats a part or a group round a point or in a row: one arm of a snowflake becomes six, one hole "
           + "a ring of holes. The assistant can also draw flat outlines of its own - stars, leaves, letters' shapes.",
           "Lines works on a part's own lines, picked first: click one on the model - Pick lines to pick several - or "

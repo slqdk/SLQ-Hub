@@ -1079,3 +1079,78 @@ def test_a_holes_lines_inside_what_it_cuts(h3, tmp_path, capsys):
     assert across["distance"] == pytest.approx(5) and np.allclose(across["point"], [0, 0, 0])
     assert beyond["distance"] == pytest.approx(10) and np.allclose(beyond["point"], [0, 10, 0])
     assert along["distance"] == pytest.approx(3) and behind["distance"] == pytest.approx(20)
+
+
+# 0.97.0, Søren: "Når jeg sætter text ind, kan jeg så vælge hvilken flade den skal ligge på? Jeg kan heller ikke lige få
+# den drejet til at sidde 90 grader, hvis jeg trækker den med musen" - On a face, and Turn's 90 degree steps.
+FACE_JS = """
+const kit = { wasm, fonts, meshes: new Map() };
+const box = { id: "box", shape: "box", size: [100, 50, 50], at: [0, 0, 25], rotate: [0, 0, 0] };
+const text = { id: "t", shape: "text", text: "Skruer", size: [0, 10, 2], at: [70, 0, 1], rotate: [0, 0, 30], mirror: true };
+const r = (v) => v.map((x) => Math.round(x * 1e4) / 1e4);
+const boxOf = (p) => G.buildPart(p, kit).box;
+const place = (p, point, normal, right = [1, 0, 0]) => G.onFace(p, point, normal, right, boxOf(p));
+const built = (parts) => G.build({ format: G.FORMAT, version: 1, parts }, kit);
+const placed = {
+  front: place(text, [0, -25, 30], [0, -1, 0]), right: place(text, [50, 0, 30], [1, 0, 0]),
+  top: place(text, [0, 0, 50], [0, 0, 1], [0, 1, 0]), under: place(text, [0, 0, 0], [0, 0, -1]),
+  hole: place({ ...text, hole: true }, [0, -25, 30], [0, -1, 0]),
+  slope: place(text, [0, 0, 30], [0.4472136, 0, 0.8944272]),
+};
+const out = { placed: {} };
+for (const [name, p] of Object.entries(placed)) out.placed[name] = { rotate: r(p.rotate), at: r(p.at), mirror: p.mirror ?? null, box: boxOf(p).map(r) };
+const both = built([box, placed.front]), alone = built([box]), t = built([placed.front]);
+out.joined = [both.volume, alone.volume + t.volume];
+const cut = built([box, placed.hole]);
+out.cut = [cut.volume, alone.volume];
+const g = { id: "g", shape: "group", parts: [{ id: "a", shape: "box", size: [20, 10, 4], at: [0, 0, 2], rotate: [0, 0, 0] },
+  { id: "b", shape: "cylinder", size: [6, 6, 6], at: [5, 0, 7], rotate: [0, 0, 0] }] };
+out.group = boxOf(place(g, [50, 0, 25], [1, 0, 0])).map(r);
+const flat = { id: "f", shape: "text", text: "Hej", size: [0, 10, 2], at: [0, 0, 1], rotate: [0, 0, 0] };
+const brick = { id: "k", shape: "box", size: [40, 20, 10], at: [0, 0, 5], rotate: [0, 0, 0] };
+const high = { ...brick, at: [0, 0, 50] };
+const turn = (p, axis, sign) => { const q = G.turned90(p, axis, sign, boxOf(p)); return { rotate: r(q.rotate ?? [0, 0, 0]), box: boxOf(q).map(r) }; };
+out.turns = { stand: turn(flat, 0, 1), left: turn(brick, 2, 1), right: turn(brick, 2, -1), tip: turn(brick, 1, 1),
+  air: turn(high, 0, -1), group: turn(g, 2, 1), back: G.turned90(G.turned90(brick, 0, 1), 0, -1).rotate };
+process.stdout.write(JSON.stringify(out));
+"""
+
+
+def test_on_a_face_and_turned_90(h3):
+    """On a face (0.97.0): a text put on a box's front, its right, its top, its underside or a slope is turned to lie
+    on it reading across it (upright on a wall, mirrored no more), 0.2 mm into it so they join - a hole text sinks in
+    as deep as it is thick; a group goes as one. Turn: 90 degrees about Z, X or Y, a part on the plate stays on it."""
+    pytest.importorskip("manifold3d")
+    out = run_js(FACE_JS, {})
+    p = out["placed"]
+    assert p["front"]["rotate"] == [90, 0, 0] and p["front"]["mirror"] is None
+    (x0, y0, z0), (x1, y1, z1) = p["front"]["box"]
+    assert (y0, y1) == (-26.8, -24.8) and x1 - x0 > z1 - z0 and abs((z0 + z1) / 2 - 30) < 0.5   # on it, across, upright
+    assert p["right"]["rotate"] == [90, 0, 90]
+    (x0, y0, z0), (x1, y1, z1) = p["right"]["box"]
+    assert (x0, x1) == (49.8, 51.8) and y1 - y0 > z1 - z0
+    assert p["top"]["rotate"] == [0, 0, 90] and p["top"]["box"][0][2] == 49.8 and p["top"]["box"][1][2] == 51.8
+    assert p["under"]["rotate"] == [180, 0, 0] and p["under"]["box"][0][2] == -1.8 and p["under"]["box"][1][2] == 0.2
+    assert p["hole"]["box"][0][1] == -25.2 and p["hole"]["box"][1][1] == -23.2                   # sunk 1.8 mm in
+    n = np.array([0.4472136, 0, 0.8944272])                                                      # a slope: its normal
+    lo, hi = np.array(p["slope"]["box"])
+    assert np.dot((lo + hi) / 2 - np.array([0, 0, 30]), n) == pytest.approx(0.8, abs=0.05)
+    joined, alone = out["joined"]
+    assert joined < alone                                       # 0.2 mm into the box: one piece, not two touching
+    cut, whole = out["cut"]
+    assert cut < whole
+    (x0, _, _), (x1, _, _) = out["group"]
+    assert x0 == pytest.approx(49.8) and x1 == pytest.approx(49.8 + 10)                          # its 10 mm height now across
+    t = out["turns"]
+    assert t["stand"]["rotate"] == [90, 0, 0] and t["stand"]["box"][0][2] == 0                   # a flat text stands up
+    assert t["stand"]["box"][1][1] - t["stand"]["box"][0][1] == pytest.approx(2, abs=1e-3)
+    for name, rz in (("left", 90), ("right", -90)):
+        (x0, y0, z0), (x1, y1, z1) = t[name]["box"]
+        assert t[name]["rotate"] == [0, 0, rz] and (x1 - x0, y1 - y0, z0) == (20, 40, 0)
+    (x0, y0, z0), (x1, y1, z1) = t["tip"]["box"]
+    assert (x1 - x0, z1 - z0, z0) == (10, 40, 0)
+    (x0, y0, z0), (x1, y1, z1) = t["air"]["box"]
+    assert (z0 + z1) / 2 == 50 and (y1 - y0, z1 - z0) == (10, 20)                                 # in the air: its middle stays
+    assert t["back"] == [0, 0, 0]
+    (x0, y0, _), (x1, y1, _) = t["group"]["box"]
+    assert (x1 - x0, y1 - y0) == pytest.approx((10, 20))

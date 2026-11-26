@@ -3309,6 +3309,21 @@ into the Hub, Tinkercad's level, his printer a Bambu Lab P2S but chosen per desi
     shape's own numbers as fields; Arrange; Duplicate, Hide, Delete.
   - Picking another part - in Parts, or a new part added - unpicks the lines picked (they stayed green on the last
     part, as his screenshot showed).
+  - **On a face and Turn (0.97.0).** Søren, 13:30: "Når jeg sætter text ind, kan jeg så vælge hvilken flade den skal
+    ligge på? Jeg kan heller ikke lige få den drejet til at sidde 90 grader, hvis jeg trækker den med musen". **On a
+    face** (Part's Arrange and the Text tab; a new text starts it at once when the design has a solid - Esc leaves it
+    where it was put): a click on a face puts the part on it (`onFace`): turned so its own Z looks out of the face -
+    a text's letters lie on it - reading across it: upright on a wall (up x the face's normal), on a top or an
+    underside the way the view's right points; its underside 0.2 mm into the face, so they print as one (the format's
+    own advice), a hole sunk as deep as it is thick with its top 0.2 mm out, so it cuts; a group turns as one, its
+    box's bottom on the face; mirrored no more (a text would read backwards). The face is the solid's under the
+    pointer, not the part's own (`picks` skips it) - through a hole's ghost, the pocket's inside. **Turn** (a menu in
+    Arrange, Office's Rotate): turn left or right 90° about Z, tip forward or back about X, left or right about Y -
+    each part picked through its middle; one that stood on the plate still does (`turned90`). Dragging a Turn ring
+    goes in 15° steps; inside the rings it turns freely - the menu and the Turned row are the exact ways.
+  - **Keys after a click that took its button away** (0.97.0): Text in Insert (the Text tab opens) or a menu's item left
+    the page focused, not the editor, so Esc did nothing; keys with nothing focused go to the editor when the last
+    click was in it (not the chat's: there arrows still scroll the page).
   - **Parts as a tree over the view (0.96.1).** Søren, with an arrow from the Parts menu (at the right of the tabs) to the
     view's left under its bar: "Move parts". There now, where SolidWorks has its FeatureManager (`PartTree`): "Parts
     (n)" folds it (kept for next time; folded at first on a phone), Pick all; each part a row with its shape's
@@ -3351,7 +3366,7 @@ into the Hub, Tinkercad's level, his printer a Bambu Lab P2S but chosen per desi
   - **A hole's fillet rounds what it cut.** The cutter rounded on its upright edges leaves the pocket round inside
     corners, on its bottom edges a rounded floor edge - its edges inside the part. On its edges at the opening the
     cutter rounded cuts less there, so a lip is left round the opening (rounding the rim itself is a fillet where the
-    hole meets the part: 0.97.0). So a hole's lines are picked as a part's - clicked, by name, Resized - and Fillet
+    hole meets the part: 0.98.0). So a hole's lines are picked as a part's - clicked, by name, Resized - and Fillet
     and Chamfer go to those inside it only (`holeEdges`); the others are named in a toast. Take off takes off any.
   - **Inside or at an opening** (`holeEdges`; hub3d's `hole_edges`, the same): points 0.2 mm off the edge, out
     between its two faces (`edgeOutside`: along a straight edge at its eighths, round a rim at eight places, up each of
@@ -3401,7 +3416,7 @@ into the Hub, Tinkercad's level, his printer a Bambu Lab P2S but chosen per desi
     that one; and the part's names now, each a button that takes it off. A box with All rounded (its radius, in Part)
     says to set that to 0; setting it clears the fillets. Holes' and meshes' edges say they cannot be rounded yet
     (a hole's can since 0.95.0, inside the part).
-  - **Not yet - 0.97.0**: edges where parts meet (the rim of a hole's opening, a wall on a base: on the built solid, a
+  - **Not yet - 0.98.0**: edges where parts meet (the rim of a hole's opening, a wall on a base: on the built solid, a
     fillet's cutter or filler swept along the picked crease) and straight sharp edges of imported meshes.
 - **Picking first (0.92.0).** Søren, 07:23: "Er det ikke muligt at vælge et enkelt bogstav og ændre på det ? altså ved
   at klikke på bogstavet ? Og hvis jeg så vil ændre på flere, så kan jeg vælge en mode for at vælge flere" - one letter

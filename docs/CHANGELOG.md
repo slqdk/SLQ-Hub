@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.97.0 - 2026-11-26
+
+- On a face, in the 3D editor: click a face of the model and the picked
+  part is put on it - a text's letters lie on the face, upright on a wall,
+  slightly into it so they print as one piece. A hole text sinks in instead.
+  A new text asks for its face straight away (Esc leaves it on the plate).
+- Turn, in Arrange: turn what is picked exactly 90° - left or right, or
+  tipped forward, back, left or right. A flat text stands up with Tip
+  forward.
+- Fixed: Esc did nothing right after adding a text, and after choosing from
+  a menu, until you clicked the model.
+
 ## 0.96.1 - 2026-11-26
 
 - The 3D editor's Parts list is now a tree at the left of the view, under

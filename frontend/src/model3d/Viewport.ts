@@ -331,20 +331,27 @@ export class Viewport {
 
   /** The part under the pointer, and the solid's own face there (0.95.0) - the same, or behind a hole's ghost: the
    *  inside of what the hole cut, where its lines are. */
-  picks(clientX: number, clientY: number): { front: Hit | null; solid: Hit | null } {
+  picks(clientX: number, clientY: number, skip?: ReadonlySet<string>): { front: Hit | null; solid: Hit | null } {
     this.ray(clientX, clientY);
     const hits = this.raycaster.intersectObjects(this.pickables, false);
     let front: Hit | null = null;
     for (const h of hits) {
       const own = h.object === this.solid;
       const part = own ? this.triPart[h.faceIndex ?? -1] : h.object.userData.part;
-      if (!part) continue;
+      if (!part || skip?.has(part)) continue;           // (0.97.0: the part put on a face is not that face)
       const n = h.face?.normal ?? new THREE.Vector3(0, 0, 1);
       const hit: Hit = { part, point: [h.point.x, h.point.y, h.point.z], normal: [n.x, n.y, n.z] };
       front ??= hit;
       if (own) return { front, solid: hit };
     }
     return { front, solid: null };
+  }
+
+  /** Which way is right on the screen, in the design (0.97.0: a text put on a top face reads that way). */
+  cameraRight(): Vec3 {
+    this.camera.updateMatrixWorld();
+    const e = this.camera.matrixWorld.elements;
+    return [e[0], e[1], e[2]];
   }
 
   /** The pointer's ray: from the camera, through the pointer, its direction a unit long (0.95.0). */

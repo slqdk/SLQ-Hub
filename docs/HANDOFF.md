@@ -4,7 +4,21 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## Next session - start here (written 2026-11-26, at 0.96.1)
+## Next session - start here (written 2026-11-26, at 0.97.0)
+
+**0.97.0 (2026-11-26): On a face, and Turn 90° - pushed, not yet installed.** Søren, 13:30, with a text standing
+crooked in his spare-parts box and the box turned -90° in X: "Når jeg sætter text ind, kan jeg så vælge hvilken flade
+den skal ligge på? Jeg kan heller ikke lige få den drejet til at sidde 90 grader, hvis jeg trækker den med musen".
+Built (DESIGN §8 "On a face and Turn (0.97.0)"): **On a face** - a new text asks for its face at once (Esc leaves it on
+the plate), and Part's Arrange and the Text tab have the button: the part is put on the face clicked, its letters on
+it, upright on a wall, 0.2 mm in so they join (a hole text sinks in); **Turn** in Arrange: 90° about Z, X or Y, a part
+on the plate staying on it (a flat text stands up with Tip forward). Fixed on the way: Esc did nothing after Insert's
+Text (its button went away with the tab, the page kept the focus) - keys with nothing focused now go to the editor
+when the last click was in it. Seen in the dev server (his box, 100 x 50 x 50): a new text, the hint, the front face
+clicked - the text upright on it (turned 90° in X, 0.2 mm in), On a face again on the right face, a second text and
+Esc (left on the plate), Turn's menu and Tip forward (standing, on the plate), arrows in the chat not moving the box -
+no console errors; tests for the front, right, top, underside, a slope, a hole, a group and the six turns. Not seen:
+his mouse; a text on a curved face (a cylinder's side: a facet's direction, flat letters).
 
 **0.96.1 (2026-11-26): Parts as a tree over the view - pushed, not yet installed.** Søren, 13:22, with an arrow from
 the Parts menu (right of the tabs) to the view's left under the bar: "Move parts" - and "hvad gør Hole / Solid?"
@@ -133,7 +147,7 @@ picking the 4 edges with their size, Take off - no console errors; the band fits
 seen: on his screens, a real mouse's feel of the hover and the pick, a design with many letters (40 parts: the build
 time), letters apart on a text inside a group.
 
-**Next: 0.97.0, fillets where parts meet and on imported meshes** - unchanged from 0.91.0's plan below, now on the
+**Next: 0.98.0, fillets where parts meet and on imported meshes** - unchanged from 0.91.0's plan below, now on the
 pick-first Lines tab: crease chains on the built mesh picked and hovered like the part's own edges (`setMarks`), then
 Fillet or Chamfer. The rim of a hole's opening is the first case (0.95.0 leaves it sharp and says so).
 
@@ -149,7 +163,7 @@ them. Seen in the dev server ("name plate"): the plate's vertical edges filleted
 the top view and picked off again, a chip taken off, a text saying it has no edges - no console errors. Not seen: with a
 real model ("rund kanterne" - does it use `fillet`?), on his screens, printed.
 
-**Next (planned as 0.92.0, then 0.95.0 and 0.96.0, now 0.97.0): fillets where parts meet and on imported meshes** - the other two of the three Søren chose ("Er det
+**Next (planned as 0.92.0, then 0.95.0 to 0.97.0, now 0.98.0): fillets where parts meet and on imported meshes** - the other two of the three Søren chose ("Er det
 muligt at lave en funktion hvor man efterfølgende kan lave fillet på et kant/side?": the parts' own edges - done in
 0.91.0 -, also where parts meet - a hole's rim, a wall on a base -, also on imported STLs - straight sharp edges). The
 design so far: picked edges `edges: [{fillet|chamfer, path, closed, face, sides, part}]` on a group or the design (mm,
@@ -418,7 +432,7 @@ finds them and fingers still come out wrong). Decided: no Facebook posting (he c
 
 Known flake: tests/test_training.py::test_the_trainer_stops_a_job fails now and then in a full run and passes alone.
 
-## State (0.96.1, 2026-11-26)
+## State (0.97.0, 2026-11-26)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -2496,6 +2510,9 @@ flow, see "Next session". |
       converter's cases are ComfyUI 0.42.3's own templates; files from other sites (Civitai, OpenArt) are
       untried - an export is the way to see what went wrong. When COMFYUI_REF changes, the editor's format may
       too: tools/workflow_oracle/ (convert.js, compare.py) is how the converter was checked - run it again.
+116. **On a face and Turn (0.97.0)** - in the tests and the dev server's headless Chromium: a text on his box's sides
+    and lid with his mouse; does a new text asking for its face at once suit him, or should it only come from the
+    button? Embossed 0.2 mm in and 1.8 mm out (the default 2 mm text) - printed, readable?
 115. **Parts as a tree (0.96.1)** - in the dev server's headless Chromium: where he wants it - always open over the
     view's left, or folded by default? It covers the model's left on a narrow editor.
 114. **Office 2007 and Select (0.96.0)** - only in the dev server's headless Chromium:

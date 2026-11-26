@@ -11,18 +11,19 @@ import wasmUrl from "manifold-3d/manifold.wasm?url";
 import { AlignCenter, AlignLeft, AlignRight, ArrowDownToLine, ArrowDownUp, Bold, Box, ChevronDown, CircleDot, Columns3, Cone,
   Copy, Cylinder, Download, Eraser, Eye, EyeOff, FlipHorizontal2, FlipVertical2, Group, Italic, ListTree, Maximize2,
   MessageSquareShare, Minimize2, MousePointer2, MousePointerClick, Move3d, PanelBottom, Printer as PrinterIcon,
-  Redo2, Repeat2, Rotate3d, Ruler, Scaling, Shapes, Split, SquareDashed, SquareMousePointer, SquareRoundCorner, Trash2,
+  Redo2, Repeat2, Rotate3d, RotateCcw, RotateCw, Ruler, Scaling, Shapes, Split, SquareDashed, SquareMousePointer,
+  SquareRoundCorner, Stamp, Trash2,
   TriangleAlert, Triangle, Type, Undo2, Ungroup, Upload, X } from "lucide-react";
 import fontIndex from "./fonts/index.json";
 import { useApp } from "../state";
 import { ConfirmButton, MenuButton } from "../components/ui";
 import type { DesignFolder } from "./folder";
-import { allIds, build, buildPart, COLORS, edgeLength, edgeLines, edgePlan, EDGES, edgesOf, extent, extentOf, FONT_FAMILIES, fontFile,
-  follows, freshId, holeEdges, joined, lettersApart, MAX_COPIES, MIN_SIZE, mirrorPart, nearestEdge, nearestToRay, newDesign,
-  partSize, readDesign, repeatAround, retext, SPACING, stl, textGlyphs, textMeasure, threeMf, transformPart, treatEdges, withCapitals,
-  withEdgeLength, writeDesign, type Align, type Box3, type Built, type Design, type EdgeKind, type FontData,
-  type FontIndex, type Fonts, type Kit, type Mat3, type MeshData, type Part, type Repeat, type Shape, type Vec3,
-  type Wasm } from "./geometry";
+import { allIds, build, buildPart, COLORS, edgeLength, edgeLines, edgePlan, EDGES, edgesOf, extent, extentOf, FONT_FAMILIES,
+  fontFile, follows, freshId, holeEdges, joined, lettersApart, MAX_COPIES, MIN_SIZE, mirrorPart, nearestEdge, nearestToRay,
+  newDesign, onFace, partSize, readDesign, repeatAround, retext, SPACING, stl, textGlyphs, textMeasure, threeMf,
+  transformPart, treatEdges, turned90, withCapitals, withEdgeLength, writeDesign, type Align, type Box3, type Built,
+  type Design, type EdgeKind, type FontData, type FontIndex, type Fonts, type Kit, type Mat3, type MeshData, type Part,
+  type Repeat, type Shape, type Vec3, type Wasm } from "./geometry";
 import { baseName, dirOf, fmt, joinPath, MESH_FILE, pointMark, relativePath } from "./files";
 import { parseMesh } from "./meshio";
 import { lastPrinter, PRINTERS, printerOf, rememberPrinter, type Printer } from "./printers";
@@ -221,7 +222,7 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
   const [status, setStatus] = useState<Status>("loading");
   const [problems, setProblems] = useState<string[]>([]);
   const [outside, setOutside] = useState<string | null>(null);
-  const [tool, setTool] = useState<null | "point" | "flat" | "edge">(null);
+  const [tool, setTool] = useState<null | "point" | "flat" | "edge" | "face">(null);
   const [edgeSize, setEdgeSize] = useState(2);
   const [edgeSel, setEdgeSel] = useState<Record<string, string[]>>({});       // picked edges, by part (0.92.0)
   const [hoverEdge, setHoverEdge] = useState<{ part: string; edge: string } | null>(null);
@@ -727,6 +728,32 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
     setTool(null);
   };
 
+  /** On a face (0.97.0): the one part picked put on the face clicked - a text's letters on it, upright on a wall. */
+  const placeOnFace = (x: number, y: number) => {
+    const d = designRef.current, v = vp.current, k = kit.current;
+    const f = d && selectedRef.current.length === 1 ? find(d.parts, selectedRef.current[0]) : null;
+    if (!d || !v || !k || !f) {
+      toast("Pick one part, then click the face it should lie on.", "fault");
+      setTool(null);
+      return;
+    }
+    const { front, solid } = v.picks(x, y, allIds([f.part]));      // not on itself
+    const h = solid ?? front;
+    if (!h) return;                                    // nothing there: click a face
+    const next = onFace(f.part, h.point, h.normal, v.cameraRight(), buildPart(f.part, k).box);
+    commit({ ...d, parts: update(d.parts, f.part.id, () => tidy(next)) });
+    setTool(null);
+  };
+
+  /** Turn (0.97.0): each part picked turned 90 degrees about X, Y or Z through its middle, as Office's Rotate. */
+  const turn90 = (axis: 0 | 1 | 2, sign: 1 | -1) => {
+    const d = designRef.current, k = kit.current;
+    if (!d || !k || !selectedRef.current.length) return;
+    let ps = d.parts;
+    for (const id of selectedRef.current) ps = update(ps, id, (p) => tidy(turned90(p, axis, sign, buildPart(p, k).box)));
+    commit({ ...d, parts: ps });
+  };
+
   const onPointerDown = (e: React.PointerEvent) => {
     host.current?.focus({ preventScroll: true });
     const v = vp.current;
@@ -982,6 +1009,10 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
       if (hit) layFlat(hit);
       return;
     }
+    if (tool === "face") {
+      placeOnFace(e.clientX, e.clientY);
+      return;
+    }
     if (tool === "edge") {
       if (hit) pickEdge(e.clientX, e.clientY);
       return;
@@ -1083,7 +1114,10 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
     commit({ ...d, parts: [...d.parts, p] });
     setSelected([id]);
     setEdgeSel({});
-    if (shape === "text") setTab("text");          // its font and size, as Office shows them for a new text box (0.96.0)
+    if (shape === "text") {
+      setTab("text");                              // its font and size, as Office shows them for a new text box (0.96.0)
+      if (d.parts.some((x) => !x.hidden && !x.hole)) setTool("face");      // and the face it goes on (0.97.0)
+    }
   };
 
   const addMesh = async (file: string) => {
@@ -1227,7 +1261,7 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
 
   // ---------------------------------------------------------------- keys
 
-  const onKey = (e: React.KeyboardEvent) => {
+  const onKey = (e: React.KeyboardEvent | KeyboardEvent) => {
     const tag = (e.target as HTMLElement).tagName;
     if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || !designRef.current) return;
     const mod = e.ctrlKey || e.metaKey;
@@ -1268,6 +1302,26 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
     }
   };
 
+  // Keys with nothing focused (0.97.0): a button that went away under the pointer - Text in Insert when the Text tab
+  // opens, a menu's item - leaves the page focused, not the editor; Esc, Delete and the arrows still work then - when
+  // the last click was in the editor (not in the chat, where they are the page's).
+  const keys = useRef(onKey);
+  keys.current = onKey;
+  const panel = useRef<HTMLElement>(null);
+  useEffect(() => {
+    let inside = false;
+    const down = (e: PointerEvent) => { inside = !!panel.current && e.target instanceof Node && panel.current.contains(e.target); };
+    const on = (e: KeyboardEvent) => {
+      if (inside && (!document.activeElement || document.activeElement === document.body)) keys.current(e);
+    };
+    window.addEventListener("pointerdown", down, true);
+    window.addEventListener("keydown", on);
+    return () => {
+      window.removeEventListener("pointerdown", down, true);
+      window.removeEventListener("keydown", on);
+    };
+  }, []);
+
   // ---------------------------------------------------------------- what is shown
 
   const box: Box3 | null = built?.box ?? null;
@@ -1298,7 +1352,7 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
     and Size put handles on what is picked.</p>;
 
   return (
-    <aside className="panel panel-3d" aria-label="3D editor" onKeyDown={onKey}>
+    <aside ref={panel} className="panel panel-3d" aria-label="3D editor" onKeyDown={onKey}>
       <div className="panel-head v3d-head">
         <Box size={17} className="faint" />
         <h2 title={shown}>{baseName(shown) || "New design"}</h2>
@@ -1392,6 +1446,7 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
                   </Grp>
                   <Grp label="Arrange" fold={3} icon={<Group size={20} />}>
                     <Big icon={<Group size={20} />} label="Group" title="Group them (Ctrl+G): a hole in a group cuts only its parts" onClick={doGroup} />
+                    <TurnButton onTurn={turn90} />
                     <MirrorButton onMirror={mirror} />
                   </Grp>
                   <Grp label="Align" fold={2} icon={<AlignCenter size={20} />}>
@@ -1410,10 +1465,12 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
               )}
               {one && k && <PartBand part={one} fonts={k.fonts} lock={lock} setLock={setLock} change={(fn) => change(one.id, fn)}
                 onDuplicate={duplicate} onDelete={del} onApart={() => splitLetters(one.id)} onDrop={drop}
-                onFlat={() => setTool(tool === "flat" ? null : "flat")} flat={tool === "flat"} onUngroup={doUngroup} onMirror={mirror} />}
+                onFlat={() => setTool(tool === "flat" ? null : "flat")} flat={tool === "flat"} onUngroup={doUngroup} onMirror={mirror}
+                onFace={() => setTool(tool === "face" ? null : "face")} face={tool === "face"} onTurn={turn90} />}
             </>
           )}
           {shownTab === "text" && texts && k && <TextBand parts={texts} fonts={k.fonts} onApart={() => splitLetters(texts[0].id)}
+            onFace={() => setTool(tool === "face" ? null : "face")} face={tool === "face"}
             change={(fn) => (texts.length > 1 ? changeEach(texts.map((t) => t.id), fn) : change(texts[0].id, fn))} />}
           {shownTab === "lines" && (
             <LinesBand part={one} many={items.length > 1} picked={pickedEdges} pickedOn={one ? edgeSel[one.id] ?? [] : []}
@@ -1482,7 +1539,8 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
               <Tool icon={<ViewIcon face="right" />} title="From the right" onClick={() => view("right")}><span>Right</span></Tool>
             </div>
           </div>
-          {tool && <div className="v3d-hint">{tool === "point" ? "Click the spot on the model to send it to the chat. Esc stops."
+          {tool && <div className="v3d-hint">{tool === "face" ? "Click the face it should lie on - a text's letters on it, upright on a wall. Esc leaves it where it is."
+            : tool === "point" ? "Click the spot on the model to send it to the chat. Esc stops."
             : tool === "edge" ? "Click lines to pick them - again to unpick - then Fillet, Chamfer, Take off or Resize above. Esc stops."
               : "Click the face that should lie on the plate. Esc stops."}</div>}
         </div>
@@ -1619,6 +1677,27 @@ function Grp({ label, children, fold, icon, id, short }: { label: ReactNode; chi
       <div className="v3d-group-body">{children}</div>
       <div className="v3d-group-label">{label}</div>
     </div>
+  );
+}
+
+/** Turn, as one button (0.97.0, Office's Rotate): 90 degrees about Z, X or Y - each part picked through its middle. */
+function TurnButton({ onTurn }: { onTurn: (axis: 0 | 1 | 2, sign: 1 | -1) => void }) {
+  const items: [0 | 1 | 2, 1 | -1, ReactNode, string, string][] = [
+    [2, 1, <RotateCcw size={15} />, "Turn left 90°", "About Z, seen from above"],
+    [2, -1, <RotateCw size={15} />, "Turn right 90°", "About Z, seen from above"],
+    [0, 1, <RotateCcw size={15} />, "Tip forward 90°", "About X: its top to the front - a flat text stands up, facing you"],
+    [0, -1, <RotateCw size={15} />, "Tip back 90°", "About X: its top to the back"],
+    [1, -1, <RotateCcw size={15} />, "Tip left 90°", "About Y: its top to the left"],
+    [1, 1, <RotateCw size={15} />, "Tip right 90°", "About Y: its top to the right"],
+  ];
+  return (
+    <MenuButton fixed className="btn v3d-big" title="Turn it 90° - one that stood on the plate still does"
+      label={<><RotateCw size={20} /><span>Turn <ChevronDown size={11} /></span></>}>
+      {(close) => items.map(([axis, sign, icon, name, note]) => (
+        <button key={`${axis}${sign}`} className="menu-item" onClick={() => { close(); onTurn(axis, sign); }}>
+          {icon}<span>{name}<small>{note}</small></span></button>
+      ))}
+    </MenuButton>
   );
 }
 
@@ -1820,9 +1899,10 @@ const kindOf = (p: Part) => (p.shape === "group" ? "Group" : p.shape === "mesh" 
 /** The Part tab for one part (0.94.0: with what Size and place and Arrange had): its name, solid or hole and colour;
  *  its size, centre and turn; what its shape has of its own; the plate; mirror and pattern; duplicate, hide, delete. */
 function PartBand({ part, fonts, lock, setLock, change, onDuplicate, onDelete, onApart, onDrop, onFlat, flat, onUngroup,
-  onMirror }: { part: Part; fonts: Fonts; lock: boolean; setLock: (v: boolean) => void; change: (fn: (p: Part) => Part) => void;
-  onDuplicate: () => void; onDelete: () => void; onApart: () => void; onDrop: () => void; onFlat: () => void; flat: boolean;
-  onUngroup: () => void; onMirror: (axis: 0 | 1 | 2) => void }) {
+  onMirror, onFace, face, onTurn }: { part: Part; fonts: Fonts; lock: boolean; setLock: (v: boolean) => void;
+  change: (fn: (p: Part) => Part) => void; onDuplicate: () => void; onDelete: () => void; onApart: () => void;
+  onDrop: () => void; onFlat: () => void; flat: boolean; onUngroup: () => void; onMirror: (axis: 0 | 1 | 2) => void;
+  onFace: () => void; face: boolean; onTurn: (axis: 0 | 1 | 2, sign: 1 | -1) => void }) {
   const g = part.shape === "group";
   const box = extent(part);
   return (
@@ -1900,6 +1980,9 @@ function PartBand({ part, fonts, lock, setLock, change, onDuplicate, onDelete, o
       <Grp label="Arrange" fold={4} icon={<ArrowDownToLine size={20} />}>
         <Big icon={<ArrowDownToLine size={20} />} label="Onto the plate" title="Moved up or down so its lowest point is on the plate" onClick={onDrop} />
         <Big icon={<PanelBottom size={20} />} label="Lay flat" title="Lay a face flat: click the face that should lie on the plate" onClick={onFlat} active={flat} />
+        <Big icon={<Stamp size={20} />} label="On a face" active={face} onClick={onFace}
+          title="Put it on a face of the model: click the face - a text's letters on it, upright on a wall (a hole sinks in)" />
+        <TurnButton onTurn={onTurn} />
         <MirrorButton onMirror={onMirror} />
         <PatternButton part={part} change={change} />
         {g && <Big icon={<Ungroup size={20} />} label="Ungroup" title="Ungroup (Ctrl+Shift+G)" onClick={onUngroup} />}
@@ -1961,8 +2044,8 @@ function PlaceTable({ part, fonts, lock, setLock, change, bottom }: { part: Part
 
 /** The Text tab (0.89.0): its letters, font, style, lines and spacing. "Capitals" is how tall they come out: it sizes
  *  the text. Several texts picked - letters taken apart, say - get one font, style and capitals each (0.92.0). */
-function TextBand({ parts, fonts, change, onApart }: { parts: Part[]; fonts: Fonts; change: (fn: (p: Part) => Part) => void;
-  onApart: () => void }) {
+function TextBand({ parts, fonts, change, onApart, onFace, face }: { parts: Part[]; fonts: Fonts;
+  change: (fn: (p: Part) => Part) => void; onApart: () => void; onFace: () => void; face: boolean }) {
   const part = parts[0], many = parts.length > 1;
   const t = textMeasure(part, fonts);
   const fontOf = (p: Part) => (fonts.index.families[p.font ?? ""] ? p.font! : fonts.index.default);
@@ -1997,6 +2080,8 @@ function TextBand({ parts, fonts, change, onApart }: { parts: Part[]; fonts: Fon
           <textarea className="textarea v3d-textarea" rows={3} defaultValue={part.text ?? ""} key={`${part.id}:${part.text ?? ""}`}
             aria-label="Text" title="Its letters; a new line is a new line of text"
             onBlur={(e) => { if (e.target.value !== part.text) restyle({ text: e.target.value }); }} />
+          <Big icon={<Stamp size={20} />} label="On a face" active={face} onClick={onFace}
+            title="Put the text on a face of the model: click the face - its letters on it, upright on a wall (a hole sinks in)" />
           <ApartButton part={part} onApart={onApart} />
         </Grp>
       )}

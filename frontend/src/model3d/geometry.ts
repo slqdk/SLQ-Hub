@@ -589,6 +589,49 @@ export function transformPart(p: Part, centre: Vec3, move: Vec3, turn: Mat3 | nu
   return out;
 }
 
+/** A part put on a face of the design (0.97.0, "On a face"): turned so its own Z looks out of the face - a text's
+ *  letters lie on it - reading across it: upright on a wall, on a top or an underside the way `right` points (the
+ *  view's right). Its underside lies on the face at `point`, 0.2 mm into it so the two join; a hole is sunk into the
+ *  face as deep as it is thick, its top 0.2 mm out, so it cuts in. A group turns as one, its box's bottom on the face
+ *  (`box`: what it builds to). A mirrored part is put on unmirrored: a text would read backwards. */
+export function onFace(p: Part, point: Vec3, normal: Vec3, right: Vec3, box?: Box3 | null): Part {
+  const n = unit(normal);
+  let u: Vec3 = Math.abs(n[2]) < 0.9 ? unit([-n[1], n[0], 0]) : [0, 0, 0];      // up x n: across a wall, as one faces it
+  if (!u[0] && !u[1] && !u[2]) {
+    const d = right[0] * n[0] + right[1] * n[1] + right[2] * n[2];
+    u = unit([right[0] - d * n[0], right[1] - d * n[1], right[2] - d * n[2]]);
+    if (!u[0] && !u[1] && !u[2]) u = [1, 0, 0];
+  }
+  const v: Vec3 = [n[1] * u[2] - n[2] * u[1], n[2] * u[0] - n[0] * u[2], n[0] * u[1] - n[1] * u[0]];   // up the face
+  const m: Mat3 = [u[0], v[0], n[0], u[1], v[1], n[1], u[2], v[2], n[2]];                           // columns u v n
+  const group = p.shape === "group";
+  const q: Part = group ? p : { ...p, mirror: undefined };
+  const b = box ?? extent(q);
+  const c: Vec3 = group && b ? [(b[0][0] + b[1][0]) / 2, (b[0][1] + b[1][1]) / 2, (b[0][2] + b[1][2]) / 2] : q.at;
+  const h = group ? (b ? b[1][2] - b[0][2] : 0) : q.size[2];
+  const r = group ? [1, 0, 0, 0, 1, 0, 0, 0, 1] as Mat3 : rotation(q.rotate);
+  const rt: Mat3 = [r[0], r[3], r[6], r[1], r[4], r[7], r[2], r[5], r[8]];                         // its turn undone
+  const lift = p.hole ? 0.2 - h / 2 : h / 2 - 0.2;
+  const to: Vec3 = [point[0] + n[0] * lift, point[1] + n[1] * lift, point[2] + n[2] * lift];
+  return transformPart(q, c, [to[0] - c[0], to[1] - c[1], to[2] - c[2]], mul(m, rt));
+}
+
+/** A part turned 90 degrees about the design's X, Y or Z through its middle (0.97.0, Arrange's Turn - Office's Rotate):
+ *  `sign` +1 one way, -1 the other. One that stood on the plate still does; else its middle stays. */
+export function turned90(p: Part, axis: 0 | 1 | 2, sign: 1 | -1, box?: Box3 | null): Part {
+  const s = sign, t: Mat3 = axis === 0 ? [1, 0, 0, 0, 0, -s, 0, s, 0] : axis === 1 ? [0, 0, s, 0, 1, 0, -s, 0, 0]
+    : [0, -s, 0, s, 0, 0, 0, 0, 1];
+  const b = box ?? extent(p);
+  const c: Vec3 = b ? [(b[0][0] + b[1][0]) / 2, (b[0][1] + b[1][1]) / 2, (b[0][2] + b[1][2]) / 2] : p.at;
+  let out = transformPart(p, c, [0, 0, 0], t);
+  if (b && Math.abs(b[0][2]) < 0.01) {                                  // on the plate: its new bottom there too
+    const half = [b[1][0] - b[0][0], b[1][1] - b[0][1], b[1][2] - b[0][2]].map((x) => x / 2);
+    const low = c[2] - Math.abs(t[6]) * half[0] - Math.abs(t[7]) * half[1] - Math.abs(t[8]) * half[2];
+    out = transformPart(out, [0, 0, 0], [0, 0, -low], null);
+  }
+  return out;
+}
+
 /** A part mirrored in the design's axis `axis` (0, 1, 2) through `centre`: its own X mirrored, its angles worked out
  *  (and its copies mirrored with it). */
 export function mirrorPart(p: Part, axis: number, centre: Vec3): Part {
