@@ -736,8 +736,12 @@ export const SECTIONS: HelpSection[] = [
         ],
         how: ["3D at the top of the chat opens a new design or one in the folder. An STL, 3MF or OBJ opens there too, "
           + "as a design with the mesh in it - to put a hole in it or text on it.",
+          "The tools are in tabs at the top: Shapes adds parts and holes, Part names the picked part and makes it "
+          + "solid or a hole, Size and place sets its size, centre and turn, Arrange groups, mirrors, aligns and "
+          + "repeats parts, and Text appears when a text is picked. Parts lists every part, to pick or hide one.",
           "Click a part to pick it, Shift-click to pick more, double-click a part inside a group, and drag a picked "
-          + "part to move it on the plate. G, R and S switch the handles between moving, turning and sizing.",
+          + "part to move it on the plate. The bar over the view switches the handles between Move, Turn and Size "
+          + "(or G, R and S), sets the snap and turns the camera.",
           "A hole cuts the solids beside it. Group parts (Ctrl+G) to keep a hole to them.",
           "Pattern repeats a part or a group round a point or in a row: one arm of a snowflake becomes six, one hole "
           + "a ring of holes. The assistant can also draw flat outlines of its own - stars, leaves, letters' shapes.",
@@ -745,7 +749,8 @@ export const SECTIONS: HelpSection[] = [
           + "centred, left or right. Letters sets how tall its capitals are; Spacing and Lines move letters and lines "
           + "apart. Cut through a plate, the stencil font keeps the middles of its letters.",
           "Point at puts a spot on the model into your message, so you can say what should change there.",
-          "Export downloads a 3MF or an STL, or saves it in the folder."],
+          "Export downloads a 3MF or an STL, or saves it in the folder. The printer is chosen at the bottom, where "
+          + "the size is."],
         tips: ["While the editor is open, the design goes with every message: the assistant sees it as it is now.",
           "Ctrl+Z undoes your changes and the assistant's."],
       },

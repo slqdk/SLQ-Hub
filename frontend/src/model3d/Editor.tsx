@@ -3,13 +3,14 @@
 // assistant works on the same file: it reads it with every message while the editor is open, writes it with its
 // file tools (and checks it with `hub3d design`), and what it writes shows here. "Point at" puts a spot on the model
 // into the message. Loaded only when opened: three.js and manifold-3d (WebAssembly) are big.
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import * as THREE from "three";
 import Module from "manifold-3d/manifold";
 import wasmUrl from "manifold-3d/manifold.wasm?url";
-import { AlignCenter, AlignLeft, AlignRight, ArrowDownToLine, Bold, Box, ChevronDown, CircleDot, Cone, Copy, Crosshair,
-  Cylinder, Download, Eye, EyeOff, FlipHorizontal2, Group, Home, Italic, Maximize2, Minimize2, Move3d, PanelBottom, Redo2,
-  Repeat2, Rotate3d, Scaling, SquareDashed, Trash2, Triangle, Type, Undo2, Ungroup, Upload, X } from "lucide-react";
+import { AlignCenter, AlignLeft, AlignRight, ArrowDownToLine, ArrowDownUp, Bold, Box, ChevronDown, CircleDot, Columns3, Cone,
+  Copy, Crosshair, Cylinder, Download, Eye, EyeOff, FlipHorizontal2, FlipVertical2, Group, Home, Italic, ListTree, Maximize2,
+  Minimize2, Move3d, PanelBottom, Printer as PrinterIcon, Redo2, Repeat2, Rotate3d, Scaling, SquareDashed, Trash2, TriangleAlert, Triangle,
+  Type, Undo2, Ungroup, Upload, X } from "lucide-react";
 import fontIndex from "./fonts/index.json";
 import { api, type FileData, type TreeData } from "../lib/api";
 import { useApp } from "../state";
@@ -133,9 +134,9 @@ function tidy(p: Part): Part {
   return out;
 }
 
-/** One number field: typed freely, applied on Enter or when it loses focus; the arrow keys step it. */
-function Num({ value, onSet, min, label: name, unit = "mm", step = 1 }: { value: number; onSet: (v: number) => void;
-  min?: number; label: string; unit?: string; step?: number }) {
+/** A number typed freely, applied on Enter or when it loses focus; the arrow keys step it. */
+function NumInput({ value, onSet, min, step = 1, label: name }: { value: number; onSet: (v: number) => void; min?: number;
+  step?: number; label?: string }) {
   const [draft, setDraft] = useState(fmt(value));
   useEffect(() => setDraft(fmt(value)), [value]);
   const apply = (raw = draft) => {
@@ -144,18 +145,26 @@ function Num({ value, onSet, min, label: name, unit = "mm", step = 1 }: { value:
     else if (Math.abs(v - value) > 1e-9) onSet(v);
   };
   return (
+    <input className="input mono" inputMode="decimal" value={draft} aria-label={name} onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => apply()}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+        if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+          e.preventDefault();
+          const v = r3(value + (e.key === "ArrowUp" ? 1 : -1) * step * (e.shiftKey ? 10 : 1));
+          if (min === undefined || v >= min) onSet(v);
+        }
+      }} />
+  );
+}
+
+/** A number field with its name over it. */
+function Num({ value, onSet, min, label: name, unit = "mm", step = 1 }: { value: number; onSet: (v: number) => void;
+  min?: number; label: string; unit?: string; step?: number }) {
+  return (
     <label className="v3d-num" title={`${name} (${unit}) - the arrow keys step it, Shift: ten steps`}>
       <span>{name}</span>
-      <input className="input mono" inputMode="decimal" value={draft} onChange={(e) => setDraft(e.target.value)}
-        onBlur={() => apply()}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-          if (e.key === "ArrowUp" || e.key === "ArrowDown") {
-            e.preventDefault();
-            const v = r3(value + (e.key === "ArrowUp" ? 1 : -1) * step * (e.shiftKey ? 10 : 1));
-            if (min === undefined || v >= min) onSet(v);
-          }
-        }} />
+      <NumInput value={value} onSet={onSet} min={min} step={step} />
     </label>
   );
 }
@@ -211,6 +220,7 @@ export function Editor({ folder, path, create, own = "", onPath, onClose, max, o
   const [failed, setFailed] = useState<string | null>(null);
   const [meshTick, setMeshTick] = useState(0);
   const [lock, setLock] = useState(false);
+  const [tab, setTab] = useState<Tab>("shapes");
   const meshes = useRef(new Map<string, MeshData | string>());
   const loading = useRef(new Set<string>());
   const past = useRef<Design[]>([]);
@@ -979,6 +989,12 @@ export function Editor({ folder, path, create, own = "", onPath, onClose, max, o
   const saying = { loading: "Loading", new: "Not saved yet", saved: "Saved", saving: "Saving", unsaved: "Not saved yet",
     error: "Not saved" }[status];
   const view = (name: ViewName) => vp.current?.view(name, built?.box ?? (design ? extentOf(design.parts) : null));
+  const textPart = one && one.shape === "text" ? one : null;
+  const shownTab: Tab = tab === "text" && !textPart ? "part" : tab;
+  const allProblems = [...problems, ...(built?.problems ?? [])];
+  const hide = (id: string) => change(id, (p) => ({ ...p, hidden: !p.hidden || undefined }));
+  const pickFirst = <p className="v3d-tip">Pick a part on the model to change it - or in Parts. Shift-click picks more,
+    a double click picks a part inside a group, and dragging a picked part moves it on the plate.</p>;
 
   return (
     <aside className="panel panel-3d" aria-label="3D editor" onKeyDown={onKey}>
@@ -986,8 +1002,8 @@ export function Editor({ folder, path, create, own = "", onPath, onClose, max, o
         <Box size={17} className="faint" />
         <h2 title={shown}>{baseName(shown) || "New design"}</h2>
         <span className={`tag${status === "error" ? " fault" : status === "saved" ? " ok" : ""}`} role="status">{saying}</span>
-        <button className="icon-btn" onClick={undo} disabled={!past.current.length} aria-label="Undo" title="Undo (Ctrl+Z)"><Undo2 size={17} /></button>
-        <button className="icon-btn" onClick={redo} disabled={!future.current.length} aria-label="Redo" title="Redo (Ctrl+Shift+Z)"><Redo2 size={17} /></button>
+        <button className="btn small quiet" onClick={undo} disabled={!past.current.length} title="Undo (Ctrl+Z)"><Undo2 size={15} /> Undo</button>
+        <button className="btn small quiet" onClick={redo} disabled={!future.current.length} title="Redo (Ctrl+Shift+Z)"><Redo2 size={15} /> Redo</button>
         <MenuButton right className="btn small" title="Files for the slicer" disabled={!built}
           label={<><Download size={15} /> Export <ChevronDown size={13} /></>}>
           {(close) => (
@@ -1004,9 +1020,9 @@ export function Editor({ folder, path, create, own = "", onPath, onClose, max, o
             </>
           )}
         </MenuButton>
-        <button className="icon-btn" onClick={onMax} aria-label={max ? "Show the chat" : "Use the whole width"}
-          title={max ? "Show the chat" : "Use the whole width"}>{max ? <Minimize2 size={17} /> : <Maximize2 size={17} />}</button>
-        <button className="icon-btn" onClick={onClose} aria-label="Close the 3D editor" title="Close"><X size={18} /></button>
+        <button className="btn small quiet" onClick={onMax} title={max ? "Show the chat beside the editor" : "Use the whole width"}>
+          {max ? <><Minimize2 size={15} /> Show the chat</> : <><Maximize2 size={15} /> Full width</>}</button>
+        <button className="btn small quiet" onClick={onClose} title="Close the 3D editor"><X size={15} /> Close</button>
       </div>
       {outside !== null && (
         <div className="v3d-bar" role="alert">
@@ -1020,117 +1036,187 @@ export function Editor({ folder, path, create, own = "", onPath, onClose, max, o
           <span className="grow">A new design with {baseName(path)} in it. The first change saves it as {baseName(shown)}.</span>
         </div>
       )}
-      <div className="v3d-body">
-        <div className="v3d-palette" role="toolbar" aria-label="Add">
-          <Tool icon={<Box size={18} />} title="Box" onClick={() => add("box")}><span>Box</span></Tool>
-          <Tool icon={<Cylinder size={18} />} title="Cylinder" onClick={() => add("cylinder")}><span>Cylinder</span></Tool>
-          <Tool icon={<Cone size={18} />} title="Cone" onClick={() => add("cone")}><span>Cone</span></Tool>
-          <Tool icon={<CircleDot size={18} />} title="Sphere" onClick={() => add("sphere")}><span>Sphere</span></Tool>
-          <Tool icon={<Triangle size={18} />} title="Wedge (a ramp)" onClick={() => add("wedge")}><span>Wedge</span></Tool>
-          <Tool icon={<Type size={18} />} title="Text" onClick={() => add("text")}><span>Text</span></Tool>
-          <hr />
-          <Tool icon={<SquareDashed size={18} />} title="A box-shaped hole" onClick={() => add("box", true)}><span>Hole</span></Tool>
-          <Tool icon={<Cylinder size={18} strokeDasharray="3 2" />} title="A round hole" onClick={() => add("cylinder", true)}><span>Round hole</span></Tool>
-          <hr />
-          <MenuButton className="btn small v3d-tool" title="An STL, 3MF or OBJ into the design" menuClassName="wide"
-            label={<><Upload size={18} /><span>Import</span></>}>
-            {(close) => <FolderMeshes base={base} onPick={(f) => { close(); void addMesh(f); }}
-              onUpload={(f) => { close(); void upload(f); }} />}
-          </MenuButton>
+      <div className="v3d-ribbon">
+        <div className="v3d-tabs">
+          <div className="v3d-tablist" role="tablist" aria-label="Tools">
+            {TABS.map(([id, name]) => (
+              <button key={id} type="button" role="tab" aria-selected={shownTab === id} className={`v3d-tab${shownTab === id ? " on" : ""}`}
+                onClick={() => setTab(id)}>{name}</button>
+            ))}
+            {textPart && (
+              <button type="button" role="tab" aria-selected={shownTab === "text"} className={`v3d-tab context${shownTab === "text" ? " on" : ""}`}
+                onClick={() => setTab("text")} title="The picked text: its letters, font and lines">Text</button>
+            )}
+          </div>
+          <div className="v3d-quick">
+            <MenuButton right className="btn small quiet" title="The design's parts: pick one, hide or show it" menuClassName="wide v3d-partsmenu"
+              label={<><ListTree size={15} /> Parts{parts.length ? ` (${allIds(parts).size})` : ""} <ChevronDown size={13} /></>}>
+              {(close) => <PartList parts={parts} onPick={(id) => { close(); setSelected([id]); }} onHide={hide} />}
+            </MenuButton>
+          </div>
         </div>
-        <div className="v3d-stage">
-          <div className="v3d-toolbar" role="toolbar" aria-label="Tools">
-            <Tool icon={<Move3d size={16} />} title="Move (G)" active={mode === "translate"} onClick={() => setMode("translate")} />
-            <Tool icon={<Rotate3d size={16} />} title="Turn (R)" active={mode === "rotate"} onClick={() => setMode("rotate")} />
-            <Tool icon={<Scaling size={16} />} title="Size (S)" active={mode === "scale"} onClick={() => setMode("scale")} />
+        <div className="v3d-band" role="tabpanel" aria-label={shownTab === "text" ? "Text" : TABS.find(([id]) => id === shownTab)?.[1]}>
+          {shownTab === "shapes" && (
+            <>
+              <Grp label="Solids">
+                <Big icon={<Box size={20} />} label="Box" onClick={() => add("box")} />
+                <Big icon={<Cylinder size={20} />} label="Cylinder" onClick={() => add("cylinder")} />
+                <Big icon={<Cone size={20} />} label="Cone" onClick={() => add("cone")} />
+                <Big icon={<CircleDot size={20} />} label="Sphere" onClick={() => add("sphere")} />
+                <Big icon={<Triangle size={20} />} label="Wedge" title="A wedge: a ramp" onClick={() => add("wedge")} />
+                <Big icon={<Type size={20} />} label="Text" onClick={() => add("text")} />
+              </Grp>
+              <Grp label="Holes">
+                <Big icon={<SquareDashed size={20} />} label="Hole" title="A box-shaped hole - through the part picked" onClick={() => add("box", true)} />
+                <Big icon={<Cylinder size={20} strokeDasharray="3 2" />} label="Round hole" title="A round hole - through the part picked"
+                  onClick={() => add("cylinder", true)} />
+              </Grp>
+              <Grp label="From a file">
+                <MenuButton className="btn v3d-big" title="An STL, 3MF or OBJ into the design" menuClassName="wide"
+                  label={<><Upload size={20} /><span>Import</span></>}>
+                  {(close) => <FolderMeshes base={base} onPick={(f) => { close(); void addMesh(f); }}
+                    onUpload={(f) => { close(); void upload(f); }} />}
+                </MenuButton>
+              </Grp>
+            </>
+          )}
+          {shownTab === "part" && (
+            <>
+              {!items.length && pickFirst}
+              {items.length > 1 && (
+                <>
+                  <Grp label={`${items.length} parts picked`}>
+                    <Big icon={<Copy size={20} />} label="Duplicate" title="Duplicate them (Ctrl+D)" onClick={duplicate} />
+                    <ConfirmButton className="btn v3d-big" confirmText="Delete?" label="Delete them" onConfirm={del}>
+                      <Trash2 size={20} /><span>Delete</span></ConfirmButton>
+                  </Grp>
+                  <p className="v3d-tip">Arrange groups, mirrors and aligns them; Size and place puts them on the plate.</p>
+                </>
+              )}
+              {one && <PartBand part={one} change={(fn) => change(one.id, fn)} onDuplicate={duplicate} onDelete={del} />}
+            </>
+          )}
+          {shownTab === "place" && (
+            <>
+              {!items.length && pickFirst}
+              {items.length > 1 && (
+                <>
+                  <Grp label="Plate">
+                    <Big icon={<ArrowDownToLine size={20} />} label="Onto the plate" title="Each moved up or down so its lowest point is on the plate" onClick={drop} />
+                  </Grp>
+                  <p className="v3d-tip">Pick one part to set its size and place by the numbers - or move them all with the handles.</p>
+                </>
+              )}
+              {one && k && <PlaceBand part={one} fonts={k.fonts} lock={lock} setLock={setLock} change={(fn) => change(one.id, fn)}
+                onDrop={drop} onFlat={() => setTool(tool === "flat" ? null : "flat")} flat={tool === "flat"} />}
+            </>
+          )}
+          {shownTab === "text" && textPart && k && <TextBand part={textPart} fonts={k.fonts} change={(fn) => change(textPart.id, fn)} />}
+          {shownTab === "arrange" && (
+            <>
+              {!items.length && pickFirst}
+              {items.length > 0 && (
+                <>
+                  <Grp label="Group">
+                    <Big icon={<Group size={20} />} label="Group" title="Group them (Ctrl+G): a hole in a group cuts only its parts"
+                      onClick={doGroup} disabled={items.length < 2} />
+                    <Big icon={<Ungroup size={20} />} label="Ungroup" title="Ungroup (Ctrl+Shift+G)" onClick={doUngroup}
+                      disabled={!(one && one.shape === "group")} />
+                  </Grp>
+                  <Grp label="Mirror">
+                    <Big icon={<FlipHorizontal2 size={20} />} label="Left-right" title="Mirror left-right (in X)" onClick={() => mirror(0)} />
+                    <Big icon={<FlipVertical2 size={20} />} label="Front-back" title="Mirror front-back (in Y)" onClick={() => mirror(1)} />
+                    <Big icon={<ArrowDownUp size={20} />} label="Up-down" title="Mirror up-down (in Z)" onClick={() => mirror(2)} />
+                  </Grp>
+                  {items.length > 1 && (
+                    <Grp label="Align">
+                      <div className="v3d-aligngrid">
+                        {ALIGNS.map(([ax, names], i) => (
+                          <Fragment key={ax}>
+                            <span className="faint">{ax}</span>
+                            {names.map((n, j) => (
+                              <button key={n} type="button" className="btn small" title={`Line them up: ${n.toLowerCase()} (${ax})`}
+                                onClick={() => align(i, j as 0 | 1 | 2)}>{n}</button>))}
+                          </Fragment>
+                        ))}
+                      </div>
+                    </Grp>
+                  )}
+                  {one && <PatternGroup part={one} change={(fn) => change(one.id, fn)} />}
+                </>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+      <div className="v3d-stage">
+        <div className={`v3d-view${tool ? " picking" : ""}`} ref={host} tabIndex={0} onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove} onPointerUp={onPointerUp} onDoubleClick={onDoubleClick}
+          aria-label="The design in 3D. Drag to turn the view, right-drag to pan, scroll to zoom. Click a part to pick it." />
+        <div className="v3d-top">
+          <div className="v3d-heads" role="toolbar" aria-label="Handles and view">
+            <Tool icon={<Move3d size={15} />} title="Move: the handles move what is picked (G)" active={mode === "translate"}
+              onClick={() => setMode("translate")}><span>Move</span></Tool>
+            <Tool icon={<Rotate3d size={15} />} title="Turn: the handles turn what is picked (R)" active={mode === "rotate"}
+              onClick={() => setMode("rotate")}><span>Turn</span></Tool>
+            <Tool icon={<Scaling size={15} />} title="Size: the handles size what is picked (S)" active={mode === "scale"}
+              onClick={() => setMode("scale")}><span>Size</span></Tool>
+            <select className="select" value={snap} onChange={(e) => setSnap(Number(e.target.value))} aria-label="Snap"
+              title="Moving snaps to this grid, turning to 15°; the arrow keys move a step">
+              {SNAPS.map((s) => <option key={s} value={s}>{s ? `Snap ${s} mm` : "No snap"}</option>)}
+            </select>
             <span className="v3d-sep" />
-            <label className="v3d-snap" title="Moving snaps to this grid; turning snaps to 15°">
-              <span>Snap</span>
-              <select className="select" value={snap} onChange={(e) => setSnap(Number(e.target.value))}>
-                {SNAPS.map((s) => <option key={s} value={s}>{s ? `${s} mm` : "off"}</option>)}
-              </select>
-            </label>
+            <Tool icon={<Home size={15} />} title="Fit the design in view" onClick={() => view("home")}><span>Fit</span></Tool>
+            <Tool icon={<span className="v3d-letter">T</span>} title="From the top" onClick={() => view("top")}><span>Top</span></Tool>
+            <Tool icon={<span className="v3d-letter">F</span>} title="From the front" onClick={() => view("front")}><span>Front</span></Tool>
+            <Tool icon={<span className="v3d-letter">R</span>} title="From the right" onClick={() => view("right")}><span>Right</span></Tool>
             <span className="v3d-sep" />
-            <Tool icon={<Home size={16} />} title="Fit the design in view" onClick={() => view("home")} />
-            <Tool icon={<span className="v3d-letter">T</span>} title="From the top" onClick={() => view("top")} />
-            <Tool icon={<span className="v3d-letter">F</span>} title="From the front" onClick={() => view("front")} />
-            <Tool icon={<span className="v3d-letter">R</span>} title="From the right" onClick={() => view("right")} />
-            <span className="grow" />
-            <Tool icon={<Crosshair size={16} />} title="Point at a spot on the model: it goes into your message to the assistant"
+            <Tool icon={<Crosshair size={15} />} title="Point at a spot on the model: it goes into your message to the assistant"
               active={tool === "point"} onClick={() => setTool(tool === "point" ? null : "point")}><span>Point at</span></Tool>
           </div>
-          <div className={`v3d-view${tool ? " picking" : ""}`} ref={host} tabIndex={0} onPointerDown={onPointerDown}
-            onPointerMove={onPointerMove} onPointerUp={onPointerUp} onDoubleClick={onDoubleClick}
-            aria-label="The design in 3D. Drag to turn the view, right-drag to pan, scroll to zoom. Click a part to pick it." />
-          {(failed || !ready || status === "loading") && <div className="v3d-overlay">{failed ?? "Loading the 3D editor"}</div>}
-          {ready && !failed && design && !parts.length && (
-            <div className="v3d-empty">Add a shape on the left, import an STL - or tell the assistant what to make.</div>)}
           {tool && <div className="v3d-hint">{tool === "point" ? "Click the spot on the model. Esc stops."
             : "Click the face that should lie on the plate. Esc stops."}</div>}
-          <div className="v3d-status num">
-            {size ? <span>{fmt(size[0])} x {fmt(size[1])} x {fmt(size[2])} mm</span> : <span>Nothing to print yet</span>}
-            {built?.volume ? <span>{(built.volume / 1000).toFixed(1)} cm³</span> : null}
-            <span className="faint">{printer.name}</span>
-            {tooBig && <span className="v3d-warn">larger than the plate</span>}
-            {below && <span className="v3d-warn">below the plate</span>}
-            {floating && <span className="v3d-warn">not on the plate</span>}
-            {built?.loose.length ? <span className="v3d-warn">{built.loose.length} not a closed solid</span> : null}
-            {built?.rests && built.rests.footprint > 1 && built.rests.contact < 0.4 * built.rests.footprint && (
-              <span className="v3d-warn" title="Its first layer is a small share of its shadow from above: round or pointed underneath (a cylinder lying down, a tip). It may come loose - a flat bottom holds.">
-                stands on {Math.round((100 * built.rests.contact) / built.rests.footprint)}% of its shadow</span>)}
-          </div>
         </div>
-        <div className="v3d-inspector">
-          {items.length > 1 && (
-            <section>
-              <h3>{items.length} parts</h3>
-              <div className="v3d-actions">
-                <Tool icon={<Group size={15} />} title="Group them (Ctrl+G): a hole in a group cuts only its parts" onClick={doGroup}><span>Group</span></Tool>
-                <Tool icon={<Copy size={15} />} title="Duplicate (Ctrl+D)" onClick={duplicate} />
-                <Tool icon={<ArrowDownToLine size={15} />} title="Onto the plate" onClick={drop} />
-                <ConfirmButton className="btn small v3d-tool" confirmText="Delete?" label="Delete" onConfirm={del}><Trash2 size={15} /></ConfirmButton>
-              </div>
-              <Mirror onMirror={mirror} />
-              <div className="v3d-align">
-                {["X", "Y", "Z"].map((ax, i) => (
-                  <div key={ax} className="row"><span className="faint">Align {ax}</span>
-                    {(["min", "middle", "max"] as const).map((w, j) => (
-                      <button key={w} className="btn small" onClick={() => align(i, j as 0 | 1 | 2)}>{w}</button>))}
-                  </div>
-                ))}
-              </div>
-            </section>
-          )}
-          {one && k && <PartFields part={one} fonts={k.fonts} lock={lock} setLock={setLock} change={(fn) => change(one.id, fn)}
-            onDuplicate={duplicate} onDelete={del} onDrop={drop} onMirror={mirror} onUngroup={doUngroup}
-            onFlat={() => setTool(tool === "flat" ? null : "flat")} flat={tool === "flat"} />}
-          {!items.length && design && (
-            <section>
-              <h3>Design</h3>
-              <label className="field"><span>Printer</span>
-                <select className="select" value={printer.id} onChange={(e) => {
-                  const p = PRINTERS.find((x) => x.id === e.target.value) ?? { id: "custom", name: "Custom size", bed: printer.bed };
-                  setPrinter(p);
-                }}>
-                  {PRINTERS.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                  <option value="custom">Custom size</option>
-                </select>
-                <small>Build volume {printer.bed.map(fmt).join(" x ")} mm</small>
-              </label>
-              {printer.id === "custom" && (
-                <div className="v3d-triple">
-                  {["X", "Y", "Z"].map((ax, i) => <Num key={ax} label={ax} value={printer.bed[i]} min={10}
-                    onSet={(v) => { const b = [...printer.bed] as Vec3; b[i] = v; setPrinter({ id: "custom", name: "Custom size", bed: b }); }} />)}
-                </div>
+        {(failed || !ready || status === "loading") && <div className="v3d-overlay">{failed ?? "Loading the 3D editor"}</div>}
+        {ready && !failed && design && !parts.length && (
+          <div className="v3d-empty">Add a shape from Shapes above, import an STL - or tell the assistant what to make.</div>)}
+        <div className="v3d-status num">
+          {size ? <span>{fmt(size[0])} x {fmt(size[1])} x {fmt(size[2])} mm</span> : <span>Nothing to print yet</span>}
+          {built?.volume ? <span>{(built.volume / 1000).toFixed(1)} cm³</span> : null}
+          {design && (
+            <MenuButton up className="btn small quiet v3d-printer" title="The printer the design is laid out for"
+              label={<><PrinterIcon size={14} /> {printer.name} <ChevronDown size={12} /></>}>
+              {(close) => (
+                <>
+                  {PRINTERS.map((p) => (
+                    <button key={p.id} className="menu-item" role="menuitemradio" aria-checked={printer.id === p.id}
+                      onClick={() => { close(); setPrinter(p); }}><span>{p.name}<small>{p.bed.map(fmt).join(" x ")} mm</small></span></button>
+                  ))}
+                  <button className="menu-item" role="menuitemradio" aria-checked={printer.id === "custom"}
+                    onClick={() => setPrinter({ id: "custom", name: "Custom size", bed: printer.bed })}>
+                    <span>Custom size<small>Its build volume below</small></span></button>
+                  {printer.id === "custom" && (
+                    <div className="v3d-triple v3d-custom">
+                      {["X", "Y", "Z"].map((ax, i) => <Num key={ax} label={ax} value={printer.bed[i]} min={10}
+                        onSet={(v) => { const b = [...printer.bed] as Vec3; b[i] = v; setPrinter({ id: "custom", name: "Custom size", bed: b }); }} />)}
+                    </div>
+                  )}
+                </>
               )}
-              <p className="v3d-note">Click a part to change it, Shift-click to pick more, double-click a part inside a
-                group. Drag a picked part to move it on the plate. A hole cuts the solids beside it - group parts to keep
-                a hole to them.</p>
-              <h3>Parts</h3>
-              <PartList parts={parts} onPick={(id) => setSelected([id])}
-                onHide={(id) => change(id, (p) => ({ ...p, hidden: !p.hidden || undefined }))} />
-              {[...problems, ...(built?.problems ?? [])].map((p, i) => <p key={i} className="v3d-note v3d-warn">{p}</p>)}
-            </section>
+            </MenuButton>
+          )}
+          {tooBig && <span className="v3d-warn">larger than the plate</span>}
+          {below && <span className="v3d-warn">below the plate</span>}
+          {floating && <span className="v3d-warn">not on the plate</span>}
+          {built?.loose.length ? <span className="v3d-warn">{built.loose.length} not a closed solid</span> : null}
+          {built?.rests && built.rests.footprint > 1 && built.rests.contact < 0.4 * built.rests.footprint && (
+            <span className="v3d-warn" title="Its first layer is a small share of its shadow from above: round or pointed underneath (a cylinder lying down, a tip). It may come loose - a flat bottom holds.">
+              stands on {Math.round((100 * built.rests.contact) / built.rests.footprint)}% of its shadow</span>)}
+          {allProblems.length > 0 && (
+            <MenuButton up right className="btn small quiet v3d-warn" title="What the design's file or its build says"
+              label={<><TriangleAlert size={14} /> {allProblems.length} {allProblems.length > 1 ? "problems" : "problem"}</>}>
+              {() => <div className="v3d-problems">{allProblems.map((p, i) => <p key={i}>{p}</p>)}</div>}
+            </MenuButton>
           )}
         </div>
       </div>
@@ -1138,9 +1224,33 @@ export function Editor({ folder, path, create, own = "", onPath, onClose, max, o
   );
 }
 
+type Tab = "shapes" | "part" | "place" | "text" | "arrange";
+const TABS: [Tab, string][] = [["shapes", "Shapes"], ["part", "Part"], ["place", "Size and place"], ["arrange", "Arrange"]];
+const ALIGNS: [string, string[]][] = [["X", ["Left", "Middle", "Right"]], ["Y", ["Front", "Middle", "Back"]],
+  ["Z", ["Bottom", "Middle", "Top"]]];
+
+/** A group of the ribbon's tools, its name under it - as in SolidWorks' and Office's ribbons. */
+function Grp({ label, children }: { label: ReactNode; children: ReactNode }) {
+  return (
+    <div className="v3d-group" role="group" aria-label={typeof label === "string" ? label : undefined}>
+      <div className="v3d-group-body">{children}</div>
+      <div className="v3d-group-label">{label}</div>
+    </div>
+  );
+}
+
+/** A ribbon button: its icon over its name. */
+function Big({ icon, label, title, onClick, active, disabled }: { icon: ReactNode; label: string; title?: string;
+  onClick: () => void; active?: boolean; disabled?: boolean }) {
+  return (
+    <button type="button" className={`btn v3d-big${active ? " on" : ""}`} onClick={onClick} disabled={disabled}
+      title={title ?? label} aria-pressed={active}>{icon}<span>{label}</span></button>
+  );
+}
+
 function PartList({ parts, onPick, onHide, depth = 0 }: { parts: Part[]; onPick: (id: string) => void;
   onHide: (id: string) => void; depth?: number }) {
-  if (!parts.length && !depth) return <p className="v3d-note faint">None yet.</p>;
+  if (!parts.length && !depth) return <p className="v3d-note faint">No parts yet.</p>;
   return (
     <ul className="v3d-parts" style={depth ? { paddingLeft: 14 } : undefined}>
       {parts.map((p) => (
@@ -1150,9 +1260,9 @@ function PartList({ parts, onPick, onHide, depth = 0 }: { parts: Part[]; onPick:
             <button className="link-btn grow ellipsis" onClick={() => onPick(p.id)}>{label(p)}</button>
             {p.hole && <span className="tag">hole</span>}
             {p.shape === "group" && <span className="tag">group</span>}
-            <button className="icon-btn small" onClick={() => onHide(p.id)} aria-label={p.hidden ? `Show ${label(p)}` : `Hide ${label(p)}`}
+            <button className="btn small quiet" onClick={() => onHide(p.id)} aria-label={p.hidden ? `Show ${label(p)}` : `Hide ${label(p)}`}
               title={p.hidden ? "Hidden: left out of the solid. Show it" : "Hide it: left out of the solid"}>
-              {p.hidden ? <EyeOff size={14} /> : <Eye size={14} />}</button>
+              {p.hidden ? <><EyeOff size={14} /> Show</> : <><Eye size={14} /> Hide</>}</button>
           </div>
           {p.parts && <PartList parts={p.parts} onPick={onPick} onHide={onHide} depth={depth + 1} />}
         </li>
@@ -1161,10 +1271,73 @@ function PartList({ parts, onPick, onHide, depth = 0 }: { parts: Part[]; onPick:
   );
 }
 
-function PartFields({ part, fonts, lock, setLock, change, onDuplicate, onDelete, onDrop, onMirror, onUngroup, onFlat, flat }: {
-  part: Part; fonts: Fonts; lock: boolean; setLock: (v: boolean) => void; change: (fn: (p: Part) => Part) => void;
-  onDuplicate: () => void; onDelete: () => void; onDrop: () => void; onMirror: (axis: number) => void; onUngroup: () => void;
-  onFlat: () => void; flat: boolean }) {
+const kindOf = (p: Part) => (p.shape === "group" ? "Group" : p.shape === "mesh" ? "Imported mesh"
+  : p.shape[0].toUpperCase() + p.shape.slice(1));
+
+/** The Part tab for one part: its name, solid or hole, colour, what its shape has of its own, and what to do with it. */
+function PartBand({ part, change, onDuplicate, onDelete }: { part: Part; change: (fn: (p: Part) => Part) => void;
+  onDuplicate: () => void; onDelete: () => void }) {
+  const g = part.shape === "group";
+  const box = g ? extent(part) : null;
+  return (
+    <>
+      <Grp label={<>{kindOf(part)} <span className="mono">{part.id}</span></>}>
+        <div className="v3d-stack">
+          <input className="input v3d-name" defaultValue={part.name ?? ""} key={`${part.id}:${part.name ?? ""}`} placeholder={label(part)}
+            aria-label="Name" title="Its name in Parts and in the assistant's messages"
+            onBlur={(e) => { if (e.target.value !== (part.name ?? "")) change((p) => ({ ...p, name: e.target.value || undefined })); }}
+            onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
+          <div className="v3d-seg" role="group" aria-label="Solid or hole">
+            <button className={`btn small${!part.hole ? " on" : ""}`} aria-pressed={!part.hole} onClick={() => change((p) => ({ ...p, hole: undefined }))}>Solid</button>
+            <button className={`btn small${part.hole ? " on" : ""}`} aria-pressed={!!part.hole} title="A hole cuts the solids beside it (H)"
+              onClick={() => change((p) => ({ ...p, hole: true }))}>Hole</button>
+            {!g && !part.hole && <input type="color" className="v3d-color" value={part.color ?? GREY} aria-label="Colour" title="Colour (for the eye only: one colour prints)"
+              onChange={(e) => change((p) => ({ ...p, color: e.target.value }))} />}
+          </div>
+        </div>
+      </Grp>
+      {part.shape === "box" && (
+        <Grp label="Box">
+          <Num label="Rounded edges" value={part.radius ?? 0} min={0} step={0.5}
+            onSet={(v) => change((p) => ({ ...p, radius: v > 0 ? v : undefined, sides: v > 0 ? p.sides ?? 32 : undefined }))} />
+          {!!part.radius && <Num label="Sides" unit="segments round a corner" value={part.sides ?? 64} min={3} step={8}
+            onSet={(v) => change((p) => ({ ...p, sides: Math.round(Math.min(256, Math.max(3, v))) }))} />}
+        </Grp>
+      )}
+      {(part.shape === "cylinder" || part.shape === "cone" || part.shape === "sphere") && (
+        <Grp label={kindOf(part)}>
+          <Num label="Sides" unit="segments around" value={part.sides ?? 64} min={3} step={8}
+            onSet={(v) => change((p) => ({ ...p, sides: Math.round(Math.min(256, Math.max(3, v))) }))} />
+          {part.shape === "cone" && <Num label="Top, %" unit="% of the base" value={(part.top ?? 0) * 100} min={0} step={10}
+            onSet={(v) => change((p) => ({ ...p, top: Math.min(1, v / 100) || undefined }))} />}
+        </Grp>
+      )}
+      {part.shape === "outline" && (
+        <Grp label="Outline"><p className="v3d-note">{part.points?.length ?? 0} points{part.holes?.length
+          ? `, ${part.holes.length} hole${part.holes.length > 1 ? "s" : ""} in it` : ""}. Its size in Size and place scales them
+          {part.size[0] <= 0 && part.size[1] <= 0 ? " (now as drawn)" : ""}.</p></Grp>
+      )}
+      {part.shape === "mesh" && <Grp label="Imported mesh"><p className="v3d-note mono" title="The file, from the design's folder">{part.file}</p></Grp>}
+      {part.shape === "text" && <Grp label="Text"><p className="v3d-note">Its letters, font and lines: the Text tab.</p></Grp>}
+      {g && (
+        <Grp label="Group"><p className="v3d-note num">{box ? `${fmt(box[1][0] - box[0][0])} x ${fmt(box[1][1] - box[0][1])} x ${fmt(box[1][2] - box[0][2])} mm, ` : ""}
+          {part.parts?.length ?? 0} parts. A hole in it cuts only its own parts; double-click one on the model to change it.</p></Grp>
+      )}
+      <Grp label="Part">
+        <Big icon={<Copy size={20} />} label="Duplicate" title="Duplicate (Ctrl+D)" onClick={onDuplicate} />
+        <Big icon={part.hidden ? <EyeOff size={20} /> : <Eye size={20} />} label={part.hidden ? "Show" : "Hide"}
+          title={part.hidden ? "Hidden: left out of the solid. Show it" : "Hide it: left out of the solid"}
+          onClick={() => change((p) => ({ ...p, hidden: !p.hidden || undefined }))} />
+        <ConfirmButton className="btn v3d-big" confirmText="Delete?" label="Delete (Del)" onConfirm={onDelete}>
+          <Trash2 size={20} /><span>Delete</span></ConfirmButton>
+      </Grp>
+    </>
+  );
+}
+
+/** The Size and place tab for one part: size (keeping proportions or not), centre, turn, and onto the plate. */
+function PlaceBand({ part, fonts, lock, setLock, change, onDrop, onFlat, flat }: { part: Part; fonts: Fonts; lock: boolean;
+  setLock: (v: boolean) => void; change: (fn: (p: Part) => Part) => void; onDrop: () => void; onFlat: () => void; flat: boolean }) {
   const g = part.shape === "group";
   const box = extent(part);
   const now = sized(part, fonts);
@@ -1178,72 +1351,51 @@ function PartFields({ part, fonts, lock, setLock, change, onDuplicate, onDelete,
     const size = (p.shape === "outline" ? sized(p, fonts) : p.size).map((x) => x * f) as Vec3;
     return { ...p, size, radius: p.radius ? p.radius * f : p.radius };
   });
-  const kind = g ? "Group" : part.shape === "mesh" ? "Imported mesh" : part.shape[0].toUpperCase() + part.shape.slice(1);
   return (
-    <section>
-      <h3>{kind} <span className="faint mono">{part.id}</span></h3>
-      <label className="field"><span>Name</span>
-        <input className="input" defaultValue={part.name ?? ""} key={`${part.id}:${part.name ?? ""}`} placeholder={label(part)}
-          onBlur={(e) => { if (e.target.value !== (part.name ?? "")) change((p) => ({ ...p, name: e.target.value || undefined })); }}
-          onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
-      </label>
-      <div className="v3d-seg" role="group" aria-label="Solid or hole">
-        <button className={`btn small${!part.hole ? " on" : ""}`} aria-pressed={!part.hole} onClick={() => change((p) => ({ ...p, hole: undefined }))}>Solid</button>
-        <button className={`btn small${part.hole ? " on" : ""}`} aria-pressed={!!part.hole} onClick={() => change((p) => ({ ...p, hole: true }))}>Hole</button>
-        {!g && !part.hole && <input type="color" className="v3d-color" value={part.color ?? GREY} aria-label="Colour" title="Colour (for the eye only: one colour prints)"
-          onChange={(e) => change((p) => ({ ...p, color: e.target.value }))} />}
-      </div>
+    <>
       {!g && (
         <>
-          <div className="v3d-label"><span>Size</span>
-            <label className="faint small"><input type="checkbox" checked={lock} onChange={(e) => setLock(e.target.checked)} /> keep proportions</label></div>
-          <div className="v3d-triple">
-            {["X", "Y", "Z"].map((ax, i) => <Num key={ax} label={ax} value={r3(now[i])} min={MIN_SIZE} onSet={(v) => sizeOf(i, v)} />)}
-          </div>
-          <div className="v3d-label"><span>{part.shape === "outline" ? "Position" : "Centre"}</span>
-            <span className="faint small">{part.shape === "outline" ? "of its points' 0,0; " : ""}its bottom at z {fmt(box?.[0][2] ?? 0)}</span></div>
-          <div className="v3d-triple">
-            {["X", "Y", "Z"].map((ax, i) => <Num key={ax} label={ax} value={part.at[i]}
-              onSet={(v) => change((p) => { const at = [...p.at] as Vec3; at[i] = v; return { ...p, at }; })} />)}
-          </div>
-          <div className="v3d-label"><span>Turned</span><span className="faint small">degrees: X, then Y, then Z</span></div>
-          <div className="v3d-triple">
-            {["X", "Y", "Z"].map((ax, i) => <Num key={ax} label={ax} unit="°" step={15} value={part.rotate[i]}
-              onSet={(v) => change((p) => { const r = [...p.rotate] as Vec3; r[i] = v; return { ...p, rotate: r }; })} />)}
-          </div>
-          {part.shape === "box" && <Num label="Rounded edges" value={part.radius ?? 0} min={0} step={0.5}
-            onSet={(v) => change((p) => ({ ...p, radius: v > 0 ? v : undefined, sides: v > 0 ? p.sides ?? 32 : undefined }))} />}
-          {(part.shape === "cylinder" || part.shape === "cone" || part.shape === "sphere" || (part.shape === "box" && !!part.radius)) &&
-            <Num label="Sides" unit="segments around" value={part.sides ?? 64} min={3} step={8}
-              onSet={(v) => change((p) => ({ ...p, sides: Math.round(Math.min(256, Math.max(3, v))) }))} />}
-          {part.shape === "cone" && <Num label="Top, % of the base" unit="%" value={(part.top ?? 0) * 100} min={0} step={10}
-            onSet={(v) => change((p) => ({ ...p, top: Math.min(1, v / 100) || undefined }))} />}
-          {part.shape === "text" && <TextFields part={part} fonts={fonts} change={change} />}
-          {part.shape === "mesh" && <p className="v3d-note mono" title="The file, from the design's folder">{part.file}</p>}
-          {part.shape === "outline" && <p className="v3d-note">An outline of {part.points?.length ?? 0} points
-            {part.holes?.length ? `, ${part.holes.length} hole${part.holes.length > 1 ? "s" : ""} in it` : ""}, {fmt(now[2])} mm
-            thick. X and Y scale its points{part.size[0] <= 0 && part.size[1] <= 0 ? " (now as drawn)" : ""}.</p>}
+          <Grp label="Size, mm">
+            <div className="v3d-stack">
+              <div className="v3d-triple">
+                {["X", "Y", "Z"].map((ax, i) => <Num key={ax} label={ax} value={r3(now[i])} min={MIN_SIZE} onSet={(v) => sizeOf(i, v)} />)}
+              </div>
+              <label className="v3d-check"><input type="checkbox" checked={lock} onChange={(e) => setLock(e.target.checked)} /> keep proportions</label>
+            </div>
+          </Grp>
+          <Grp label={part.shape === "outline" ? "Its points' 0,0, mm" : "Centre, mm"}>
+            <div className="v3d-stack">
+              <div className="v3d-triple">
+                {["X", "Y", "Z"].map((ax, i) => <Num key={ax} label={ax} value={part.at[i]}
+                  onSet={(v) => change((p) => { const at = [...p.at] as Vec3; at[i] = v; return { ...p, at }; })} />)}
+              </div>
+              <small className="faint">its bottom at z {fmt(box?.[0][2] ?? 0)}</small>
+            </div>
+          </Grp>
+          <Grp label="Turned, degrees">
+            <div className="v3d-stack">
+              <div className="v3d-triple">
+                {["X", "Y", "Z"].map((ax, i) => <Num key={ax} label={ax} unit="°" step={15} value={part.rotate[i]}
+                  onSet={(v) => change((p) => { const r = [...p.rotate] as Vec3; r[i] = v; return { ...p, rotate: r }; })} />)}
+              </div>
+              <small className="faint">X first, then Y, then Z</small>
+            </div>
+          </Grp>
         </>
       )}
-      {g && box && <p className="v3d-note num">{fmt(box[1][0] - box[0][0])} x {fmt(box[1][1] - box[0][1])} x {fmt(box[1][2] - box[0][2])} mm,
-        {" "}{part.parts?.length ?? 0} parts. A hole in it cuts only its own parts. Double-click a part on the model to change it.</p>}
-      <div className="v3d-actions">
-        <Tool icon={<Copy size={15} />} title="Duplicate (Ctrl+D)" onClick={onDuplicate} />
-        <Tool icon={<ArrowDownToLine size={15} />} title="Onto the plate" onClick={onDrop} />
-        <Tool icon={<PanelBottom size={15} />} title="Lay a face flat: click the face that should lie on the plate" onClick={onFlat} active={flat} />
-        {g && <Tool icon={<Ungroup size={15} />} title="Ungroup (Ctrl+Shift+G)" onClick={onUngroup}><span>Ungroup</span></Tool>}
-        <Tool icon={part.hidden ? <EyeOff size={15} /> : <Eye size={15} />} title={part.hidden ? "Show it" : "Hide it: left out of the solid"}
-          onClick={() => change((p) => ({ ...p, hidden: !p.hidden || undefined }))} />
-        <ConfirmButton className="btn small v3d-tool" confirmText="Delete?" label="Delete" onConfirm={onDelete}><Trash2 size={15} /></ConfirmButton>
-      </div>
-      <Mirror onMirror={onMirror} />
-      <Pattern part={part} change={change} />
-    </section>
+      {g && box && <Grp label="Group"><p className="v3d-note num">{fmt(box[1][0] - box[0][0])} x {fmt(box[1][1] - box[0][1])} x {fmt(box[1][2] - box[0][2])} mm.
+        Move, turn and size it with the handles.</p></Grp>}
+      <Grp label="Plate">
+        <Big icon={<ArrowDownToLine size={20} />} label="Onto the plate" title="Moved up or down so its lowest point is on the plate" onClick={onDrop} />
+        <Big icon={<PanelBottom size={20} />} label="Lay flat" title="Lay a face flat: click the face that should lie on the plate" onClick={onFlat} active={flat} />
+      </Grp>
+    </>
   );
 }
 
-/** A text's letters, font and spacing (0.89.0). "Letters" is how tall its capitals come out: it sizes the text. */
-function TextFields({ part, fonts, change }: { part: Part; fonts: Fonts; change: (fn: (p: Part) => Part) => void }) {
+/** The Text tab (0.89.0): its letters, font, style, lines and spacing. "Capitals" is how tall they come out: it sizes
+ *  the text. */
+function TextBand({ part, fonts, change }: { part: Part; fonts: Fonts; change: (fn: (p: Part) => Part) => void }) {
   const t = textMeasure(part, fonts);
   const fam = fonts.index.families[part.font ?? ""] ?? fonts.index.families[fonts.index.default];
   const restyle = (patch: Partial<Part>) => change((p) => retext(p, patch, fonts));
@@ -1254,107 +1406,96 @@ function TextFields({ part, fonts, change }: { part: Part; fonts: Fonts; change:
   };
   const fixed = part.size[0] > 0 && part.size[1] > 0;
   const own = fixed ? textMeasure({ ...part, size: [0, part.size[1], part.size[2]] }, fonts)?.width : undefined;
-  const ALIGNS: [Align, ReactNode][] = [["left", <AlignLeft size={15} />], ["center", <AlignCenter size={15} />],
-    ["right", <AlignRight size={15} />]];
+  const stretched = own !== undefined && Math.abs(own - part.size[0]) >= 0.05;
+  const LINES: [Align, ReactNode, string][] = [["left", <AlignLeft size={15} />, "Left"], ["center", <AlignCenter size={15} />, "Centre"],
+    ["right", <AlignRight size={15} />, "Right"]];
   return (
     <>
-      <label className="field"><span>Text</span>
-        <textarea className="textarea" rows={2} defaultValue={part.text ?? ""} key={`${part.id}:${part.text ?? ""}`}
+      <Grp label="Text">
+        <textarea className="textarea v3d-textarea" rows={2} defaultValue={part.text ?? ""} key={`${part.id}:${part.text ?? ""}`}
+          aria-label="Text" title="Its letters; a new line is a new line of text"
           onBlur={(e) => { if (e.target.value !== part.text) restyle({ text: e.target.value }); }} />
-      </label>
-      <label className="field"><span>Font</span>
-        <select className="select" value={part.font ?? fonts.index.default}
-          onChange={(e) => restyle({ font: e.target.value === fonts.index.default ? undefined : e.target.value })}>
-          {FONT_FAMILIES.map((f) => <option key={f} value={f}>{f[0].toUpperCase() + f.slice(1)} - {fonts.index.families[f]?.name}</option>)}
-        </select>
-      </label>
-      <div className="v3d-seg" role="group" aria-label="Style and lines">
-        <button className={`btn small${part.bold && fam.bold ? " on" : ""}`} aria-pressed={!!part.bold} disabled={!fam.bold}
-          title={fam.bold ? "Bold" : `${fam.name} has no bold`} onClick={() => restyle({ bold: !part.bold || undefined })}><Bold size={15} /></button>
-        <button className={`btn small${part.italic ? " on" : ""}`} aria-pressed={!!part.italic}
-          title={fam.italic ? "Italic" : `Slanted (${fam.name} has no italic)`}
-          onClick={() => restyle({ italic: !part.italic || undefined })}><Italic size={15} /></button>
-        <span className="v3d-sep" />
-        {ALIGNS.map(([a, icon]) => (
-          <button key={a} className={`btn small${align === a ? " on" : ""}`} aria-pressed={align === a}
-            title={`Lines ${a === "center" ? "centred" : `to the ${a}`}`} onClick={() => restyle({ align: a === "center" ? undefined : a })}>{icon}</button>
-        ))}
-      </div>
-      <div className="v3d-triple">
-        <Num label="Letters" unit="mm: how tall its capitals are" value={r3(t?.capitals ?? 0)} min={0.1}
-          onSet={(v) => change((p) => withCapitals(p, v, fonts))} />
-        <Num label="Spacing" unit="from letter to letter: 1 is the font's own" step={0.05} value={part.letter_spacing ?? 1}
-          min={SPACING[0]} onSet={spacing("letter_spacing")} />
-        <Num label="Lines" unit="from line to line: 1 is the font's own" step={0.05} value={part.line_spacing ?? 1}
-          min={SPACING[0]} onSet={spacing("line_spacing")} />
-      </div>
-      <p className="v3d-note">{t ? `${t.lines > 1 ? `${t.lines} lines, ` : ""}${t.font}. ` : ""}
-        {part.size[0] <= 0 ? "Its width follows the letters." : part.size[1] <= 0 ? "Its height follows the letters."
-          : own !== undefined && Math.abs(own - part.size[0]) >= 0.05 ? <>Stretched to X. <button className="link-btn small"
-            onClick={() => change((p) => ({ ...p, size: [0, p.size[1], p.size[2]] }))}>Width from the letters</button></>
-            : "Its width follows the letters."}</p>
+      </Grp>
+      <Grp label={t ? t.font : "Font"}>
+        <div className="v3d-stack">
+          <select className="select" value={part.font ?? fonts.index.default} aria-label="Font"
+            onChange={(e) => restyle({ font: e.target.value === fonts.index.default ? undefined : e.target.value })}>
+            {FONT_FAMILIES.map((f) => <option key={f} value={f}>{f[0].toUpperCase() + f.slice(1)} - {fonts.index.families[f]?.name}</option>)}
+          </select>
+          <div className="v3d-seg">
+            <button className={`btn small${part.bold && fam.bold ? " on" : ""}`} aria-pressed={!!part.bold} disabled={!fam.bold}
+              title={fam.bold ? "Bold" : `${fam.name} has no bold`} onClick={() => restyle({ bold: !part.bold || undefined })}><Bold size={14} /> Bold</button>
+            <button className={`btn small${part.italic ? " on" : ""}`} aria-pressed={!!part.italic}
+              title={fam.italic ? "Italic" : `Slanted (${fam.name} has no italic)`}
+              onClick={() => restyle({ italic: !part.italic || undefined })}><Italic size={14} /> Italic</button>
+          </div>
+        </div>
+      </Grp>
+      <Grp label={t ? `Letters: ${fmt(t.width)} x ${fmt(t.height)} mm` : "Letters"}>
+        <div className="v3d-stack">
+          <div className="v3d-pair">
+            <Num label="Capitals, mm" unit="mm: how tall its capitals are - it sizes the text" value={r3(t?.capitals ?? 0)} min={0.1}
+              onSet={(v) => change((p) => withCapitals(p, v, fonts))} />
+            <Num label="Spacing" unit="from letter to letter: 1 is the font's own" step={0.05} value={part.letter_spacing ?? 1}
+              min={SPACING[0]} onSet={spacing("letter_spacing")} />
+          </div>
+          <small className="faint" title={t ? `${t.lines > 1 ? `${t.lines} lines in ` : ""}${t.font}` : undefined}>
+            {part.size[0] <= 0 ? "Its width follows the letters" : part.size[1] <= 0 ? "Its height follows the letters"
+              : stretched ? <>Stretched to its size: <button className="link-btn small" onClick={() => change((p) => ({ ...p, size: [0, p.size[1], p.size[2]] }))}>undo</button></>
+                : "Its width follows the letters"}</small>
+        </div>
+      </Grp>
+      <Grp label="Lines">
+        <div className="v3d-stack">
+          <div className="v3d-seg" role="group" aria-label="The lines">
+            {LINES.map(([a, icon, name]) => (
+              <button key={a} className={`btn small${align === a ? " on" : ""}`} aria-pressed={align === a}
+                title={`Lines ${a === "center" ? "centred" : `to the ${a}`}`} onClick={() => restyle({ align: a === "center" ? undefined : a })}>{icon} {name}</button>
+            ))}
+          </div>
+          <label className="v3d-inline" title="From line to line: 1 is the font's own">
+            <span>Spacing</span>
+            <NumInput value={part.line_spacing ?? 1} min={SPACING[0]} step={0.05} onSet={spacing("line_spacing")} />
+          </label>
+        </div>
+      </Grp>
     </>
   );
 }
 
 /** Copies of the part or group (0.88.0): turned round a point - a snowflake's arms, a star's points - or in a row. */
-function Pattern({ part, change }: { part: Part; change: (fn: (p: Part) => Part) => void }) {
+function PatternGroup({ part, change }: { part: Part; change: (fn: (p: Part) => Part) => void }) {
   const r = part.repeat;
   const set = (fn: (x: Repeat) => Repeat) => change((p) => (p.repeat ? { ...p, repeat: fn({ ...p.repeat }) } : p));
   if (!r) {
     const b = extent(part);
     const w = b ? b[1][0] - b[0][0] : 20;
     return (
-      <div className="v3d-mirror" role="group" aria-label="Pattern">
-        <span className="faint"><Repeat2 size={14} style={{ verticalAlign: -2 }} /> Pattern</span>
-        <button className="btn small" onClick={() => change((p) => ({ ...p, repeat: { count: 6 } }))}
+      <Grp label="Pattern">
+        <Big icon={<Repeat2 size={20} />} label="Around" onClick={() => change((p) => ({ ...p, repeat: { count: 6 } }))}
           title={part.shape === "group" ? "Six copies turned round the plate's middle - set Around for another point"
-            : "Six copies turned round its own position - set Around for another point"}>Around</button>
-        <button className="btn small" onClick={() => change((p) => ({ ...p, repeat: { count: 3, step: [r3(w + 5), 0, 0] } }))}
-          title="Three copies in a row">In a row</button>
-      </div>
+            : "Six copies turned round its own position - set Around for another point"} />
+        <Big icon={<Columns3 size={20} />} label="In a row" title="Three copies in a row"
+          onClick={() => change((p) => ({ ...p, repeat: { count: 3, step: [r3(w + 5), 0, 0] } }))} />
+      </Grp>
     );
   }
   const around = repeatAround(part);
   return (
-    <div className="v3d-pattern">
-      <div className="v3d-label"><span><Repeat2 size={14} style={{ verticalAlign: -2 }} /> Pattern</span>
-        <button className="link-btn small" onClick={() => change((p) => ({ ...p, repeat: undefined }))}>remove</button></div>
-      <div className="v3d-triple">
-        <Num label="Copies" unit="in all" value={r.count} min={2}
-          onSet={(v) => set((x) => ({ ...x, count: Math.max(2, Math.min(MAX_COPIES, Math.round(v))) }))} />
-        {!r.step && <Num label="Angle" unit="° from the first to the last (360: all round)" step={15} value={r.angle ?? 360}
-          onSet={(v) => set((x) => ({ ...x, angle: Math.max(-360, Math.min(360, v)) }))} />}
-      </div>
-      {r.step ? (
+    <Grp label={r.step ? "Pattern: in a row" : r.around ? "Pattern: turned round a point" : part.shape === "group"
+      ? "Pattern: round the plate's middle" : "Pattern: round its own position"}>
+      <Num label="Copies" unit="in all" value={r.count} min={2}
+        onSet={(v) => set((x) => ({ ...x, count: Math.max(2, Math.min(MAX_COPIES, Math.round(v))) }))} />
+      {r.step ? ["X", "Y", "Z"].map((ax, i) => <Num key={ax} label={`Step ${ax}`} value={r.step![i]}
+        onSet={(v) => set((x) => { const st = [...(x.step ?? [0, 0, 0])] as Vec3; st[i] = v; return { ...x, step: st }; })} />) : (
         <>
-          <div className="v3d-label"><span>Step</span><span className="faint small">from one copy to the next</span></div>
-          <div className="v3d-triple">
-            {["X", "Y", "Z"].map((ax, i) => <Num key={ax} label={ax} value={r.step![i]}
-              onSet={(v) => set((x) => { const st = [...(x.step ?? [0, 0, 0])] as Vec3; st[i] = v; return { ...x, step: st }; })} />)}
-          </div>
-        </>
-      ) : (
-        <>
-          <div className="v3d-label"><span>Around</span>
-            <span className="faint small">{r.around ? "the point they turn about" : part.shape === "group" ? "the plate's middle" : "its own position"}</span></div>
-          <div className="v3d-triple">
-            {["X", "Y"].map((ax, i) => <Num key={ax} label={ax} value={around[i]}
-              onSet={(v) => set((x) => { const a = [...around] as [number, number]; a[i] = v; return { ...x, around: a }; })} />)}
-          </div>
+          <Num label="Angle" unit="° from the first to the last (360: all round)" step={15} value={r.angle ?? 360}
+            onSet={(v) => set((x) => ({ ...x, angle: Math.max(-360, Math.min(360, v)) }))} />
+          {["X", "Y"].map((ax, i) => <Num key={ax} label={`Around ${ax}`} value={around[i]}
+            onSet={(v) => set((x) => { const a = [...around] as [number, number]; a[i] = v; return { ...x, around: a }; })} />)}
         </>
       )}
-    </div>
-  );
-}
-
-function Mirror({ onMirror }: { onMirror: (axis: number) => void }) {
-  return (
-    <div className="v3d-mirror" role="group" aria-label="Mirror">
-      <span className="faint"><FlipHorizontal2 size={14} style={{ verticalAlign: -2 }} /> Mirror</span>
-      {["X", "Y", "Z"].map((ax, i) => (
-        <button key={ax} className="btn small" onClick={() => onMirror(i)}
-          title={`Mirror ${["left-right", "front-back", "up-down"][i]} (in ${ax})`}>{ax}</button>))}
-    </div>
+      <Big icon={<X size={20} />} label="Remove" title="No copies" onClick={() => change((p) => ({ ...p, repeat: undefined }))} />
+    </Grp>
   );
 }

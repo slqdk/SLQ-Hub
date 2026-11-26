@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.90.0 - 2026-11-26
+
+- The 3D editor has its tools in tabs at the top, as in SolidWorks, and
+  nothing at the sides: the model gets the whole width. Shapes adds parts
+  and holes, Part names the picked part and makes it solid or a hole,
+  Size and place sets its size, centre and turn, Arrange groups, mirrors,
+  aligns and repeats parts, and a Text tab appears when a text is picked.
+- A bar over the view has Move, Turn, Size, the snap, the camera views and
+  Point at. Parts, at the right of the tabs, lists every part to pick or
+  hide.
+- Buttons in the editor have words on them, not only icons.
+- The printer is chosen in the status line under the view, where the size
+  is, and what the design's file or its build complains about opens from
+  "1 problem" there.
+
 ## 0.89.0 - 2026-11-26
 
 - Text in a 3D design comes in six fonts: sans (Barlow), serif (Bitter),

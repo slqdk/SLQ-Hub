@@ -3109,11 +3109,11 @@ into the Hub, Tinkercad's level, his printer a Bambu Lab P2S but chosen per desi
   groups - solid or hole, on the chosen printer's plate. Mouse: click picks the top item, Shift-click adds, a double
   click picks the part inside its group, dragging a picked part moves it on the plate (in the plane of the point
   grabbed), the handles (three.js TransformControls on a stand-in object) move, turn and size it; G, R, S switch them,
-  snap 0.1-10 mm and 15 degrees. The inspector has the numbers (size with "keep proportions", centre, angles, radius,
-  sides, a cone's top, text), solid or hole, colour, duplicate, onto the plate (from the built solid's lowest point,
-  not the box), lay a face flat (the clicked face turned to point down), mirror X/Y/Z, hide, delete, group and
-  ungroup, align (several parts). Undo and redo: 100 steps, the assistant's changes too. New shapes go beside what is
-  there; a hole goes through the one part picked.
+  snap 0.1-10 mm and 15 degrees. The numbers (size with "keep proportions", centre, angles, radius, sides, a cone's
+  top, text), solid or hole, colour, duplicate, onto the plate (from the built solid's lowest point, not the box), lay
+  a face flat (the clicked face turned to point down), mirror X/Y/Z, hide, delete, group and ungroup, align (several
+  parts) - in the ribbon since 0.90.0 (below), in a side inspector before. Undo and redo: 100 steps, the assistant's
+  changes too. New shapes go beside what is there; a hole goes through the one part picked.
 - **The format** (`geometry.ts` readDesign/writeDesign, hub3d's `read_design`; `hub3d format` prints it for the
   assistant with an example its build checks): `{"format": "slq-hub-3d", "version": 1, "printer", "bed", "parts"}`;
   a part has an id, a shape, `size` (its own box before turning), `at` (that box's middle), `rotate` (degrees, X then
@@ -3218,6 +3218,28 @@ into the Hub, Tinkercad's level, his printer a Bambu Lab P2S but chosen per desi
     letters were small and skewed - Gemma could not see how big they were. A model no taller than a quarter of its
     width or depth is drawn straight down first ("top"), then at an angle and from the front; straight down, higher
     faces are lighter and a dark line marks every step in depth, so letters on a plate read.
+- **The ribbon (0.90.0).** Søren, with a screenshot of the editor: "Jeg vil gerne have faner i toppen ligesom Solid
+  Works. Så der ikke er nogen ting i siderne, da det i forvejen er trangt med pladsen i siderne" - and "jeg er ikke så
+  meget for knapper uden text". The shape palette (left) and the inspector (right) are gone; the view is the panel's
+  whole width, under a ribbon of tabs, each a row of groups with their names under them (`Grp`, `Big`: an icon over
+  its name):
+  - **Shapes**: box, cylinder, cone, sphere, wedge, text; hole, round hole; Import (from the folder or this computer).
+  - **Part** (the part picked): name, solid or hole, colour; what its shape has of its own (a box's rounded edges and
+    sides, a cylinder's sides, a cone's top, an outline's points, a mesh's file, a group's size); Duplicate, Hide,
+    Delete. Several parts: Duplicate, Delete.
+  - **Size and place**: size (keep proportions), centre ("its bottom at z ..."), turned; Onto the plate, Lay flat.
+  - **Arrange**: Group, Ungroup; mirror left-right, front-back, up-down; align (two or more: left/middle/right,
+    front/middle/back, bottom/middle/top); Pattern (Around, In a row - then copies, angle, the point or the step,
+    Remove).
+  - **Text**, a tab of its own colour while one text is picked: its letters, font (its full name under it), Bold,
+    Italic, Capitals and Spacing (the size it comes out at under them), the lines' alignment and spacing. A tab that
+    goes (Text, when a box is picked) shows Part instead and comes back with the next text.
+  - **Parts**, a menu at the right of the tabs: every part, nested in its groups, to pick, hide or show.
+  - **Over the view**, a heads-up bar as SolidWorks has: Move, Turn, Size, the snap, Fit, Top, Front, Right, Point at
+    (the pick hint under it). **The status line**: size, volume, the printer (a menu: the printers and a custom size),
+    the warnings, and "2 problems" (a menu with what the file's reader and the build said). The head: Undo, Redo,
+    Export, Full width / Show the chat, Close - all with their words. With nothing picked, Part, Size and place and
+    Arrange say how to pick. On a narrow panel the ribbon scrolls sideways; on a phone the tabs wrap.
 
 ### Workflows (0.67.0)
 

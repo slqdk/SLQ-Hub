@@ -4,7 +4,34 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## Next session - start here (written 2026-11-26, at 0.89.0)
+## Next session - start here (written 2026-11-26, at 0.90.0)
+
+**0.90.0 (2026-11-26): the 3D editor's tools in tabs at the top - pushed, not yet installed.** Søren, 06:05, with a
+screenshot of the editor: "Editor/vieweren skal laves lidt om.. Jeg vil gerne have faner i toppen ligesom Solid Works.
+Så der ikke er nogen ting i siderne, da det i forvejen er trangt med pladsen i siderne", and at 06:09: "jeg er ikke så
+meget for knapper uden text. Så lav gerne text på så mange knapper som muligt i editoren". Built (DESIGN §8 "The 3D
+editor", "The ribbon (0.90.0)"): tabs Shapes, Part, Size and place, Arrange and - while a text is picked - Text, each
+a row of named groups of buttons with words; Parts as a menu right of the tabs; a heads-up bar over the view (Move,
+Turn, Size, snap, Fit, Top, Front, Right, Point at); the printer and the problems in the status line; the head's
+buttons with words. The view is the panel's whole width. Seen in the dev server ("name plate"): every tab at 1440,
+1280 (a 742 px panel), full width and a phone's 390 px; a box added, named, made a hole, rounded, sized, centred and
+put onto the plate; the text's font, bold, left, capitals 12, spacing, three lines; a pattern of three, removed, a
+mirror; two parts picked (Align); G after Turn; Top and Point at (the mark in the message); the printer changed to A1
+mini; an unknown font from outside shown as "1 problem"; undo and redo - no console errors. Not seen on his screens.
+To try after the update: the plate from chat 330 - is the ribbon the way he wanted it, are the words clear, does
+anything he uses often take a tab change too many?
+
+**Next: 0.91.0, fillets and chamfers.** Søren (before chat 330): "Er det muligt at lave en funktion hvor man
+efterfølgende kan lave fillet på et kant/side?" - asked, he chose all three: the parts' own edges (box, wedge,
+cylinder, cone, outline - stored on the part), also where parts meet (hole rims, wall/base joints - on the built
+shape, may break when parts move), also on imported STLs (straight sharp edges). The design so far: `fillet` /
+`chamfer` maps on a part (edge name -> mm: a box's "top front", "vertical", "all"; built into the part's own shape -
+edge cutters with overshoot and sphere corners for a box, a revolved rounded profile for cylinders and cones, 2D
+corner rounding for an outline's "vertical"); picked edges `edges: [{fillet|chamfer, path, closed, face, sides,
+part}]` - on a part in its own frame as shares of its size, on a group or the design in mm after that level's joins
+and cuts, checked to lie on the surface (0.05 mm); convex edges cut, concave ones filled; both builds the same.
+
+The paragraphs below were written at 0.89.0 and before.
 
 **0.89.0 (2026-11-26): text options in designs - six fonts, bold, italic, aligned and spaced lines - and text that
 comes out the size meant - pushed, not yet installed.** Chat 330 (Gemma 4 31B, 0.88.0): "Lav en 3D plade på 10x10cm
@@ -23,22 +50,6 @@ changed to script (Pacifico loaded then, bold greyed out), back to sans bold lef
 0.8, new text - the file each time, no console errors. Not tried with a real model; the sandbox image must be rebuilt
 (update.sh: `fonts/` replaces `hub3d-font.json`, the self-test draws every font). To try after the update: chat 330's
 two messages again - does Gemma make the text big at once (a width of most of the plate), and italic when asked?
-
-**Next: 0.90.0, the editor's tools in tabs at the top.** Søren, 06:05 with a screenshot of the editor: "Editor/vieweren
-skal laves lidt om.. Jeg vil gerne have faner i toppen ligesom Solid Works. Så der ikke er nogen ting i siderne, da det
-i forvejen er trangt med pladsen i siderne" - the palette (left) and the inspector (right) go into a ribbon of tabs
-over the view. Told him: Shapes, Part (name, solid/hole, colour, size, centre, turn, actions), Text (when a text is
-picked), Arrange (group, align, mirror, pattern), View (views, snap, Point at), the parts list as a dropdown.
-
-**Then 0.91.0: fillets and chamfers.** Søren (before chat 330): "Er det muligt at lave en funktion hvor man
-efterfølgende kan lave fillet på et kant/side?" - asked, he chose all three: the parts' own edges (box, wedge,
-cylinder, cone, outline - stored on the part), also where parts meet (hole rims, wall/base joints - on the built
-shape, may break when parts move), also on imported STLs (straight sharp edges). The design so far: `fillet` /
-`chamfer` maps on a part (edge name -> mm: a box's "top front", "vertical", "all"; built into the part's own shape -
-edge cutters with overshoot and sphere corners for a box, a revolved rounded profile for cylinders and cones, 2D
-corner rounding for an outline's "vertical"); picked edges `edges: [{fillet|chamfer, path, closed, face, sides,
-part}]` - on a part in its own frame as shares of its size, on a group or the design in mm after that level's joins
-and cuts, checked to lie on the surface (0.05 mm); convex edges cut, concave ones filled; both builds the same.
 
 The paragraphs below were written at 0.88.0 and before.
 
@@ -261,7 +272,7 @@ finds them and fingers still come out wrong). Decided: no Facebook posting (he c
 
 Known flake: tests/test_training.py::test_the_trainer_stops_a_job fails now and then in a full run and passes alone.
 
-## State (0.89.0, 2026-11-26)
+## State (0.90.0, 2026-11-26)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -2325,6 +2336,11 @@ box kept; a flat design drawn straight down with its letters showing, and its re
       converter's cases are ComfyUI 0.42.3's own templates; files from other sites (Civitai, OpenArt) are
       untried - an export is the way to see what went wrong. When COMFYUI_REF changes, the editor's format may
       too: tools/workflow_oracle/ (convert.js, compare.py) is how the converter was checked - run it again.
+108. **The ribbon (0.90.0)** - only in the dev server's headless Chromium:
+    - **His screens**: the tabs and the heads-up bar on his PC (at his zoom), with the chat beside it and at full width;
+      on his phone the tabs wrap and the ribbon scrolls sideways - usable?
+    - **What moved**: the Part and Size and place split, the printer in the status line, the parts list as a menu -
+      does he find them? The keyboard (G, R, S, Delete, Ctrl+D, Ctrl+G, arrows) is as before.
 107. **Text options (0.89.0)** - in the tests and the dev server, not with a real model:
     - **The sandbox image**: update.sh rebuilds it - `COPY fonts/ /opt/hub3d/fonts/` (18 fonts, 3.7 MB) in place of
       hub3d-font.json, and `hub3d selftest` measures text in every font and style. Check `hub3d selftest` and
