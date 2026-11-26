@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.95.0 - 2026-11-26
+
+- The 3D editor picks the lines inside what a hole cuts: click an inside
+  corner or a floor edge of a pocket (through the hole), or pick the hole's
+  lines by name, and Fillet or Chamfer them to round the pocket inside.
+  Lines at the rim of an opening stay sharp for now - rounding the hole
+  there would leave a lip - and a message says which were left.
+- Lines are easier to click when you look at a face edge-on, such as a
+  pocket's wall from above: a click within a few pixels of a line on the
+  screen picks it, but not one hidden behind the model.
+- The assistant's 3D designs: `hub3d format` says how a hole's fillet
+  rounds a pocket, and `hub3d design` warns when a hole's fillet or chamfer
+  is at an opening.
+
 ## 0.94.0 - 2026-11-26
 
 - The 3D editor's tabs are Insert (was Shapes), Part and Lines (was Edges).

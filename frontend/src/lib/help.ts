@@ -755,6 +755,9 @@ export const SECTIONS: HelpSection[] = [
           + "has one shows its size, and a new size resizes it. Resize, with one line picked, opens a box by the line: "
           + "type how long it should be - a rim: how wide - and Enter makes it so (its part keeps its bottom where it "
           + "was). A cylinder's rims, a wedge's slope and an outline's corners too.",
+          "A hole's lines are where it cut: click a line inside a pocket - an upright corner, the edge round its floor - "
+          + "and Fillet or Chamfer it to round the pocket inside. The rim of an opening stays sharp for now: a hole "
+          + "rounded there would leave a lip.",
           "Text comes in six fonts - sans, serif, rounded, script, stencil and mono - bold or italic, its lines "
           + "centred, left or right. Letters sets how tall its capitals are; Spacing and Lines move letters and lines "
           + "apart. Cut through a plate, the stencil font keeps the middles of its letters.",

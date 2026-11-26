@@ -326,15 +326,43 @@ export class Viewport {
 
   /** The part under the pointer: where, and which way that face looks. */
   pick(clientX: number, clientY: number): Hit | null {
+    return this.picks(clientX, clientY).front;
+  }
+
+  /** The part under the pointer, and the solid's own face there (0.95.0) - the same, or behind a hole's ghost: the
+   *  inside of what the hole cut, where its lines are. */
+  picks(clientX: number, clientY: number): { front: Hit | null; solid: Hit | null } {
     this.ray(clientX, clientY);
     const hits = this.raycaster.intersectObjects(this.pickables, false);
+    let front: Hit | null = null;
     for (const h of hits) {
-      const part = h.object === this.solid ? this.triPart[h.faceIndex ?? -1] : h.object.userData.part;
+      const own = h.object === this.solid;
+      const part = own ? this.triPart[h.faceIndex ?? -1] : h.object.userData.part;
       if (!part) continue;
       const n = h.face?.normal ?? new THREE.Vector3(0, 0, 1);
-      return { part, point: [h.point.x, h.point.y, h.point.z], normal: [n.x, n.y, n.z] };
+      const hit: Hit = { part, point: [h.point.x, h.point.y, h.point.z], normal: [n.x, n.y, n.z] };
+      front ??= hit;
+      if (own) return { front, solid: hit };
     }
-    return null;
+    return { front, solid: null };
+  }
+
+  /** The pointer's ray: from the camera, through the pointer, its direction a unit long (0.95.0). */
+  rayAt(clientX: number, clientY: number): { origin: Vec3; dir: Vec3 } {
+    this.ray(clientX, clientY);
+    const { origin: o, direction: d } = this.raycaster.ray;
+    return { origin: [o.x, o.y, o.z], dir: [d.x, d.y, d.z] };
+  }
+
+  /** Whether a point of the design shows (0.95.0): nothing of the solid in front of it, give or take `slack` mm - a
+   *  line inside a pocket from above, not one behind the wall in front of it. */
+  seen(v: Vec3, slack: number): boolean {
+    if (!this.solid) return true;
+    const cam = this.camera.position, to = new THREE.Vector3(v[0], v[1], v[2]).sub(cam);
+    const far = to.length();
+    this.raycaster.set(cam, to.normalize());
+    const hit = this.raycaster.intersectObject(this.solid, false)[0];
+    return !hit || hit.distance >= far - slack;
   }
 
   /** How many mm a pixel spans at a point of the design (0.94.0: a click a few pixels from an edge picks it). */

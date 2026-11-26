@@ -952,7 +952,9 @@ A part:
   fillet    its own edges rounded, {{edge: mm}}: {{"top": 2}} rounds the edges round its top, {{"vertical": 3}} the
             upright ones, {{"all": 1}} every one, {{"top-front": 2}} the one between two faces. A box's faces: top,
             bottom, front, back, left, right; a wedge's: bottom, left, front, back, slope; a cylinder's or a cone's
-            edges: top, bottom; an outline's: vertical (its corners). The name that means an edge most exactly wins
+            edges: top, bottom; an outline's: vertical (its corners). The name that means an edge most exactly wins.
+            On a hole they shape what it cuts: a box's pocket gets round inside corners and floor edges from the
+            hole's {{"vertical": 5, "bottom": 2}} - never its edges at the opening, which would leave a lip round it
   chamfer   the same names, the edges cut off instead (the size along each face): {{"bottom": 0.6}} - a bottom edge
             that does not bulge onto the plate
 
@@ -1590,6 +1592,170 @@ def _place_mesh(v: np.ndarray, f: np.ndarray, part: dict) -> tuple[np.ndarray, n
     return w, f
 
 
+# ---------------------------------------------------------------- a hole's lines (0.95.0)
+# A fillet or chamfer on a hole shapes what it cuts. On its edges inside the part - a pocket's upright corners and
+# floor edges - it rounds the pocket's inside; on its edges at an opening the cutter rounded there cuts less, so a
+# lip is left round the opening. The editor rounds only the inside ones; `hub3d design` warns of the others.
+
+_FACE_OUT = {"top": (0, 0, 1), "bottom": (0, 0, -1), "front": (0, -1, 0), "back": (0, 1, 0), "left": (-1, 0, 0),
+             "right": (1, 0, 0)}
+_FACE_AT = {"top": (2, 1), "bottom": (2, -1), "front": (1, -1), "back": (1, 1), "left": (0, -1), "right": (0, 1)}
+
+
+def _unit(v) -> np.ndarray:
+    v = np.asarray(v, dtype=np.float64)
+    n = float(np.linalg.norm(v))
+    return v / n if n > 1e-12 else np.zeros(3)
+
+
+def _edge_ends(p: dict, edge: str):
+    """A box's or wedge's edge, its two ends in its own frame - the editor's edgeSegments."""
+    x, y, z = (s / 2 for s in p["size"])
+    if p["shape"] == "box":
+        lo, hi = np.array([-x, -y, -z]), np.array([x, y, z])
+        a, b = lo.copy(), hi.copy()
+        for face in edge.split("-"):
+            axis, sign = _FACE_AT[face]
+            a[axis] = b[axis] = hi[axis] if sign > 0 else lo[axis]
+        return a, b
+    pt = {"A": (-x, -y, -z), "B": (x, -y, -z), "C": (x, y, -z), "D": (-x, y, -z), "E": (-x, -y, z), "F": (-x, y, z)}
+    ends = {"bottom-left": "AD", "bottom-front": "AB", "bottom-back": "DC", "bottom-slope": "BC", "left-front": "AE",
+            "left-back": "DF", "left-slope": "EF", "front-slope": "EB", "back-slope": "FC"}[edge]
+    return np.array(pt[ends[0]], dtype=np.float64), np.array(pt[ends[1]], dtype=np.float64)
+
+
+def _in_outlines(polys, x: float, y: float) -> bool:
+    """Inside outlines read EvenOdd: inside an odd number of them."""
+    inside = False
+    for poly in polys:
+        n = len(poly)
+        for i in range(n):
+            (xi, yi), (xj, yj) = poly[i], poly[i - 1]
+            if (yi > y) != (yj > y) and x < (xj - xi) * (y - yi) / (yj - yi) + xi:
+                inside = not inside
+    return inside
+
+
+def _edge_outside(p: dict, edge: str, gap: float) -> list[np.ndarray]:
+    """Points `gap` mm off a part's edge, out between the two faces it lies between: along each line of it, on the
+    part and each copy, in the design - the editor's edgeOutside. One array a line."""
+    sx, sy, sz = p["size"]
+    local = []
+
+    def along(a, b, out):
+        d = _unit(out)
+        return [a + (k / 8) * (b - a) + gap * d for k in range(1, 8)]
+
+    if p["shape"] in ("box", "wedge"):
+        ln = math.hypot(sx, sz) or 1.0
+        f, g = (np.array((sz / ln, 0, sx / ln) if face == "slope" else _FACE_OUT[face], dtype=np.float64)
+                for face in edge.split("-"))
+        a, b = _edge_ends(p, edge)
+        local.append(along(a, b, f + g))
+    elif p["shape"] in ("cylinder", "cone"):
+        k = 1.0 if edge == "bottom" else (p.get("top", 0.0) if p["shape"] == "cone" else 1.0)
+        if k > 0:
+            up = 1 if edge == "top" else -1
+            ring = []
+            for i in range(8):
+                t = 2 * math.pi * (i + 0.5) / 8
+                n = _unit((math.cos(t) / max(sx, 1e-9), math.sin(t) / max(sy, 1e-9), 0))
+                d = _unit((n[0], n[1], up))
+                ring.append(np.array([sx / 2 * k * math.cos(t), sy / 2 * k * math.sin(t), up * sz / 2]) + gap * d)
+            local.append(ring)
+    elif p["shape"] == "outline" and edge == "vertical":
+        polys = _outline_polygons(p) or []
+        for poly in polys:
+            for i in range(len(poly)):
+                c, a, b = poly[i], poly[i - 1], poly[(i + 1) % len(poly)]
+                u, w = _unit((a[0] - c[0], a[1] - c[1], 0)), _unit((b[0] - c[0], b[1] - c[1], 0))
+                d = _unit(u + w)                                  # into the corner's angle ...
+                if not d[0] and not d[1]:
+                    d = np.array([-u[1], u[0], 0.0])
+                if _in_outlines(polys, c[0] + gap / 2 * d[0], c[1] + gap / 2 * d[1]):
+                    d = -d                                        # ... or out of it
+                local.append(along(np.array([c[0], c[1], -sz / 2]), np.array([c[0], c[1], sz / 2]), d))
+    m = _rotation_matrix(p["rotate"])
+
+    def place(v):
+        w = np.array(v, dtype=np.float64)
+        if p.get("mirror"):
+            w[0] = -w[0]
+        return m @ w + np.array(p["at"], dtype=np.float64)
+
+    out = [np.array([place(v) for v in line]) for line in local]
+    r = p.get("repeat")
+    for i in range(1, r["count"] if r and r["count"] > 1 else 1):
+        for line in local:
+            pts = np.array([place(v) for v in line])
+            if "step" in r:
+                pts = pts + np.array(r["step"], dtype=np.float64) * i
+            else:
+                ax, ay = _repeat_around(p)
+                t = math.radians(_repeat_step(r) * i)
+                x, y = pts[:, 0] - ax, pts[:, 1] - ay
+                pts = np.column_stack([ax + math.cos(t) * x - math.sin(t) * y, ay + math.sin(t) * x + math.cos(t) * y,
+                                       pts[:, 2]])
+            out.append(pts)
+    return out
+
+
+def _inside_solid(tri: np.ndarray, v) -> bool:
+    """Whether a point is inside a closed mesh (its triangles, N x 3 x 3): rays along +X, +Y and +Z each cross it an
+    odd number of times when it is - and the three vote, as the editor's insideMesh."""
+    q = np.asarray(v, dtype=np.float64) + np.array([1.37e-5, 2.91e-5, 4.73e-5])
+    votes = 0
+    for axis in range(3):
+        i, j = (axis + 1) % 3, (axis + 2) % 3
+        ti, tj = tri[:, :, i] - q[i], tri[:, :, j] - q[j]
+        near = ~((ti > 0).all(1) | (ti < 0).all(1) | (tj > 0).all(1) | (tj < 0).all(1))
+        ti, tj, ta = ti[near], tj[near], tri[near][:, :, axis]
+        wa = ti[:, 1] * tj[:, 2] - tj[:, 1] * ti[:, 2]
+        wb = ti[:, 2] * tj[:, 0] - tj[:, 2] * ti[:, 0]
+        wc = ti[:, 0] * tj[:, 1] - tj[:, 0] * ti[:, 1]
+        hit = ((wa > 0) & (wb > 0) & (wc > 0)) | ((wa < 0) & (wb < 0) & (wc < 0))
+        at = (wa * ta[:, 0] + wb * ta[:, 1] + wc * ta[:, 2])[hit] / (wa + wb + wc)[hit]
+        votes += int((at > q[axis]).sum()) % 2
+    return votes >= 2
+
+
+def hole_edges(p: dict, edges, tri: np.ndarray) -> tuple[list[str], list[str]]:
+    """A cutter's edges split: those inside the solid it cuts (solid just off the edge somewhere along each of its
+    lines) and the open ones - the editor's holeEdges. `tri`: the built solid's triangles."""
+    gap = min(0.2, 0.1 * min([2.0] + [s for s in p["size"] if s > 0]))
+    inside, open_ = [], []
+    for e in edges:
+        ok = all(any(_inside_solid(tri, v) for v in line) for line in _edge_outside(p, e, gap))
+        (inside if ok else open_).append(e)
+    return inside, open_
+
+
+def _hole_lips(parts: list, solid, under: bool = False, mesh: list | None = None) -> list[str]:
+    """Holes (and parts of hole groups) with a fillet or chamfer on an edge at an opening: a lip round it."""
+    out, mesh = [], mesh if mesh is not None else []
+    for p in parts:
+        if p.get("hidden"):
+            continue
+        cuts = under or bool(p.get("hole"))
+        if p["shape"] == "group":
+            out += _hole_lips(p.get("parts", []), solid, cuts, mesh)
+            continue
+        plan = _edge_plan(p) if cuts and (p.get("fillet") or p.get("chamfer")) and not p.get("radius") else {}
+        if not plan:
+            continue
+        if not mesh:                                    # the solid's triangles, once
+            m = solid.to_mesh()
+            mesh.append(np.asarray(m.vert_properties, dtype=np.float64)[:, :3][np.asarray(m.tri_verts)])
+        _, lips = hole_edges(p, list(plan), mesh[0])
+        for kind in ("fillet", "chamfer"):
+            these = [e for e in lips if plan[e][0] == kind]
+            if these:
+                out.append(f"hole {p['id']}: its {kind} on {', '.join(these)} is at an opening, where it leaves a lip "
+                           f"round the opening - a hole's {kind} belongs on its edges inside the part (a pocket's "
+                           "vertical and bottom)")
+    return out
+
+
 class DesignBuild:
     """What a design makes: `solid` (a Manifold, or None), `loose` meshes that are not closed solids [(part id,
     vertices, faces)], `problems`, and the design itself (`design`, with its `bed`)."""
@@ -1848,6 +2014,8 @@ def design_report(path, bed=None, stl=None, three_mf=None, png=None) -> int:
         return 1
     model = models[0] if len(models) == 1 else models
     report = check(model, bed)
+    if b.solid is not None and not b.solid.is_empty():
+        report.warnings += _hole_lips(d["parts"], b.solid)
     low = report.lowest[2]
     if low < -0.01:              # a design is placed on its plate: the slicer moves it, so what lies there changes
         report.warnings.append(f"its lowest point is at z {low:.2f} mm, below the plate - the slicer lifts it, so "

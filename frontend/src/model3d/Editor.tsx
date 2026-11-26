@@ -18,14 +18,15 @@ import { useApp } from "../state";
 import { ConfirmButton, MenuButton } from "../components/ui";
 import type { DesignFolder } from "./folder";
 import { allIds, build, buildPart, COLORS, edgeLength, edgeLines, edgePlan, EDGES, edgesOf, extent, extentOf, FONT_FAMILIES, fontFile,
-  follows, freshId, joined, lettersApart, MAX_COPIES, MIN_SIZE, mirrorPart, nearestEdge, newDesign, partSize, readDesign,
-  repeatAround, retext, SPACING, stl, textMeasure, threeMf, transformPart, treatEdges, withCapitals, withEdgeLength, writeDesign,
-  type Align, type Box3, type Built, type Design, type EdgeKind, type FontData, type FontIndex, type Fonts, type Kit,
-  type Mat3, type MeshData, type Part, type Repeat, type Shape, type Vec3, type Wasm } from "./geometry";
+  follows, freshId, holeEdges, joined, lettersApart, MAX_COPIES, MIN_SIZE, mirrorPart, nearestEdge, nearestToRay, newDesign,
+  partSize, readDesign, repeatAround, retext, SPACING, stl, textMeasure, threeMf, transformPart, treatEdges, withCapitals,
+  withEdgeLength, writeDesign, type Align, type Box3, type Built, type Design, type EdgeKind, type FontData,
+  type FontIndex, type Fonts, type Kit, type Mat3, type MeshData, type Part, type Repeat, type Shape, type Vec3,
+  type Wasm } from "./geometry";
 import { baseName, dirOf, fmt, joinPath, MESH_FILE, pointMark, relativePath } from "./files";
 import { parseMesh } from "./meshio";
 import { lastPrinter, PRINTERS, printerOf, rememberPrinter, type Printer } from "./printers";
-import { centre, copy, find, group, label, pick, remove, replaceWith, ungroup, update } from "./tree";
+import { centre, copy, cuts, cutters, find, group, label, pick, remove, replaceWith, ungroup, update } from "./tree";
 import { Viewport, type Hit, type ViewName } from "./Viewport";
 
 type Mode = "translate" | "rotate" | "scale";
@@ -730,9 +731,7 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
       const x = e.clientX, y = e.clientY;
       cancelAnimationFrame(hoverFrame.current);
       hoverFrame.current = requestAnimationFrame(() => {
-        const vv = vp.current;
-        const hit = vv && !vv.overGizmo ? vv.pick(x, y) : null;
-        const got = !hit ? null : tool === "edge" ? edgeOf(hit) : lineAt(hit);
+        const got = lineUnder(x, y, tool === "edge");
         setHoverEdge((cur) => (got && typeof got !== "string" ? (cur?.part === got.part.id && cur.edge === got.edge ? cur
           : { part: got.part.id, edge: got.edge }) : null));
       });
@@ -763,13 +762,39 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
     return near ? { part, edge: near.edge } : "";
   };
 
-  /** A line within a few pixels of a spot on the model (0.94.0): a click there picks the line, not the part. */
-  const lineAt = (hit: Hit, px = 7): { part: Part; edge: string } | null => {
+  /** The line under the pointer (0.94.0): one a few pixels from it on the screen (0.95.0: however the face there is
+   *  turned - a pocket's wall seen edge-on from above too) and not behind the solid - of the part the pointer is on,
+   *  or of a hole: the creases of what it cut, the pocket's inside seen through the hole's ghost. A rounded or cut
+   *  line, its band as well. `any` (Pick lines): else the part's nearest line, however far - or why it has none. */
+  const lineUnder = (x: number, y: number, any = false, px = 7): { part: Part; edge: string } | string | null => {
     const v = vp.current, d = designRef.current;
-    const part = d ? find(d.parts, hit.part)?.part : null;
-    if (!v || !part || edgeless(part)) return null;
-    const near = nearestEdge(part, hit.point);
-    return near && near.distance <= px * v.mmPerPx(hit.point) ? { part, edge: near.edge } : null;
+    if (!v || !d || v.overGizmo) return null;
+    const { front, solid } = v.picks(x, y);
+    if (!front) return null;
+    const { origin, dir } = v.rayAt(x, y);
+    const parts = new Set<Part>();
+    for (const h of [front, solid]) {
+      const p = h ? find(d.parts, h.part)?.part : null;
+      if (p) parts.add(p);
+    }
+    for (const p of cutters(d.parts)) parts.add(p);
+    const near: { part: Part; edge: string; off: number; at: Vec3; slack: number }[] = [];
+    for (const part of parts) {
+      if (edgeless(part)) continue;
+      const plan = edgePlan(part);
+      for (const edge of EDGES[part.shape] ?? []) {
+        const n = nearestToRay(edgeLines(part, [edge]), origin, dir);
+        if (!n) continue;
+        const per = v.mmPerPx(n.point), size = plan[edge]?.size ?? 0;
+        const off = Math.max(0, n.distance - size) / per;
+        if (off <= px) near.push({ part, edge, off, at: n.point, slack: Math.min(2 * per, 1) + 1.5 * size });
+      }
+    }
+    near.sort((a, b) => a.off - b.off);
+    const got = near.find((n) => v.seen(n.at, n.slack));          // the nearest one not behind the solid
+    if (got) return { part: got.part, edge: got.edge };
+    const h = solid ?? front;
+    return any ? edgeOf(h) : null;
   };
 
   /** A line picked (0.92.0, 0.94.0): alone - or, `add` (Shift, Pick several, Pick lines), with the others, or unpicked.
@@ -793,9 +818,9 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
   };
 
   /** Pick lines (0.92.0): a click picks the line nearest it - however far - or unpicks it. */
-  const pickEdge = (hit: Hit) => {
-    const got = edgeOf(hit);
-    if (typeof got === "string") {
+  const pickEdge = (x: number, y: number) => {
+    const got = lineUnder(x, y, true);
+    if (!got || typeof got === "string") {
       if (got) toast(got, "fault");
       return;
     }
@@ -836,15 +861,33 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
     else change(r.part, () => next);
   };
 
-  /** The picked edges given a fillet or chamfer of the size field's size, or none. */
+  /** The picked edges given a fillet or chamfer of the size field's size, or none. A hole's (0.95.0): those inside
+   *  the part it cuts - its inside corners - not those at an opening, where rounding the hole would leave a lip. */
   const treatPicked = (kind: EdgeKind | null, size = edgeSize) => {
     const d = designRef.current;
     if (!d || !Object.keys(edgeSel).length) return;
     let ps = d.parts;
-    for (const [id, edges] of Object.entries(edgeSel)) {          // not a part rounded all round since, nor a hole
-      ps = update(ps, id, (p) => (edgeless(p) ? p : tidy(treatEdges(p, edges, kind ? { kind, size } : null))));
+    const left: string[] = [];
+    for (const [id, edges] of Object.entries(edgeSel)) {
+      const f = find(d.parts, id);
+      if (!f || edgeless(f.part)) continue;                       // not a part rounded all round since
+      let these = edges;
+      if (kind && cuts(d.parts, id)) {
+        if (!built) {
+          toast("The design is not built yet - try again in a moment.", "fault");
+          return;
+        }
+        const split = holeEdges(f.part, edges, built);
+        these = split.inside;
+        if (split.open.length) left.push(`${label(f.part)}: ${split.open.join(", ")}`);
+      }
+      if (these.length) ps = update(ps, id, (p) => tidy(treatEdges(p, these, kind ? { kind, size } : null)));
     }
-    commit({ ...d, parts: ps });
+    if (ps !== d.parts) commit({ ...d, parts: ps });
+    if (left.length) {
+      toast(`Left sharp - at an opening, where a ${kind} on the hole would leave a lip (that comes with fillets where`
+        + ` parts meet): ${left.join("; ")}.`, "fault");
+    }
   };
 
   /** A new size for the picked edges that have a fillet or chamfer: each keeps its kind. */
@@ -923,7 +966,7 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
       return;
     }
     if (tool === "edge") {
-      if (hit) pickEdge(hit);
+      if (hit) pickEdge(e.clientX, e.clientY);
       return;
     }
     if (!hit) {
@@ -933,8 +976,8 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
       }
       return;
     }
-    const line = lineAt(hit);                          // a line: it, and the Lines tab (0.94.0)
-    if (line) {
+    const line = lineUnder(e.clientX, e.clientY);      // a line: it, and the Lines tab (0.94.0) - a hole's too (0.95.0)
+    if (line && typeof line !== "string") {
       pickLine(line, e.shiftKey || several);
       return;
     }
@@ -1363,7 +1406,7 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
               onName={(key) => { if (one) pickEdges(one, key); }}
               onChip={(key, v) => { if (one) { pickEdges(one, key); setEdgeSize(v); } }}
               onTreat={(kind) => treatPicked(kind)} onSize={resizePicked} onClear={() => setEdgeSel({})}
-              length={oneLine} onResize={openResize} />
+              length={oneLine} onResize={openResize} cutter={!!one && !!design && !!cuts(design.parts, one.id)} />
           )}
         </Band>
       </div>
@@ -1842,7 +1885,6 @@ function ApartButton({ part, onApart }: { part: Part; onApart: () => void }) {
 
 /** Why a part has no lines of its own to round, cut or resize in the Lines tab - or null. */
 function edgeless(p: Part): string | null {
-  if (p.hole) return "A hole's rim where it meets a part cannot be rounded yet.";
   if (p.radius) return "That box is rounded all round: set All rounded (Part) to 0 to round single edges.";
   if (EDGES[p.shape]) return null;
   return p.shape === "group" ? "A group's lines are its parts': click one on the model to pick it."
@@ -1854,11 +1896,11 @@ function edgeless(p: Part): string | null {
  *  fillet, a chamfer or nothing; a new size resizes the picked lines that have one. One line picked: Resize sets how
  *  long it is (0.94.0) - a box over the view, Enter sets it. */
 function LinesBand({ part, many, picked, pickedOn, size, picking, onPicking, onName, onChip, onTreat, onSize, onClear,
-  length, onResize }: {
+  length, onResize, cutter }: {
   part: Part | null; many: boolean; picked: number; pickedOn: string[]; size: number; picking: boolean;
   onPicking: () => void; onName: (key: string) => void; onChip: (key: string, size: number) => void;
   onTreat: (kind: EdgeKind | null) => void; onSize: (v: number) => void; onClear: () => void;
-  length: { length: number; what: string } | null; onResize: () => void }) {
+  length: { length: number; what: string } | null; onResize: () => void; cutter: boolean }) {
   const why = part ? edgeless(part) : null;
   const shape = part?.shape;
   const names: [string, string][] = !part || why ? [] : shape === "outline" ? [["vertical", "Corners"]]
@@ -1872,9 +1914,10 @@ function LinesBand({ part, many, picked, pickedOn, size, picking, onPicking, onN
   const now = part && !why ? (["fillet", "chamfer"] as const).flatMap((k) => Object.entries(part[k] ?? {}).map(([key, v]) => ({ k, key, v }))) : [];
   const where = (key: string) => (key === "all" ? "every edge" : key === "vertical" ? (shape === "outline" ? "its corners"
     : "the upright edges") : `the edges round its ${key}`);
+  const inside = cutter ? " - those inside the part the hole cuts (its inside corners), not those at an opening" : "";
   return (
     <>
-      <Grp label={part && !why ? `Pick: ${kindOf(part).toLowerCase()} ${part.id}` : "Pick"}>
+      <Grp label={part && !why ? `Pick: ${kindOf(part).toLowerCase()} ${part.id}${cutter ? " (hole)" : ""}` : "Pick"}>
         <Big icon={<MousePointerClick size={20} />} label="Pick lines" active={picking} onClick={onPicking}
           title="Click lines on the model to pick several - again to unpick (a plain click near a line picks it alone). Esc stops." />
         {names.length > 0 && (
@@ -1894,9 +1937,9 @@ function LinesBand({ part, many, picked, pickedOn, size, picking, onPicking, onN
       </Grp>
       <Grp id="treat" short="Fillet" label={picked ? `${picked} line${picked > 1 ? "s" : ""} picked` : "Nothing picked"} fold={3} icon={<SquareRoundCorner size={20} />}>
         <Big icon={<SquareRoundCorner size={20} />} label="Fillet" disabled={!picked} onClick={() => onTreat("fillet")}
-          title={`The picked lines rounded: radius ${fmt(size)} mm`} />
+          title={`The picked lines rounded: radius ${fmt(size)} mm${inside}`} />
         <Big icon={<ChamferIcon />} label="Chamfer" disabled={!picked} onClick={() => onTreat("chamfer")}
-          title={`The picked lines cut off: ${fmt(size)} mm along each face`} />
+          title={`The picked lines cut off: ${fmt(size)} mm along each face${inside}`} />
         <Big icon={<Eraser size={20} />} label="Take off" disabled={!picked} onClick={() => onTreat(null)}
           title="The picked lines sharp again" />
         <div className="v3d-stack">

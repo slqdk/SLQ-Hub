@@ -3303,6 +3303,32 @@ into the Hub, Tinkercad's level, his printer a Bambu Lab P2S but chosen per desi
     ellipse scaled alike), a cone's bottom rim its base keeping the top's own diameter, its top rim the top (not wider
     than the base); an outline's corners its thickness. The part keeps its bottom's z (it stays on the plate) and its
     middle across; X, Y and Z are its own, so a part lying on its side grows the way its line runs.
+- **A hole's lines (0.95.0).** Søren, with his spare-parts box (a box, and a box hole "Innerum" 94 x 44 x 37 from 3 mm
+  up, its top at the box's): "Jeg skulle gerne kunne vælge linierne inde i kassen også, så jeg kan lave fillet på dem".
+  - **A hole's fillet rounds what it cut.** The cutter rounded on its upright edges leaves the pocket round inside
+    corners, on its bottom edges a rounded floor edge - its edges inside the part. On its edges at the opening the
+    cutter rounded cuts less there, so a lip is left round the opening (rounding the rim itself is a fillet where the
+    hole meets the part: 0.96.0). So a hole's lines are picked as a part's - clicked, by name, Resized - and Fillet
+    and Chamfer go to those inside it only (`holeEdges`); the others are named in a toast. Take off takes off any.
+  - **Inside or at an opening** (`holeEdges`; hub3d's `hole_edges`, the same): points 0.2 mm off the edge, out
+    between its two faces (`edgeOutside`: along a straight edge at its eighths, round a rim at eight places, up each of
+    an outline's corners - on the part and each copy). An edge is inside when on each of its lines one such point is
+    inside the built solid (`insideMesh`: rays along +X, +Y and +Z, an odd number of crossings inside; the three vote,
+    the point nudged off round numbers). A pocket's upright and bottom edges are inside, its top edges at the top face
+    or above it are not; a shut-in void's are all inside; a slot across the top keeps only its long bottom edges; an
+    outline cut out of a part's side has not every corner inside (its one name means them all). Whatever cuts is
+    checked: a hole, or a part of a hole group.
+  - **Clicking the lines inside a pocket.** The pointer's ray meets the hole's ghost first - it covers the opening -
+    so `picks` gives that hit and the solid's own face behind it, the pocket's inside (its triangles the hole's, by
+    `triPart`). Lines of the parts under the pointer (ghost and solid) and of every hole are looked at; one is under the
+    pointer when the ray passes within 7 pixels of it on the screen (`nearestToRay`, over `mmPerPx` there - 0.94.0
+    measured from the spot hit, which on a wall seen edge-on from above gave one pixel or two), and when it is not
+    behind the solid (`seen`: a ray from the camera to it meets the solid no more than 1 mm - 2 pixels, when that is
+    less - before it; a rounded or cut line its size more, its band counting too). An inside corner behind the front
+    wall is not picked through it.
+  - **hub3d**: `hub3d format` says a hole's fillet shapes what it cuts (a pocket's `{"vertical": 5, "bottom": 2}`, never
+    its edges at the opening); `hub3d design` warns of a hole's fillet or chamfer at an opening - the lip - so the
+    design is not READY.
 - **Fillets and chamfers (0.91.0).** Søren: "Er det muligt at lave en funktion hvor man efterfølgende kan lave fillet
   på et kant/side?" - asked, he chose all three: the parts' own edges, also where parts meet, also on imported STLs.
   0.91.0 is the first: a part's own edges.
@@ -3330,9 +3356,10 @@ into the Hub, Tinkercad's level, his printer a Bambu Lab P2S but chosen per desi
     **Pick an edge**: click edges on the model - the spot is taken into the part's own frame (unmoved, unturned,
     unmirrored; a repeated part's copy found) and the nearest named edge gets the treatment, or loses it when it has
     that one; and the part's names now, each a button that takes it off. A box with All rounded (its radius, in Part)
-    says to set that to 0; setting it clears the fillets. Holes' and meshes' edges say they cannot be rounded yet.
-  - **Not yet - 0.95.0**: edges where parts meet (a hole's rim, a wall on a base: on the built solid, a fillet's
-    cutter or filler swept along the picked crease) and straight sharp edges of imported meshes.
+    says to set that to 0; setting it clears the fillets. Holes' and meshes' edges say they cannot be rounded yet
+    (a hole's can since 0.95.0, inside the part).
+  - **Not yet - 0.96.0**: edges where parts meet (the rim of a hole's opening, a wall on a base: on the built solid, a
+    fillet's cutter or filler swept along the picked crease) and straight sharp edges of imported meshes.
 - **Picking first (0.92.0).** Søren, 07:23: "Er det ikke muligt at vælge et enkelt bogstav og ændre på det ? altså ved
   at klikke på bogstavet ? Og hvis jeg så vil ændre på flere, så kan jeg vælge en mode for at vælge flere" - one letter
   bigger, or moved a little, or two of them - and at 07:25, with the Edges tab whose Pick an edge filleted at once: "jeg

@@ -371,6 +371,7 @@ def test_hub3d_format_is_what_both_read(h3, capsys):
     assert "  repeat    copies of the part" in guide and "linear_extrude(size z, center=true) polygon(points)" in guide
     assert "Not cylinders lying down" in guide                         # chat 328
     assert "tiers that step out" in guide and '{"bottom": 17}' in guide   # 0.93.1: the tree
+    assert 'hole\'s {"vertical": 5, "bottom": 2} - never its edges at the opening' in guide   # 0.95.0: a hole's lines
     keys = (ROOT / "frontend" / "src" / "model3d" / "geometry.ts").read_text()
     assert all(f'"{k}"' in keys for k in h3.PART_KEYS)                  # the two know the same keys
     assert h3.MAX_COPIES == 100 and "export const MAX_COPIES = 100;" in keys
@@ -684,6 +685,18 @@ EDGED = [
                {"id": "z", "shape": "box", "radius": 2, "fillet": {"top": 1}},
                {"id": "t", "shape": "text", "text": "A", "chamfer": {"all": 1}, "size": [0, 10, 2], "at": [30, 0, 1]}]},
     {"parts": [{"id": "r", "shape": "box", "size": [40, 30, 20], "at": [0, 0, 10], "radius": 4, "sides": 32}]},
+    # 0.95.0: a hole's lines inside what it cuts - Søren's spare-parts box, its pocket's corners and floor rounded
+    {"parts": [{"id": "kasse", "shape": "box", "size": [100, 50, 40], "at": [0, 0, 20]},
+               {"id": "inner", "name": "Innerum", "shape": "box", "size": [94, 44, 37], "at": [0, 0, 21.5], "hole": True,
+                "fillet": {"vertical": 5, "bottom": 2}}]},
+    {"parts": [{"id": "plate", "shape": "box", "size": [80, 60, 12], "at": [0, 0, 6], "rotate": [0, 0, 15]},
+               {"id": "drill", "shape": "cylinder", "size": [8, 8, 20], "at": [25, 0, 14], "hole": True,
+                "fillet": {"bottom": 1.5}, "repeat": {"count": 4, "around": [0, 0]}},
+               {"id": "ramp", "shape": "wedge", "size": [30, 16, 8], "at": [0, 0, 9], "hole": True, "mirror": True,
+                "chamfer": {"bottom": 1}},
+               {"id": "g", "shape": "group", "hole": True, "parts": [
+                   {"id": "slot", "shape": "outline", "points": [[0, 0], [20, 0], [20, 6], [0, 6]], "size": [0, 0, 8],
+                    "at": [-10, -26, 10], "fillet": {"corners": 2}}]}]},
 ]
 
 
@@ -955,3 +968,114 @@ def test_letters_apart_make_the_same_solid(h3):
     js_tables = run_js("process.stdout.write(JSON.stringify({faces: G.EDGE_FACES, edges: G.EDGES}));", {})
     assert js_tables["faces"] == {k: list(v) for k, v in h3.EDGE_FACES.items()}
     assert js_tables["edges"] == {k: list(v) for k, v in h3.EDGES.items()}
+
+
+# 0.95.0, Søren: "Jeg skulle gerne kunne vælge linierne inde i kassen også, så jeg kan lave fillet på dem" - a hole's
+# lines inside the part it cuts are picked and rounded as a part's own are: a fillet on the cutter rounds the pocket's
+# inside corners. Its lines at an opening are not (yet): there the cutter rounded would leave a lip round it.
+BOX = {"id": "box", "shape": "box", "size": [100, 50, 40], "at": [0, 0, 20]}
+POCKET = {"id": "h", "shape": "box", "size": [94, 44, 37], "at": [0, 0, 21.5], "hole": True}
+TOPS = ["top-front", "top-back", "top-left", "top-right"]
+HOLE_CASES = {
+    "open": ([BOX, POCKET], TOPS),
+    "tall": ([BOX, {**POCKET, "size": [94, 44, 197], "at": [0, 0, 101.5]}], TOPS),          # far out of the top
+    "void": ([BOX, {**POCKET, "size": [80, 30, 20], "at": [0, 0, 20]}], []),                # shut in: all inside
+    "turned": ([{**BOX, "rotate": [0, 0, 30]}, {**POCKET, "rotate": [0, 0, 30], "mirror": True}], TOPS),
+    "slot": ([BOX, {"id": "h", "shape": "box", "size": [20, 80, 10], "at": [0, 0, 40], "hole": True}],   # across the top
+             TOPS + ["bottom-front", "bottom-back", "front-left", "front-right", "back-left", "back-right"]),
+    "drill": ([BOX, {"id": "h", "shape": "cylinder", "size": [8, 8, 30], "at": [30, 0, 30], "hole": True,
+                     "repeat": {"count": 3, "step": [-30, 0, 0]}}], ["top"]),
+    "ramp": ([BOX, {"id": "h", "shape": "wedge", "size": [40, 20, 20], "at": [0, 0, 30], "hole": True}], ["left-slope"]),
+    "pocket": ([BOX, {"id": "h", "shape": "outline", "points": [[0, 0], [30, 0], [30, 20], [15, 10], [0, 20]],
+                      "size": [0, 0, 20], "at": [-15, -10, 35], "hole": True}], []),
+    "through": ([BOX, {"id": "h", "shape": "outline", "points": [[0, 0], [30, 0], [30, 20], [0, 20]], "size": [0, 0, 20],
+                       "at": [35, -10, 35], "hole": True}], ["vertical"]),           # out of its side: not every corner
+    "group": ([BOX, {"id": "g", "shape": "group", "hole": True, "parts": [{**POCKET, "hole": False}]}], TOPS),
+}
+HOLE_JS = """
+const kit = { wasm, fonts, meshes: new Map() };
+const read = (parts) => G.readDesign(JSON.stringify({ parts })).design;
+const find = (ps, id) => { for (const p of ps) { if (p.id === id) return p; const r = p.parts && find(p.parts, id); if (r) return r; } return null; };
+const out = { open: {} };
+for (const [name, [parts]] of Object.entries(input)) {
+  const d = read(parts), b = G.build(d, kit), h = find(d.parts, "h");
+  out.open[name] = G.holeEdges(h, G.EDGES[h.shape], b).open;
+}
+// all twelve picked, Fillet: the eight inside get it
+const d = read(input.open[0]), sharp = G.build(d, kit), h = find(d.parts, "h");
+const split = G.holeEdges(h, G.EDGES.box, sharp);
+const treated = G.treatEdges(h, split.inside, { kind: "fillet", size: 3 });
+const as = (q) => G.build({ ...d, parts: d.parts.map((p) => (p.id === "h" ? q : p)) }, kit);
+const inside = as(treated), all = as(G.treatEdges(h, G.EDGES.box, { kind: "fillet", size: 3 }));
+out.inside = split.inside;
+out.treated = { fillet: treated.fillet ?? null, chamfer: treated.chamfer ?? null };
+out.volumes = { sharp: sharp.volume, inside: inside.volume, all: all.volume };
+const lip = [0, -21.9, 39.9];                       // just in from the opening's front rim
+out.lip = { inside: G.insideMesh(inside, lip), all: G.insideMesh(all, lip) };
+// insideMesh against the open box worked out by hand, both turned 30 degrees
+const t = read(input.turned[0].map((p) => ({ ...p, mirror: false }))), tb = G.build(t, kit);
+const c = Math.cos(Math.PI / 6), s = Math.sin(Math.PI / 6);
+let seed = 3, wrong = 0;
+const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+for (let k = 0; k < 3000; k++) {
+  const v = [(rnd() - 0.5) * 140, (rnd() - 0.5) * 140, rnd() * 50 - 5];
+  const x = c * v[0] + s * v[1], y = -s * v[0] + c * v[1];
+  const want = Math.abs(x) < 50 && Math.abs(y) < 25 && v[2] > 0 && v[2] < 40
+    && !(Math.abs(x) < 47 && Math.abs(y) < 22 && v[2] > 3);
+  if (G.insideMesh(tb, v) !== want) wrong++;
+}
+out.wrong = wrong;
+out.near = G.nearestEdge({ ...d.parts[1], hole: true }, [10, -22.5, 41]);
+const line = [[[0, -10, 0], [0, 10, 0]]];          // the pointer's ray: what is a few pixels from it on the screen
+out.ray = [G.nearestToRay(line, [5, 0, 10], [0, 0, -1]), G.nearestToRay(line, [0, 20, 10], [0, 0, -1]),
+           G.nearestToRay([[[0, 0, 0], [0, 0, 10]]], [3, 0, -5], [0, 0, 1]), G.nearestToRay([[[0, 0, 20], [10, 0, 20]]], [0, 0, 0], [0, 0, -1])];
+process.stdout.write(JSON.stringify(out));
+"""
+
+
+def _find(parts: list, pid: str):
+    for p in parts:
+        if p["id"] == pid:
+            return p
+        got = _find(p.get("parts", []), pid)
+        if got:
+            return got
+    return None
+
+
+def test_a_holes_lines_inside_what_it_cuts(h3, tmp_path, capsys):
+    """A hole's lines (0.95.0): those with the part it cuts just outside them - a pocket's upright corners and floor
+    edges, a drilled hole's bottom, a shut-in void's every one - are inside; those at an opening (or out in the air) are
+    not, and a fillet given only the inside ones rounds the pocket without the lip a fillet at the rim leaves. hub3d
+    tells them apart the same way, and `hub3d design` warns of a hole's fillet at an opening."""
+    pytest.importorskip("manifold3d")
+    out = run_js(HOLE_JS, HOLE_CASES)
+    for name, (parts, want) in HOLE_CASES.items():
+        assert sorted(out["open"][name]) == sorted(want), (name, out["open"][name])
+        design, _ = h3.read_design(json.dumps({"parts": parts}))
+        m = h3.build_design(design, ".").solid.to_mesh()
+        tri = np.asarray(m.vert_properties, dtype=np.float64)[:, :3][np.asarray(m.tri_verts)]
+        p = _find(design["parts"], "h")
+        _, py_open = h3.hole_edges(p, h3.EDGES[p["shape"]], tri)
+        assert sorted(py_open) == sorted(want), (name, py_open)
+    lipped = {"parts": [BOX, {**POCKET, "fillet": {"all": 3}}]}
+    f = tmp_path / "kasse.3d.json"
+    for d, warned in ((lipped, True), ({"parts": [BOX, {**POCKET, "fillet": {"vertical": 5, "bottom": 2}}]}, False)):
+        f.write_text(json.dumps(d))
+        h3.main(["design", str(f)])
+        said = capsys.readouterr().out
+        assert ("! hole h: its fillet on top-front, top-back, top-left, top-right is at an opening" in said) == warned, said
+        assert ("READY for the slicer." in said) != warned
+    assert sorted(out["inside"]) == sorted(e for e in h3.EDGES["box"] if e not in TOPS)
+    assert out["treated"] == {"fillet": {"vertical": 3, "bottom": 3}, "chamfer": None}
+    vol = out["volumes"]
+    assert vol["sharp"] == pytest.approx(100 * 50 * 40 - 94 * 44 * 37)
+    assert vol["sharp"] < vol["inside"] < vol["all"]           # round inside corners keep a little; a lip more
+    assert out["lip"] == {"inside": False, "all": True}
+    assert out["wrong"] == 0
+    near = out["near"]
+    assert near["edge"] == "top-front" and np.allclose(near["point"], [10, -22, 40]) and near["distance"] == pytest.approx(math.hypot(0.5, 1))
+    across, beyond, along, behind = out["ray"]     # past it, past its end, along it, behind where the ray starts
+    assert across["distance"] == pytest.approx(5) and np.allclose(across["point"], [0, 0, 0])
+    assert beyond["distance"] == pytest.approx(10) and np.allclose(beyond["point"], [0, 10, 0])
+    assert along["distance"] == pytest.approx(3) and behind["distance"] == pytest.approx(20)

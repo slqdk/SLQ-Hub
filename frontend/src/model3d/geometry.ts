@@ -887,6 +887,12 @@ export function edgeLines(p: Part, names: string[]): Vec3[][] {
   } else if (p.shape === "outline" && names.includes("vertical")) {
     for (const poly of outlinePolygons(p) ?? []) for (const [x, y] of poly) local.push([[x, y, -sz / 2], [x, y, sz / 2]]);
   }
+  return placed(p, local);
+}
+
+/** Points in a part's own frame where they are in the design: mirrored, turned and moved as the part is - each list
+ *  once on the part and once on each of its copies. */
+function placed(p: Part, local: Vec3[][]): Vec3[][] {
   const m = rotation(p.rotate);
   const place = (v: Vec3): Vec3 => {
     const w = apply(m, [p.mirror ? -v[0] : v[0], v[1], v[2]]);
@@ -937,11 +943,12 @@ export function treatEdges(p: Part, edges: string[], spec: EdgeSpec | null): Par
 
 /** The part's own edge nearest a point (the editor's lines), with how far it is (mm) - null for a shape without
  *  named edges. Measured to the lines `edgeLines` draws - a rim round, an outline's corners, every copy - so a click
- *  on a cylinder's top far from its rim is far from the edge (0.94.0: a click near a line picks it). */
-export function nearestEdge(p: Part, v: Vec3): { edge: string; distance: number } | null {
+ *  on a cylinder's top far from its rim is far from the edge (0.94.0: a click near a line picks it) - and the point
+ *  on it nearest. */
+export function nearestEdge(p: Part, v: Vec3): { edge: string; distance: number; point: Vec3 } | null {
   const names = EDGES[p.shape];
   if (!names) return null;
-  let best: { edge: string; distance: number } | null = null;
+  let best: { edge: string; distance: number; point: Vec3 } | null = null;
   for (const name of names) {
     for (const line of edgeLines(p, [name])) {
       for (let i = 1; i < line.length; i++) {
@@ -949,9 +956,37 @@ export function nearestEdge(p: Part, v: Vec3): { edge: string; distance: number 
         const ab: Vec3 = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
         const len2 = ab[0] * ab[0] + ab[1] * ab[1] + ab[2] * ab[2];
         const t = len2 > 0 ? Math.max(0, Math.min(1, ((v[0] - a[0]) * ab[0] + (v[1] - a[1]) * ab[1] + (v[2] - a[2]) * ab[2]) / len2)) : 0;
-        const d = Math.hypot(v[0] - a[0] - t * ab[0], v[1] - a[1] - t * ab[1], v[2] - a[2] - t * ab[2]);
-        if (!best || d < best.distance) best = { edge: name, distance: d };
+        const point: Vec3 = [a[0] + t * ab[0], a[1] + t * ab[1], a[2] + t * ab[2]];
+        const d = Math.hypot(v[0] - point[0], v[1] - point[1], v[2] - point[2]);
+        if (!best || d < best.distance) best = { edge: name, distance: d, point };
       }
+    }
+  }
+  return best;
+}
+
+/** The point of some lines (each a row of points, straight between them) nearest a ray - from `o` along the unit
+ *  `dir` - and how far it is from the ray (0.95.0): seen from a camera at `o`, what is a few pixels from the pointer
+ *  on the screen, whichever way the face under it is turned. */
+export function nearestToRay(lines: Vec3[][], o: Vec3, dir: Vec3): { distance: number; point: Vec3 } | null {
+  const dot = (a: Vec3, b: Vec3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  const clamp = (x: number) => Math.max(0, Math.min(1, x));
+  let best: { distance: number; point: Vec3 } | null = null;
+  for (const line of lines) {
+    for (let i = 1; i < line.length; i++) {
+      const a = line[i - 1], b = line[i];
+      const e: Vec3 = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], w: Vec3 = [o[0] - a[0], o[1] - a[1], o[2] - a[2]];
+      const B = dot(dir, e), C = dot(e, e), D = dot(dir, w), E = dot(e, w);
+      const den = C - B * B;                                             // 0: the piece lies along the ray
+      let t = C > 1e-12 && den > 1e-12 * C ? clamp((E - B * D) / den) : 0;
+      let u = t * B - D;                                                 // how far along the ray
+      if (u < 0) {
+        u = 0;
+        t = C > 1e-12 ? clamp(E / C) : 0;
+      }
+      const point: Vec3 = [a[0] + t * e[0], a[1] + t * e[1], a[2] + t * e[2]];
+      const d = Math.hypot(point[0] - o[0] - u * dir[0], point[1] - o[1] - u * dir[1], point[2] - o[2] - u * dir[2]);
+      if (!best || d < best.distance) best = { distance: d, point };
     }
   }
   return best;
@@ -1011,6 +1046,123 @@ export function withEdgeLength(p: Part, edge: string, length: number): Part | st
 }
 
 const fmtMm = (v: number) => String(Math.round(v * 100) / 100);
+
+// ---------------------------------------------------------------- a hole's lines (0.95.0)
+
+const FACE_OUT: Record<string, Vec3> = { top: [0, 0, 1], bottom: [0, 0, -1], front: [0, -1, 0], back: [0, 1, 0],
+  left: [-1, 0, 0], right: [1, 0, 0] };
+
+const unit = (v: Vec3): Vec3 => {
+  const l = Math.hypot(v[0], v[1], v[2]);
+  return l > 1e-12 ? [v[0] / l, v[1] / l, v[2] / l] : [0, 0, 0];
+};
+
+/** Whether a point is inside outlines read EvenOdd - inside an odd number of them, as an outline part is built. */
+function inOutlines(polys: number[][][], x: number, y: number): boolean {
+  let inside = false;
+  for (const poly of polys) {
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      const [xi, yi] = poly[i], [xj, yj] = poly[j];
+      if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+    }
+  }
+  return inside;
+}
+
+/** Points a little way (`gap` mm) off a part's edge, out between the two faces it lies between: along each line of it
+ *  - a box's or wedge's edge at its eighths, a rim at eight places round it, each of an outline's corners up its
+ *  height - on the part and on each copy, in the design. One list a line. */
+export function edgeOutside(p: Part, edge: string, gap: number): Vec3[][] {
+  const [sx, sy, sz] = p.size;
+  const local: Vec3[][] = [];
+  const along = (a: Vec3, b: Vec3, out: Vec3): Vec3[] => {
+    const d = unit(out), pts: Vec3[] = [];
+    for (let k = 1; k < 8; k++) {
+      const t = k / 8;
+      pts.push([a[0] + t * (b[0] - a[0]) + gap * d[0], a[1] + t * (b[1] - a[1]) + gap * d[1],
+        a[2] + t * (b[2] - a[2]) + gap * d[2]]);
+    }
+    return pts;
+  };
+  if (p.shape === "box" || p.shape === "wedge") {
+    const seg = edgeSegments(p).find(([name]) => name === edge);
+    const len = Math.hypot(sx, sz) || 1;
+    const out = (face: string): Vec3 => (face === "slope" ? [sz / len, 0, sx / len] : FACE_OUT[face]);
+    if (seg) {
+      const [f, g] = edge.split("-").map(out);
+      local.push(along(seg[1], seg[2], [f[0] + g[0], f[1] + g[1], f[2] + g[2]]));
+    }
+  } else if (p.shape === "cylinder" || p.shape === "cone") {
+    const k = edge === "bottom" ? 1 : edge === "top" ? (p.shape === "cone" ? p.top ?? 0 : 1) : 0;
+    if (k > 0) {
+      const up = edge === "top" ? 1 : -1;
+      const ring: Vec3[] = [];
+      for (let i = 0; i < 8; i++) {
+        const t = (2 * Math.PI * (i + 0.5)) / 8;                         // between a few-sided one's corners
+        const n = unit([Math.cos(t) / Math.max(sx, 1e-9), Math.sin(t) / Math.max(sy, 1e-9), 0]);   // out of its side
+        const d = unit([n[0], n[1], up]);
+        ring.push([(sx / 2) * k * Math.cos(t) + gap * d[0], (sy / 2) * k * Math.sin(t) + gap * d[1], (up * sz) / 2 + gap * d[2]]);
+      }
+      local.push(ring);
+    }
+  } else if (p.shape === "outline" && edge === "vertical") {
+    const polys = outlinePolygons(p) ?? [];
+    for (const poly of polys) {
+      for (let i = 0; i < poly.length; i++) {
+        const [cx, cy] = poly[i], a = poly[(i + poly.length - 1) % poly.length], b = poly[(i + 1) % poly.length];
+        const u = unit([a[0] - cx, a[1] - cy, 0]), w = unit([b[0] - cx, b[1] - cy, 0]);
+        let d = unit([u[0] + w[0], u[1] + w[1], 0]);                     // into the corner's angle ...
+        if (!d[0] && !d[1]) d = [-u[1], u[0], 0];                         // (a straight one: off its side)
+        if (inOutlines(polys, cx + (gap / 2) * d[0], cy + (gap / 2) * d[1])) d = [-d[0], -d[1], 0];   // ... or out of it
+        local.push(along([cx, cy, -sz / 2], [cx, cy, sz / 2], d));
+      }
+    }
+  }
+  return placed(p, local);
+}
+
+/** How far off its edges `holeEdges` looks: 0.2 mm, less on a small part. */
+function edgeGap(p: Part): number {
+  return Math.min(0.2, 0.1 * Math.min(2, ...p.size.filter((x) => x > 0)));
+}
+
+/** Whether a point is inside a closed mesh: rays from it along +X, +Y and +Z each cross the mesh an odd number of times
+ *  when it is. One through a line or a corner between two triangles can count wrong, so the three vote. */
+export function insideMesh(m: MeshData, v: Vec3): boolean {
+  const P = m.positions, T = m.triangles;
+  const q = [v[0] + 1.37e-5, v[1] + 2.91e-5, v[2] + 4.73e-5];          // off the round numbers corners are at
+  let votes = 0;
+  for (let axis = 0; axis < 3; axis++) {
+    const i = (axis + 1) % 3, j = (axis + 2) % 3, qi = q[i], qj = q[j], qa = q[axis];
+    let n = 0;
+    for (let t = 0; t < T.length; t += 3) {
+      const a = T[t] * 3, b = T[t + 1] * 3, c = T[t + 2] * 3;
+      const ai = P[a + i] - qi, bi = P[b + i] - qi, ci = P[c + i] - qi;
+      if ((ai > 0 && bi > 0 && ci > 0) || (ai < 0 && bi < 0 && ci < 0)) continue;
+      const aj = P[a + j] - qj, bj = P[b + j] - qj, cj = P[c + j] - qj;
+      if ((aj > 0 && bj > 0 && cj > 0) || (aj < 0 && bj < 0 && cj < 0)) continue;
+      const wa = bi * cj - bj * ci, wb = ci * aj - cj * ai, wc = ai * bj - aj * bi;   // the ray's side of each edge
+      if (!((wa > 0 && wb > 0 && wc > 0) || (wa < 0 && wb < 0 && wc < 0))) continue;
+      if ((wa * P[a + axis] + wb * P[b + axis] + wc * P[c + axis]) / (wa + wb + wc) > qa) n++;
+    }
+    if (n % 2) votes++;
+    if (votes === 2 || votes + 2 - axis < 2) break;                       // decided
+  }
+  return votes >= 2;
+}
+
+/** A cutter's edges (a hole's, or a part's in a hole group) split: those inside the solid it cuts - solid just off the
+ *  edge somewhere along each of its lines: the inside corners of what it cut, which a fillet or chamfer on it rounds
+ *  or cuts as it should - and the open ones, at an opening or out in the air, where rounding the cutter would leave a
+ *  lip round the opening (or do nothing). */
+export function holeEdges(p: Part, edges: string[], solid: MeshData): { inside: string[]; open: string[] } {
+  const gap = edgeGap(p), inside: string[] = [], open: string[] = [];
+  for (const e of edges) {
+    const lines = edgeOutside(p, e, gap);
+    (lines.every((pts) => pts.some((v) => insideMesh(solid, v))) ? inside : open).push(e);
+  }
+  return { inside, open };
+}
 
 function readEdgeSizes(v: unknown, part: Part, kind: EdgeKind, problems: string[]): EdgeSizes | undefined {
   if (v === undefined) return undefined;

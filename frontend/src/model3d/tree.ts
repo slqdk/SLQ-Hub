@@ -15,6 +15,28 @@ export function find(parts: Part[], id: string, top: Part | null = null, parent:
   return null;
 }
 
+/** Whether a part cuts (0.95.0): a hole, or a part in a group that is one - null when there is no such part. */
+export function cuts(parts: Part[], id: string, under = false): boolean | null {
+  for (const p of parts) {
+    const c = under || !!p.hole;
+    if (p.id === id) return c;
+    const r = p.parts ? cuts(p.parts, id, c) : null;
+    if (r !== null) return r;
+  }
+  return null;
+}
+
+/** The parts that cut and are built (0.95.0): holes, and the parts of hole groups - not a hidden one. */
+export function cutters(parts: Part[], under = false, out: Part[] = []): Part[] {
+  for (const p of parts) {
+    if (p.hidden) continue;
+    const c = under || !!p.hole;
+    if (p.parts) cutters(p.parts, c, out);
+    else if (c) out.push(p);
+  }
+  return out;
+}
+
 export function update(parts: Part[], id: string, fn: (p: Part) => Part): Part[] {
   return parts.map((p) => (p.id === id ? fn(p) : p.parts ? { ...p, parts: update(p.parts, id, fn) } : p));
 }
