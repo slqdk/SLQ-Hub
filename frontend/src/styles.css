@@ -1188,63 +1188,209 @@ div.tests-result-head { cursor: default; }
 .v3d-head > svg { flex: none; }
 .v3d-bar { display: flex; align-items: center; gap: 8px; padding: 7px 12px; border-bottom: 1px solid var(--rule-2);
   background: color-mix(in srgb, var(--wait) 10%, var(--sheet)); font-size: 13.5px; }
-/* The ribbon (0.90.0): tabs at the top, as in SolidWorks - nothing at the sides, the view the whole width. */
-.v3d-ribbon { flex: none; border-bottom: 1px solid var(--rule-2); background: var(--paper); }
-.v3d-tabs { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 4px 12px; padding: 5px 10px 0; }
-.v3d-tablist { display: flex; align-items: flex-end; gap: 2px; margin-bottom: -1px; }
-.v3d-tab { padding: 6px 13px 7px; border: 1px solid transparent; border-bottom: 0; border-radius: 7px 7px 0 0;
-  background: transparent; color: var(--ink-2); font-family: var(--font-plate); font-weight: 600; font-size: 14px;
+/* The ribbon (0.90.0): tabs at the top, as in SolidWorks - nothing at the sides, the view the whole width.
+   0.96.0: in Office 2007's look - Søren: "hele top ribbon ligner Office 2007 i style" - its Blue in the light theme and
+   its Black in the dark one: the tabs on a strip, groups as panels with their name in a band under them, big buttons
+   (icon over name) and small ones (icon before name) three to a column, and the golden hover and orange pressed. */
+.panel-3d {
+  --rb-font: "Segoe UI", system-ui, var(--font);
+  --rb-ink: light-dark(#1e2b3a, #eceff1);
+  --rb-blue: light-dark(#15428b, #f2f5f7);
+  --rb-label: light-dark(#3e6aaa, #c3ccd3);
+  --rb-strip-1: light-dark(#e4eefb, #42474b);
+  --rb-strip-2: light-dark(#c6d9f1, #2b2f32);
+  --rb-tab-1: light-dark(#ffffff, #60666c);
+  --rb-tab-2: light-dark(#eaf1fb, #4d5358);
+  --rb-body-1: light-dark(#e9f1fb, #4d5358);
+  --rb-body-2: light-dark(#cddcf1, #3a3f43);
+  --rb-edge: light-dark(#8db2e3, #1f2326);
+  --rb-group-1: light-dark(#fbfdff, #5d6369);
+  --rb-group-2: light-dark(#e6eefa, #52585d);
+  --rb-group-3: light-dark(#d8e5f6, #474d52);
+  --rb-group-4: light-dark(#e2ecf9, #4d5358);
+  --rb-group-edge: light-dark(#a9c4e8, #2a2e32);
+  --rb-band-1: light-dark(#cadcf3, #3b4044);
+  --rb-band-2: light-dark(#b9cfeb, #32373a);
+  --rb-hov-1: light-dark(#fffdf0, rgba(255, 236, 170, 0.34));
+  --rb-hov-2: light-dark(#ffeeb0, rgba(255, 222, 130, 0.3));
+  --rb-hov-3: light-dark(#ffdb68, rgba(255, 196, 80, 0.36));
+  --rb-hov-4: light-dark(#ffeba4, rgba(255, 214, 120, 0.3));
+  --rb-hov-edge: light-dark(#dbc076, rgba(255, 214, 128, 0.65));
+  --rb-press-1: light-dark(#fcd7a3, rgba(255, 190, 100, 0.55));
+  --rb-press-2: light-dark(#f9b55c, rgba(250, 165, 70, 0.5));
+  --rb-press-3: light-dark(#f69a30, rgba(240, 140, 40, 0.58));
+  --rb-press-4: light-dark(#fbc06c, rgba(250, 175, 80, 0.5));
+  --rb-press-edge: light-dark(#c27e2c, rgba(255, 176, 76, 0.85));
+  --rb-on-1: light-dark(#fde6c0, rgba(255, 208, 120, 0.42));
+  --rb-on-2: light-dark(#fccd8c, rgba(252, 186, 92, 0.38));
+  --rb-on-3: light-dark(#fbba5e, rgba(250, 170, 70, 0.44));
+  --rb-on-4: light-dark(#fdd897, rgba(252, 196, 110, 0.38));
+  --rb-on-edge: light-dark(#c69853, rgba(255, 196, 108, 0.8));
+  --rb-field: light-dark(#ffffff, #2a2f33);
+  --rb-field-edge: light-dark(#abc1de, #616a70);
+  --rb-field-hover: light-dark(#7ea4d3, #8f9aa2);
+  --rb-menu: light-dark(#fcfcfc, #33383c);
+  --rb-menu-edge: light-dark(#8a9cb4, #626b71);
+  --rb-menu-gutter: light-dark(#eef2f7, #2c3134);
+  --rb-icon: light-dark(#2a5aa3, #93bbef);
+  --rb-orange: light-dark(#c8661c, #f2a462);
+  --rb-grey: light-dark(#66727c, #aeb8bf);
+  --rb-green: light-dark(#2e7d33, #7cc67f);
+  --rb-red: light-dark(#c4332d, #f2817a);
+  --rb-violet: light-dark(#6a45a8, #b79ced);
+  --rb-hover: linear-gradient(var(--rb-hov-1) 0%, var(--rb-hov-2) 45%, var(--rb-hov-3) 46%, var(--rb-hov-4) 100%);
+  --rb-press: linear-gradient(var(--rb-press-1) 0%, var(--rb-press-2) 45%, var(--rb-press-3) 46%, var(--rb-press-4) 100%);
+  --rb-on: linear-gradient(var(--rb-on-1) 0%, var(--rb-on-2) 45%, var(--rb-on-3) 46%, var(--rb-on-4) 100%);
+  --vi-on: light-dark(#4f81bd, #78a6e4);
+  --vi-off: light-dark(rgba(255, 255, 255, 0.85), rgba(255, 255, 255, 0.08));
+  --vi-top: light-dark(#e1ebf7, #9ab4d6);
+  --vi-front: light-dark(#a4bfe3, #5f7ca3);
+  --vi-right: light-dark(#5d87c5, #3d5d89);
+}
+/* The head - the file, Undo, Redo, Export - as Office 2007's title bar with its quick access buttons */
+.panel-3d > .v3d-head { min-height: 40px; padding: 4px 8px 4px 12px; border-bottom: 0;
+  background: linear-gradient(var(--rb-strip-1), var(--rb-strip-1)); color: var(--rb-blue); }
+.panel-3d > .v3d-head h2 { font-family: var(--rb-font); font-weight: 600; font-size: 14px; color: var(--rb-blue); }
+.panel-3d > .v3d-head > svg { color: var(--rb-icon); opacity: 1; }
+.panel-3d > .v3d-head .btn { height: 26px; padding: 0 8px; border-color: transparent; border-radius: 3px; background: transparent;
+  box-shadow: none; color: var(--rb-ink); font-family: var(--rb-font); font-weight: 400; font-size: 13px; }
+.panel-3d > .v3d-head .btn svg { color: var(--rb-icon); }
+.panel-3d > .v3d-head .btn:hover:not(:disabled) { background: var(--rb-hover); border-color: var(--rb-hov-edge); }
+.panel-3d > .v3d-head .btn:active:not(:disabled) { background: var(--rb-press); border-color: var(--rb-press-edge); }
+.v3d-ribbon { flex: none; border-bottom: 1px solid var(--rb-edge); background: linear-gradient(var(--rb-strip-1), var(--rb-strip-2));
+  font-family: var(--rb-font); color: var(--rb-ink); }
+.v3d-tabs { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 4px 12px; padding: 2px 8px 0; }
+.v3d-tablist { display: flex; align-items: flex-end; gap: 1px; margin-bottom: -1px; }
+.v3d-tab { padding: 4px 14px 5px; border: 1px solid transparent; border-bottom: 0; border-radius: 3px 3px 0 0;
+  background: transparent; color: var(--rb-blue); font-family: var(--rb-font); font-weight: 400; font-size: 13px;
   cursor: pointer; white-space: nowrap; }
-.v3d-tab:hover { color: var(--ink); background: var(--rule-2); }
-.v3d-tab.on { position: relative; z-index: 1; background: var(--sheet); border-color: var(--rule-2); color: var(--ink); }
-.v3d-tab.context { color: var(--act); }
-.v3d-tab.context.on { box-shadow: inset 0 3px 0 var(--act); }
-.v3d-quick { display: flex; align-items: center; gap: 4px; margin-left: auto; padding-bottom: 5px; }
-/* The heads-up bar over the view, as SolidWorks has it: the handles, the snap, the camera, Point at. */
-.v3d-top { position: absolute; top: 8px; left: 8px; right: 8px; z-index: 2; display: flex; flex-direction: column;
-  align-items: center; gap: 6px; pointer-events: none; }
-.v3d-heads { pointer-events: auto; display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 3px;
-  max-width: 100%; padding: 4px;
-  border: 1px solid var(--rule-2); border-radius: 9px; background: color-mix(in srgb, var(--sheet) 88%, transparent);
-  box-shadow: var(--shadow); backdrop-filter: blur(4px); }
-.v3d-heads .v3d-tool { padding: 0 8px; border-color: transparent; background: transparent; box-shadow: none; }
-.v3d-heads .v3d-tool:hover { background: var(--rule-2); }
-.v3d-heads .v3d-tool.on { border-color: var(--act); background: var(--act-wash); }
-.v3d-heads .select { width: auto; height: 28px; padding: 0 26px 0 8px; font-size: 13px; }
-.v3d-heads .v3d-letter { width: 15px; font-size: 14px; line-height: 15px; }
-.v3d-tool.on, .v3d-seg .btn.on, .v3d-edgenames .btn.on, .v3d-band .v3d-chip.on { color: var(--act); border-color: var(--act);
-  background: var(--act-wash); }
-.v3d-band { display: flex; align-items: stretch; min-height: 108px; padding: 7px 4px 4px; overflow-x: auto;
-  background: var(--sheet); border-top: 1px solid var(--rule-2); }
-/* 0.94.0: a group short of room is one button, the group in its menu; size, centre and turn as one small table */
-.v3d-group.folded { padding: 0 5px; }
+.v3d-tab:hover { background: linear-gradient(color-mix(in srgb, var(--rb-tab-1) 70%, transparent), transparent);
+  border-color: color-mix(in srgb, var(--rb-edge) 60%, transparent); }
+.v3d-tab.on { position: relative; z-index: 1; border-color: var(--rb-edge); background: linear-gradient(var(--rb-tab-1), var(--rb-body-1));
+  color: var(--rb-blue); }
+/* A tab that is there while a text is picked: tinted, as Office 2007's contextual tabs ("Text Box Tools") */
+.v3d-tab.context { color: light-dark(#7a4b00, #ffd98c);
+  background: linear-gradient(light-dark(#fff6d6, rgba(255, 214, 110, 0.18)), light-dark(#fbe3a0, rgba(255, 196, 80, 0.12)));
+  border-color: light-dark(#e3bf62, rgba(255, 200, 100, 0.45)); box-shadow: inset 0 3px 0 light-dark(#f0b43c, #e8a63a); }
+.v3d-tab.context.on { color: light-dark(#7a4b00, #ffd98c); background: linear-gradient(light-dark(#fffbea, #66603f), var(--rb-body-1)); }
+.v3d-quick { display: flex; align-items: center; gap: 4px; margin-left: auto; padding-bottom: 3px; }
+.v3d-quick .btn { height: 24px; padding: 0 8px; border-color: transparent; border-radius: 3px; background: transparent; box-shadow: none;
+  color: var(--rb-blue); font-family: var(--rb-font); font-weight: 400; font-size: 12.5px; }
+.v3d-quick .btn svg { color: var(--rb-icon); }
+.v3d-quick .btn:hover { background: var(--rb-hover); border-color: var(--rb-hov-edge); }
+.v3d-band { display: flex; align-items: stretch; gap: 3px; height: 100px; padding: 3px 4px 3px; overflow: auto hidden;
+  background: linear-gradient(var(--rb-body-1), var(--rb-body-2)); border-top: 1px solid var(--rb-edge); }
+.v3d-group { flex: none; display: flex; flex-direction: column; min-width: 40px; padding: 2px 3px 0;
+  border: 1px solid var(--rb-group-edge); border-radius: 3px;
+  background: linear-gradient(var(--rb-group-1) 0%, var(--rb-group-2) 55%, var(--rb-group-3) 56%, var(--rb-group-4) 100%);
+  box-shadow: inset 0 0 0 1px light-dark(rgba(255, 255, 255, 0.6), rgba(255, 255, 255, 0.06)); }
+.v3d-group:hover { box-shadow: inset 0 0 0 1px light-dark(rgba(255, 255, 255, 0.95), rgba(255, 255, 255, 0.12)); }
+.v3d-group-body { flex: 1; display: flex; align-items: center; gap: 2px; min-height: 0; }
+.v3d-group-label { margin: 2px -3px 0; padding: 1px 6px 2px; border-top: 1px solid light-dark(rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0.05));
+  border-radius: 0 0 2px 2px; background: linear-gradient(var(--rb-band-1), var(--rb-band-2));
+  text-align: center; font-size: 11px; line-height: 14px; color: var(--rb-label); white-space: nowrap; }
+/* Big buttons: the icon (32 px) over the name, which may take two lines; small ones: a 16 px icon before it */
+.v3d-ribbon .v3d-big, .v3d-foldmenu .v3d-big { flex-direction: column; justify-content: flex-start; gap: 1px; height: 68px;
+  min-width: 44px; max-width: 82px; padding: 3px 4px 2px; border: 1px solid transparent; border-radius: 3px; background: transparent;
+  box-shadow: none; color: var(--rb-ink); font-family: var(--rb-font); font-weight: 400; font-size: 12px; line-height: 1.15;
+  letter-spacing: 0; white-space: normal; text-align: center; }
+.v3d-ribbon .v3d-big > svg, .v3d-foldmenu .v3d-big > svg { flex: none; width: 32px; height: 32px; stroke-width: 1.45;
+  color: var(--rb-icon); }
+.v3d-ribbon .v3d-big > span, .v3d-foldmenu .v3d-big > span { display: block; }
+.v3d-ribbon .v3d-big > span svg { width: 9px; height: 9px; vertical-align: 1px; }
+.v3d-small { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 6px 0 3px; border: 1px solid transparent;
+  border-radius: 3px; background: transparent; color: var(--rb-ink); font-family: var(--rb-font); font-size: 12px;
+  white-space: nowrap; cursor: pointer; }
+.v3d-small > svg { flex: none; width: 16px; height: 16px; stroke-width: 1.8; color: var(--rb-icon); }
+.v3d-ribbon .v3d-big:hover:not(:disabled), .v3d-foldmenu .v3d-big:hover:not(:disabled), .v3d-small:hover:not(:disabled),
+.v3d-combo-btn:hover:not(:disabled) .v3d-combo-arrow { background: var(--rb-hover); border-color: var(--rb-hov-edge); }
+.v3d-ribbon .v3d-big:active:not(:disabled), .v3d-foldmenu .v3d-big:active:not(:disabled), .v3d-small:active:not(:disabled),
+.v3d-combo-btn:active:not(:disabled) .v3d-combo-arrow { background: var(--rb-press); border-color: var(--rb-press-edge); }
+.v3d-ribbon .v3d-big.on, .v3d-foldmenu .v3d-big.on, .v3d-small.on, .v3d-ribbon .v3d-big[aria-expanded="true"] {
+  background: var(--rb-on); border-color: var(--rb-on-edge); }
+.v3d-ribbon .v3d-big:disabled, .v3d-foldmenu .v3d-big:disabled, .v3d-small:disabled { opacity: 0.45; cursor: default; }
+.v3d-ribbon .v3d-big.armed { background: light-dark(#fde4e2, rgba(240, 100, 90, 0.25)); border-color: var(--rb-red);
+  color: var(--rb-red); font-weight: 600; justify-content: center; }
+.tone-orange > svg { color: var(--rb-orange) !important; }
+.tone-grey > svg { color: var(--rb-grey) !important; }
+.tone-green > svg { color: var(--rb-green) !important; }
+.tone-red > svg { color: var(--rb-red) !important; }
+.tone-violet > svg { color: var(--rb-violet) !important; }
+/* Columns of up to three rows (Stack), rows in them, and a number with its name (Field) */
+.v3d-col { display: flex; flex-direction: column; justify-content: center; gap: 1px; align-self: stretch; padding: 0 2px; }
+.v3d-row { display: flex; align-items: center; gap: 2px; min-height: 22px; }
+.v3d-field { display: flex; align-items: center; gap: 5px; min-height: 22px; padding: 0 2px; font-size: 12px; color: var(--rb-ink);
+  white-space: nowrap; }
+.v3d-field > span:first-child { min-width: 0; }
+.v3d-field small { font-size: 11.5px; color: var(--rb-label); }
+.v3d-field-in { display: inline-flex; width: 56px; }
+.v3d-field-in .input { width: 100%; }
+.v3d-col-note { font-size: 11.5px; line-height: 1.3; color: var(--rb-label); white-space: nowrap; padding: 0 3px; }
+.v3d-col-strong { font-size: 12.5px; color: var(--rb-ink); padding: 0 3px; white-space: nowrap; }
+.v3d-col-note .link-btn { font-size: 11.5px; }
+/* Fields as Office 2007 has them: white, a light blue edge that darkens under the pointer */
+.v3d-ribbon .input, .v3d-ribbon .select, .v3d-ribbon .textarea, .v3d-foldmenu .input, .v3d-foldmenu .select {
+  height: 21px; padding: 1px 4px; border: 1px solid var(--rb-field-edge); border-radius: 2px; background: var(--rb-field);
+  box-shadow: none; color: var(--rb-ink); font-family: var(--rb-font); font-size: 12px; }
+.v3d-ribbon .input.mono { font-family: var(--rb-font); font-variant-numeric: tabular-nums; }
+.v3d-ribbon .textarea { height: auto; }
+.v3d-ribbon .input:hover, .v3d-ribbon .select:hover, .v3d-ribbon .textarea:hover { border-color: var(--rb-field-hover); }
+.v3d-ribbon .input:focus, .v3d-ribbon .select:focus, .v3d-ribbon .textarea:focus { border-color: var(--rb-field-hover);
+  box-shadow: 0 0 0 1px var(--rb-field-hover); }
+.v3d-ribbon .select { width: auto; max-width: 200px; padding-right: 22px; background-position: right 5px center; }
+.v3d-ribbon .v3d-name { width: 132px; }
+.v3d-textarea { width: 150px; height: 66px !important; min-height: 0; resize: none; line-height: 1.3; }
+.v3d-color { width: 40px; height: 21px; padding: 0 2px; border: 1px solid var(--rb-field-edge); border-radius: 2px; background: var(--rb-field);
+  cursor: pointer; }
+.v3d-ribbon .v3d-place { gap: 1px 4px; }
+.v3d-ribbon .v3d-place-name { color: var(--rb-label); font-size: 11.5px; }
+.v3d-ribbon .v3d-axis .input { width: 50px; height: 21px; padding: 1px 4px; font-size: 12px; }
+.v3d-ribbon .v3d-place .v3d-check, .v3d-ribbon .v3d-place small { color: var(--rb-label); }
+/* The Font and Size boxes (0.96.0): a field with its arrow, the list a menu - a font's name in its own letters */
+.v3d-combo { display: inline-flex; align-items: center; gap: 3px; }
+.v3d-combo .menu-anchor { display: inline-flex; }
+.v3d-combo-btn { display: inline-flex; align-items: stretch; height: 21px; padding: 0; border: 1px solid var(--rb-field-edge);
+  border-radius: 2px; background: var(--rb-field); color: var(--rb-ink); cursor: pointer; font: inherit; }
+.v3d-combo-btn:hover { border-color: var(--rb-field-hover); }
+.v3d-combo.font .v3d-combo-btn { width: 140px; }
+.v3d-combo-text { flex: 1; min-width: 0; display: flex; align-items: center; padding: 0 5px; overflow: hidden; font-size: 12px; }
+.v3d-combo-arrow { display: grid; place-items: center; width: 15px; border-left: 1px solid transparent; color: var(--rb-ink); }
+.v3d-combo-btn:hover .v3d-combo-arrow { border-left-color: var(--rb-hov-edge); }
+.v3d-combo.size .v3d-combo-in { display: inline-flex; width: 40px; }
+.v3d-combo.size .v3d-combo-in .input { width: 100%; border-radius: 2px 0 0 2px; border-right: 0; }
+.v3d-combo.size .v3d-combo-btn.arrow { border-radius: 0 2px 2px 0; }
+.v3d-combo small { font-size: 11.5px; color: var(--rb-label); }
+.v3d-face { display: block; flex: none; color: var(--rb-ink); }
+.v3d-face-plain { font-size: 12px; }
+.menu.v3d-combomenu { min-width: 190px; padding: 2px; }
+.menu.v3d-combomenu.narrow { min-width: 64px; max-height: 300px; overflow-y: auto; }
+.menu.v3d-combomenu .menu-item { min-height: 26px; padding: 3px 8px; }
+.v3d-fontitem { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.v3d-fontitem small { font-size: 11px; color: var(--rb-label); }
+/* A part's lines rounded or cut: a gallery, as Office's styles, three rows high */
+.v3d-gallery { display: grid; grid-auto-flow: column; grid-template-rows: repeat(3, 22px); align-content: start; gap: 0 4px;
+  max-width: 380px; height: 68px; padding: 0 2px; overflow-x: auto; border: 1px solid var(--rb-field-edge); border-radius: 2px;
+  background: var(--rb-field); }
+.v3d-gallery.empty { display: flex; align-items: center; padding: 0 10px; font-size: 12px; color: var(--rb-label); }
+.v3d-ribbon .v3d-tip, .v3d-foldmenu .v3d-tip { align-self: center; max-width: 360px; margin: 0 10px; font-size: 12px; line-height: 1.4;
+  color: var(--rb-label); }
+.v3d-ribbon .v3d-note { color: var(--rb-ink); font-size: 12px; }
+.v3d-aligngrid { display: grid; grid-template-columns: 14px repeat(3, auto); gap: 1px 2px; align-items: center; }
+.v3d-aligngrid .v3d-small { justify-content: center; padding: 0 7px; }
+/* 0.94.0: a group short of room is one button, the group in its menu (as Office 2007 folds its groups) */
+.v3d-group.folded { padding: 2px 3px 0; }
 .v3d-group.folded .v3d-big span { display: inline-flex; align-items: center; gap: 2px; }
-.menu.v3d-foldmenu { min-width: 0; max-width: min(620px, calc(100vw - 16px)); padding: 8px; }
-.v3d-foldbody { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-.v3d-foldhead { flex-basis: 100%; font-size: 12px; color: var(--ink-3); }
-.v3d-band .v3d-name { width: 150px; }
-.v3d-place { display: grid; grid-template-columns: auto repeat(3, auto) auto; gap: 3px 5px; align-items: center; }
-.v3d-place-name { font-size: 12px; color: var(--ink-3); text-align: right; white-space: nowrap; }
-.v3d-axis { display: flex; align-items: center; gap: 3px; }
-.v3d-ax { width: 8px; font-size: 10.5px; font-weight: 600; text-align: center; }
-.v3d-ax.ax0 { color: #d13b3b; }
-.v3d-ax.ax1 { color: #2e9a3e; }
-.v3d-ax.ax2 { color: #2f6fd1; }
-.v3d-band .v3d-axis .input { width: 50px; height: 23px; padding: 1px 5px; font-size: 12.5px; }
-.v3d-place .v3d-check, .v3d-place small { font-size: 11.5px; white-space: nowrap; }
-.v3d-resize { position: absolute; z-index: 6; display: flex; flex-direction: column; gap: 3px; padding: 8px 10px;
-  border: 1px solid var(--act); border-radius: 8px; background: var(--sheet); box-shadow: var(--pop); }
-.v3d-resize label { display: flex; align-items: center; gap: 7px; font-size: 13px; color: var(--ink-2); }
-.v3d-resize .input { width: 86px; height: 28px; font-size: 14px; color: var(--ink); }
-.v3d-resize small { font-size: 11.5px; color: var(--ink-3); }
-.v3d-group { flex: none; display: flex; flex-direction: column; padding: 0 9px; border-right: 1px solid var(--rule-2); }
-.v3d-group:last-of-type { border-right: 0; }
-.v3d-group-body { flex: 1; display: flex; align-items: center; gap: 6px; }
-.v3d-group-label { padding-top: 4px; text-align: center; font-size: 11.5px; color: var(--ink-3); white-space: nowrap; }
-.v3d-big { flex-direction: column; gap: 3px; height: auto; min-width: 58px; padding: 6px 8px 5px; font-size: 12.5px;
-  line-height: 1.1; box-shadow: none; }
-.v3d-big.on { color: var(--act); border-color: var(--act); background: var(--act-wash); }
-.v3d-big.armed { color: var(--fault); background: var(--fault-wash); }
+.menu.v3d-foldmenu { min-width: 0; max-width: min(620px, calc(100vw - 16px)); padding: 4px; border-color: var(--rb-edge);
+  background: linear-gradient(var(--rb-body-1), var(--rb-body-2)); font-family: var(--rb-font); color: var(--rb-ink); }
+.v3d-foldbody { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; }
+.v3d-foldhead { flex-basis: 100%; padding: 2px 4px; font-size: 11.5px; color: var(--rb-label); }
+/* Menus from the ribbon (Import, Mirror, Pattern, the boxes' lists): Office 2007's, the golden hover */
+.v3d-ribbon .menu:not(.v3d-foldmenu) { border-color: var(--rb-menu-edge); border-radius: 2px; background: var(--rb-menu);
+  font-family: var(--rb-font); }
+.v3d-ribbon .menu-item { border: 1px solid transparent; border-radius: 3px; }
+.v3d-ribbon .menu-item:hover, .v3d-ribbon .menu-item:focus-visible { background: var(--rb-hover); border-color: var(--rb-hov-edge); }
+.v3d-ribbon .menu-item[aria-checked="true"] { background: var(--rb-on); border-color: var(--rb-on-edge); color: var(--rb-ink); }
+.v3d-ribbon .menu-item small { color: var(--rb-label); }
 .v3d-band .menu-anchor { display: flex; }
 .v3d-stack { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
 .v3d-stack > small, .v3d-check { font-size: 12px; color: var(--ink-3); white-space: nowrap; }
@@ -1253,26 +1399,44 @@ div.tests-result-head { cursor: default; }
 .v3d-band .v3d-num { width: 70px; }
 .v3d-pair { display: flex; gap: 6px; }
 .v3d-pair .v3d-num { width: 74px; }
+.v3d-band .v3d-triple .v3d-num { width: auto; }
+.v3d-band .v3d-note { max-width: 260px; font-size: 12.5px; line-height: 1.35; }
+.v3d-place { display: grid; grid-template-columns: auto repeat(3, auto) auto; gap: 3px 5px; align-items: center; }
+.v3d-place-name { font-size: 12px; color: var(--ink-3); text-align: right; white-space: nowrap; }
+.v3d-axis { display: flex; align-items: center; gap: 3px; }
+.v3d-ax { width: 8px; font-size: 10.5px; font-weight: 600; text-align: center; }
+.v3d-ax.ax0 { color: #d13b3b; }
+.v3d-ax.ax1 { color: #2e9a3e; }
+.v3d-ax.ax2 { color: #2f6fd1; }
+.v3d-place .v3d-check, .v3d-place small { font-size: 11.5px; white-space: nowrap; }
+.v3d-resize { position: absolute; z-index: 6; display: flex; flex-direction: column; gap: 3px; padding: 8px 10px;
+  border: 1px solid var(--act); border-radius: 8px; background: var(--sheet); box-shadow: var(--pop); }
+.v3d-resize label { display: flex; align-items: center; gap: 7px; font-size: 13px; color: var(--ink-2); }
+.v3d-resize .input { width: 86px; height: 28px; font-size: 14px; color: var(--ink); }
+.v3d-resize small { font-size: 11.5px; color: var(--ink-3); }
 .v3d-inline { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-3); }
 .v3d-inline .input { width: 64px; color: var(--ink); }
-.v3d-band .v3d-triple .v3d-num { width: auto; }
-.v3d-band .input, .v3d-band .select, .v3d-band .textarea { padding: 3px 7px; font-size: 13.5px; }
-.v3d-band .select { width: auto; max-width: 200px; height: 28px; padding-right: 28px; }
-.v3d-band .v3d-note { max-width: 260px; font-size: 12.5px; line-height: 1.35; }
-.v3d-name { width: 190px; }
-.v3d-textarea { width: 175px; min-height: 58px; resize: vertical; }
-.v3d-band .v3d-seg .btn.small { padding: 0 8px; }
-.v3d-tip { align-self: center; max-width: 520px; margin: 0 12px; font-size: 13px; line-height: 1.45; color: var(--ink-2); }
-.v3d-edgelist { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; max-width: 300px; }
-.v3d-edgenames { display: grid; grid-template-columns: repeat(2, auto); gap: 4px; }
-.v3d-edgenames .btn { height: 27px; padding: 0 8px 0 5px; justify-content: flex-start; gap: 5px; box-shadow: none; }
-.v3d-band .v3d-chip { height: 24px; padding: 0 8px; font-family: var(--font); font-weight: 400; font-size: 12.5px; }
-.v3d-aligngrid { display: grid; grid-template-columns: 16px repeat(3, auto); gap: 3px 4px; align-items: center; }
-.v3d-aligngrid .btn { height: 21px; padding: 0 8px; font-size: 12px; box-shadow: none; }
+.v3d-seg { display: flex; align-items: center; gap: 4px; }
+.v3d-seg .btn { box-shadow: none; }
+/* The heads-up bars over the view (0.96.0): Select, Select multiple, Send to chat and the handles at the left, the
+   views at the right with SolidWorks' cube pictures - Office 2007's colours on them */
+.v3d-top { position: absolute; top: 8px; left: 8px; right: 8px; z-index: 2; display: flex; flex-direction: column;
+  align-items: center; gap: 6px; pointer-events: none; }
+.v3d-heads-row { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-start; gap: 6px; width: 100%; }
+.v3d-heads-row > .v3d-heads:last-child { margin-left: auto; }        /* wrapped under: still at the right */
+.v3d-heads { pointer-events: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 1px; max-width: 100%; padding: 2px;
+  border: 1px solid var(--rb-edge); border-radius: 4px;
+  background: linear-gradient(color-mix(in srgb, var(--rb-tab-1) 92%, transparent), color-mix(in srgb, var(--rb-body-2) 92%, transparent));
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.14); backdrop-filter: blur(4px); font-family: var(--rb-font); }
+.v3d-heads .v3d-tool { height: 26px; padding: 0 7px 0 5px; gap: 5px; border: 1px solid transparent; border-radius: 3px; background: transparent;
+  box-shadow: none; color: var(--rb-ink); font-family: var(--rb-font); font-weight: 400; font-size: 12.5px; letter-spacing: 0; }
+.v3d-heads .v3d-tool > svg { color: var(--rb-icon); }
+.v3d-heads .v3d-tool:hover { background: var(--rb-hover); border-color: var(--rb-hov-edge); }
+.v3d-heads .v3d-tool:active { background: var(--rb-press); border-color: var(--rb-press-edge); }
+.v3d-heads .v3d-tool.on { background: var(--rb-on); border-color: var(--rb-on-edge); }
+.v3d-viewicon { flex: none; color: light-dark(#1f3f6e, #dce6f2); }
+.v3d-sep { width: 1px; height: 20px; margin: 0 3px; background: var(--rb-group-edge); }
 .v3d-stage { position: relative; flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
-.v3d-sep { width: 1px; height: 20px; background: var(--rule-2); margin: 0 4px; }
-.v3d-letter { display: inline-block; width: 20px; text-align: center; font-family: var(--font-plate); font-weight: 700;
-  font-size: 17px; line-height: 20px; }
 .v3d-view { position: relative; flex: 1; min-height: 0; outline: none; touch-action: none; }
 .v3d-view:focus-visible { box-shadow: inset 0 0 0 2px var(--act); }
 .v3d-view.picking { cursor: crosshair; }
@@ -1295,10 +1459,6 @@ div.tests-result-head { cursor: default; }
 .v3d-triple { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
 .v3d-num { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .v3d-num > span { font-size: 12px; color: var(--ink-3); }
-.v3d-seg { display: flex; align-items: center; gap: 4px; }
-.v3d-seg .btn { box-shadow: none; }
-.v3d-color { width: 36px; height: 28px; margin-left: auto; padding: 0 2px; border: 1px solid var(--rule); border-radius: 6px;
-  background: var(--sheet); cursor: pointer; }
 .v3d-note { margin: 0; font-size: 13px; line-height: 1.45; color: var(--ink-2); overflow-wrap: anywhere; }
 .v3d-parts { display: flex; flex-direction: column; gap: 1px; margin: 0; padding: 0; list-style: none; }
 .v3d-parts .row { gap: 6px; min-height: 28px; }
@@ -1311,6 +1471,7 @@ div.tests-result-head { cursor: default; }
 }
 @media (max-width: 760px) {
   .v3d-head { flex-wrap: wrap; }
-  .v3d-tab { padding: 5px 9px 6px; font-size: 13px; }
+  .v3d-tab { padding: 4px 9px 5px; font-size: 12.5px; }
+  .v3d-heads-row { justify-content: center; }
   .v3d-quick { margin-left: 0; }
 }

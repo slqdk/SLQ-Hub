@@ -737,16 +737,18 @@ export const SECTIONS: HelpSection[] = [
         how: ["Make 3D model on a new chat opens a new design beside it; 3D at the top of a chat opens a new one or "
           + "one of the chat's. An STL, 3MF or OBJ opens there too, as a design with the mesh in it - to put a hole in "
           + "it or text on it.",
-          "The tools are in tabs at the top: Insert adds parts and holes; Part has everything for the picked part - "
-          + "its name, solid or hole, its size, centre and turn by the numbers, onto the plate, mirror, pattern, "
-          + "duplicate and delete; Lines rounds, cuts and resizes its lines; Text appears when a text is picked. A "
-          + "narrow editor folds a tab's groups into buttons, each opening its group. Parts lists every part, to pick "
-          + "or hide one.",
-          "Click a part to pick it - the Part tab opens - or click right by one of its lines to pick the line (it "
-          + "lights up as you point at it), and the Lines tab opens. Shift-click picks more - or turn on Pick "
-          + "several over the view - double-click a part inside a group, and drag a picked part to move it on the "
-          + "plate. Ctrl+A picks them all. The bar over the view switches the handles between Move, Turn and Size "
-          + "(or G, R and S), sets the snap and turns the camera; the arrow keys move what is picked a step.",
+          "The tools are in tabs at the top, as in Office: Insert adds parts and holes; Part has everything for the "
+          + "picked part - its name, solid or hole, its size, centre and turn by the numbers, onto the plate, mirror, "
+          + "pattern, duplicate and delete; Lines rounds, cuts and resizes its lines; Text - its font and size, bold, "
+          + "italic and its lines - opens when a text is added or clicked. A narrow editor folds a tab's groups into "
+          + "buttons, each opening its group. Parts lists every part, to pick or hide one.",
+          "Select (the arrow, at the left over the view) is on to begin with: click a part to pick it - the Part tab "
+          + "opens - or click right by one of its lines to pick the line (it lights up as you point at it), and the "
+          + "Lines tab opens. Nothing moves. Shift-click picks more - or turn on Select multiple - double-click a part "
+          + "inside a group; Ctrl+A picks them all. Move, Turn and Size put handles on what is picked (or G, R and S; "
+          + "Q or Esc goes back to Select): Move goes 1 mm at a time - drag the part itself on the plate too - Turn 15° "
+          + "at a time. The arrow keys move what is picked 1 mm (Shift: 10). Fit, Top, Front and Right, at the right, "
+          + "turn the camera.",
           "A hole cuts the solids beside it. Group parts (Ctrl+G) to keep a hole to them.",
           "Pattern repeats a part or a group round a point or in a row: one arm of a snowflake becomes six, one hole "
           + "a ring of holes. The assistant can also draw flat outlines of its own - stars, leaves, letters' shapes.",
@@ -763,7 +765,8 @@ export const SECTIONS: HelpSection[] = [
           + "apart. Cut through a plate, the stencil font keeps the middles of its letters.",
           "Letters apart makes a text one part per letter, each just where it was: click one to make it bigger, move "
           + "it or turn it - or pick several and change them together.",
-          "Point at puts a spot on the model into your message, so you can say what should change there.",
+          "Send to chat puts a spot on the model into your message - click it - so you can say what should change "
+          + "there.",
           "Export downloads a 3MF or an STL, or saves it beside the design. The printer is chosen at the bottom, where "
           + "the size is."],
         tips: ["While the editor is open, the design goes with every message: the assistant sees it as it is now.",

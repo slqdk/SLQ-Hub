@@ -4,7 +4,29 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## Next session - start here (written 2026-11-26, at 0.95.0)
+## Next session - start here (written 2026-11-26, at 0.96.0)
+
+**0.96.0 (2026-11-26): the ribbon in Office 2007's look, Select, the views at the right - pushed, not yet installed.**
+Søren, 12:27-12:47: what is "Snap 1 mm" (answered: moving in 1 mm steps, turning in 15°, the arrow keys' step); then 1 mm
+and 15° always, the setting gone; a Select that only picks ("Det er ikke så tit der skal flyttes noget") with a mouse
+pointer, at the left with Move and Turn, Pick several as "Select Multiple" and Point at as "Send to Chat" beside it;
+Fit/Top/Front/Right at the right with SolidWorks' pictures; and "hele top ribbon ligner Office 2007 i style", a text's
+font and size coming up when one is added, "Ligesom i office". Built (DESIGN §8 "Office 2007, and Select (0.96.0)"):
+Select is the mode the editor opens in (a click picks, no handles, a drag turns the view; Q, or Esc with nothing
+picked), Move/Turn/Size show handles and only Move drags a part on the plate; two bars over the view; the head, tabs
+and band in Office 2007 Blue (light) and Black (dark) - glossy groups with their names in a band, big 32 px buttons,
+small ones three to a column, the golden hover, orange pressed, amber checked, toned icons; the Text tab opens when a
+text is added or clicked, with a Font box showing each font in its own letters, a Size box (capitals, mm, typed or
+3-80), Bold, Italic, spacing, and Lines; the Lines tab on the same grid (names in columns, Size and Take off in a
+column, the part's treated lines as a gallery). Fixed on the way: lines picked on one part stayed green when another
+part was picked from Parts or added (his screenshot). Seen in the dev server (1440 light and dark, 1280, 390): every
+tab, the Font and Size lists (Pacifico picked, then 20 mm), the folded Box group's menu, Import's menu, two parts and
+their Align grid, Letters apart then the Text tab for three letters, Select keeping the box still while the view turned
+(Move moved it 15 mm), Esc twice back to Select, G/S/Q, Send to chat putting the spot in the message - no console
+errors. Not seen: his screens (Segoe UI there, so closer to Office than here), whether this is the Office 2007 he means.
+**Asked, not built**: Resize of one line alone - "Når jeg resizer en streg, så følger alle 4 med.. kan vi kun justere
+den side jeg har valgt?" A box's four parallel lines are its size; one changing alone makes a free block of 8 corners
+(SketchUp: a corner raised, a top sloping, sides tapering) that loses Fillet. Waiting for his answer.
 
 **0.95.0 (2026-11-26): a hole's lines - picked inside a pocket and filleted - pushed, not yet installed.** Søren, 11:30,
 with his spare-parts box (`reservedels_kasse.3d.json`: a box and a box hole "Innerum" 94 x 44 x 37 from 3 mm up, the
@@ -99,7 +121,7 @@ picking the 4 edges with their size, Take off - no console errors; the band fits
 seen: on his screens, a real mouse's feel of the hover and the pick, a design with many letters (40 parts: the build
 time), letters apart on a text inside a group.
 
-**Next: 0.96.0, fillets where parts meet and on imported meshes** - unchanged from 0.91.0's plan below, now on the
+**Next: 0.97.0, fillets where parts meet and on imported meshes** - unchanged from 0.91.0's plan below, now on the
 pick-first Lines tab: crease chains on the built mesh picked and hovered like the part's own edges (`setMarks`), then
 Fillet or Chamfer. The rim of a hole's opening is the first case (0.95.0 leaves it sharp and says so).
 
@@ -115,7 +137,7 @@ them. Seen in the dev server ("name plate"): the plate's vertical edges filleted
 the top view and picked off again, a chip taken off, a text saying it has no edges - no console errors. Not seen: with a
 real model ("rund kanterne" - does it use `fillet`?), on his screens, printed.
 
-**Next (planned as 0.92.0, then 0.95.0, now 0.96.0): fillets where parts meet and on imported meshes** - the other two of the three Søren chose ("Er det
+**Next (planned as 0.92.0, then 0.95.0 and 0.96.0, now 0.97.0): fillets where parts meet and on imported meshes** - the other two of the three Søren chose ("Er det
 muligt at lave en funktion hvor man efterfølgende kan lave fillet på et kant/side?": the parts' own edges - done in
 0.91.0 -, also where parts meet - a hole's rim, a wall on a base -, also on imported STLs - straight sharp edges). The
 design so far: picked edges `edges: [{fillet|chamfer, path, closed, face, sides, part}]` on a group or the design (mm,
@@ -384,7 +406,7 @@ finds them and fingers still come out wrong). Decided: no Facebook posting (he c
 
 Known flake: tests/test_training.py::test_the_trainer_stops_a_job fails now and then in a full run and passes alone.
 
-## State (0.95.0, 2026-11-26)
+## State (0.96.0, 2026-11-26)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -2462,6 +2484,13 @@ flow, see "Next session". |
       converter's cases are ComfyUI 0.42.3's own templates; files from other sites (Civitai, OpenArt) are
       untried - an export is the way to see what went wrong. When COMFYUI_REF changes, the editor's format may
       too: tools/workflow_oracle/ (convert.js, compare.py) is how the converter was checked - run it again.
+114. **Office 2007 and Select (0.96.0)** - only in the dev server's headless Chromium:
+    - **His screens**: the ribbon at his zoom with Segoe UI (here the fallback font), light and dark; is it the Office
+      2007 he has in mind, and are the toned icons right?
+    - **Select first**: does a click that only picks - and a drag that only turns the view - suit him, and does he find
+      Move when he does want to move something? Esc twice is back to Select.
+    - **The Font box** loads all six fonts (1.3 MB) when the pointer first comes to it - over his line, fine?
+    - **Resize one line alone** (asked, above): his answer decides a free 8-corner block.
 113. **A hole's lines (0.95.0)** - in the tests and the dev server's headless Chromium:
     - **His box with his mouse**: the lines inside the pocket picked from the angles he looks from; is a line within
       7 px on the screen right now that a wall seen edge-on counts as fully as one seen square on?

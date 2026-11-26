@@ -1,7 +1,7 @@
 // The 3D editor (0.87.0): a design (.3d.json) in the chat's or the project's folder, edited Tinkercad-style beside
 // the chat - shapes, holes, groups, moving, turning, sizing, an imported STL - on the chosen printer's plate. The
 // assistant works on the same file: it reads it with every message while the editor is open, writes it with its
-// file tools (and checks it with `hub3d design`), and what it writes shows here. "Point at" puts a spot on the model
+// file tools (and checks it with `hub3d design`), and what it writes shows here. "Send to chat" puts a spot on the model
 // into the message. Loaded only when opened: three.js and manifold-3d (WebAssembly) are big.
 import { createContext, Fragment, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState,
   type ReactNode } from "react";
@@ -9,17 +9,17 @@ import * as THREE from "three";
 import Module from "manifold-3d/manifold";
 import wasmUrl from "manifold-3d/manifold.wasm?url";
 import { AlignCenter, AlignLeft, AlignRight, ArrowDownToLine, ArrowDownUp, Bold, Box, ChevronDown, CircleDot, Columns3, Cone,
-  Copy, Crosshair, Cylinder, Download, Eraser, Eye, EyeOff, FlipHorizontal2, FlipVertical2, Group, Home, Italic, ListTree,
-  Maximize2, Minimize2, MousePointerClick, Move3d, PanelBottom, Printer as PrinterIcon, Redo2, Repeat2, Rotate3d, Ruler,
-  Scaling, Shapes, Split, SquareDashed, SquareMousePointer, SquareRoundCorner, Trash2, TriangleAlert, Triangle, Type, Undo2,
-  Ungroup, Upload, X } from "lucide-react";
+  Copy, Cylinder, Download, Eraser, Eye, EyeOff, FlipHorizontal2, FlipVertical2, Group, Italic, ListTree, Maximize2,
+  MessageSquareShare, Minimize2, MousePointer2, MousePointerClick, Move3d, PanelBottom, Printer as PrinterIcon,
+  Redo2, Repeat2, Rotate3d, Ruler, Scaling, Shapes, Split, SquareDashed, SquareMousePointer, SquareRoundCorner, Trash2,
+  TriangleAlert, Triangle, Type, Undo2, Ungroup, Upload, X } from "lucide-react";
 import fontIndex from "./fonts/index.json";
 import { useApp } from "../state";
 import { ConfirmButton, MenuButton } from "../components/ui";
 import type { DesignFolder } from "./folder";
 import { allIds, build, buildPart, COLORS, edgeLength, edgeLines, edgePlan, EDGES, edgesOf, extent, extentOf, FONT_FAMILIES, fontFile,
   follows, freshId, holeEdges, joined, lettersApart, MAX_COPIES, MIN_SIZE, mirrorPart, nearestEdge, nearestToRay, newDesign,
-  partSize, readDesign, repeatAround, retext, SPACING, stl, textMeasure, threeMf, transformPart, treatEdges, withCapitals,
+  partSize, readDesign, repeatAround, retext, SPACING, stl, textGlyphs, textMeasure, threeMf, transformPart, treatEdges, withCapitals,
   withEdgeLength, writeDesign, type Align, type Box3, type Built, type Design, type EdgeKind, type FontData,
   type FontIndex, type Fonts, type Kit, type Mat3, type MeshData, type Part, type Repeat, type Shape, type Vec3,
   type Wasm } from "./geometry";
@@ -29,7 +29,8 @@ import { lastPrinter, PRINTERS, printerOf, rememberPrinter, type Printer } from 
 import { centre, copy, cuts, cutters, find, group, label, pick, remove, replaceWith, ungroup, update } from "./tree";
 import { Viewport, type Hit, type ViewName } from "./Viewport";
 
-type Mode = "translate" | "rotate" | "scale";
+// Select (0.96.0): a click only picks - no handles, nothing moves; Move, Turn and Size show their handles.
+type Mode = "select" | "translate" | "rotate" | "scale";
 type Status = "loading" | "new" | "saved" | "saving" | "unsaved" | "error";
 
 // The fonts (0.89.0): the index now, each font's polygons when a design first uses it (they are 130-330 kB each).
@@ -80,7 +81,8 @@ function loadKit(): Promise<{ wasm: Wasm; fonts: Fonts }> {
 
 const r3 = (v: number) => Math.round(v * 1000) / 1000 + 0;
 const r4 = (v: number) => Math.round(v * 1e4) / 1e4 + 0;
-const SNAPS = [0, 0.1, 0.5, 1, 2, 5, 10];
+// Moving goes in whole mm and turning in 15° steps (0.96.0: no setting - Søren: "1 mm skal være standard").
+const SNAP = 1;
 const GREY = "#9aa0a3";
 
 /** A rotation as the design keeps turns (row-major). */
@@ -214,8 +216,7 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
   const designRef = useRef<Design | null>(null);
   const [selected, setSelectedState] = useState<string[]>([]);
   const selectedRef = useRef<string[]>([]);
-  const [mode, setMode] = useState<Mode>("translate");
-  const [snap, setSnap] = useState(1);
+  const [mode, setMode] = useState<Mode>("select");
   const [built, setBuilt] = useState<Built | null>(null);
   const [status, setStatus] = useState<Status>("loading");
   const [problems, setProblems] = useState<string[]>([]);
@@ -225,7 +226,7 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
   const [edgeSel, setEdgeSel] = useState<Record<string, string[]>>({});       // picked edges, by part (0.92.0)
   const [hoverEdge, setHoverEdge] = useState<{ part: string; edge: string } | null>(null);
   const hoverFrame = useRef(0);
-  const [several, setSeveral] = useState(false);                               // Pick several: a click adds
+  const [several, setSeveral] = useState(false);                               // Select multiple: a click adds
   const [failed, setFailed] = useState<string | null>(null);
   const [meshTick, setMeshTick] = useState(0);
   const [lock, setLock] = useState(false);
@@ -568,14 +569,14 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
     const items = pick(design.parts, selected);
     const builts = items.map((p) => buildPart(p, k));
     v.setOutline(builts);
-    if (!items.length || tool) {
+    if (!items.length || tool || mode === "select") {
       v.detach();
       return;
     }
     const one = items.length === 1 && !asGroup(items[0]) ? items[0] : null;
     const b = union(builts.map((x, i) => x.box ?? extent(items[i])));
-    v.attach(one ? one.at : b ? centre(b) : [0, 0, 0], one ? one.rotate : null, mode, snap);
-  }, [design, selected, mode, snap, ready, tool, meshTick]);
+    v.attach(one ? one.at : b ? centre(b) : [0, 0, 0], one ? one.rotate : null, mode, SNAP);
+  }, [design, selected, mode, ready, tool, meshTick]);
 
   // The picked lines (0.92.0) drawn over the model, and the one a click would pick (0.94.0: near a line, on any tab).
   useEffect(() => {
@@ -717,7 +718,8 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
     const v = vp.current;
     if (!v || e.button !== 0 || v.overGizmo) return;
     const hit = v.pick(e.clientX, e.clientY);
-    const body = !tool && !!hit && !e.shiftKey && selectedRef.current.some((s) => within(designRef.current?.parts ?? [], s, hit.part));
+    const body = mode === "translate" && !tool && !!hit && !e.shiftKey   // dragging a picked part moves it: Move only
+      && selectedRef.current.some((s) => within(designRef.current?.parts ?? [], s, hit.part));
     pointer.current = { x: e.clientX, y: e.clientY, hit, body };
     if (body) {
       v.controls.enabled = false;                      // the part moves, not the view
@@ -744,7 +746,7 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
     const s = start.current;
     const at = s?.body ? v.onPlane(e.clientX, e.clientY, s.body.z) : null;
     if (!s?.body || !at) return;
-    const q = (x: number) => (snap > 0 ? Math.round(x / snap) * snap : x);
+    const q = (x: number) => Math.round(x / SNAP) * SNAP;
     v.proxy.position.set(s.pos.x + q(at[0] - s.body.from[0]), s.pos.y + q(at[1] - s.body.from[1]), s.pos.z);
     v.proxy.updateMatrixWorld(true);
     v.movePreview(v.proxy.matrixWorld.clone().multiply(s.matrix.clone().invert()));
@@ -797,7 +799,7 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
     return any ? edgeOf(h) : null;
   };
 
-  /** A line picked (0.92.0, 0.94.0): alone - or, `add` (Shift, Pick several, Pick lines), with the others, or unpicked.
+  /** A line picked (0.92.0, 0.94.0): alone - or, `add` (Shift, Select multiple, Pick lines), with the others, or unpicked.
    *  A line that has a fillet or chamfer already puts its size in the size field: changing that resizes it. Its part
    *  is the one picked, and the Lines tab shows. */
   const pickLine = ({ part, edge }: { part: Part; edge: string }, add: boolean) => {
@@ -932,8 +934,9 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
     }
     commit({ ...d, parts: replaceWith(d.parts, id, letters) });
     setSelected(letters.map((l) => l.id));
+    setTab("text");
     host.current?.focus({ preventScroll: true });     // its button is gone: Esc and the arrow keys work on
-    toast(`${letters.length} letters, each a part of its own: click one to move, size or turn it - Pick several for more.`, "run");
+    toast(`${letters.length} letters, each a part of its own: click one to change it - Select multiple for more.`, "run");
   };
 
   /** One change for several parts at once (the Text tab for several texts). */
@@ -990,7 +993,7 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
       setEdgeSel({});
     }
     const text = designRef.current ? find(designRef.current.parts, id)?.part.shape === "text" : false;
-    setTab((t) => (t === "text" && text ? t : "part"));
+    setTab(text ? "text" : "part");                    // a text: its font and size first (0.96.0), as in Office
   };
 
   const onDoubleClick = (e: React.MouseEvent) => {        // the part itself, inside its group
@@ -1052,7 +1055,8 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
     shown3d.current = [id];
     commit({ ...d, parts: [...d.parts, p] });
     setSelected([id]);
-    setMode("translate");
+    setEdgeSel({});
+    if (shape === "text") setTab("text");          // its font and size, as Office shows them for a new text box (0.96.0)
   };
 
   const addMesh = async (file: string) => {
@@ -1201,7 +1205,7 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
     if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || !designRef.current) return;
     const mod = e.ctrlKey || e.metaKey;
     const key = e.key.toLowerCase();
-    const step = (snap || 1) * (e.shiftKey ? 10 : 1);
+    const step = SNAP * (e.shiftKey ? 10 : 1);
     const nudge = (m: Vec3) => {
       const d = designRef.current;
       if (!d || !selectedRef.current.length) return;
@@ -1213,15 +1217,15 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
       Delete: del, Backspace: del, Escape: () => {
         if (host.current?.closest(".panel-3d")?.querySelector(".menu")) return;   // it closes the menu, nothing more
         if (tool) setTool(null);
-        else {
+        else if (selectedRef.current.length || Object.keys(edgeSel).length) {
           setSelected([]);
           setEdgeSel({});
-        }
+        } else setMode("select");                     // nothing picked: back to Select
       },
       ArrowLeft: () => nudge([-step, 0, 0]), ArrowRight: () => nudge([step, 0, 0]),
       ArrowUp: () => nudge([0, step, 0]), ArrowDown: () => nudge([0, -step, 0]),
       PageUp: () => nudge([0, 0, step]), PageDown: () => nudge([0, 0, -step]),
-      g: () => setMode("translate"), r: () => setMode("rotate"), s: () => setMode("scale"),
+      g: () => setMode("translate"), r: () => setMode("rotate"), s: () => setMode("scale"), q: () => setMode("select"),
       h: () => { if (one) change(one.id, (p) => ({ ...p, hole: !p.hole || undefined })); },
     };
     let run: (() => void) | undefined;
@@ -1263,8 +1267,8 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
   const allProblems = [...problems, ...(built?.problems ?? [])];
   const hide = (id: string) => change(id, (p) => ({ ...p, hidden: !p.hidden || undefined }));
   const pickFirst = <p className="v3d-tip">Click a part on the model to change it - or a line on it, to round, cut or
-    resize that line. Shift-click (or Pick several) picks more, a double click picks a part inside a group, and dragging a
-    picked part moves it on the plate.</p>;
+    resize that line. Shift-click (or Select multiple) picks more, a double click picks a part inside a group; Move, Turn
+    and Size put handles on what is picked.</p>;
 
   return (
     <aside className="panel panel-3d" aria-label="3D editor" onKeyDown={onKey}>
@@ -1325,11 +1329,14 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
               {(close) => (
                 <>
                   {parts.length > 1 && (
-                    <button type="button" className="menu-item" onClick={() => { close(); setSelected(parts.map((x) => x.id)); }}>
+                    <button type="button" className="menu-item" onClick={() => { close(); setSelected(parts.map((x) => x.id)); setEdgeSel({}); }}>
                       <span>Pick all<small>Every part, Ctrl+A</small></span></button>
                   )}
                   <PartList parts={parts} onHide={hide} onPick={(id) => {
-                    if (!several) close();
+                    if (!several) {
+                      close();
+                      setEdgeSel({});                  // another part: the lines picked go (they stayed drawn green)
+                    }
                     setSelected(several ? (selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]) : [id]);
                   }} />
                 </>
@@ -1341,21 +1348,22 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
           {shownTab === "insert" && (
             <>
               <Grp label="Solids">
-                <Big icon={<Box size={20} />} label="Box" onClick={() => add("box")} />
-                <Big icon={<Cylinder size={20} />} label="Cylinder" onClick={() => add("cylinder")} />
-                <Big icon={<Cone size={20} />} label="Cone" onClick={() => add("cone")} />
-                <Big icon={<CircleDot size={20} />} label="Sphere" onClick={() => add("sphere")} />
-                <Big icon={<Triangle size={20} />} label="Wedge" title="A wedge: a ramp" onClick={() => add("wedge")} />
-                <Big icon={<Type size={20} />} label="Text" onClick={() => add("text")} />
+                <Big tone="orange" icon={<Box size={20} />} label="Box" onClick={() => add("box")} />
+                <Big tone="orange" icon={<Cylinder size={20} />} label="Cylinder" onClick={() => add("cylinder")} />
+                <Big tone="orange" icon={<Cone size={20} />} label="Cone" onClick={() => add("cone")} />
+                <Big tone="orange" icon={<CircleDot size={20} />} label="Sphere" onClick={() => add("sphere")} />
+                <Big tone="orange" icon={<Triangle size={20} />} label="Wedge" title="A wedge: a ramp" onClick={() => add("wedge")} />
+                <Big tone="violet" icon={<Type size={20} />} label="Text" title="A text - its font and size in the Text tab"
+                  onClick={() => add("text")} />
               </Grp>
               <Grp label="Holes" fold={2} icon={<SquareDashed size={20} />}>
-                <Big icon={<SquareDashed size={20} />} label="Hole" title="A box-shaped hole - through the part picked" onClick={() => add("box", true)} />
-                <Big icon={<Cylinder size={20} strokeDasharray="3 2" />} label="Round hole" title="A round hole - through the part picked"
+                <Big tone="grey" icon={<SquareDashed size={20} />} label="Hole" title="A box-shaped hole - through the part picked" onClick={() => add("box", true)} />
+                <Big tone="grey" icon={<Cylinder size={20} strokeDasharray="3 2" />} label="Round hole" title="A round hole - through the part picked"
                   onClick={() => add("cylinder", true)} />
               </Grp>
               <Grp label="From a file" fold={1} icon={<Upload size={20} />}>
-                <MenuButton fixed className="btn v3d-big" title="An STL, 3MF or OBJ into the design" menuClassName="wide"
-                  label={<><Upload size={20} /><span>Import</span></>}>
+                <MenuButton fixed className="btn v3d-big tone-green" title="An STL, 3MF or OBJ into the design" menuClassName="wide"
+                  label={<><Upload size={20} /><span>Import <ChevronDown size={11} /></span></>}>
                   {(close) => <FolderMeshes store={store} onPick={(f) => { close(); void addMesh(f); }}
                     onUpload={(f) => { close(); void upload(f); }} />}
                 </MenuButton>
@@ -1369,7 +1377,7 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
                 <>
                   <Grp label={`${items.length} parts picked`}>
                     <Big icon={<Copy size={20} />} label="Duplicate" title="Duplicate them (Ctrl+D)" onClick={duplicate} />
-                    <ConfirmButton className="btn v3d-big" confirmText="Delete?" label="Delete them" onConfirm={del}>
+                    <ConfirmButton className="btn v3d-big tone-red" confirmText="Delete?" label="Delete them" onConfirm={del}>
                       <Trash2 size={20} /><span>Delete</span></ConfirmButton>
                   </Grp>
                   <Grp label="Plate" fold={4} icon={<ArrowDownToLine size={20} />}>
@@ -1383,10 +1391,10 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
                     <div className="v3d-aligngrid">
                       {ALIGNS.map(([ax, names], i) => (
                         <Fragment key={ax}>
-                          <span className="faint">{ax}</span>
+                          <span className={`v3d-ax ax${i}`}>{ax}</span>
                           {names.map((n, j) => (
-                            <button key={n} type="button" className="btn small" title={`Line them up: ${n.toLowerCase()} (${ax})`}
-                              onClick={() => align(i, j as 0 | 1 | 2)}>{n}</button>))}
+                            <button key={n} type="button" className="v3d-small" title={`Line them up: ${n.toLowerCase()} (${ax})`}
+                              onClick={() => align(i, j as 0 | 1 | 2)}><span>{n}</span></button>))}
                         </Fragment>
                       ))}
                     </div>
@@ -1438,29 +1446,30 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
           </div>
         )}
         <div className="v3d-top">
-          <div className="v3d-heads" role="toolbar" aria-label="Handles and view">
-            <Tool icon={<Move3d size={15} />} title="Move: the handles move what is picked (G)" active={mode === "translate"}
-              onClick={() => setMode("translate")}><span>Move</span></Tool>
-            <Tool icon={<Rotate3d size={15} />} title="Turn: the handles turn what is picked (R)" active={mode === "rotate"}
-              onClick={() => setMode("rotate")}><span>Turn</span></Tool>
-            <Tool icon={<Scaling size={15} />} title="Size: the handles size what is picked (S)" active={mode === "scale"}
-              onClick={() => setMode("scale")}><span>Size</span></Tool>
-            <select className="select" value={snap} onChange={(e) => setSnap(Number(e.target.value))} aria-label="Snap"
-              title="Moving snaps to this grid, turning to 15°; the arrow keys move a step">
-              {SNAPS.map((s) => <option key={s} value={s}>{s ? `Snap ${s} mm` : "No snap"}</option>)}
-            </select>
-            <span className="v3d-sep" />
-            <Tool icon={<Home size={15} />} title="Fit the design in view" onClick={() => view("home")}><span>Fit</span></Tool>
-            <Tool icon={<span className="v3d-letter">T</span>} title="From the top" onClick={() => view("top")}><span>Top</span></Tool>
-            <Tool icon={<span className="v3d-letter">F</span>} title="From the front" onClick={() => view("front")}><span>Front</span></Tool>
-            <Tool icon={<span className="v3d-letter">R</span>} title="From the right" onClick={() => view("right")}><span>Right</span></Tool>
-            <span className="v3d-sep" />
-            <Tool icon={<SquareMousePointer size={15} />} active={several} onClick={() => setSeveral(!several)}
-              title="Pick several: each click on the model picks one more part - or unpicks it - as Shift-click does"><span>Pick several</span></Tool>
-            <Tool icon={<Crosshair size={15} />} title="Point at a spot on the model: it goes into your message to the assistant"
-              active={tool === "point"} onClick={() => setTool(tool === "point" ? null : "point")}><span>Point at</span></Tool>
+          <div className="v3d-heads-row">
+            <div className="v3d-heads" role="toolbar" aria-label="Pick and handles">
+              <Tool icon={<MousePointer2 size={16} />} title="Select: a click picks a part or a line - no handles, nothing moves (Q, or Esc with nothing picked)"
+                active={mode === "select"} onClick={() => setMode("select")}><span>Select</span></Tool>
+              <Tool icon={<SquareMousePointer size={16} />} active={several} onClick={() => setSeveral(!several)}
+                title="Select multiple: each click on the model picks one more part or line - or unpicks it - as Shift-click does"><span>Select multiple</span></Tool>
+              <Tool icon={<MessageSquareShare size={16} />} title="Send to chat: click a spot on the model and it goes into your message to the assistant"
+                active={tool === "point"} onClick={() => setTool(tool === "point" ? null : "point")}><span>Send to chat</span></Tool>
+              <span className="v3d-sep" />
+              <Tool icon={<Move3d size={16} />} title="Move: arrows on what is picked move it, 1 mm at a time - or drag it on the plate (G)"
+                active={mode === "translate"} onClick={() => setMode("translate")}><span>Move</span></Tool>
+              <Tool icon={<Rotate3d size={16} />} title="Turn: rings on what is picked turn it, 15° at a time (R)" active={mode === "rotate"}
+                onClick={() => setMode("rotate")}><span>Turn</span></Tool>
+              <Tool icon={<Scaling size={16} />} title="Size: handles on what is picked make it longer or shorter, 1 mm at a time (S)"
+                active={mode === "scale"} onClick={() => setMode("scale")}><span>Size</span></Tool>
+            </div>
+            <div className="v3d-heads" role="toolbar" aria-label="View">
+              <Tool icon={<ViewIcon face="home" />} title="Fit: the whole design, seen from the front, right and above" onClick={() => view("home")}><span>Fit</span></Tool>
+              <Tool icon={<ViewIcon face="top" />} title="From the top" onClick={() => view("top")}><span>Top</span></Tool>
+              <Tool icon={<ViewIcon face="front" />} title="From the front" onClick={() => view("front")}><span>Front</span></Tool>
+              <Tool icon={<ViewIcon face="right" />} title="From the right" onClick={() => view("right")}><span>Right</span></Tool>
+            </div>
           </div>
-          {tool && <div className="v3d-hint">{tool === "point" ? "Click the spot on the model. Esc stops."
+          {tool && <div className="v3d-hint">{tool === "point" ? "Click the spot on the model to send it to the chat. Esc stops."
             : tool === "edge" ? "Click lines to pick them - again to unpick - then Fillet, Chamfer, Take off or Resize above. Esc stops."
               : "Click the face that should lie on the plate. Esc stops."}</div>}
         </div>
@@ -1616,12 +1625,129 @@ function MirrorButton({ onMirror }: { onMirror: (axis: 0 | 1 | 2) => void }) {
   );
 }
 
-/** A ribbon button: its icon over its name. */
-function Big({ icon, label, title, onClick, active, disabled }: { icon: ReactNode; label: string; title?: string;
-  onClick: () => void; active?: boolean; disabled?: boolean }) {
+/** A big ribbon button, as Office 2007 has them (0.96.0): its icon over its name - `tone` colours the icon. */
+function Big({ icon, label, title, onClick, active, disabled, tone }: { icon: ReactNode; label: string; title?: string;
+  onClick: () => void; active?: boolean; disabled?: boolean; tone?: Tone }) {
   return (
-    <button type="button" className={`btn v3d-big${active ? " on" : ""}`} onClick={onClick} disabled={disabled}
-      title={title ?? label} aria-pressed={active}>{icon}<span>{label}</span></button>
+    <button type="button" className={`btn v3d-big${tone ? ` tone-${tone}` : ""}${active ? " on" : ""}`} onClick={onClick}
+      disabled={disabled} title={title ?? label} aria-pressed={active}>{icon}<span>{label}</span></button>
+  );
+}
+
+type Tone = "orange" | "grey" | "green" | "red" | "violet";
+
+/** A small ribbon button: its icon before its name, one of up to three in a column (`Stack`). */
+function Small({ icon, label, title, onClick, active, disabled, tone }: { icon: ReactNode; label: string; title?: string;
+  onClick: () => void; active?: boolean; disabled?: boolean; tone?: Tone }) {
+  return (
+    <button type="button" className={`v3d-small${tone ? ` tone-${tone}` : ""}${active ? " on" : ""}`} onClick={onClick}
+      disabled={disabled} title={title ?? label} aria-pressed={active}>{icon}<span>{label}</span></button>
+  );
+}
+
+/** Up to three rows of small controls, one over the other - an Office ribbon group's column. */
+function Stack({ children }: { children: ReactNode }) {
+  return <div className="v3d-col">{children}</div>;
+}
+
+/** A number in a row of a column: its name, the field, its unit. */
+function Field({ value, onSet, min, label: name, unit, step = 1, title, width }: { value: number; onSet: (v: number) => void;
+  min?: number; label: string; unit?: string; step?: number; title?: string; width?: number }) {
+  return (
+    <label className="v3d-field" title={title ?? `${name}${unit ? ` (${unit})` : ""} - the arrow keys step it, Shift: ten steps`}>
+      <span>{name}</span>
+      <span className="v3d-field-in" style={width ? { width } : undefined}><NumInput value={value} onSet={onSet} min={min} step={step} label={name} /></span>
+      {unit && <small>{unit}</small>}
+    </label>
+  );
+}
+
+/** The view buttons' pictures, as SolidWorks draws its view orientations (0.96.0): a cube seen from the front, the
+ *  right and above, the face looked at filled - Fit: all three, shaded. */
+function ViewIcon({ face }: { face: "home" | "top" | "front" | "right" }) {
+  const fill = (f: "top" | "front" | "right") => (face === "home" ? `var(--vi-${f})` : face === f ? "var(--vi-on)" : "var(--vi-off)");
+  return (
+    <svg className="v3d-viewicon" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+      <polygon points="8,1.5 14.5,5 8,8.5 1.5,5" fill={fill("top")} />
+      <polygon points="1.5,5 8,8.5 8,15 1.5,11.5" fill={fill("front")} />
+      <polygon points="8,8.5 14.5,5 14.5,11.5 8,15" fill={fill("right")} />
+      <path d="M8 1.5 14.5 5v6.5L8 15l-6.5-3.5V5ZM1.5 5 8 8.5 14.5 5M8 8.5V15" fill="none" stroke="currentColor"
+        strokeWidth="1.1" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+/** A text's name in its own font (the Font box's list, as Office shows its fonts): the letters' outlines as a path. */
+function FontFace({ text, font, height = 15 }: { text: string; font: FontData | undefined; height?: number }) {
+  const d = useMemo(() => {
+    if (!font) return null;
+    const glyphs = textGlyphs({ id: "", shape: "text", text, size: [0, 0, 0], at: [0, 0, 0], rotate: [0, 0, 0], align: "left" }, font);
+    let x1 = 0, path = "";
+    for (const g of glyphs) {
+      for (const c of g.contours) {
+        path += `M${c.map(([x, y]) => `${Math.round(x)} ${Math.round(-y)}`).join("L")}Z`;
+        for (const [x] of c) x1 = Math.max(x1, x);
+      }
+    }
+    return { path, w: Math.max(1, x1) };
+  }, [text, font]);
+  if (!font || !d) return <span className="v3d-face-plain">{text}</span>;
+  const cap = font.capHeight ?? font.ascender * 0.7;                 // its capitals the same height in every font
+  const top = cap * 1.3, h = top - Math.max(font.descender, -cap * 0.45);
+  return (
+    <svg className="v3d-face" height={height} width={(height * d.w) / h} viewBox={`0 ${-top} ${d.w} ${h}`} aria-label={text} role="img">
+      <path d={d.path} fill="currentColor" />
+    </svg>
+  );
+}
+
+/** The Font box (0.96.0, Office's): the font's name in its own letters; its list, each font so, loaded when opened. */
+function FontCombo({ value, fonts, onPick }: { value: string; fonts: Fonts; onPick: (family: string) => void }) {
+  const [, setTick] = useState(0);
+  const faceOf = (f: string) => fonts.loaded[fonts.index.families[f]?.regular ?? ""];
+  const loadAll = () => {
+    const missing = FONT_FAMILIES.map((f) => fonts.index.families[f]?.regular).filter((x): x is string => !!x && !fonts.loaded[x]);
+    if (missing.length) void Promise.allSettled(missing.map(loadFont)).then(() => setTick((t) => t + 1));
+  };
+  const fam = value ? fonts.index.families[value] : undefined;
+  return (
+    <div className="v3d-combo font" onPointerEnter={loadAll}>
+      <MenuButton fixed className="v3d-combo-btn" title="Font" menuClassName="v3d-combomenu"
+        label={<><span className="v3d-combo-text">{fam ? <FontFace text={fam.name} font={faceOf(value)} height={14} /> : "Several fonts"}</span>
+          <span className="v3d-combo-arrow"><ChevronDown size={12} /></span></>}>
+        {(close) => (
+          <>
+            {FONT_FAMILIES.map((f) => (
+              <button key={f} type="button" role="menuitemradio" aria-checked={f === value} className="menu-item v3d-fontitem"
+                onClick={() => { close(); onPick(f); }}>
+                <FontFace text={fonts.index.families[f]?.name ?? f} font={faceOf(f)} height={19} />
+                <small>{f[0].toUpperCase() + f.slice(1)}</small>
+              </button>
+            ))}
+          </>
+        )}
+      </MenuButton>
+    </div>
+  );
+}
+
+/** How tall its capitals come out, mm - Office's font size box: typed, or one of its list. */
+const TEXT_SIZES = [3, 4, 5, 6, 8, 10, 12, 15, 20, 25, 30, 40, 50, 60, 80];
+function SizeCombo({ value, mixed, onSet }: { value: number; mixed: boolean; onSet: (v: number) => void }) {
+  return (
+    <div className="v3d-combo size" title="Size: how tall its capitals come out, mm">
+      <span className="v3d-combo-in">{mixed ? <input className="input mono" placeholder="-" aria-label="Size, mm"
+        onKeyDown={(e) => { if (e.key === "Enter") { const v = Number(e.currentTarget.value.replace(",", ".")); if (v >= 0.1) onSet(v); } }} />
+        : <NumInput value={r3(value)} min={0.1} onSet={onSet} label="Size, mm" />}</span>
+      <MenuButton fixed className="v3d-combo-btn arrow" title="Sizes" menuClassName="v3d-combomenu narrow"
+        label={<span className="v3d-combo-arrow"><ChevronDown size={12} /></span>}>
+        {(close) => TEXT_SIZES.map((v) => (
+          <button key={v} type="button" role="menuitemradio" aria-checked={!mixed && Math.abs(v - value) < 1e-6}
+            className="menu-item num" onClick={() => { close(); onSet(v); }}>{v}</button>
+        ))}
+      </MenuButton>
+      <small>mm</small>
+    </div>
   );
 }
 
@@ -1662,19 +1788,27 @@ function PartBand({ part, fonts, lock, setLock, change, onDuplicate, onDelete, o
   return (
     <>
       <Grp label={<>{kindOf(part)} <span className="mono">{part.id}</span></>}>
-        <div className="v3d-stack">
-          <input className="input v3d-name" defaultValue={part.name ?? ""} key={`${part.id}:${part.name ?? ""}`} placeholder={label(part)}
-            aria-label="Name" title="Its name in Parts and in the assistant's messages"
-            onBlur={(e) => { if (e.target.value !== (part.name ?? "")) change((p) => ({ ...p, name: e.target.value || undefined })); }}
-            onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
-          <div className="v3d-seg" role="group" aria-label="Solid or hole">
-            <button className={`btn small${!part.hole ? " on" : ""}`} aria-pressed={!part.hole} onClick={() => change((p) => ({ ...p, hole: undefined }))}>Solid</button>
-            <button className={`btn small${part.hole ? " on" : ""}`} aria-pressed={!!part.hole} title="A hole cuts the solids beside it (H)"
-              onClick={() => change((p) => ({ ...p, hole: true }))}>Hole</button>
-            {!g && !part.hole && <input type="color" className="v3d-color" value={part.color ?? GREY} aria-label="Colour" title="Colour (for the eye only: one colour prints)"
-              onChange={(e) => change((p) => ({ ...p, color: e.target.value }))} />}
+        <Stack>
+          <label className="v3d-field" title="Its name in Parts and in the assistant's messages">
+            <span>Name</span>
+            <input className="input v3d-name" defaultValue={part.name ?? ""} key={`${part.id}:${part.name ?? ""}`} placeholder={label(part)}
+              aria-label="Name" onBlur={(e) => { if (e.target.value !== (part.name ?? "")) change((p) => ({ ...p, name: e.target.value || undefined })); }}
+              onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
+          </label>
+          <div className="v3d-row" role="group" aria-label="Solid or hole">
+            <Small icon={<Box size={16} />} tone="orange" label="Solid" active={!part.hole} title="A solid: joined to the others"
+              onClick={() => change((p) => ({ ...p, hole: undefined }))} />
+            <Small icon={<SquareDashed size={16} />} tone="grey" label="Hole" active={!!part.hole} title="A hole cuts the solids beside it (H)"
+              onClick={() => change((p) => ({ ...p, hole: true }))} />
           </div>
-        </div>
+          {!g && !part.hole && (
+            <label className="v3d-field" title="Colour (for the eye only: one colour prints)">
+              <span>Colour</span>
+              <input type="color" className="v3d-color" value={part.color ?? GREY} aria-label="Colour"
+                onChange={(e) => change((p) => ({ ...p, color: e.target.value }))} />
+            </label>
+          )}
+        </Stack>
       </Grp>
       {!g && (
         <Grp id="place" short="Size" label={part.shape === "outline" ? "Size, its points' 0,0 and turn" : "Size, centre and turn"} fold={6}
@@ -1691,19 +1825,24 @@ function PartBand({ part, fonts, lock, setLock, change, onDuplicate, onDelete, o
       )}
       {part.shape === "box" && (
         <Grp label="Box" fold={3} icon={<Box size={20} />}>
-          <Num label="All rounded" unit="mm: every edge and corner - or round some lines in Lines" value={part.radius ?? 0} min={0} step={0.5}
-            onSet={(v) => change((p) => (v > 0 ? { ...p, radius: v, sides: p.sides ?? 32, fillet: undefined, chamfer: undefined }
-              : { ...p, radius: undefined, sides: p.fillet ? p.sides : undefined }))} />
-          {!!part.radius && <Num label="Sides" unit="segments round a corner" value={part.sides ?? 64} min={3} step={8}
-            onSet={(v) => change((p) => ({ ...p, sides: Math.round(Math.min(256, Math.max(3, v))) }))} />}
+          <Stack>
+            <Field label="All rounded" unit="mm" value={part.radius ?? 0} min={0} step={0.5}
+              title="Every edge and corner rounded, mm - or round some lines in Lines"
+              onSet={(v) => change((p) => (v > 0 ? { ...p, radius: v, sides: p.sides ?? 32, fillet: undefined, chamfer: undefined }
+                : { ...p, radius: undefined, sides: p.fillet ? p.sides : undefined }))} />
+            {!!part.radius && <Field label="Sides" value={part.sides ?? 64} min={3} step={8} title="Segments round a corner"
+              onSet={(v) => change((p) => ({ ...p, sides: Math.round(Math.min(256, Math.max(3, v))) }))} />}
+          </Stack>
         </Grp>
       )}
       {(part.shape === "cylinder" || part.shape === "cone" || part.shape === "sphere") && (
         <Grp label={kindOf(part)} fold={3} icon={part.shape === "cone" ? <Cone size={20} /> : part.shape === "sphere" ? <CircleDot size={20} /> : <Cylinder size={20} />}>
-          <Num label="Sides" unit="segments around" value={part.sides ?? 64} min={3} step={8}
-            onSet={(v) => change((p) => ({ ...p, sides: Math.round(Math.min(256, Math.max(3, v))) }))} />
-          {part.shape === "cone" && <Num label="Top, %" unit="% of the base" value={(part.top ?? 0) * 100} min={0} step={10}
-            onSet={(v) => change((p) => ({ ...p, top: Math.min(1, v / 100) || undefined }))} />}
+          <Stack>
+            <Field label="Sides" value={part.sides ?? 64} min={3} step={8} title="Segments around"
+              onSet={(v) => change((p) => ({ ...p, sides: Math.round(Math.min(256, Math.max(3, v))) }))} />
+            {part.shape === "cone" && <Field label="Top" unit="% of the base" value={(part.top ?? 0) * 100} min={0} step={10}
+              onSet={(v) => change((p) => ({ ...p, top: Math.min(1, v / 100) || undefined }))} />}
+          </Stack>
         </Grp>
       )}
       {part.shape === "outline" && (
@@ -1730,7 +1869,7 @@ function PartBand({ part, fonts, lock, setLock, change, onDuplicate, onDelete, o
         <Big icon={part.hidden ? <EyeOff size={20} /> : <Eye size={20} />} label={part.hidden ? "Show" : "Hide"}
           title={part.hidden ? "Hidden: left out of the solid. Show it" : "Hide it: left out of the solid"}
           onClick={() => change((p) => ({ ...p, hidden: !p.hidden || undefined }))} />
-        <ConfirmButton className="btn v3d-big" confirmText="Delete?" label="Delete (Del)" onConfirm={onDelete}>
+        <ConfirmButton className="btn v3d-big tone-red" confirmText="Delete?" label="Delete (Del)" onConfirm={onDelete}>
           <Trash2 size={20} /><span>Delete</span></ConfirmButton>
       </Grp>
     </>
@@ -1805,8 +1944,9 @@ function TextBand({ parts, fonts, change, onApart }: { parts: Part[]; fonts: Fon
   const own = fixed ? textMeasure({ ...part, size: [0, part.size[1], part.size[2]] }, fonts)?.width : undefined;
   const stretched = own !== undefined && Math.abs(own - part.size[0]) >= 0.05;
   const caps = parts.map((p) => textMeasure(p, fonts)?.capitals ?? 0);
-  const LINES: [Align, ReactNode, string][] = [["left", <AlignLeft size={15} />, "Left"], ["center", <AlignCenter size={15} />, "Centre"],
-    ["right", <AlignRight size={15} />, "Right"]];
+  const LINES: [Align, ReactNode, string][] = [["left", <AlignLeft size={16} />, "Left"], ["center", <AlignCenter size={16} />, "Centre"],
+    ["right", <AlignRight size={16} />, "Right"]];
+  const mixed = many && caps.some((c) => Math.abs(c - caps[0]) > 1e-6);
   return (
     <>
       {many ? (
@@ -1814,60 +1954,53 @@ function TextBand({ parts, fonts, change, onApart }: { parts: Part[]; fonts: Fon
           A change here is made to each.</p></Grp>
       ) : (
         <Grp label="Text">
-          <textarea className="textarea v3d-textarea" rows={2} defaultValue={part.text ?? ""} key={`${part.id}:${part.text ?? ""}`}
+          <textarea className="textarea v3d-textarea" rows={3} defaultValue={part.text ?? ""} key={`${part.id}:${part.text ?? ""}`}
             aria-label="Text" title="Its letters; a new line is a new line of text"
             onBlur={(e) => { if (e.target.value !== part.text) restyle({ text: e.target.value }); }} />
           <ApartButton part={part} onApart={onApart} />
         </Grp>
       )}
-      <Grp id="font" short="Font" fold={2} icon={<Type size={20} />} label={many ? (oneFont ? fam.name : "Fonts") : t ? t.font : "Font"}>
-        <div className="v3d-stack">
-          <select className="select" value={oneFont ? fontOf(part) : ""} aria-label="Font"
-            onChange={(e) => { if (e.target.value) restyle({ font: e.target.value === fonts.index.default ? undefined : e.target.value }); }}>
-            {!oneFont && <option value="">Several fonts</option>}
-            {FONT_FAMILIES.map((f) => <option key={f} value={f}>{f[0].toUpperCase() + f.slice(1)} - {fonts.index.families[f]?.name}</option>)}
-          </select>
-          <div className="v3d-seg">
-            <button className={`btn small${bold && canBold ? " on" : ""}`} aria-pressed={bold} disabled={!canBold}
-              title={canBold ? "Bold" : `${fam.name} has no bold`} onClick={() => restyle({ bold: !bold || undefined })}><Bold size={14} /> Bold</button>
-            <button className={`btn small${italic ? " on" : ""}`} aria-pressed={italic}
-              title={fam.italic || many ? "Italic" : `Slanted (${fam.name} has no italic)`}
-              onClick={() => restyle({ italic: !italic || undefined })}><Italic size={14} /> Italic</button>
+      <Grp id="font" short="Font" fold={3} icon={<Type size={20} />} label="Font">
+        <Stack>
+          <div className="v3d-row">
+            <FontCombo value={oneFont ? fontOf(part) : ""} fonts={fonts}
+              onPick={(f) => restyle({ font: f === fonts.index.default ? undefined : f })} />
+            <SizeCombo value={caps[0]} mixed={mixed} onSet={(v) => change((p) => withCapitals(p, v, fonts))} />
           </div>
-        </div>
-      </Grp>
-      <Grp id="letters" short="Letters" fold={3} icon={<Scaling size={20} />}
-        label={many ? "Letters" : t ? `Letters: ${fmt(t.width)} x ${fmt(t.height)} mm` : "Letters"}>
-        <div className="v3d-stack">
-          <div className="v3d-pair">
-            <Num label="Capitals, mm" value={r3(caps[0])} min={0.1}
-              unit={many && caps.some((c) => Math.abs(c - caps[0]) > 1e-6) ? "mm: how tall each one's capitals are - now not the same"
-                : "mm: how tall its capitals are - it sizes the text"}
-              onSet={(v) => change((p) => withCapitals(p, v, fonts))} />
-            <Num label="Spacing" unit="from letter to letter: 1 is the font's own" step={0.05} value={part.letter_spacing ?? 1}
-              min={SPACING[0]} onSet={spacing("letter_spacing")} />
+          <div className="v3d-row">
+            <Small icon={<Bold size={16} />} label="Bold" active={bold && canBold} disabled={!canBold}
+              title={canBold ? "Bold" : `${fam.name} has no bold`} onClick={() => restyle({ bold: !bold || undefined })} />
+            <Small icon={<Italic size={16} />} label="Italic" active={italic}
+              title={fam.italic || many ? "Italic" : `Slanted (${fam.name} has no italic)`} onClick={() => restyle({ italic: !italic || undefined })} />
           </div>
-          {!many && (
-            <small className="faint" title={t ? `${t.lines > 1 ? `${t.lines} lines in ` : ""}${t.font}` : undefined}>
-              {part.size[0] <= 0 ? "Its width follows the letters" : part.size[1] <= 0 ? "Its height follows the letters"
-                : stretched ? <>Stretched to its size: <button className="link-btn small" onClick={() => change((p) => ({ ...p, size: [0, p.size[1], p.size[2]] }))}>undo</button></>
-                  : "Its width follows the letters"}</small>
-          )}
-        </div>
+          <Field label="Spacing" value={part.letter_spacing ?? 1} min={SPACING[0]} step={0.05} width={52}
+            title="From letter to letter: 1 is the font's own" onSet={spacing("letter_spacing")} />
+        </Stack>
       </Grp>
-      <Grp id="lines" short="Lines" fold={1} icon={<AlignCenter size={20} />} label="Lines">
-        <div className="v3d-stack">
-          <div className="v3d-seg" role="group" aria-label="The lines">
+      <Grp id="lines" short="Lines" fold={2} icon={<AlignCenter size={20} />} label="Lines">
+        <Stack>
+          <div className="v3d-row" role="group" aria-label="The lines">
             {LINES.map(([a, icon, name]) => (
-              <button key={a} className={`btn small${align === a ? " on" : ""}`} aria-pressed={align === a}
-                title={`Lines ${a === "center" ? "centred" : `to the ${a}`}`} onClick={() => restyle({ align: a === "center" ? undefined : a })}>{icon} {name}</button>
+              <Small key={a} icon={icon} label={name} active={align === a} title={`Lines ${a === "center" ? "centred" : `to the ${a}`}`}
+                onClick={() => restyle({ align: a === "center" ? undefined : a })} />
             ))}
           </div>
-          <label className="v3d-inline" title="From line to line: 1 is the font's own">
-            <span>Spacing</span>
-            <NumInput value={part.line_spacing ?? 1} min={SPACING[0]} step={0.05} onSet={spacing("line_spacing")} />
-          </label>
-        </div>
+          <Field label="Spacing" value={part.line_spacing ?? 1} min={SPACING[0]} step={0.05} width={52}
+            title="From line to line: 1 is the font's own" onSet={spacing("line_spacing")} />
+          {!many && t && <small className="v3d-col-note">{t.lines > 1 ? `${t.lines} lines` : "1 line"}</small>}
+        </Stack>
+      </Grp>
+      <Grp id="letters" short="Size" fold={1} icon={<Scaling size={20} />} label="Size">
+        <Stack>
+          {!many && t && <span className="v3d-col-strong num">{fmt(t.width)} x {fmt(t.height)} mm</span>}
+          {!many && (
+            <small className="v3d-col-note" title={t ? `${t.lines > 1 ? `${t.lines} lines in ` : ""}${t.font}` : undefined}>
+              {part.size[0] <= 0 ? "Its width follows the letters" : part.size[1] <= 0 ? "Its height follows the letters"
+                : stretched ? <>Stretched to its size - <button className="link-btn small" onClick={() => change((p) => ({ ...p, size: [0, p.size[1], p.size[2]] }))}>undo</button></>
+                  : "Its width follows the letters"}</small>
+          )}
+          {many && <small className="v3d-col-note">{mixed ? "Not the same size: a size typed is given to each" : `Capitals ${fmt(caps[0])} mm each`}</small>}
+        </Stack>
       </Grp>
     </>
   );
@@ -1915,52 +2048,51 @@ function LinesBand({ part, many, picked, pickedOn, size, picking, onPicking, onN
   const where = (key: string) => (key === "all" ? "every edge" : key === "vertical" ? (shape === "outline" ? "its corners"
     : "the upright edges") : `the edges round its ${key}`);
   const inside = cutter ? " - those inside the part the hole cuts (its inside corners), not those at an opening" : "";
+  const first = names.slice(0, 3), rest = names.slice(3);
+  const byName = ([key, name]: [string, string]) => (
+    <Small key={key} icon={<EdgeIcon which={key} size={16} />} label={name} active={has(key)} onClick={() => onName(key)}
+      title={has(key) ? `Unpick ${where(key)}` : `Pick ${where(key)}`} />
+  );
   return (
     <>
       <Grp label={part && !why ? `Pick: ${kindOf(part).toLowerCase()} ${part.id}${cutter ? " (hole)" : ""}` : "Pick"}>
         <Big icon={<MousePointerClick size={20} />} label="Pick lines" active={picking} onClick={onPicking}
           title="Click lines on the model to pick several - again to unpick (a plain click near a line picks it alone). Esc stops." />
-        {names.length > 0 && (
-          <div className="v3d-edgenames" role="group" aria-label="Pick lines by name">
-            {names.map(([key, name]) => (
-              <button key={key} type="button" className={`btn small${has(key) ? " on" : ""}`} aria-pressed={has(key)}
-                onClick={() => onName(key)} title={has(key) ? `Unpick ${where(key)}` : `Pick ${where(key)}`}>
-                <EdgeIcon which={key} size={16} /> {name}</button>
-            ))}
-          </div>
-        )}
+        {first.length > 0 && <Stack>{first.map(byName)}</Stack>}
+        <Stack>
+          {rest.map(byName)}
+          <Small icon={<X size={16} />} label="Unpick all" disabled={!picked} onClick={onClear} title="No line picked (Esc)" />
+        </Stack>
       </Grp>
       <Grp id="resize" short="Resize" label={length ? `${length.what}: ${fmt(length.length)} mm` : "One line"} fold={4} icon={<Ruler size={20} />}>
         <Big icon={<Ruler size={20} />} label="Resize" disabled={!length} onClick={onResize}
           title={length ? `Make it another ${length.what.toLowerCase()} - type it in the box by the line, Enter sets it`
             : picked > 1 ? "Pick one line to resize it" : "Pick a line to resize it"} />
       </Grp>
-      <Grp id="treat" short="Fillet" label={picked ? `${picked} line${picked > 1 ? "s" : ""} picked` : "Nothing picked"} fold={3} icon={<SquareRoundCorner size={20} />}>
+      <Grp id="treat" short="Fillet" label={picked ? `${picked} line${picked > 1 ? "s" : ""} picked` : "Round or cut"} fold={3}
+        icon={<SquareRoundCorner size={20} />}>
         <Big icon={<SquareRoundCorner size={20} />} label="Fillet" disabled={!picked} onClick={() => onTreat("fillet")}
           title={`The picked lines rounded: radius ${fmt(size)} mm${inside}`} />
         <Big icon={<ChamferIcon />} label="Chamfer" disabled={!picked} onClick={() => onTreat("chamfer")}
           title={`The picked lines cut off: ${fmt(size)} mm along each face${inside}`} />
-        <Big icon={<Eraser size={20} />} label="Take off" disabled={!picked} onClick={() => onTreat(null)}
-          title="The picked lines sharp again" />
-        <div className="v3d-stack">
-          <label className="v3d-inline" title="The fillet's radius or the chamfer's reach. Changed: the picked lines that have one get it">
-            <span>Size</span><NumInput value={size} min={0.1} step={0.5} onSet={onSize} label="Size" /><span>mm</span>
-          </label>
-          <button type="button" className="btn small quiet" disabled={!picked} onClick={onClear} title="No line picked (Esc)">
-            <X size={14} /> Unpick all</button>
-        </div>
+        <Stack>
+          <Field label="Size" unit="mm" value={size} min={0.1} step={0.5} onSet={onSize} width={46}
+            title="The fillet's radius or the chamfer's reach, mm. Changed: the picked lines that have one get it" />
+          <Small icon={<Eraser size={16} />} label="Take off" disabled={!picked} onClick={() => onTreat(null)}
+            title="The picked lines sharp again" />
+        </Stack>
       </Grp>
       {why && <p className="v3d-tip">{why}</p>}
       {!part && !many && <p className="v3d-tip">Click a line on the model to pick it - or pick a part and its lines by name.</p>}
       {many && <p className="v3d-tip">Pick one part to pick its lines by name - or click lines on the model.</p>}
       {part && !why && (
-        <Grp label="Now - click to pick" short="Now" fold={1} icon={<SquareRoundCorner size={20} />}>
-          <div className="v3d-edgelist">
+        <Grp label="Rounded or cut - click to pick" short="On it" fold={1} icon={<SquareRoundCorner size={20} />}>
+          <div className={`v3d-gallery${now.length ? "" : " empty"}`} role="group" aria-label="Its lines rounded or cut">
             {now.length ? now.map(({ k, key, v }) => (
-              <button key={k + key} type="button" className={`btn small v3d-chip${has(key) ? " on" : ""}`} aria-pressed={has(key)}
+              <button key={k + key} type="button" className={`v3d-small${has(key) ? " on" : ""}`} aria-pressed={has(key)}
                 title={has(key) ? "Unpick these lines" : "Pick these lines - then change the size, or Take off"}
-                onClick={() => onChip(key, v)}>{key} · {k} {fmt(v)}</button>
-            )) : <span className="faint">No line rounded or cut</span>}
+                onClick={() => onChip(key, v)}><EdgeIcon which={key} size={16} /><span>{key} · {k} {fmt(v)} mm</span></button>
+            )) : <span>No line rounded or cut</span>}
           </div>
         </Grp>
       )}

@@ -53,7 +53,8 @@ export function facing(n: [number, number, number]): string {
   return Math.abs(z) > 0.35 ? `${side}, ${z > 0 ? "upwards" : "downwards"}` : side;
 }
 
-/** A spot on the model as "Point at" puts it in the message - in the words the assistant's prompt shows it. */
+/** A spot on the model as "Send to chat" (0.96.0; Point at before) puts it in the message - in the words the
+ *  assistant's prompt shows it. */
 export function pointMark(name: string, id: string, hole: boolean, at: [number, number, number],
   normal: [number, number, number]): string {
   return `[3D point: part ${JSON.stringify(name)} (id ${id}${hole ? ", a hole" : ""}) at x ${fmt(at[0])}, y ${fmt(at[1])}, `

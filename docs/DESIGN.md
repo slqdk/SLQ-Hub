@@ -3268,11 +3268,46 @@ into the Hub, Tinkercad's level, his printer a Bambu Lab P2S but chosen per desi
     picked) shows Part instead and comes back with the next text.
   - **Parts**, a menu at the right of the tabs: every part, nested in its groups, to pick, hide or show.
   - **Over the view**, a heads-up bar as SolidWorks has: Move, Turn, Size, the snap, Fit, Top, Front, Right, Pick
-    several (0.92.0), Point at (the pick hint under it). **The status line**: size, volume, the printer (a menu: the printers and a custom size),
+    several (0.92.0), Point at (the pick hint under it) - since 0.96.0 two bars, Select first (below). **The status line**: size, volume, the printer (a menu: the printers and a custom size),
     the warnings, and "2 problems" (a menu with what the file's reader and the build said). The head: Undo, Redo,
     Export, Full width / Show the chat, Close - all with their words. With nothing picked, Part, Size and place and
     Arrange say how to pick. On a narrow panel the ribbon scrolls sideways; on a phone the tabs wrap.
   - **Three tabs since 0.94.0** (below): Insert, Part (with Size and place and Arrange in it), Lines.
+  - **Office 2007's look since 0.96.0** (below), and Select.
+- **Office 2007, and Select (0.96.0).** Søren, 12:36-12:47, after asking what "Snap 1 mm" means: "Jeg tænker at 1mm
+  slatid skal være standard.. og 15 grader når man drejer er også fint.. så indstillingen kan vi fjerne"; "mangler der
+  ikke en select ? så når select er valdt, så kan jeg kun vælge ting. Det er ikke så tit der skal flyttes noget"; the
+  four views "højre til højre, med små pictogrammer ligesom i solidworks"; Select with a mouse pointer, Select, Move,
+  Turn at the left; Pick several as "Select Multiple" and Point at as "Send to Chat" beside Select; and "Lines op
+  menuerne ser lidt amatøragtigt ud... Jeg vil gerne have at hele top ribbon ligner Office 2007 i style. Når man
+  indsætter en text, så skal valg af skrifttype komme frem, og størrelse osv... Ligesom i office.."
+  - **Select** (an arrow; Q, or Esc with nothing picked) is the mode the editor opens in: a click picks a part or a
+    line, no handles show, and a drag always turns the view. **Move, Turn, Size** (G, R, S) put their handles on what
+    is picked; dragging a picked part on the plate moves it in Move only (it did in every mode). Moving goes in 1 mm,
+    turning in 15° - the snap menu is gone (`SNAP`); the arrow keys move 1 mm, Shift 10. Two bars over the view: Select,
+    Select multiple (Pick several), Send to chat (Point at) | Move, Turn, Size at the left; Fit, Top, Front, Right at
+    the right (wrapped under, still at the right), each with SolidWorks' view picture - a cube seen from the front, the
+    right and above, the face looked at filled; Fit's all three shaded (`ViewIcon`). Words stay beside the pictures.
+  - **The ribbon as Office 2007's** (styles.css, `.panel-3d` variables with `light-dark()`: Blue in the light theme,
+    Black in the dark one): the head as the title bar with its quick access buttons; the tabs on a light strip, the open
+    one joined to the band; a contextual tab tinted gold (Text, as Office's "Text Box Tools"); groups as glossy panels,
+    their names in a band under them; **big buttons** (`Big`: a 32 px icon over the name, which may take two lines) and
+    **small ones** (`Small`: a 16 px icon before the name) three to a column (`Stack`), numbers as a name, a field, a
+    unit in a row (`Field`); the golden hover, the orange pressed, the amber checked; icons in Office's blue, the solids
+    orange, holes grey, Import green, Delete red, Text violet (`tone`). The band is 100 px high on every tab (the view
+    no longer jumps); it folds as before and scrolls only where nothing more can fold (a phone).
+  - **Text as Office has it**: adding a text, or clicking one, opens the Text tab. Its Font group: the **Font box**
+    shows the font's name in its own letters (`FontFace`: the name laid out by `textGlyphs`, a path, its capitals as
+    tall in every font) and lists all six so - their files loaded when the pointer comes to the box - then the **Size
+    box**: how tall its capitals come out, mm, typed or one of 3-80 (`withCapitals`); Bold, Italic; letter Spacing.
+    Lines: Left, Centre, Right, line Spacing, how many lines. Size: how big it comes out, and whether its width follows
+    the letters (or "Stretched - undo"). Narrow, Size folds first, then Lines.
+  - **Lines on the grid**: Pick lines; Top, Bottom, Vertical (a wedge's Slope, a cylinder's Both, an outline's Corners)
+    and All in columns with Unpick all; Resize; Fillet, Chamfer, then Size and Take off in a column; the part's lines
+    rounded or cut as a gallery, three rows high. **Part**: name, Solid or Hole, colour in a column; the table; the
+    shape's own numbers as fields; Arrange; Duplicate, Hide, Delete.
+  - Picking another part - in Parts, or a new part added - unpicks the lines picked (they stayed green on the last
+    part, as his screenshot showed).
 - **Insert, Part, Lines (0.94.0).** Søren, with the editor beside the chat: "Shapes skal hedde 'Insert'. Når man klikker
   på en Part, så skal parts menuen komme frem. Parts menuen skal også inkludere Size, place, arrange. (alle på en tab).
   Hvis man klikker på en streg, så skal menuen Lines komme frem, (edges i dag). Under lines, skal jeg have mulighed for
@@ -3308,7 +3343,7 @@ into the Hub, Tinkercad's level, his printer a Bambu Lab P2S but chosen per desi
   - **A hole's fillet rounds what it cut.** The cutter rounded on its upright edges leaves the pocket round inside
     corners, on its bottom edges a rounded floor edge - its edges inside the part. On its edges at the opening the
     cutter rounded cuts less there, so a lip is left round the opening (rounding the rim itself is a fillet where the
-    hole meets the part: 0.96.0). So a hole's lines are picked as a part's - clicked, by name, Resized - and Fillet
+    hole meets the part: 0.97.0). So a hole's lines are picked as a part's - clicked, by name, Resized - and Fillet
     and Chamfer go to those inside it only (`holeEdges`); the others are named in a toast. Take off takes off any.
   - **Inside or at an opening** (`holeEdges`; hub3d's `hole_edges`, the same): points 0.2 mm off the edge, out
     between its two faces (`edgeOutside`: along a straight edge at its eighths, round a rim at eight places, up each of
@@ -3358,7 +3393,7 @@ into the Hub, Tinkercad's level, his printer a Bambu Lab P2S but chosen per desi
     that one; and the part's names now, each a button that takes it off. A box with All rounded (its radius, in Part)
     says to set that to 0; setting it clears the fillets. Holes' and meshes' edges say they cannot be rounded yet
     (a hole's can since 0.95.0, inside the part).
-  - **Not yet - 0.96.0**: edges where parts meet (the rim of a hole's opening, a wall on a base: on the built solid, a
+  - **Not yet - 0.97.0**: edges where parts meet (the rim of a hole's opening, a wall on a base: on the built solid, a
     fillet's cutter or filler swept along the picked crease) and straight sharp edges of imported meshes.
 - **Picking first (0.92.0).** Søren, 07:23: "Er det ikke muligt at vælge et enkelt bogstav og ændre på det ? altså ved
   at klikke på bogstavet ? Og hvis jeg så vil ændre på flere, så kan jeg vælge en mode for at vælge flere" - one letter

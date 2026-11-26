@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.96.0 - 2026-11-26
+
+- The 3D editor's ribbon looks like Office 2007: tabs on a strip, groups
+  with their names underneath, big and small buttons, the golden hover - in
+  blue in the light theme and black in the dark one.
+- Select is the editor's starting mode: a click only picks a part or a
+  line, and dragging only turns the view. Move, Turn and Size put handles on
+  what is picked; Esc (with nothing picked) goes back to Select.
+- Over the view: Select, Select multiple, Send to chat (was Point at),
+  Move, Turn and Size at the left; Fit, Top, Front and Right at the right,
+  with SolidWorks-style pictures. Moving always goes in 1 mm steps and
+  turning in 15° steps; the snap setting is gone.
+- Adding or clicking a text opens the Text tab, as in Office: a Font box
+  that shows each font in its own letters, a Size box (how tall the capitals
+  are, in mm), Bold, Italic, spacing and the lines' alignment.
+- Fixed: lines picked on one part stayed marked green after another part
+  was picked from Parts or added.
+
 ## 0.95.0 - 2026-11-26
 
 - The 3D editor picks the lines inside what a hole cuts: click an inside
