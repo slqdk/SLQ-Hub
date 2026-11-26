@@ -8,12 +8,17 @@
    "italic": "barlow-600-italic",
    "bold-italic": "barlow-800-italic"
   },
-  "serif": {
-   "name": "Bitter",
-   "regular": "bitter-600",
-   "bold": "bitter-800",
-   "italic": "bitter-600-italic",
-   "bold-italic": "bitter-800-italic"
+  "condensed": {
+   "name": "Oswald",
+   "regular": "oswald-500",
+   "bold": "oswald-700"
+  },
+  "geometric": {
+   "name": "Montserrat",
+   "regular": "montserrat-600",
+   "bold": "montserrat-800",
+   "italic": "montserrat-600-italic",
+   "bold-italic": "montserrat-800-italic"
   },
   "rounded": {
    "name": "Nunito",
@@ -22,13 +27,57 @@
    "italic": "nunito-700-italic",
    "bold-italic": "nunito-900-italic"
   },
+  "serif": {
+   "name": "Bitter",
+   "regular": "bitter-600",
+   "bold": "bitter-800",
+   "italic": "bitter-600-italic",
+   "bold-italic": "bitter-800-italic"
+  },
+  "classic": {
+   "name": "Cinzel",
+   "regular": "cinzel-600",
+   "bold": "cinzel-900"
+  },
   "script": {
    "name": "Pacifico",
    "regular": "pacifico-400"
   },
+  "handwriting": {
+   "name": "Caveat",
+   "regular": "caveat-500",
+   "bold": "caveat-700"
+  },
+  "marker": {
+   "name": "Knewave",
+   "regular": "knewave-400"
+  },
   "stencil": {
    "name": "Saira Stencil One",
    "regular": "saira-stencil-one-400"
+  },
+  "comic": {
+   "name": "Bangers",
+   "regular": "bangers-400"
+  },
+  "western": {
+   "name": "Holtwood One SC",
+   "regular": "holtwood-one-sc-400"
+  },
+  "blackletter": {
+   "name": "Grenze Gotisch",
+   "regular": "grenze-gotisch-600",
+   "bold": "grenze-gotisch-800"
+  },
+  "futuristic": {
+   "name": "Oxanium",
+   "regular": "oxanium-600",
+   "bold": "oxanium-800"
+  },
+  "pixel": {
+   "name": "Pixelify Sans",
+   "regular": "pixelify-sans-500",
+   "bold": "pixelify-sans-700"
   },
   "mono": {
    "name": "JetBrains Mono",

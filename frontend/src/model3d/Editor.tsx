@@ -57,6 +57,18 @@ function loadFont(file: string): Promise<void> {
   return p;
 }
 
+/** Every family's name in its own letters (0.99.0): the Font box's list from one small file, not every font's. */
+let previews: Record<string, FontData> | null = null;
+let previewLoad: Promise<void> | null = null;
+function loadPreviews(): Promise<void> {
+  previewLoad ??= (async () => {
+    const url = FONT_URLS["./fonts/previews.json"];
+    const r = url ? await fetch(url) : null;
+    if (r?.ok) previews = await r.json() as Record<string, FontData>;
+  })().catch(() => { previewLoad = null; });
+  return previewLoad;
+}
+
 /** The font files a design's texts need that are not loaded (nor failed to load). */
 function fontsWanted(parts: Part[], into = new Set<string>()): Set<string> {
   for (const p of parts) {
@@ -1928,13 +1940,13 @@ function FontFace({ text, font, height = 15 }: { text: string; font: FontData | 
   );
 }
 
-/** The Font box (0.96.0, Office's): the font's name in its own letters; its list, each font so, loaded when opened. */
+/** The Font box (0.96.0, Office's): the font's name in its own letters; its list, each font so - from previews.json
+ *  (0.99.0: sixteen fonts), fetched when the pointer comes to the box; a font's own file, where it is loaded. */
 function FontCombo({ value, fonts, onPick }: { value: string; fonts: Fonts; onPick: (family: string) => void }) {
   const [, setTick] = useState(0);
-  const faceOf = (f: string) => fonts.loaded[fonts.index.families[f]?.regular ?? ""];
+  const faceOf = (f: string) => fonts.loaded[fonts.index.families[f]?.regular ?? ""] ?? previews?.[f];
   const loadAll = () => {
-    const missing = FONT_FAMILIES.map((f) => fonts.index.families[f]?.regular).filter((x): x is string => !!x && !fonts.loaded[x]);
-    if (missing.length) void Promise.allSettled(missing.map(loadFont)).then(() => setTick((t) => t + 1));
+    if (!previews) void loadPreviews().then(() => setTick((t) => t + 1));
   };
   const fam = value ? fonts.index.families[value] : undefined;
   return (

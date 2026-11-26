@@ -3231,6 +3231,25 @@ into the Hub, Tinkercad's level, his printer a Bambu Lab P2S but chosen per desi
     family's files; the readers take a model's other names too - "Arial" (sans), "Times New Roman" (serif),
     "monospace", "cursive", OpenSCAD's "Liberation Sans:style=Bold Italic" - and say an unknown one, drawn in sans.
     The two readers' alias tables are the same (a test).
+  - **Ten more (0.99.0).** Søren, with the Font box open: "Kan vi få nogle flere skrifttyper?" Sixteen now, in the
+    box sans to serif to hand to display, mono last: sans (Barlow), **condensed** (Oswald 500/700: more letters in a
+    width), **geometric** (Montserrat 600/800, italics), rounded (Nunito), serif (Bitter), **classic** (Cinzel
+    600/900: Roman capitals), script (Pacifico), **handwriting** (Caveat 500/700), **marker** (Knewave), stencil
+    (Saira Stencil One), **comic** (Bangers), **western** (Holtwood One SC: wood type, a wanted poster's),
+    **blackletter** (Grenze Gotisch 600/800), **futuristic** (Oxanium 600/800), **pixel** (Pixelify Sans 500/700),
+    mono (JetBrains Mono). Chosen with æøå (Orbitron has no ø) and a clean licence: `make_3d_font.py` stops unless a
+    font is OFL 1.1 without a Reserved Font Name - the polygons are a Modified Version, which may not carry such a
+    name (OFL condition 3) - so Permanent Marker (Apache 2.0), Rye, UnifrakturMaguntia, Audiowide and Press Start 2P
+    (reserved names) are left out; asked for by name, the readers give the family like them ("Permanent Marker":
+    marker, "Rye": western, "Orbitron": futuristic, "Press Start 2P": pixel; "handwriting" is Caveat now, "cursive"
+    still Pacifico). Every font is written in thousandths of its em (some are 2048 units); its capitals' height is
+    the font's own figure unless its flat-topped capitals (E F H I K L T Z) differ by more than 5 % (Pixelify Sans
+    says 700 for 633, Caveat 610 for 661; Rye said 177) - the Size box's millimetres are the capitals'. The fonts before
+    are byte for byte as they were. **The Font box** draws each name in its own letters from `fonts/previews.json`
+    (each family's name's glyphs, 113 kB, fetched when the pointer comes to the box - not sixteen fonts, 3.4 MB), its
+    list scrolling where it is taller than the window. Size: the fonts are 7.9 MB in each of the two folders (3.6
+    before), each file fetched when a text first uses it; a rough font's outlines have many points (Caveat about 400
+    a letter, Barlow 155), which builds slower in a long text.
   - **Layout** (`geometry.ts` textContours, hub3d `_text_contours`, the same arithmetic in the same order): each
     letter after the last by its advance, times `letter_spacing` between letters (OpenSCAD's `spacing`); each line
     `ascender - descender` (the font's own line height, Barlow's 1.2 em as before) times `line_spacing` below the
@@ -3413,7 +3432,7 @@ into the Hub, Tinkercad's level, his printer a Bambu Lab P2S but chosen per desi
   - **A hole's fillet rounds what it cut.** The cutter rounded on its upright edges leaves the pocket round inside
     corners, on its bottom edges a rounded floor edge - its edges inside the part. On its edges at the opening the
     cutter rounded cuts less there, so a lip is left round the opening (rounding the rim itself is a fillet where the
-    hole meets the part: 0.99.0). So a hole's lines are picked as a part's - clicked, by name, Resized - and Fillet
+    hole meets the part: 0.100.0). So a hole's lines are picked as a part's - clicked, by name, Resized - and Fillet
     and Chamfer go to those inside it only (`holeEdges`); the others are named in a toast. Take off takes off any.
   - **Inside or at an opening** (`holeEdges`; hub3d's `hole_edges`, the same): points 0.2 mm off the edge, out
     between its two faces (`edgeOutside`: along a straight edge at its eighths, round a rim at eight places, up each of
@@ -3463,7 +3482,7 @@ into the Hub, Tinkercad's level, his printer a Bambu Lab P2S but chosen per desi
     that one; and the part's names now, each a button that takes it off. A box with All rounded (its radius, in Part)
     says to set that to 0; setting it clears the fillets. Holes' and meshes' edges say they cannot be rounded yet
     (a hole's can since 0.95.0, inside the part).
-  - **Not yet - 0.99.0**: edges where parts meet (the rim of a hole's opening, a wall on a base: on the built solid, a
+  - **Not yet - 0.100.0**: edges where parts meet (the rim of a hole's opening, a wall on a base: on the built solid, a
     fillet's cutter or filler swept along the picked crease) and straight sharp edges of imported meshes.
 - **Picking first (0.92.0).** Søren, 07:23: "Er det ikke muligt at vælge et enkelt bogstav og ændre på det ? altså ved
   at klikke på bogstavet ? Og hvis jeg så vil ændre på flere, så kan jeg vælge en mode for at vælge flere" - one letter

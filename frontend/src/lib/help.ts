@@ -771,9 +771,11 @@ export const SECTIONS: HelpSection[] = [
           "A hole's lines are where it cut: click a line inside a pocket - an upright corner, the edge round its floor - "
           + "and Fillet or Chamfer it to round the pocket inside. The rim of an opening stays sharp for now: a hole "
           + "rounded there would leave a lip.",
-          "Text comes in six fonts - sans, serif, rounded, script, stencil and mono - bold or italic, its lines "
-          + "centred, left or right. Letters sets how tall its capitals are; Spacing and Lines move letters and lines "
-          + "apart. Cut through a plate, the stencil font keeps the middles of its letters.",
+          "Text comes in sixteen fonts - sans, condensed, geometric, rounded, serif, classic, script, handwriting, "
+          + "marker, stencil, comic, western, blackletter, futuristic, pixel and mono - each named in its own letters "
+          + "in the Font box; bold or italic, its lines centred, left or right. Size sets how tall its capitals are; "
+          + "Spacing and Lines move letters and lines apart. Cut through a plate, the stencil font keeps the middles of "
+          + "its letters.",
           "Letters apart makes a text one part per letter, each just where it was: click one to make it bigger, move "
           + "it or turn it - or pick several and change them together.",
           "Send to chat puts a spot on the model into your message - click it - so you can say what should change "

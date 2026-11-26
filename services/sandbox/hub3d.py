@@ -820,17 +820,34 @@ DEFAULT_SIDES = 64
 MIN_SIZE = 0.01
 FONT_DIR = Path(__file__).with_name("fonts")        # the fonts as polygons (tools/make_3d_font.py): index.json, ...
 _font_cache: dict = {}
-# A text's fonts (0.89.0) as fonts/index.json names them, the first the default; other names a model may write for
-# them, and the words in a name that ask for bold or italic - the editor's (geometry.ts), word for word.
-FONT_FAMILIES = ("sans", "serif", "rounded", "script", "stencil", "mono")
+# A text's fonts (0.89.0; ten more 0.99.0) as fonts/index.json names them, the first the default; other names a model
+# may write for them, and the words in a name that ask for bold or italic - the editor's (geometry.ts), word for word.
+FONT_FAMILIES = ("sans", "condensed", "geometric", "rounded", "serif", "classic", "script", "handwriting", "marker",
+                 "stencil", "comic", "western", "blackletter", "futuristic", "pixel", "mono")
 FONT_ALIASES = {
     "barlow": "sans", "sans serif": "sans", "arial": "sans", "helvetica": "sans", "liberation sans": "sans",
     "dejavu sans": "sans", "roboto": "sans", "open sans": "sans", "inter": "sans",
+    "oswald": "condensed", "bebas neue": "condensed", "bebas": "condensed", "impact": "condensed",
+    "league gothic": "condensed", "arial narrow": "condensed", "narrow": "condensed",
+    "montserrat": "geometric", "futura": "geometric", "century gothic": "geometric", "avenir": "geometric",
+    "poppins": "geometric", "gotham": "geometric",
+    "nunito": "rounded", "round": "rounded", "arial rounded": "rounded", "varela round": "rounded",
     "bitter": "serif", "slab": "serif", "times": "serif", "times new roman": "serif", "georgia": "serif",
     "liberation serif": "serif", "roboto slab": "serif",
-    "nunito": "rounded", "round": "rounded", "arial rounded": "rounded", "varela round": "rounded",
-    "pacifico": "script", "cursive": "script", "handwriting": "script", "lobster": "script", "brush script": "script",
+    "cinzel": "classic", "trajan": "classic", "roman": "classic", "engraved": "classic",
+    "pacifico": "script", "cursive": "script", "lobster": "script", "brush script": "script",
+    "caveat": "handwriting", "handwritten": "handwriting", "hand": "handwriting",
+    "knewave": "marker", "permanent marker": "marker", "sharpie": "marker",
     "saira stencil one": "stencil", "saira stencil": "stencil",
+    "bangers": "comic", "comic book": "comic", "cartoon": "comic",
+    "holtwood one sc": "western", "holtwood": "western", "rye": "western", "wild west": "western",
+    "cowboy": "western", "saloon": "western", "wanted": "western",
+    "grenze gotisch": "blackletter", "grenze": "blackletter", "unifrakturmaguntia": "blackletter",
+    "unifraktur": "blackletter", "fraktur": "blackletter", "old english": "blackletter", "medieval": "blackletter",
+    "oxanium": "futuristic", "audiowide": "futuristic", "orbitron": "futuristic", "sci fi": "futuristic",
+    "scifi": "futuristic", "techno": "futuristic",
+    "pixelify sans": "pixel", "pixelify": "pixel", "press start 2p": "pixel", "silkscreen": "pixel", "8 bit": "pixel",
+    "8bit": "pixel", "arcade": "pixel",
     "jetbrains mono": "mono", "monospace": "mono", "courier": "mono", "courier new": "mono", "consolas": "mono",
     "liberation mono": "mono", "dejavu sans mono": "mono",
 }
@@ -976,10 +993,15 @@ A part:
             size [width, height, thickness] is the box all its lines fill, not one letter's height: two lines 40
             high have capitals about 13 mm tall (hub3d design says how tall they came out). A width or height of 0
             follows the letters: [70, 0, 2] is 70 mm wide - text on a plate fills most of its width. font: sans
-            (Barlow, the default), serif (Bitter), rounded (Nunito), script (Pacifico), stencil (Saira Stencil: cut
-            through a plate, its letters keep their middles) or mono (JetBrains Mono); bold: true, italic: true
-            (script and stencil have no bold); align: "left", "center" (the default) or "right" - the lines;
-            letter_spacing, line_spacing: 1 is the font's own (1.3: wider apart). Standing up: rotate [90, 0, 0]
+            (Barlow, the default), condensed (Oswald: narrow - more letters in a width), geometric (Montserrat),
+            rounded (Nunito), serif (Bitter), classic (Cinzel: Roman capitals, for a plaque), script (Pacifico),
+            handwriting (Caveat), marker (Knewave), stencil (Saira Stencil: cut through a plate, its letters keep
+            their middles), comic (Bangers), western (Holtwood One SC: a wanted poster's), blackletter (Grenze
+            Gotisch: fraktur), futuristic (Oxanium), pixel (Pixelify Sans) or mono (JetBrains Mono); bold: true
+            (none in script, marker, stencil, comic and western), italic: true (an italic in sans, geometric,
+            rounded, serif and mono - the others lean); align: "left", "center" (the default)
+            or "right" - the lines; letter_spacing, line_spacing: 1 is the font's own (1.3: wider apart).
+            Standing up: rotate [90, 0, 0]
   outline   points: [[x, y], ...] - a flat shape of your own, drawn in mm around the part's 0,0 and size z thick, as
             OpenSCAD's translate(at) rotate(rotate) linear_extrude(size z, center=true) polygon(points). So here at
             is where the points' 0,0 goes, not the middle (left out: [0, 0, thickness / 2] - the points where they
@@ -2326,7 +2348,8 @@ def selftest() -> int:
                         t = {"id": "t", "shape": "text", "text": "Aæ", "size": [0, 8, 1], "font": fid,
                              "bold": "bold" in style, "italic": "italic" in style}
                         m = _text_measure(t)
-                        expect(m is not None and 2 < m["capitals"] < 8, f"the font {fid} {style} draws nothing")
+                        expect(m is not None and 2 < m["capitals"] < 8.01,          # 8: no overshoot (Oxanium)
+                               f"the font {fid} {style} draws nothing")
             Path("tag.3d.json").write_text(DESIGN_EXAMPLE)          # hub3d format's example
             tag = check(design("tag.3d.json", quiet=True), bed=256)
             expect(tag.ok and tag.parts == 1 and not tag.warnings, f"hub3d format's example is not ready:\n{tag}")

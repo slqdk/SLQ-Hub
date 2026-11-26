@@ -26,17 +26,35 @@ export const PART_KEYS = ["id", "name", "shape", "size", "at", "rotate", "mirror
   "radius", "top", "text", "font", "bold", "italic", "align", "letter_spacing", "line_spacing", "points", "holes",
   "file", "repeat", "fillet", "chamfer", "on", "parts"];
 
-/** A text's fonts (0.89.0), as fonts/index.json names them (tools/make_3d_font.py makes both): the first is the
- *  default. Other names a model may write for them, and the words in a name that ask for bold or italic. */
-export const FONT_FAMILIES = ["sans", "serif", "rounded", "script", "stencil", "mono"];
+/** A text's fonts (0.89.0; ten more 0.99.0), as fonts/index.json names them (tools/make_3d_font.py makes both): the
+ *  first is the default. Other names a model may write for them, and the words in a name that ask for bold or
+ *  italic. */
+export const FONT_FAMILIES = ["sans", "condensed", "geometric", "rounded", "serif", "classic", "script", "handwriting",
+  "marker", "stencil", "comic", "western", "blackletter", "futuristic", "pixel", "mono"];
 export const FONT_ALIASES: Record<string, string> = {
   "barlow": "sans", "sans serif": "sans", "arial": "sans", "helvetica": "sans", "liberation sans": "sans",
   "dejavu sans": "sans", "roboto": "sans", "open sans": "sans", "inter": "sans",
+  "oswald": "condensed", "bebas neue": "condensed", "bebas": "condensed", "impact": "condensed",
+  "league gothic": "condensed", "arial narrow": "condensed", "narrow": "condensed",
+  "montserrat": "geometric", "futura": "geometric", "century gothic": "geometric", "avenir": "geometric",
+  "poppins": "geometric", "gotham": "geometric",
+  "nunito": "rounded", "round": "rounded", "arial rounded": "rounded", "varela round": "rounded",
   "bitter": "serif", "slab": "serif", "times": "serif", "times new roman": "serif", "georgia": "serif",
   "liberation serif": "serif", "roboto slab": "serif",
-  "nunito": "rounded", "round": "rounded", "arial rounded": "rounded", "varela round": "rounded",
-  "pacifico": "script", "cursive": "script", "handwriting": "script", "lobster": "script", "brush script": "script",
+  "cinzel": "classic", "trajan": "classic", "roman": "classic", "engraved": "classic",
+  "pacifico": "script", "cursive": "script", "lobster": "script", "brush script": "script",
+  "caveat": "handwriting", "handwritten": "handwriting", "hand": "handwriting",
+  "knewave": "marker", "permanent marker": "marker", "sharpie": "marker",
   "saira stencil one": "stencil", "saira stencil": "stencil",
+  "bangers": "comic", "comic book": "comic", "cartoon": "comic",
+  "holtwood one sc": "western", "holtwood": "western", "rye": "western", "wild west": "western",
+  "cowboy": "western", "saloon": "western", "wanted": "western",
+  "grenze gotisch": "blackletter", "grenze": "blackletter", "unifrakturmaguntia": "blackletter",
+  "unifraktur": "blackletter", "fraktur": "blackletter", "old english": "blackletter", "medieval": "blackletter",
+  "oxanium": "futuristic", "audiowide": "futuristic", "orbitron": "futuristic", "sci fi": "futuristic",
+  "scifi": "futuristic", "techno": "futuristic",
+  "pixelify sans": "pixel", "pixelify": "pixel", "press start 2p": "pixel", "silkscreen": "pixel", "8 bit": "pixel",
+  "8bit": "pixel", "arcade": "pixel",
   "jetbrains mono": "mono", "monospace": "mono", "courier": "mono", "courier new": "mono", "consolas": "mono",
   "liberation mono": "mono", "dejavu sans mono": "mono",
 };

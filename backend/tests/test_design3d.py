@@ -75,7 +75,11 @@ def test_the_fonts_are_the_same_in_both_places(h3):
     index = json.loads((FONTS / "index.json").read_text(encoding="utf-8"))
     assert list(index["families"]) == list(h3.FONT_FAMILIES) and index["default"] == h3.FONT_FAMILIES[0]
     files = {f for fam in index["families"].values() for k, f in fam.items() if k != "name"}
-    assert files == {n[:-5] for n in names if n.endswith(".json") and n != "index.json"}       # none missing, none extra
+    assert files == {n[:-5] for n in names if n.endswith(".json") and n not in ("index.json", "previews.json")}
+    previews = json.loads((FONTS / "previews.json").read_text(encoding="utf-8"))      # the Font box's list (0.99.0)
+    assert list(previews) == list(index["families"])
+    for fid, fam in index["families"].items():
+        assert set(fam["name"]) - {" "} <= set(previews[fid]["glyphs"]) <= set(fam["name"])      # its name's letters
     for file in files:
         font = json.loads((FONTS / f"{file}.json").read_text(encoding="utf-8"))
         assert font["unitsPerEm"] == 1000 and all(ch in font["glyphs"] for ch in "AZaz09æøåÆØÅ?.,-+°"), file
@@ -481,6 +485,11 @@ TEXTS += [
                {"id": "cut", "shape": "text", "text": "HUB", "font": "stencil", "size": [40, 0, 5], "at": [0, -38, 1.5],
                 "hole": True}]},
 ]
+# 0.99.0: ten fonts more (Søren: "Kan vi få nogle flere skrifttyper?") - each upright and bold, where it has one
+NEW_FONTS = ("condensed", "geometric", "classic", "handwriting", "marker", "comic", "western", "blackletter", "futuristic",
+             "pixel")
+TEXTS += [{"parts": [{"id": "t", "shape": "text", "text": "Søren æøå\nÆØÅ 08", "size": [0, 20, 2], "font": f, "bold": b}]}
+          for f in NEW_FONTS for b in (False, True)]
 TEXT_JS = """
 const out = input.map((d) => {
   const r = G.readDesign(JSON.stringify(d));
@@ -514,6 +523,12 @@ def test_text_in_every_font_and_style_builds_the_same_in_both(h3):
     # every family in its own font; a bold where there is one; an italic, or the upright slanted
     assert {"Barlow SemiBold", "Barlow ExtraBold Italic", "Bitter SemiBold Italic", "Nunito Black",
             "Pacifico Regular", "Saira Stencil One Regular", "JetBrains Mono ExtraBold"} <= names
+    assert {"Oswald Medium", "Oswald Bold", "Montserrat SemiBold", "Montserrat ExtraBold", "Cinzel SemiBold",
+            "Cinzel Black", "Caveat Medium", "Caveat Bold", "Knewave Regular", "Bangers Regular",
+            "Holtwood One SC Regular", "Grenze Gotisch SemiBold", "Grenze Gotisch ExtraBold", "Oxanium SemiBold",
+            "Oxanium ExtraBold", "Pixelify Sans Medium", "Pixelify Sans Bold"} <= names
+    for j in js[-20:]:                                  # each new font draws its letters (æøå: the fonts test)
+        assert j["measure"]["capitals"] > 4 and j["triangles"] > 500
     widths = [j["measure"]["width"] for j in js[:24]]
     assert widths[12] == widths[14] != widths[13] == widths[15]          # script: no bold; italic slants it
     assert js[0]["measure"]["capitals"] == pytest.approx(6.64, abs=0.01)  # chat 330's: 20 high, two lines
@@ -541,7 +556,8 @@ def test_both_read_text_options_the_same(h3):
     assert flat(js["parts"]) == flat(py["parts"])
     assert len(js["problems"]) == len(problems) == 6, (js["problems"], problems)
     assert [x.split(":")[0] for x in problems] == ["b", "b", "b", "c", "c", "e"]
-    assert 'no font "Comic Sans" - the fonts are sans, serif, rounded, script, stencil, mono; drawn in sans' in problems[1]
+    assert ('no font "Comic Sans" - the fonts are sans, condensed, geometric, rounded, serif, classic, script, '
+            'handwriting, marker, stencil, comic, western, blackletter, futuristic, pixel, mono; drawn in sans') in problems[1]
     by_id = {p["id"]: p for p in py["parts"]}
     assert by_id["a"]["size"] == [0, 10, 2] and by_id["a"]["bold"] and by_id["a"]["italic"] and "font" not in by_id["a"]
     assert by_id["b"]["size"] == [0, 10, 2] and "font" not in by_id["b"] and "align" not in by_id["b"]

@@ -4,7 +4,23 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## Next session - start here (written 2026-11-26, at 0.98.0)
+## Next session - start here (written 2026-11-26, at 0.99.0)
+
+**0.99.0 (2026-11-26): ten more fonts - pushed, not yet installed.** Søren, 15:54, with the Font box open: "Kan vi få
+nogle flere skrifttyper?" Built (DESIGN §8 "Text", "Ten more (0.99.0)"): sixteen families - condensed (Oswald),
+geometric (Montserrat), classic (Cinzel), handwriting (Caveat), marker (Knewave), comic (Bangers), western (Holtwood
+One SC), blackletter (Grenze Gotisch), futuristic (Oxanium) and pixel (Pixelify Sans) beside the six - in both readers
+(the same aliases: "Permanent Marker", "Rye", "Orbitron", "Press Start 2P" give the family like them), in
+`hub3d format`, and in the Font box, which now draws every name from one small `previews.json` instead of fetching
+every font. Chosen for æøå and a clean licence: `make_3d_font.py` now stops on a font that is not OFL 1.1 or has a
+Reserved Font Name (Permanent Marker is Apache, Rye, UnifrakturMaguntia, Audiowide and Press Start 2P reserve their
+names - the polygons are a modified version), and on one without æ, ø and å (Orbitron); it writes every font in
+thousandths of its em and corrects a capitals' height a font states wrongly (Pixelify Sans, Caveat). The six
+fonts before are byte for byte the same. Seen in the dev server (light and dark): a plate with "Søren æøå" in each new
+font (each its own ø), the Font box's sixteen names each in its own letters with only `previews.json` fetched, Western
+picked for a text - no console errors; tests: every new font built the same in both, bold where it has one. Not seen:
+printed - Caveat, Knewave and Grenze Gotisch at small sizes (thin strokes?), Pixelify Sans' pixel steps on the plate;
+a long text in Caveat (about 400 points a letter: the build's time).
 
 **0.98.0 (2026-11-26): a hole, a boss or a text on a box's face, kept there - pushed, not yet installed.** Søren, 13:57:
 "Hvad gør jeg hvis jeg gerne vil lave en 2D cirkel et sted på kassen, og derefter skære hullet ud hele vejen igennem
@@ -172,7 +188,7 @@ picking the 4 edges with their size, Take off - no console errors; the band fits
 seen: on his screens, a real mouse's feel of the hover and the pick, a design with many letters (40 parts: the build
 time), letters apart on a text inside a group.
 
-**Next: 0.99.0, fillets where parts meet and on imported meshes** - unchanged from 0.91.0's plan below, now on the
+**Next: 0.100.0, fillets where parts meet and on imported meshes** - unchanged from 0.91.0's plan below, now on the
 pick-first Lines tab: crease chains on the built mesh picked and hovered like the part's own edges (`setMarks`), then
 Fillet or Chamfer. The rim of a hole's opening is the first case (0.95.0 leaves it sharp and says so).
 
@@ -188,7 +204,7 @@ them. Seen in the dev server ("name plate"): the plate's vertical edges filleted
 the top view and picked off again, a chip taken off, a text saying it has no edges - no console errors. Not seen: with a
 real model ("rund kanterne" - does it use `fillet`?), on his screens, printed.
 
-**Next (planned as 0.92.0, then 0.95.0 to 0.98.0, now 0.99.0): fillets where parts meet and on imported meshes** - the other two of the three Søren chose ("Er det
+**Next (planned as 0.92.0, then 0.95.0 to 0.99.0, now 0.100.0): fillets where parts meet and on imported meshes** - the other two of the three Søren chose ("Er det
 muligt at lave en funktion hvor man efterfølgende kan lave fillet på et kant/side?": the parts' own edges - done in
 0.91.0 -, also where parts meet - a hole's rim, a wall on a base -, also on imported STLs - straight sharp edges). The
 design so far: picked edges `edges: [{fillet|chamfer, path, closed, face, sides, part}]` on a group or the design (mm,
@@ -457,7 +473,7 @@ finds them and fingers still come out wrong). Decided: no Facebook posting (he c
 
 Known flake: tests/test_training.py::test_the_trainer_stops_a_job fails now and then in a full run and passes alone.
 
-## State (0.98.0, 2026-11-26)
+## State (0.99.0, 2026-11-26)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -2535,6 +2551,9 @@ flow, see "Next session". |
       converter's cases are ComfyUI 0.42.3's own templates; files from other sites (Civitai, OpenArt) are
       untried - an export is the way to see what went wrong. When COMFYUI_REF changes, the editor's format may
       too: tools/workflow_oracle/ (convert.js, compare.py) is how the converter was checked - run it again.
+118. **Ten more fonts (0.99.0)** - in the tests and the dev server's headless Chromium: printed at 6-10 mm capitals -
+    which of the sixteen hold up on the P2S (Caveat's and Grenze Gotisch's thin strokes, Knewave's spatters)? The Font
+    box on his phone: the list of sixteen scrolls.
 117. **On a face of a box, kept there (0.98.0)** - in the tests and the dev server's headless Chromium:
     - **His box**: a hole through its side and a boss on its lid with his mouse; does the Face tab opening on every
       click on a box suit him, or should the Part tab stay (one click to Face)? Does Through all mean what he wants on

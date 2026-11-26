@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.99.0 - 2026-11-26
+
+- Ten more fonts for text in the 3D editor, sixteen in all: Oswald
+  (condensed), Montserrat (geometric), Cinzel (classic Roman capitals),
+  Caveat (handwriting), Knewave (marker), Bangers (comic), Holtwood One SC
+  (western), Grenze Gotisch (blackletter), Oxanium (futuristic) and
+  Pixelify Sans (pixel) - all with æ, ø and å. Most have a bold; Montserrat
+  has italics too.
+- The Font box shows every font's name in its own letters straight away,
+  without loading all sixteen fonts.
+- The assistant knows the new fonts (`hub3d format`), also by names like
+  "Permanent Marker", "Rye" or "Orbitron", which give the closest one.
+
 ## 0.98.0 - 2026-11-26
 
 - A hole, a boss or a text on a box's face, as in SolidWorks: in Select,
