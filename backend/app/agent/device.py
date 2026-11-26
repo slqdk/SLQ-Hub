@@ -72,6 +72,7 @@ class DeviceInfo:
     code: bool
     dropped: int = 0
     left: list = field(default_factory=list)          # files on the device too big to send each time: (path, size)
+    design: str = ""                                  # the design open in her 3D editor (0.93.0), one of the files
     history: list = field(default_factory=list)       # the conversation the device sent (chat_history searches it)
     artifacts: dict = field(default_factory=dict)     # id -> {"title", "type", "version", "content"}
     shas: set = field(default_factory=set)            # stored files of this turn (tools may use these only)
@@ -407,6 +408,15 @@ def left_on_device(body: dict) -> list[tuple[str, int]]:
     return out
 
 
+def open_design(body: dict, turn: DeviceTurn) -> str:
+    """The design the person has open in the 3D editor beside the chat (0.93.0) - a .3d.json she sent with the
+    message: the model is told which, as the owner's message carries the open design."""
+    p = body.get("design")
+    if not isinstance(p, str) or not p.lower().endswith(".3d.json") or p not in turn.inputs:
+        return ""
+    return p[:300]
+
+
 def removed(turn: DeviceTurn) -> list[str]:
     """Files the device sent that are gone now (the assistant deleted or moved them): the device deletes them too."""
     return sorted(rel for rel in turn.inputs if not os.path.lexists(turn.folder / rel))
@@ -422,7 +432,7 @@ async def run_turn(hub, turn: DeviceTurn, body: dict, rows: list[dict], wd: proj
     ephemeral = images.EPHEMERAL.set(True)               # ComfyUI keeps no copy of this chat's pictures
     status, error, engine, ticket, pos_task = "done", None, None, None, None
     device = DeviceInfo(user_id=turn.user["id"], name=auth.display_name(turn.user), code=False, shas=turn.shas,
-                        history=rows, left=left_on_device(body))
+                        history=rows, left=left_on_device(body), design=open_design(body, turn))
     for a in body.get("artifacts") or []:
         if isinstance(a, dict) and isinstance(a.get("id"), str) and isinstance(a.get("content"), str):
             device.artifacts[a["id"]] = {"title": str(a.get("title") or a["id"]), "type": str(a.get("type") or "html"),

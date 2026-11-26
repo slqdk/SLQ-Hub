@@ -13,16 +13,15 @@ import { AlignCenter, AlignLeft, AlignRight, ArrowDownToLine, ArrowDownUp, Bold,
   Split, SquareDashed, SquareMousePointer, SquareRoundCorner, Trash2, TriangleAlert, Triangle, Type, Undo2, Ungroup, Upload,
   X } from "lucide-react";
 import fontIndex from "./fonts/index.json";
-import { api, type FileData, type TreeData } from "../lib/api";
 import { useApp } from "../state";
 import { ConfirmButton, MenuButton } from "../components/ui";
-import type { Folder } from "../components/Files";
+import type { DesignFolder } from "./folder";
 import { allIds, build, buildPart, COLORS, edgeLines, edgePlan, EDGES, edgesOf, extent, extentOf, FONT_FAMILIES, fontFile,
   follows, freshId, joined, lettersApart, MAX_COPIES, MIN_SIZE, mirrorPart, nearestEdge, newDesign, partSize, readDesign,
   repeatAround, retext, SPACING, stl, textMeasure, threeMf, transformPart, treatEdges, withCapitals, writeDesign,
   type Align, type Box3, type Built, type Design, type EdgeKind, type FontData, type FontIndex, type Fonts, type Kit,
   type Mat3, type MeshData, type Part, type Repeat, type Shape, type Vec3, type Wasm } from "./geometry";
-import { baseName, dirOf, fmt, inFolder, joinPath, MESH_FILE, pointMark, relativePath } from "./files";
+import { baseName, dirOf, fmt, joinPath, MESH_FILE, pointMark, relativePath } from "./files";
 import { parseMesh } from "./meshio";
 import { lastPrinter, PRINTERS, printerOf, rememberPrinter, type Printer } from "./printers";
 import { centre, copy, find, group, label, pick, remove, replaceWith, ungroup, update } from "./tree";
@@ -178,31 +177,33 @@ function Tool({ icon, title, onClick, active, disabled, children }: { icon: Reac
   );
 }
 
-/** The STL, 3MF and OBJ files in the folder, to put in the design. */
-function FolderMeshes({ base, onPick, onUpload }: { base: string; onPick: (path: string) => void; onUpload: (f: File) => void }) {
+/** The STL, 3MF and OBJ files in the folder (a person's: in the chat's files), to put in the design. */
+function FolderMeshes({ store, onPick, onUpload }: { store: DesignFolder; onPick: (path: string) => void;
+  onUpload: (f: File) => void }) {
   const [files, setFiles] = useState<string[] | null>(null);
   useEffect(() => {
-    api<TreeData>(`${base}/tree`).then((t) => setFiles(t.entries.filter((e) => !e.dir && MESH_FILE.test(e.path))
-      .map((e) => e.path).sort()), () => setFiles([]));
-  }, [base]);
+    store.list().then((all) => setFiles(all.filter((e) => MESH_FILE.test(e.path)).map((e) => e.path).sort()),
+      () => setFiles([]));
+  }, [store]);
   return (
     <>
-      <label className="menu-item"><Upload size={15} /><span>Upload from this computer<small>STL, 3MF or OBJ, into the folder</small></span>
+      <label className="menu-item"><Upload size={15} /><span>Upload from this computer<small>STL, 3MF or OBJ, into {store.where}</small></span>
         <input type="file" accept=".stl,.3mf,.obj" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) onUpload(f); }} />
       </label>
       <div className="menu-sep" />
-      {files === null && <div className="menu-item faint">Looking in the folder</div>}
-      {files?.length === 0 && <div className="menu-item faint">No STL, 3MF or OBJ in the folder</div>}
+      {files === null && <div className="menu-item faint">Looking in {store.where}</div>}
+      {files?.length === 0 && <div className="menu-item faint">No STL, 3MF or OBJ in {store.where}</div>}
       {files?.map((f) => <button key={f} className="menu-item mono" onClick={() => onPick(f)}>{f}</button>)}
     </>
   );
 }
 
-export function Editor({ folder, path, create, own = "", onPath, onClose, max, onMax, onPin }: { folder: Folder;
+export function Editor({ store, path, create, own = "", onPath, onClose, max, onMax, onPin }: { store: DesignFolder;
   path: string; create?: boolean; own?: string; onPath: (path: string) => void; onClose: () => void; max: boolean;
   onMax: () => void; onPin: (path: string) => void }) {
   const { toast } = useApp();
-  const base = `/hub/api/folders/${folder.kind}/${folder.id}`;
+  const folder = useRef(store);                 // where it reads and writes (0.93.0: the Hub's, or a person's device)
+  folder.current = store;
   const host = useRef<HTMLDivElement>(null);
   const vp = useRef<Viewport | null>(null);
   const kit = useRef<Kit | null>(null);
@@ -270,7 +271,7 @@ export function Editor({ folder, path, create, own = "", onPath, onClose, max, o
     setStatus("saving");
     inFlight.current = text;
     try {
-      await api(`${base}/file`, { method: "PUT", body: { path: at, text } });
+      await folder.current.writeText(at, text);
       if (!alive.current) return;                      // closed meanwhile: saved, nothing more to show
       saved.current = text;
       const same = !!designRef.current && writeDesign(designRef.current) === text;
@@ -287,7 +288,7 @@ export function Editor({ folder, path, create, own = "", onPath, onClose, max, o
     } finally {
       if (inFlight.current === text) inFlight.current = null;
     }
-  }, [base, toast, onPin, onPath]);
+  }, [toast, onPin, onPath]);
   const saveRef = useRef(save);
   saveRef.current = save;
 
@@ -333,13 +334,20 @@ export function Editor({ folder, path, create, own = "", onPath, onClose, max, o
     };
   }, []);
 
+  // A message is about to go: what is not saved yet is saved first, so it goes as it is now (0.93.0 - a person's
+  // chat sends its files as they are at that moment).
+  useEffect(() => {
+    const flush = (e: Event) => {
+      const waits = (e as CustomEvent<Promise<void>[]>).detail;
+      if (dirty.current && Array.isArray(waits)) waits.push(saveRef.current());
+    };
+    window.addEventListener("slq:3d-save", flush);
+    return () => window.removeEventListener("slq:3d-save", flush);
+  }, []);
+
   // ---------------------------------------------------------------- loading
 
-  const fetchMesh = useCallback(async (full: string) => {
-    const r = await fetch(`${base}/raw?path=${encodeURIComponent(full)}`, { credentials: "same-origin" });
-    if (!r.ok) throw new Error(r.status === 404 ? `there is no ${full} in the folder` : `${full}: HTTP ${r.status}`);
-    return parseMesh(full, await r.arrayBuffer());
-  }, [base]);
+  const fetchMesh = useCallback(async (full: string) => parseMesh(full, await folder.current.readBytes(full)), []);
 
   const ensureMeshes = useCallback((d: Design) => {
     const want: string[] = [];
@@ -392,7 +400,7 @@ export function Editor({ folder, path, create, own = "", onPath, onClose, max, o
       return;
     }
     if (path.startsWith("/")) {                        // the sandbox's own path, as the assistant may write it
-      onPath(inFolder(path, folder));
+      onPath(store.local(path));
       return;
     }
     let on = true;
@@ -410,19 +418,19 @@ export function Editor({ folder, path, create, own = "", onPath, onClose, max, o
         let name = "";
         for (let n = 1; n < 100 && !name; n++) {
           const next = `${own}${n === 1 ? "design" : `design-${n}`}.3d.json`;
-          if (!await api<FileData>(`${base}/file`, { query: { path: next } }).then(() => true, () => false)) name = next;
+          if (!await store.has(next)) name = next;
         }
         if (!name) throw new Error("There are 99 designs called design-N already: rename some.");
         const pr = lastPrinter();
-        await api(`${base}/file`, { method: "PUT", body: { path: name, text: writeDesign(newDesign(pr.id, pr.bed)) } });
+        await store.writeText(name, writeDesign(newDesign(pr.id, pr.bed)));
         if (on) onPath(name);
         return;
       }
       if (MESH_FILE.test(path)) {                      // an STL, 3MF or OBJ: a design with it in, beside it
         const designName = path.replace(MESH_FILE, ".3d.json");
-        const there = await api<FileData>(`${base}/file`, { query: { path: designName } }).catch(() => null);
+        const there = await store.readText(designName).catch(() => null);
         if (!on) return;
-        if (there?.text != null) {                     // made before: that one
+        if (there != null) {                           // made before: that one
           onPath(designName);
           return;
         }
@@ -441,16 +449,16 @@ export function Editor({ folder, path, create, own = "", onPath, onClose, max, o
         setStatus("new");
         return;
       }
-      const f = await api<FileData>(`${base}/file`, { query: { path } });
+      const text = await store.readText(path);
       if (!on) return;
-      if (f.text == null) throw new Error(`${path} is not a text file the editor can read`);
-      adopt(f.text, false);
+      if (text == null) throw new Error(`${path} is not in ${store.where}, or not a text file the editor can read`);
+      adopt(text, false);
       onPin(path);
     };
     open().catch((e) => on && setFailed((e as Error).message));
     return () => { on = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [base, path, create]);
+  }, [store.key, path, create]);
 
   // What the assistant (or anyone) writes to the file shows here; with changes of one's own not saved yet, ask.
   useEffect(() => {
@@ -458,20 +466,20 @@ export function Editor({ folder, path, create, own = "", onPath, onClose, max, o
     const t = window.setInterval(async () => {
       if (document.hidden || dragging.current || outside !== null) return;
       try {
-        const f = await api<FileData>(`${base}/file`, { query: { path: designPath.current } });
-        if (!alive.current || f.text == null || f.text === saved.current || f.text === inFlight.current) return;
-        if (designRef.current && f.text === writeDesign(designRef.current)) {
-          saved.current = f.text;
+        const text = await folder.current.readText(designPath.current);
+        if (!alive.current || text == null || text === saved.current || text === inFlight.current) return;
+        if (designRef.current && text === writeDesign(designRef.current)) {
+          saved.current = text;
           return;
         }
-        if (!dirty.current) adopt(f.text, true);
-        else setOutside(f.text);
+        if (!dirty.current) adopt(text, true);
+        else setOutside(text);
       } catch {
         /* gone or offline: the next look tells */
       }
     }, 2500);
     return () => window.clearInterval(t);
-  }, [status, path, base, adopt, outside]);
+  }, [status, path, store.key, adopt, outside]);
 
   // ---------------------------------------------------------------- the view
 
@@ -962,12 +970,8 @@ export function Editor({ folder, path, create, own = "", onPath, onClose, max, o
   };
 
   const upload = async (file: File) => {
-    const fd = new FormData();
-    fd.append("files", file);
-    fd.append("dir", dirOf(designPath.current));
     try {
-      const r = await api<{ saved: string[] }>(`${base}/upload`, { form: fd });
-      if (r.saved[0]) await addMesh(r.saved[0]);
+      await addMesh(await store.put(file, file.name, dirOf(designPath.current)));
     } catch (e) {
       toast((e as Error).message, "fault");
     }
@@ -1073,12 +1077,10 @@ export function Editor({ folder, path, create, own = "", onPath, onClose, max, o
       window.setTimeout(() => URL.revokeObjectURL(a.href), 4000);
       return;
     }
-    const fd = new FormData();
-    fd.append("files", new File([bytes as BlobPart], name));
-    fd.append("dir", dirOf(designPath.current));
     try {
-      const r = await api<{ saved: string[] }>(`${base}/upload`, { form: fd });
-      toast(`Saved ${r.saved[0] ?? name} in the folder`, "run");
+      const saved = await store.put(new Blob([bytes as BlobPart], { type: kind === "stl" ? "model/stl" : "model/3mf" }), name,
+        dirOf(designPath.current));
+      toast(`Saved ${saved} in ${store.where}`, "run");
     } catch (e) {
       toast((e as Error).message, "fault");
     }
@@ -1164,9 +1166,9 @@ export function Editor({ folder, path, create, own = "", onPath, onClose, max, o
                 <span>Download STL</span></button>
               <div className="menu-sep" />
               <button className="menu-item" onClick={() => { close(); void exportAs("3mf", "folder"); }}>
-                <span>Save 3MF in the folder<small>Beside the design, where the assistant sees it too</small></span></button>
+                <span>Save 3MF in {store.where}<small>Beside the design, where the assistant sees it too</small></span></button>
               <button className="menu-item" onClick={() => { close(); void exportAs("stl", "folder"); }}>
-                <span>Save STL in the folder</span></button>
+                <span>Save STL in {store.where}</span></button>
             </>
           )}
         </MenuButton>
@@ -1176,7 +1178,7 @@ export function Editor({ folder, path, create, own = "", onPath, onClose, max, o
       </div>
       {outside !== null && (
         <div className="v3d-bar" role="alert">
-          <span className="grow">The design was changed in the folder - by the assistant? - while you had changes here.</span>
+          <span className="grow">The design was changed in {store.where} - by the assistant? - while you had changes here.</span>
           <button className="btn small primary" onClick={() => { const t = outside; setOutside(null); adopt(t, true); }}>Load it</button>
           <button className="btn small" onClick={() => { saved.current = outside; setOutside(null); void save(); }}>Keep mine</button>
         </div>
@@ -1236,7 +1238,7 @@ export function Editor({ folder, path, create, own = "", onPath, onClose, max, o
               <Grp label="From a file">
                 <MenuButton className="btn v3d-big" title="An STL, 3MF or OBJ into the design" menuClassName="wide"
                   label={<><Upload size={20} /><span>Import</span></>}>
-                  {(close) => <FolderMeshes base={base} onPick={(f) => { close(); void addMesh(f); }}
+                  {(close) => <FolderMeshes store={store} onPick={(f) => { close(); void addMesh(f); }}
                     onUpload={(f) => { close(); void upload(f); }} />}
                 </MenuButton>
               </Grp>

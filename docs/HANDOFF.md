@@ -4,7 +4,26 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## Next session - start here (written 2026-11-26, at 0.92.1)
+## Next session - start here (written 2026-11-26, at 0.93.0)
+
+**0.93.0 (2026-11-26): the 3D editor for people too, and Make 3D model on every new chat - pushed, not yet
+installed.** Søren, 08:33, with Sanne's chat (a person's: "lav en 3D model af et juletræ med en stjerne på toppen.
+Højde: 18cm" - the model planned a `.3d.json` she had no way to open) and the owner's empty new chat: "3D skal også
+være tilgængelig for brugere... faktisk så lav gerne en knap ved den røde firkant med teksten (Make 3D model), samt
+tilføj den oppe i hjørnet ved brugerne ligesom ved admin. (knappen på forsiden skal være ved alle)". Built (DESIGN §8
+"The 3D editor", "For everyone (0.93.0)"): **Make 3D model** under the welcome text for the owner and people (the chat
+made at once, a new design open; a project's new chat: in the project's folder); people get the **3D** button at the
+top and the editor panel, working on the chat's files on their device through a `DesignFolder` (`model3d/folder.ts`
+`hubFolder` for the owner, `person/designs.ts` `deviceFolder`); Open on a design under an answer and "3D editor" in
+their Files panel; a design an answer wrote opens when the answer is done; the request names the open design and
+the prompt says it (`device_folder_text`); before any message the open editor saves (`saveOpenDesign`). Seen in the
+dev server: the owner's button making /c/1 with design.3d.json and a box saved in its folder; a person (made through
+the API) - the button, a cylinder saved in IndexedDB, Save 3MF in this chat's files, the 3D menu listing both,
+reopened, the Files panel's 3D editor, "Make me a name plate" opening plate.3d.json when the answer came home, a box
+added just before the next message kept, both turns' requests naming the open design, the phone layout - no console
+errors. Not seen: on the VM, Sanne's real chat (her model with "May run code" running `hub3d` in her confined
+folder), her phone.
+
 
 **0.92.1 (2026-11-26): the model menus without their grey lines - pushed, not yet installed.** Søren, 08:12, with
 screenshots of the picture and chat model menus: "Fjern den grå text under hver model navn. Den forvirre bare." The
@@ -34,7 +53,7 @@ picking the 4 edges with their size, Take off - no console errors; the band fits
 seen: on his screens, a real mouse's feel of the hover and the pick, a design with many letters (40 parts: the build
 time), letters apart on a text inside a group.
 
-**Next: 0.93.0, fillets where parts meet and on imported meshes** - unchanged from 0.91.0's plan below, now on the
+**Next: 0.94.0, fillets where parts meet and on imported meshes** - unchanged from 0.91.0's plan below, now on the
 pick-first Edges tab: crease chains on the built mesh picked and hovered like the part's own edges (`setMarks`), then
 Fillet or Chamfer.
 
@@ -50,7 +69,7 @@ them. Seen in the dev server ("name plate"): the plate's vertical edges filleted
 the top view and picked off again, a chip taken off, a text saying it has no edges - no console errors. Not seen: with a
 real model ("rund kanterne" - does it use `fillet`?), on his screens, printed.
 
-**Next (planned as 0.92.0, now 0.93.0): fillets where parts meet and on imported meshes** - the other two of the three Søren chose ("Er det
+**Next (planned as 0.92.0, now 0.94.0): fillets where parts meet and on imported meshes** - the other two of the three Søren chose ("Er det
 muligt at lave en funktion hvor man efterfølgende kan lave fillet på et kant/side?": the parts' own edges - done in
 0.91.0 -, also where parts meet - a hole's rim, a wall on a base -, also on imported STLs - straight sharp edges). The
 design so far: picked edges `edges: [{fillet|chamfer, path, closed, face, sides, part}]` on a group or the design (mm,
@@ -319,7 +338,7 @@ finds them and fingers still come out wrong). Decided: no Facebook posting (he c
 
 Known flake: tests/test_training.py::test_the_trainer_stops_a_job fails now and then in a full run and passes alone.
 
-## State (0.92.0, 2026-11-26)
+## State (0.93.0, 2026-11-26)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -1797,7 +1816,7 @@ by hub3d. In the dev server
 | Open page across an update, lost stream (0.13.6) | A test: `X-Hub-Version` on the UI's answers (auth status, chats, health), not on the model API's. In Chromium as a Pixel 7 against the dev server (9 checks): no notice while the version stays; a newer version (the answers rewritten in the browser) after the page comes back into view gives "SLQ Hub was updated to 9.9.9" with Reload, and Reload loads the page without it; offline for 12 s while the turn ends - what streamed stays, and back online the answer, the files card and the stats come; the first stream cut without an end and the reconnect answered 502 - the page follows the turn again (3 streams) to the answer and the card. The same two connection checks fail with 0.13.5's chat view. Not tried: a real phone, a real proxy. |
 | Music in one piece, metadata, export (0.13.5) | Tests: the system prompt's sound section (one music call makes the whole piece only when a music model is there; the ffmpeg mix command; "makes" for one tool), the music and sound tool texts (a solo in the music prompt; with no music model the sound tool says separately made music does not fit), the export's `made/` (the newest turn's version of a file, a file gone from the folder and one too big said so, subfolders kept). ComfyUI v0.42.3 on the CPU with `--disable-metadata`: an MP3 from `SaveAudioAdvanced` and a PNG from `SaveImage` without the prompt (without the flag both carry it). The mix command run with ffmpeg 6.1.1 (the sandbox's version) on a 48 kHz stereo and a 24 kHz mono MP3; the wrapper: no banner, `-version` still answers, ffprobe works. The sandbox and ComfyUI images themselves not rebuilt here. |
 | Sound, full weights only (0.13.4) | 22 tests in `tests/test_audio.py`: the request carries only key, family and files (no speed knobs) and a capped piece is named in the result; a `settings.json` from 0.13.3 with `sound.speech_speed` loads without it and the whole Sound section saves (the key is still refused when sent); the samples list skips 0.13.2-0.13.3 speed runs, missing files and bad names; with both Røst models downloaded Danish goes to Røst v3 Turbo and the tool says so, the Sound setting still picks Røst v3. The real speech service (random weights, 2 threads) with the self-test's speech lines: one sample per model, speech.json without settings, the WARN for a piece that ran to the ceiling. In Chromium against the dev server started with a 0.13.3 settings file (27 checks): Turbo first on the models page, no speed choice, the Danish choice and its help, Save over the old file (the stale key gone from the file), one sample per model playing, speech in a chat by Røst v3 Turbo, phone width. Not on the VM yet. |
-| People (0.11.0) | 19 tests (`tests/test_people.py`): adding, changing, signing out and removing a person (user names, case, passwords); home only (refused from outside before the password; a session taken outside is signed out) and away; every owner route 403 for a person, the sync API and the model API (`/v1`, `/api`) 401; settings reduced to three defaults with no secrets; a device turn (her name and no memory in the system prompt, no bash/memory/library tools, the photo seen, no chat/run/prompt rows left, folder and photo gone after `/done`, the queue log with her name and "Chat"); pictures, files and artifacts back to the device, an artifact changed in the next turn; bash only when allowed and Landlock present, sent confined; turns private between people and bad requests refused (paths out of the folder, `.hub/home`); the queue as a person sees it; swept turns and ledgers (a list written into the folder by her code is ignored); the run dropped and deleted files reported; ComfyUI's history entries and output/input pictures deleted for her and kept for the owner; a picture the owner or another turn stores meanwhile kept; her skills (since 0.23.0 in `tests/test_skills.py`); at most four turns waiting for a device; the time each message was sent, from the device. 5 tests (`tests/test_sandbox_daemon.py`, real Landlock, skipped without it): a confined command reads and writes its folder only (not a sibling file, another turn's folder, `/root`; `TMPDIR` inside), `/dev/null`, `/dev/urandom`, process substitution and child processes work, `/dev/shm` and `/dev/pts` do not; background, `setsid` and `nohup` processes are killed when it ends, the owner's are not; bad confine settings refused. By hand on this build machine (kernel 6.18, ABI 7) as uid 1000: Landlock denies a confined process another process's `environ`, `mem` and `maps`, while `cmdline` stays readable (documented). The Hub's ComfyUI client against real ComfyUI v0.42.3 (CPU, a LoadImage → SaveImage graph): with `keep=False` the output file, the input file and the history entry are gone; with `keep=True` they stay. In Chromium (Playwright, 19 checks): Settings → People (add, list, the user name from the name), her chat at phone size (her sidebar, the thinking levels, no libraries), a title, a picture shown from the device's store, an artifact, an attachment and a file the assistant wrote in the Files panel, both chats and the picture after a reload with the Hub's copies gone, the owner seeing none of it, Export all chats → Import on a second browser with the picture, her session refused by the owner API, and not one refused request from her pages. An independent review (a separate agent, the whole diff) found five issues - `/dev/shm` writable, disabled skills readable, abandoned turns unbounded, the model API open to her session, `/proc/<pid>/cmdline` visible - the first four are fixed, the last is documented. |
+| People (0.11.0) | 21 tests (`tests/test_people.py`; 0.93.0: the design open in her 3D editor named to the model, and only a `.3d.json` she sent): adding, changing, signing out and removing a person (user names, case, passwords); home only (refused from outside before the password; a session taken outside is signed out) and away; every owner route 403 for a person, the sync API and the model API (`/v1`, `/api`) 401; settings reduced to three defaults with no secrets; a device turn (her name and no memory in the system prompt, no bash/memory/library tools, the photo seen, no chat/run/prompt rows left, folder and photo gone after `/done`, the queue log with her name and "Chat"); pictures, files and artifacts back to the device, an artifact changed in the next turn; bash only when allowed and Landlock present, sent confined; turns private between people and bad requests refused (paths out of the folder, `.hub/home`); the queue as a person sees it; swept turns and ledgers (a list written into the folder by her code is ignored); the run dropped and deleted files reported; ComfyUI's history entries and output/input pictures deleted for her and kept for the owner; a picture the owner or another turn stores meanwhile kept; her skills (since 0.23.0 in `tests/test_skills.py`); at most four turns waiting for a device; the time each message was sent, from the device. 5 tests (`tests/test_sandbox_daemon.py`, real Landlock, skipped without it): a confined command reads and writes its folder only (not a sibling file, another turn's folder, `/root`; `TMPDIR` inside), `/dev/null`, `/dev/urandom`, process substitution and child processes work, `/dev/shm` and `/dev/pts` do not; background, `setsid` and `nohup` processes are killed when it ends, the owner's are not; bad confine settings refused. By hand on this build machine (kernel 6.18, ABI 7) as uid 1000: Landlock denies a confined process another process's `environ`, `mem` and `maps`, while `cmdline` stays readable (documented). The Hub's ComfyUI client against real ComfyUI v0.42.3 (CPU, a LoadImage → SaveImage graph): with `keep=False` the output file, the input file and the history entry are gone; with `keep=True` they stay. In Chromium (Playwright, 19 checks): Settings → People (add, list, the user name from the name), her chat at phone size (her sidebar, the thinking levels, no libraries), a title, a picture shown from the device's store, an artifact, an attachment and a file the assistant wrote in the Files panel, both chats and the picture after a reload with the Hub's copies gone, the owner seeing none of it, Export all chats → Import on a second browser with the picture, her session refused by the owner API, and not one refused request from her pages. An independent review (a separate agent, the whole diff) found five issues - `/dev/shm` writable, disabled skills readable, abandoned turns unbounded, the model API open to her session, `/proc/<pid>/cmdline` visible - the first four are fixed, the last is documented. |
 
 ## Not verified - check these on the real system
 
@@ -2392,6 +2411,16 @@ by hub3d. In the dev server
       converter's cases are ComfyUI 0.42.3's own templates; files from other sites (Civitai, OpenArt) are
       untried - an export is the way to see what went wrong. When COMFYUI_REF changes, the editor's format may
       too: tools/workflow_oracle/ (convert.js, compare.py) is how the converter was checked - run it again.
+111. **The 3D editor for people (0.93.0)** - in the dev server's headless Chromium:
+    - **Sanne's chat again** after the update: Make 3D model, then "lav et juletræ med en stjerne på toppen, 18 cm" -
+      with "May run code" her model reads `hub3d format` and checks with `hub3d design` in her confined folder (the
+      fonts in /opt/hub3d are readable to it?); the design opens when the answer is done. Without code the
+      assistant gets no 3D section - the editor is hers by hand.
+    - **A design changed in the editor while her answer runs** is replaced by the answer's version when its files
+      come home (the device takes the turn's copy; the owner's editor merges through the Hub's file). Not tried.
+    - **Big meshes**: an imported STL is one of her files - sent with every message (60 MB per message at most).
+    - **Her phone**: the 3D button and the editor full-screen on a phone; IndexedDB kept (S.askToKeep on the first
+      chat).
 110. **Pick first (0.92.0)** - in the tests and the dev server's headless Chromium:
     - **His mouse and screens**: is the amber edge under the pointer the one he means, are the green picked edges
       clear beside the part's blue outline, does the Edges band fit beside the chat at his zoom?

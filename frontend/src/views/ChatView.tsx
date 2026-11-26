@@ -23,6 +23,7 @@ import type { PanelState } from "../App";
 import type { Folder } from "../components/Files";
 import { DesignMenu } from "../model3d/DesignMenu";
 import { DESIGN_FILE, inFolder, OPENS_IN_3D } from "../model3d/files";
+import { hubFolder, saveOpenDesign } from "../model3d/folder";
 
 let settingsCache: Settings | null = null;
 async function loadSettings(): Promise<Settings> {
@@ -309,6 +310,7 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
   const send = async (text: string, uploads: Upload[], answers: AnswersBlock[] = []): Promise<boolean> => {
     if (data?.persona?.read_aloud) unlockAudio();     // the answer is read aloud later, from this key press or tap
     try {
+      await saveOpenDesign();                          // the open design as it is now (0.93.0)
       let id = chatId;
       if (!id) {
         const created = await api<{ id: number }>("/hub/api/chats", { body: { project_id: projectId ?? null,
@@ -462,6 +464,22 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
   const own = syncs && syncs !== "." ? "hub/" : "";
   const open3d = (path?: string) => folder && openPanel({ kind: "model3d", folder, path: path ?? "", create: !path, own,
     at: Date.now() });
+  // Make 3D model, on a new chat (0.93.0): the chat is made now - its folder keeps the design - with a new design open.
+  const make3d = async () => {
+    if (folder) {                                    // a project's new chat: the project's folder is there already
+      open3d();
+      return;
+    }
+    try {
+      const created = await api<{ id: number }>("/hub/api/chats", { body: { project_id: projectId ?? null, settings: draft } });
+      refreshLists();
+      keepPanel();
+      openPanel({ kind: "model3d", folder: { kind: "chat", id: created.id }, path: "", create: true, own: "", at: Date.now() });
+      navigate({ name: "chat", id: created.id }, true);
+    } catch (e) {
+      toast((e as Error).message, "fault");
+    }
+  };
   const fileHandlers: FileHandlers = {
     src: fileSrc,
     download: (f) => download(`${fileSrc(f)}&download=true`, f.path.split("/").pop()),
@@ -499,7 +517,7 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
         {folder && (
           <MenuButton right className="btn quiet small" title="The 3D editor: models to print, made with the assistant"
             label={<><Box size={15} /> 3D</>} menuClassName="wide">
-            {(close) => <DesignMenu folder={folder} onNew={() => { close(); open3d(); }} onOpen={(p) => { close(); open3d(p); }} />}
+            {(close) => <DesignMenu store={hubFolder(folder)} onNew={() => { close(); open3d(); }} onOpen={(p) => { close(); open3d(p); }} />}
           </MenuButton>
         )}
         {chatId && (
@@ -568,6 +586,11 @@ export function ChatView({ chatId, projectId, openPanel, refs, onRefs, keepPanel
                 ? "This chat works in the project's files. Everything the assistant changes is kept in the project's history."
                 : "Ask, attach files or pictures, ask for a picture, or have it build something. It runs on your own card."}
                 {" "}<a {...linkProps("/help")}>What you can ask for</a></p>
+              <div className="welcome-actions">
+                <button type="button" className="btn" onClick={() => void make3d()}
+                  title="A new design in the 3D editor beside the chat: shapes, holes and text on the printer's plate - the assistant can work on it too">
+                  <Box size={16} /> Make 3D model</button>
+              </div>
             </div>
           )}
           <div className="messages">

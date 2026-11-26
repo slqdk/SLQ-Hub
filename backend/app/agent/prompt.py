@@ -328,8 +328,9 @@ def system_prompt(*, user: str, model_name: str, folder_text: str, sandbox_path:
     return text
 
 
-def device_folder_text(sandbox_path: str, code: bool = False, left: list | None = None) -> str:
-    """A person's chat: their files live on their own device, the server keeps nothing."""
+def device_folder_text(sandbox_path: str, code: bool = False, left: list | None = None, design: str = "") -> str:
+    """A person's chat: their files live on their own device, the server keeps nothing. `design`: the one open in
+    their 3D editor (0.93.0)."""
     text = (f"This chat's files live on the user's own device. For this answer they are in a temporary folder "
             f"({sandbox_path}): what the user attached is in .hub/attachments/, and the files you create or change "
             "here are sent to the user's device when you finish. Nothing stays on the server, and there is no "
@@ -341,6 +342,10 @@ def device_folder_text(sandbox_path: str, code: bool = False, left: list | None 
     if code:
         text += (" bash may touch only this folder (no shared memory either, so Python multiprocessing does not "
                  "work), and nothing it starts keeps running after the command.")
+    if design:
+        text += (f" The user has {design} open in the 3D editor beside the chat: it is in this folder as they left "
+                 "it - read it before you change it, and keep its parts' ids. What you write to it shows there when "
+                 "you finish.")
     return text
 
 

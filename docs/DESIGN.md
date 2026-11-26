@@ -3149,6 +3149,27 @@ into the Hub, Tinkercad's level, his printer a Bambu Lab P2S but chosen per desi
   larger than the plate, below it, not on it, or has a part that is not a closed solid.
 - **Export**: the built solid and the loose meshes as one binary STL or a 3MF (core spec, millimetres, one object -
   Bambu Studio opens both), downloaded or saved in the folder beside the design.
+- **For everyone (0.93.0).** Søren, with a person's chat where the model planned a design she could not open: "3D skal
+  også være tilgængelig for brugere... lav gerne en knap ... (Make 3D model), samt tilføj den oppe i hjørnet ved
+  brugerne ligesom ved admin. (knappen på forsiden skal være ved alle)".
+  - **Make 3D model** under the new chat's welcome text, for the owner and for people: the chat is made at once (the
+    owner's on the Hub - `POST /chats`, titled by its first message later; a person's in her device's store) and a new
+    design opens beside it; on a project's new chat the design goes in the project's folder.
+  - **The editor reads and writes through a `DesignFolder`** (`model3d/folder.ts`): the owner's is the Hub's folder
+    API (`hubFolder`), a person's her chat's files in IndexedDB (`person/designs.ts`, `deviceFolder`) - read and
+    write text, read bytes (meshes), list, put (uploads, exports "in this chat's files"), and a sandbox path as the
+    folder's (a device turn's `/workspace/device/run_…/`). The editor, its import list and the 3D menu are the same
+    code. Its 2.5 s look at the design's file works for both: a person's design changes when an answer's files come
+    home, and the editor takes it then (or asks, with changes of her own unsaved).
+  - **People's chats**: the 3D button at the top (with Files), the panel and Full width as the owner's, Open on a
+    design or mesh under an answer and "3D editor" in the Files panel. Their files go with every message anyway; the
+    request also names the design open in the editor (`design`, one of the files sent, a `.3d.json`), and the prompt
+    says so (`device_folder_text`), as the owner's message carries it. A design an answer wrote opens when the answer
+    is done (a device turn's files come home only then - not live, as the owner's do).
+  - **Before a message goes** (both): `saveOpenDesign` asks the open editor to save what it has not yet
+    (`slq:3d-save`), so the message carries the design as it is - a person's files are read at that moment.
+  - The assistant's 3D section is in a person's prompt only with "May run code" (it needs `hub3d`); without, the
+    editor is hers by hand.
 - **Outlines and repeats (0.88.0).** Chat 328: asked for a snowflake filling 80 % of the P2S's plate, Gemma 4 31B
   made 31 cylinders lying down (round rods, 1 mm below the plate, touching it in lines), "READY for the slicer".
   Søren: "Kan den laves mere advanced?" - he chose better models from the assistant. Two parts to the format:
@@ -3270,7 +3291,7 @@ into the Hub, Tinkercad's level, his printer a Bambu Lab P2S but chosen per desi
     unmirrored; a repeated part's copy found) and the nearest named edge gets the treatment, or loses it when it has
     that one; and the part's names now, each a button that takes it off. A box with All rounded (its radius, in Part)
     says to set that to 0; setting it clears the fillets. Holes' and meshes' edges say they cannot be rounded yet.
-  - **Not yet - 0.93.0**: edges where parts meet (a hole's rim, a wall on a base: on the built solid, a fillet's
+  - **Not yet - 0.94.0**: edges where parts meet (a hole's rim, a wall on a base: on the built solid, a fillet's
     cutter or filler swept along the picked crease) and straight sharp edges of imported meshes.
 - **Picking first (0.92.0).** Søren, 07:23: "Er det ikke muligt at vælge et enkelt bogstav og ændre på det ? altså ved
   at klikke på bogstavet ? Og hvis jeg så vil ændre på flere, så kan jeg vælge en mode for at vælge flere" - one letter
@@ -3907,7 +3928,9 @@ chats, per-chat data, files, pictures). Pictures are made by asking; there is
 no Picture button. The account menu has Export all chats / Import chats (one
 JSON file with pictures and files), Change password and Sign out. A Files
 panel lists the chat's files (attachments in `.hub/attachments/`, what the
-assistant made), each sent with every message.
+assistant made), each sent with every message. Since 0.93.0 the 3D editor
+works on them too (§8, "The 3D editor", "For everyone"): Make 3D model on a
+new chat, the 3D button at the top.
 
 ---
 

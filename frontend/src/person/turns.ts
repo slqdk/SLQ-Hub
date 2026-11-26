@@ -29,8 +29,9 @@ function dataUrl(b: Blob): Promise<string> {
   });
 }
 
-/** What the Hub needs for one answer: the conversation, the chat's files, recent pictures, the artifacts. */
-export async function request(meta: S.ChatMeta, data: S.ChatData): Promise<Record<string, unknown>> {
+/** What the Hub needs for one answer: the conversation, the chat's files, recent pictures, the artifacts - and the
+ *  design open in the 3D editor (0.93.0), so the model is told which it is. */
+export async function request(meta: S.ChatMeta, data: S.ChatData, design = ""): Promise<Record<string, unknown>> {
   let total = 0;
   const files: { path: string; mime: string; data: string }[] = [];
   const left: { path: string; size: number }[] = [];       // too big to send each time: the model is told (0.38.0)
@@ -61,7 +62,7 @@ export async function request(meta: S.ChatMeta, data: S.ChatData): Promise<Recor
   }
   const artifacts = Object.values(data.artifacts).map((versions) => versions[versions.length - 1])
     .map(({ id, title, type, version, content }) => ({ id, title, type, version, content }));
-  return { title: meta.title, settings: meta.settings, files, left, blobs, artifacts,
+  return { title: meta.title, settings: meta.settings, files, left, blobs, artifacts, design: design || undefined,
     messages: data.messages.map((m) => ({ role: m.role, content: m.content, created_at: m.created_at })) };
 }
 

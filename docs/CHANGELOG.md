@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.93.0 - 2026-11-26
+
+- Make 3D model, under "What are we working on?" on every new chat - the
+  owner's and the people's: it makes the chat and opens a new design in the
+  3D editor beside it.
+- People's chats have the 3D editor too: the 3D button at the top (next to
+  Files) opens a new design or one of the chat's, an STL or 3MF opens there,
+  and a design the assistant writes opens when its answer is done. Designs
+  are the chat's files on that device, sent along with each message; the
+  assistant is told which design is open.
+- The editor saves what it has not yet before a message goes, so the
+  assistant always gets the design as it is.
+
 ## 0.92.1 - 2026-11-26
 
 - The model menus under the message box show only the models' names: the

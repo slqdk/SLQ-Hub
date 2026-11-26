@@ -722,7 +722,6 @@ export const SECTIONS: HelpSection[] = [
       },
       {
         id: "editor3d",
-        owner: true,
         title: "The 3D editor",
         what: "A design beside the chat: boxes, cylinders, cones, spheres, wedges, text and holes on your printer's "
           + "plate - a Bambu Lab P2S unless you choose another. Move, turn and size the parts with the mouse or by the "
@@ -735,8 +734,9 @@ export const SECTIONS: HelpSection[] = [
           { text: "Make a 10 x 10 cm plate with my name on two lines, big and in italics, centred" },
           { text: "Round the box's upright edges by 4 mm and chamfer its top edges 0.6 mm" },
         ],
-        how: ["3D at the top of the chat opens a new design or one in the folder. An STL, 3MF or OBJ opens there too, "
-          + "as a design with the mesh in it - to put a hole in it or text on it.",
+        how: ["Make 3D model on a new chat opens a new design beside it; 3D at the top of a chat opens a new one or "
+          + "one of the chat's. An STL, 3MF or OBJ opens there too, as a design with the mesh in it - to put a hole in "
+          + "it or text on it.",
           "The tools are in tabs at the top: Shapes adds parts and holes, Part names the picked part and makes it "
           + "solid or a hole, Size and place sets its size, centre and turn, Arrange groups, mirrors, aligns and "
           + "repeats parts, and Text appears when a text is picked. Parts lists every part, to pick or hide one.",
@@ -757,9 +757,11 @@ export const SECTIONS: HelpSection[] = [
           "Letters apart makes a text one part per letter, each just where it was: click one to make it bigger, move "
           + "it or turn it - or pick several and change them together.",
           "Point at puts a spot on the model into your message, so you can say what should change there.",
-          "Export downloads a 3MF or an STL, or saves it in the folder. The printer is chosen at the bottom, where "
+          "Export downloads a 3MF or an STL, or saves it beside the design. The printer is chosen at the bottom, where "
           + "the size is."],
         tips: ["While the editor is open, the design goes with every message: the assistant sees it as it is now.",
+          "In a person's chats the design is one of the chat's files on that device; the assistant works on it where "
+          + "the owner lets that person run code (Settings, People), and what it changes shows when its answer is done.",
           "Ctrl+Z undoes your changes and the assistant's."],
       },
       {

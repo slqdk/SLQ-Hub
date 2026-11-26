@@ -2,9 +2,9 @@
 // the owner's - models, pictures, thinking, tools, artifacts - with the chats
 // and their files kept on this device. The Hub only answers.
 import { levelOf } from "../lib/effort";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CircleHelp, Download, FileText, FolderOpen, KeyRound, LogOut, Menu, MessageSquarePlus, MoreHorizontal, Pencil,
-  Search, Sparkles, Trash2, Upload as UploadIcon, User as UserIcon, X } from "lucide-react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Box, CircleHelp, Download, FileText, FolderOpen, KeyRound, LogOut, Menu, MessageSquarePlus, MoreHorizontal,
+  Pencil, Search, Sparkles, Trash2, Upload as UploadIcon, User as UserIcon, X } from "lucide-react";
 import { api, setLocalMedia, type Artifact, type ArtifactRef, type Block, type ChatSettings, type Message, type ModelEntry, type ProducedFile, type Settings, type Skill, type Upload, type AnswersBlock, answeredIn } from "../lib/api";
 import { bytes, dateGroup } from "../lib/format";
 import { saveText } from "../lib/download";
@@ -23,14 +23,22 @@ import { Lamp, Logo, MenuButton, Modal, Toasts } from "../components/ui";
 import { ChatSpent, LiveState, TurnFoot, UserMessage } from "../views/ChatView";
 import { SkillsContent } from "../views/SkillsView";
 import { photoFromFile } from "../chat/photos";
+import { DesignMenu } from "../model3d/DesignMenu";
+import { DESIGN_FILE, OPENS_IN_3D } from "../model3d/files";
+import { saveOpenDesign } from "../model3d/folder";
+import { deviceFolder } from "./designs";
 import * as S from "./store";
 import * as T from "./turns";
+
+// The 3D editor (0.93.0, as the owner's: three.js and manifold-3d load only when it opens), on the chat's files here.
+const Editor3d = lazy(() => import("../model3d/Editor").then((m) => ({ default: m.Editor })));
 
 const MAX_ATTACHMENT = 50 * 1024 * 1024;
 const EMPTY: S.ChatData = { messages: [], runs: [], artifacts: {} };
 
 interface Busy { chat: string; turn: string; started: number }
-type Panel = { kind: "artifact"; id: string; version?: number } | { kind: "files" } | null;
+type Panel = { kind: "artifact"; id: string; version?: number } | { kind: "files" }
+  | { kind: "model3d"; path: string; create?: boolean; at: number } | null;
 
 function chatFromHash(): string | null {
   const m = location.hash.match(/^#c=([\w-]+)$/);
@@ -67,6 +75,9 @@ export function PersonApp() {
   const [saving, setSaving] = useState(false);          // the answer is done; its pictures and files come home
   const liveArtifacts = useRef(new Map<string, Artifact>());
   const [panel, setPanel] = useState<Panel>(null);
+  const [max3d, setMax3d] = useState(false);            // the 3D editor the whole width
+  const shownChat = useRef<string | null>(null);        // the chat on the screen, for an answer that ends later
+  const openDesign = useRef("");                        // the design open in the 3D editor: the model is told
   const [help, setHelp] = useState<string | null>(null);   // the help page's section, instead of the chat
   const [skillsPage, setSkillsPage] = useState(false);     // her skills, instead of the chat (0.23.0)
   const [draft, setDraft] = useState<Partial<ChatSettings>>({});
@@ -143,6 +154,7 @@ export function PersonApp() {
     setHelp(null);
     setSkillsPage(false);
     setPanel(null);
+    setMax3d(false);
     setEditing(null);
     if (id) location.hash = `c=${id}`;
     else history.replaceState(null, "", location.pathname);
@@ -185,7 +197,8 @@ export function PersonApp() {
     const started = resumeStarted ?? Date.now();
     if (!turnId) {
       try {
-        turnId = await T.start(await T.request(meta, data));
+        await saveOpenDesign();                        // the open design goes as it is now (0.93.0)
+        turnId = await T.start(await T.request(meta, data, shownChat.current === meta.id ? openDesign.current : ""));
       } catch (e) {
         toast((e as Error).message, "fault");
         return;
@@ -239,6 +252,13 @@ export function PersonApp() {
     forgetPending();
     await loadMedia(merged);
     setChat((c) => (c && c.meta.id === meta.id ? { meta: newMeta, data: merged } : c));
+    // A design the answer wrote opens in the 3D editor, as in the owner's chat - or, open there already, shows what it
+    // became (the editor looks at its file).
+    const designs = result.files.filter((f) => !f.skipped && DESIGN_FILE.test(f.path)).map((f) => f.path);
+    const last = designs[designs.length - 1];
+    if (last && shownChat.current === meta.id && await S.getFile(meta.id, last)) {
+      setPanel((p) => (p?.kind === "model3d" && p.path === last ? p : { kind: "model3d", path: last, at: Date.now() }));
+    }
     liveRef.current = null;
     setLive(null);
     setBusy(null);
@@ -433,6 +453,28 @@ export function PersonApp() {
     }
   };
 
+  // Make 3D model (0.93.0): on a new chat the chat is made here now - the design is one of its files - and a new
+  // design opens in the 3D editor.
+  const open3d = (path?: string) => setPanel({ kind: "model3d", path: path ?? "", create: !path, at: Date.now() });
+  const make3d = async () => {
+    try {
+      if (!chat) {
+        const now = Date.now();
+        const meta: S.ChatMeta = { id: S.newKey(), title: "New chat", created: now, updated: now, settings: draft };
+        await S.saveChat(meta, EMPTY);
+        S.askToKeep();
+        setDraft({});
+        location.hash = `c=${meta.id}`;
+        setChatId(meta.id);
+        setChat({ meta, data: EMPTY });
+        refreshChats();
+      }
+      open3d();
+    } catch (e) {
+      toast((e as Error).message || "The chat could not be kept on this device.", "fault");
+    }
+  };
+
   const remove = async (id: string) => {
     if (busy?.chat === id) await stop();
     await S.deleteChat(id);
@@ -484,7 +526,7 @@ export function PersonApp() {
           if (u) saveUrl(u, f.path.split("/").pop() || "file");
           else toast(`${f.path} is not on this device.`, "fault");
         },
-        open: () => setPanel({ kind: "files" }),
+        open: (f) => (OPENS_IN_3D.test(f.path) ? open3d(f.path) : setPanel({ kind: "files" })),
         missing: "not on this device",
       };
       handlerCache.current.set(key, h);
@@ -547,6 +589,8 @@ export function PersonApp() {
   const openArtifact = (ref: ArtifactRef) => setPanel({ kind: "artifact", id: ref.id, version: ref.version });
   const chatWithSkill = (ref: string) => newChatWith("", [ref]);
   const shown = q.trim() ? chats.filter((c) => c.title.toLowerCase().includes(q.trim().toLowerCase())) : chats;
+  shownChat.current = chatId;
+  openDesign.current = panel?.kind === "model3d" ? panel.path : "";
   const groups: { label: string; items: S.ChatMeta[] }[] = [];
   for (const c of shown) {
     const g = dateGroup(new Date(c.updated).toISOString());
@@ -555,7 +599,7 @@ export function PersonApp() {
   }
 
   return (
-    <div className={`app ${panel ? "with-panel" : ""}`}>
+    <div className={`app ${panel ? "with-panel" : ""}${panel?.kind === "model3d" ? ` with-3d${max3d ? " max-3d" : ""}` : ""}`}>
       {sidebarOpen && <div className="scrim" onClick={() => setSidebarOpen(false)} />}
       <nav className={`sidebar ${sidebarOpen ? "open" : ""}`} aria-label="Chats">
         <div className="sidebar-head">
@@ -657,6 +701,13 @@ export function PersonApp() {
           <span className="grow" />
           {chat && <button className="btn quiet small" onClick={() => setPanel({ kind: "files" })}><FolderOpen size={15} /> Files</button>}
           {chat && (
+            <MenuButton right className="btn quiet small" title="The 3D editor: models to print, made with the assistant"
+              label={<><Box size={15} /> 3D</>} menuClassName="wide">
+              {(close) => <DesignMenu store={deviceFolder(chat.meta.id)} onNew={() => { close(); open3d(); }}
+                onOpen={(p) => { close(); open3d(p); }} />}
+            </MenuButton>
+          )}
+          {chat && (
             <MenuButton right className="icon-btn" label={<MoreHorizontal size={18} />} title="More">
               {(close) => (
                 <>
@@ -686,6 +737,11 @@ export function PersonApp() {
                 <p>Ask, attach files or pictures, ask for a picture, or have it build something. Your chats are kept on this
                   device; the Hub only answers.{" "}
                   <a href="#help" onClick={(e) => { e.preventDefault(); setHelp("chat"); }}>What you can ask for</a></p>
+                <div className="welcome-actions">
+                  <button type="button" className="btn" onClick={() => void make3d()}
+                    title="A new design in the 3D editor beside the chat: shapes, holes and text on the printer's plate - the assistant can work on it too">
+                    <Box size={16} /> Make 3D model</button>
+                </div>
               </div>
             )}
             <div className="messages">
@@ -751,14 +807,23 @@ export function PersonApp() {
         <ArtifactPanel chatId={0} id={panel.id} version={panel.version} loader={loadArtifact} onClose={() => setPanel(null)} />
       )}
       {panel?.kind === "files" && chat && <LocalFiles chat={chat.meta.id} version={chat.meta.updated}
-        onClose={() => setPanel(null)} />}
+        onClose={() => setPanel(null)} onOpen3d={open3d} />}
+      {panel?.kind === "model3d" && chat && (
+        <Suspense fallback={<aside className="panel panel-3d" aria-label="3D editor"><div className="v3d-overlay">Loading the 3D editor</div></aside>}>
+          <Editor3d key={panel.at} store={deviceFolder(chat.meta.id)} path={panel.path} create={panel.create}
+            onPath={(path) => setPanel((p) => (p?.kind === "model3d" ? { ...p, path, create: false } : p))}
+            onClose={() => { setPanel(null); setMax3d(false); }} max={max3d} onMax={() => setMax3d((m) => !m)}
+            onPin={() => undefined} />
+        </Suspense>
+      )}
       {account && <PasswordModal onClose={() => setAccount(false)} />}
       <Toasts />
     </div>
   );
 }
 
-function LocalFiles({ chat, version, onClose }: { chat: string; version: number; onClose: () => void }) {
+function LocalFiles({ chat, version, onClose, onOpen3d }: { chat: string; version: number; onClose: () => void;
+  onOpen3d: (path: string) => void }) {
   const { toast } = useApp();
   const [files, setFiles] = useState<S.LocalFile[] | null>(null);
   const load = useCallback(() => {
@@ -797,6 +862,8 @@ function LocalFiles({ chat, version, onClose }: { chat: string; version: number;
                 <FileText size={15} />
                 <span className="grow ellipsis" title={f.path}>{f.path.replace(/^\.hub\/attachments\//, "")}
                   <div className="meta">{bytes(f.size)}{f.path.startsWith(".hub/attachments/") ? ", attached" : ""}</div></span>
+                {OPENS_IN_3D.test(f.path) && <button className="btn small" onClick={() => onOpen3d(f.path)}
+                  title="Open it in the 3D editor beside the chat"><Box size={14} /> 3D editor</button>}
                 <button className="icon-btn small" onClick={() => save(f)} aria-label={`Download ${f.path}`}><Download size={15} /></button>
                 <button className="icon-btn small" onClick={() => del(f)} aria-label={`Delete ${f.path}`}><Trash2 size={15} /></button>
               </div>

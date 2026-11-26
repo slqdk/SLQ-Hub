@@ -492,3 +492,26 @@ def test_files_left_on_the_device_are_named_to_the_model():
     assert "big.mp4 (80 MB)" in text and "ask the user to attach it" in text
     assert "stayed on the device" not in device_folder_text("/workspace/device/r1", False, [])
     assert left_on_device({"left": "nope"}) == [] and left_on_device({}) == []
+
+
+async def test_the_design_open_in_her_3d_editor_is_named_to_the_model(signed_in, app, fakes):
+    """0.93.0: a person's 3D editor works on the chat's files on her device; her message says which design is open
+    (one of the files sent, a .3d.json - anything else is ignored), and the prompt names it, as the owner's message
+    carries the design."""
+    from app.agent.device import open_design
+    from app.agent.prompt import device_folder_text
+    await add_person(signed_in)
+    design = b'{"format": "slq-hub-3d", "version": 1, "parts": []}'
+    fakes.llama["replies"] = [{"content": "Fine."}]
+    async with client_from(app) as phone:
+        await sign_in(phone)
+        res = await turn(app, phone, {"title": "Tree", "design": "tree.3d.json", "messages": [user_msg("Taller")],
+                                      "files": [{"path": "tree.3d.json", "mime": "application/json",
+                                                 "data": base64.b64encode(design).decode()}]})
+    assert res["status"] == "done"
+    system = fakes.llama["requests"][0]["messages"][0]["content"]
+    assert "The user has tree.3d.json open in the 3D editor beside the chat" in system
+    t = type("T", (), {"inputs": {"tree.3d.json": "x", "notes.txt": "y"}})()
+    assert open_design({"design": "tree.3d.json"}, t) == "tree.3d.json"
+    assert [open_design(b, t) for b in ({"design": "notes.txt"}, {"design": "gone.3d.json"}, {"design": 3}, {})] == [""] * 4
+    assert "3D editor" not in device_folder_text("/workspace/device/r1", True, [], "")

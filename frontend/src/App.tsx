@@ -7,6 +7,7 @@ import { Toasts } from "./components/ui";
 import { setDraft } from "./lib/draft";
 import { navigate, useRoute } from "./lib/router";
 import { useApp } from "./state";
+import { hubFolder } from "./model3d/folder";
 import { PersonApp } from "./person/PersonApp";
 import { ChatView } from "./views/ChatView";
 import { HelpView } from "./views/HelpView";
@@ -146,7 +147,7 @@ export function App() {
       )}
       {panel?.kind === "model3d" && (
         <Suspense fallback={<aside className="panel panel-3d" aria-label="3D editor"><div className="v3d-overlay">Loading the 3D editor</div></aside>}>
-          <Editor3d key={panel.at} folder={panel.folder} path={panel.path} create={panel.create} own={panel.own}
+          <Editor3d key={panel.at} store={hubFolder(panel.folder)} path={panel.path} create={panel.create} own={panel.own}
             onPath={(path) => setPanel((p) => (p?.kind === "model3d" ? { ...p, path, create: false } : p))}
             onClose={() => { pinDesign(null); setPanel(null); setMax3d(false); }} max={max3d}
             onMax={() => setMax3d((m) => !m)} onPin={pinDesign} />

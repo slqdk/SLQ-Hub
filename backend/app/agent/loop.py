@@ -1367,7 +1367,8 @@ class Agent:
         model3d = bool(pipe3d and pipe3d.available()) and not subagent
         if device is not None:                   # a person's chat: their name, no memory, code if allowed
             return system_prompt(user=device.name, model_name=Catalog.label(entry),
-                                 folder_text=device_folder_text(wd.sandbox_path, device.code, device.left),
+                                 folder_text=device_folder_text(wd.sandbox_path, device.code, device.left,
+                                                                device.design),
                                  sandbox_path=wd.sandbox_path, memory_index=[], skills=skills, project=None,
                                  images_available=bool(images and images.available()), handover_to=handover_to,
                                  subagent=subagent, taken_over_from=taken_over_from, memory=False,
