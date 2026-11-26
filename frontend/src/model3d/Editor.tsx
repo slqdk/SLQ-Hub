@@ -227,6 +227,20 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
   const [hoverEdge, setHoverEdge] = useState<{ part: string; edge: string } | null>(null);
   const hoverFrame = useRef(0);
   const [several, setSeveral] = useState(false);                               // Select multiple: a click adds
+  // The parts' tree over the view (0.96.1): open or folded, kept for next time - folded at first on a phone.
+  const [treeOpen, setTreeOpenState] = useState(() => {
+    try {
+      const v = localStorage.getItem("slq3d.tree");
+      if (v) return v === "open";
+    } catch { /* no storage: the default */ }
+    return window.innerWidth >= 700;
+  });
+  const setTreeOpen = (v: boolean) => {
+    setTreeOpenState(v);
+    try {
+      localStorage.setItem("slq3d.tree", v ? "open" : "closed");
+    } catch { /* kept for this time only */ }
+  };
   const [failed, setFailed] = useState<string | null>(null);
   const [meshTick, setMeshTick] = useState(0);
   const [lock, setLock] = useState(false);
@@ -996,6 +1010,19 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
     setTab(text ? "text" : "part");                    // a text: its font and size first (0.96.0), as in Office
   };
 
+  /** A part picked in the tree (0.96.1): as a click on it on the model - alone, or one more with Shift or Select
+   *  multiple - its tab opening (a text's: Text), but Lines stays: there a part is picked for its lines by name. */
+  const pickFromTree = (id: string, add: boolean) => {
+    const cur = selectedRef.current;
+    if (add || several) setSelected(cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]);
+    else {
+      setSelected([id]);
+      setEdgeSel({});
+    }
+    const p = designRef.current ? find(designRef.current.parts, id)?.part : null;
+    setTab((t) => (t === "lines" ? t : p?.shape === "text" ? "text" : "part"));
+  };
+
   const onDoubleClick = (e: React.MouseEvent) => {        // the part itself, inside its group
     const v = vp.current;
     if (!v || tool || v.overGizmo) return;
@@ -1323,26 +1350,6 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
                   : "The picked text: its letters, font and lines"}>Text</button>
             )}
           </div>
-          <div className="v3d-quick">
-            <MenuButton right className="btn small quiet" title="The design's parts: pick one, hide or show it" menuClassName="wide v3d-partsmenu"
-              label={<><ListTree size={15} /> Parts{parts.length ? ` (${allIds(parts).size})` : ""} <ChevronDown size={13} /></>}>
-              {(close) => (
-                <>
-                  {parts.length > 1 && (
-                    <button type="button" className="menu-item" onClick={() => { close(); setSelected(parts.map((x) => x.id)); setEdgeSel({}); }}>
-                      <span>Pick all<small>Every part, Ctrl+A</small></span></button>
-                  )}
-                  <PartList parts={parts} onHide={hide} onPick={(id) => {
-                    if (!several) {
-                      close();
-                      setEdgeSel({});                  // another part: the lines picked go (they stayed drawn green)
-                    }
-                    setSelected(several ? (selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]) : [id]);
-                  }} />
-                </>
-              )}
-            </MenuButton>
-          </div>
         </div>
         <Band label={shownTab === "text" ? "Text" : TABS.find(([id]) => id === shownTab)?.[1]} fit={fitKey}>
           {shownTab === "insert" && (
@@ -1447,6 +1454,7 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
         )}
         <div className="v3d-top">
           <div className="v3d-heads-row">
+            <div className="v3d-left">
             <div className="v3d-heads" role="toolbar" aria-label="Pick and handles">
               <Tool icon={<MousePointer2 size={16} />} title="Select: a click picks a part or a line - no handles, nothing moves (Q, or Esc with nothing picked)"
                 active={mode === "select"} onClick={() => setMode("select")}><span>Select</span></Tool>
@@ -1461,6 +1469,11 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
                 onClick={() => setMode("rotate")}><span>Turn</span></Tool>
               <Tool icon={<Scaling size={16} />} title="Size: handles on what is picked make it longer or shorter, 1 mm at a time (S)"
                 active={mode === "scale"} onClick={() => setMode("scale")}><span>Size</span></Tool>
+            </div>
+            {parts.length > 0 && (
+              <PartTree parts={parts} selected={selected} open={treeOpen} onOpen={setTreeOpen} onHide={hide}
+                onPickAll={() => { setSelected(parts.map((x) => x.id)); setEdgeSel({}); }} onPick={pickFromTree} />
+            )}
             </div>
             <div className="v3d-heads" role="toolbar" aria-label="View">
               <Tool icon={<ViewIcon face="home" />} title="Fit: the whole design, seen from the front, right and above" onClick={() => view("home")}><span>Fit</span></Tool>
@@ -1751,27 +1764,54 @@ function SizeCombo({ value, mixed, onSet }: { value: number; mixed: boolean; onS
   );
 }
 
-function PartList({ parts, onPick, onHide, depth = 0 }: { parts: Part[]; onPick: (id: string) => void;
-  onHide: (id: string) => void; depth?: number }) {
-  if (!parts.length && !depth) return <p className="v3d-note faint">No parts yet.</p>;
+/** The design's parts as a tree over the view, at the left under the bar (0.96.1, Søren: "Move parts" - where
+ *  SolidWorks has its FeatureManager): a click picks one (Shift: one more), Hide or Show on the row leaves it out or
+ *  in; the title folds it. */
+function PartTree({ parts, selected, open, onOpen, onPick, onHide, onPickAll }: { parts: Part[]; selected: string[];
+  open: boolean; onOpen: (v: boolean) => void; onPick: (id: string, add: boolean) => void; onHide: (id: string) => void;
+  onPickAll: () => void }) {
+  const rows = (list: Part[], depth: number): ReactNode => list.map((p) => {
+    const on = selected.includes(p.id);
+    return (
+      <li key={p.id} role="treeitem" aria-selected={on}>
+        <div className={`v3d-tree-row${on ? " on" : ""}${p.hidden ? " hidden" : ""}`} style={{ paddingLeft: 2 + depth * 14 }}>
+          <button type="button" className="v3d-tree-name" onClick={(e) => onPick(p.id, e.shiftKey)}
+            title={`${label(p)} - ${p.shape === "group" ? "a group" : p.hole ? `a ${p.shape} hole` : `a ${p.shape}`}${p.hidden ? ", hidden" : ""}. Click to pick it, Shift-click: one more`}>
+            <ShapeIcon part={p} /><span>{label(p)}</span>
+          </button>
+          <button type="button" className="v3d-tree-eye" onClick={() => onHide(p.id)}
+            title={p.hidden ? "Hidden: left out of the solid. Show it" : "Hide it: left out of the solid"}
+            aria-label={p.hidden ? `Show ${label(p)}` : `Hide ${label(p)}`}>
+            {p.hidden ? <EyeOff size={13} /> : <Eye size={13} />}<span>{p.hidden ? "Show" : "Hide"}</span>
+          </button>
+        </div>
+        {!!p.parts?.length && <ul role="group">{rows(p.parts, depth + 1)}</ul>}
+      </li>
+    );
+  });
   return (
-    <ul className="v3d-parts" style={depth ? { paddingLeft: 14 } : undefined}>
-      {parts.map((p) => (
-        <li key={p.id}>
-          <div className="row">
-            <span className={`v3d-swatch${p.hole ? " hole" : ""}`} style={p.hole || p.shape === "group" ? undefined : { background: p.color ?? GREY }} />
-            <button className="link-btn grow ellipsis" onClick={() => onPick(p.id)}>{label(p)}</button>
-            {p.hole && <span className="tag">hole</span>}
-            {p.shape === "group" && <span className="tag">group</span>}
-            <button className="btn small quiet" onClick={() => onHide(p.id)} aria-label={p.hidden ? `Show ${label(p)}` : `Hide ${label(p)}`}
-              title={p.hidden ? "Hidden: left out of the solid. Show it" : "Hide it: left out of the solid"}>
-              {p.hidden ? <><EyeOff size={14} /> Show</> : <><Eye size={14} /> Hide</>}</button>
-          </div>
-          {p.parts && <PartList parts={p.parts} onPick={onPick} onHide={onHide} depth={depth + 1} />}
-        </li>
-      ))}
-    </ul>
+    <div className="v3d-tree">
+      <div className="v3d-tree-head">
+        <button type="button" className="v3d-tree-toggle" aria-expanded={open} onClick={() => onOpen(!open)}
+          title={open ? "Fold the list of parts" : "The design's parts: pick one, hide or show it"}>
+          <ChevronDown size={13} className={open ? undefined : "shut"} /><ListTree size={14} /><span>Parts ({allIds(parts).size})</span>
+        </button>
+        {open && parts.length > 1 && <button type="button" className="v3d-tree-all" onClick={onPickAll} title="Every part (Ctrl+A)">Pick all</button>}
+      </div>
+      {open && <ul className="v3d-tree-list" role="tree" aria-label="The design's parts">{rows(parts, 0)}</ul>}
+    </div>
   );
+}
+
+/** A part's shape as a small picture in the tree: a hole's grey and dashed, a text's violet, a group's blue. */
+function ShapeIcon({ part: p }: { part: Part }) {
+  const props = { size: 14, ...(p.hole ? { strokeDasharray: "3 2" } : {}) };
+  const icon = p.shape === "box" ? <Box {...props} /> : p.shape === "cylinder" ? <Cylinder {...props} /> : p.shape === "cone"
+    ? <Cone {...props} /> : p.shape === "sphere" ? <CircleDot {...props} /> : p.shape === "wedge" ? <Triangle {...props} />
+      : p.shape === "text" ? <Type {...props} /> : p.shape === "outline" ? <Shapes {...props} /> : p.shape === "mesh"
+        ? <Upload {...props} /> : <Group {...props} />;
+  const tone = p.hole ? "grey" : p.shape === "text" ? "violet" : p.shape === "group" ? "" : "orange";
+  return <span className={`v3d-tree-icon${tone ? ` tone-${tone}` : ""}`}>{icon}</span>;
 }
 
 const kindOf = (p: Part) => (p.shape === "group" ? "Group" : p.shape === "mesh" ? "Imported mesh"

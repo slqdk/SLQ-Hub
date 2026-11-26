@@ -3266,7 +3266,8 @@ into the Hub, Tinkercad's level, his printer a Bambu Lab P2S but chosen per desi
     and Letters apart, font (its full name under it), Bold, Italic, Capitals and Spacing (the size it comes out at under
     them), the lines' alignment and spacing; for several, each gets the change. A tab that goes (Text, when a box is
     picked) shows Part instead and comes back with the next text.
-  - **Parts**, a menu at the right of the tabs: every part, nested in its groups, to pick, hide or show.
+  - **Parts**, a menu at the right of the tabs: every part, nested in its groups, to pick, hide or show - since 0.96.1 a
+    tree over the view, at its left (below).
   - **Over the view**, a heads-up bar as SolidWorks has: Move, Turn, Size, the snap, Fit, Top, Front, Right, Pick
     several (0.92.0), Point at (the pick hint under it) - since 0.96.0 two bars, Select first (below). **The status line**: size, volume, the printer (a menu: the printers and a custom size),
     the warnings, and "2 problems" (a menu with what the file's reader and the build said). The head: Undo, Redo,
@@ -3308,6 +3309,13 @@ into the Hub, Tinkercad's level, his printer a Bambu Lab P2S but chosen per desi
     shape's own numbers as fields; Arrange; Duplicate, Hide, Delete.
   - Picking another part - in Parts, or a new part added - unpicks the lines picked (they stayed green on the last
     part, as his screenshot showed).
+  - **Parts as a tree over the view (0.96.1).** Søren, with an arrow from the Parts menu (at the right of the tabs) to the
+    view's left under its bar: "Move parts". There now, where SolidWorks has its FeatureManager (`PartTree`): "Parts
+    (n)" folds it (kept for next time; folded at first on a phone), Pick all; each part a row with its shape's
+    picture (a hole's grey and dashed, a text's violet, a group's blue, its parts under it, indented), picked rows
+    amber; a click picks it as a click on the model does - Shift or Select multiple: one more - and opens its tab (a
+    text's: Text) unless Lines is open, where a part is picked for its lines by name; Hide or Show on the row (Show
+    always shown on a hidden one, which is grey and slanted). The menu at the right of the tabs is gone.
 - **Insert, Part, Lines (0.94.0).** Søren, with the editor beside the chat: "Shapes skal hedde 'Insert'. Når man klikker
   på en Part, så skal parts menuen komme frem. Parts menuen skal også inkludere Size, place, arrange. (alle på en tab).
   Hvis man klikker på en streg, så skal menuen Lines komme frem, (edges i dag). Under lines, skal jeg have mulighed for

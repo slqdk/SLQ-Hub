@@ -1273,11 +1273,6 @@ div.tests-result-head { cursor: default; }
   background: linear-gradient(light-dark(#fff6d6, rgba(255, 214, 110, 0.18)), light-dark(#fbe3a0, rgba(255, 196, 80, 0.12)));
   border-color: light-dark(#e3bf62, rgba(255, 200, 100, 0.45)); box-shadow: inset 0 3px 0 light-dark(#f0b43c, #e8a63a); }
 .v3d-tab.context.on { color: light-dark(#7a4b00, #ffd98c); background: linear-gradient(light-dark(#fffbea, #66603f), var(--rb-body-1)); }
-.v3d-quick { display: flex; align-items: center; gap: 4px; margin-left: auto; padding-bottom: 3px; }
-.v3d-quick .btn { height: 24px; padding: 0 8px; border-color: transparent; border-radius: 3px; background: transparent; box-shadow: none;
-  color: var(--rb-blue); font-family: var(--rb-font); font-weight: 400; font-size: 12.5px; }
-.v3d-quick .btn svg { color: var(--rb-icon); }
-.v3d-quick .btn:hover { background: var(--rb-hover); border-color: var(--rb-hov-edge); }
 .v3d-band { display: flex; align-items: stretch; gap: 3px; height: 100px; padding: 3px 4px 3px; overflow: auto hidden;
   background: linear-gradient(var(--rb-body-1), var(--rb-body-2)); border-top: 1px solid var(--rb-edge); }
 .v3d-group { flex: none; display: flex; flex-direction: column; min-width: 40px; padding: 2px 3px 0;
@@ -1435,6 +1430,35 @@ div.tests-result-head { cursor: default; }
 .v3d-heads .v3d-tool:active { background: var(--rb-press); border-color: var(--rb-press-edge); }
 .v3d-heads .v3d-tool.on { background: var(--rb-on); border-color: var(--rb-on-edge); }
 .v3d-viewicon { flex: none; color: light-dark(#1f3f6e, #dce6f2); }
+/* The parts' tree (0.96.1): at the left under the bar, where SolidWorks has its FeatureManager - Søren: "Move parts" */
+.v3d-left { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; min-width: 0; }
+.v3d-tree { pointer-events: auto; width: 224px; max-width: 100%; border: 1px solid var(--rb-edge); border-radius: 4px;
+  background: color-mix(in srgb, var(--rb-tab-1) 90%, transparent); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.14);
+  backdrop-filter: blur(4px); font-family: var(--rb-font); font-size: 12px; color: var(--rb-ink); }
+.v3d-tree-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 2px; }
+.v3d-tree-toggle, .v3d-tree-all { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 7px 0 3px;
+  border: 1px solid transparent; border-radius: 3px; background: transparent; color: var(--rb-blue); font: inherit;
+  cursor: pointer; }
+.v3d-tree-toggle { font-weight: 600; }
+.v3d-tree-all { height: 22px; padding: 0 7px; }
+.v3d-tree-toggle svg { flex: none; color: var(--rb-icon); transition: transform 0.12s; }
+.v3d-tree-toggle svg.shut { transform: rotate(-90deg); }
+.v3d-tree-toggle:hover, .v3d-tree-all:hover { background: var(--rb-hover); border-color: var(--rb-hov-edge); }
+.v3d-tree-list, .v3d-tree-list ul { margin: 0; padding: 0; list-style: none; }
+.v3d-tree-list { max-height: min(55vh, 520px); overflow-y: auto; padding: 2px 2px 3px; border-top: 1px solid var(--rb-group-edge); }
+.v3d-tree-row { display: flex; align-items: center; gap: 2px; border: 1px solid transparent; border-radius: 3px; }
+.v3d-tree-row:hover { background: var(--rb-hover); border-color: var(--rb-hov-edge); }
+.v3d-tree-row.on { background: var(--rb-on); border-color: var(--rb-on-edge); }
+.v3d-tree-row.hidden .v3d-tree-name { opacity: 0.55; font-style: italic; }
+.v3d-tree-name { flex: 1; min-width: 0; display: flex; align-items: center; gap: 5px; height: 22px; padding: 0 3px; border: 0;
+  background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.v3d-tree-name > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.v3d-tree-icon { display: inline-grid; place-items: center; flex: none; }
+.v3d-tree-icon > svg { width: 14px; height: 14px; color: var(--rb-icon); }
+.v3d-tree-eye { flex: none; display: none; align-items: center; gap: 3px; height: 20px; margin-right: 1px; padding: 0 5px;
+  border: 0; border-radius: 2px; background: transparent; color: var(--rb-blue); font: inherit; font-size: 11.5px; cursor: pointer; }
+.v3d-tree-eye:hover { background: light-dark(rgba(255, 255, 255, 0.7), rgba(255, 255, 255, 0.12)); }
+.v3d-tree-row:hover .v3d-tree-eye, .v3d-tree-row.hidden .v3d-tree-eye, .v3d-tree-eye:focus-visible { display: inline-flex; }
 .v3d-sep { width: 1px; height: 20px; margin: 0 3px; background: var(--rb-group-edge); }
 .v3d-stage { position: relative; flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .v3d-view { position: relative; flex: 1; min-height: 0; outline: none; touch-action: none; }
@@ -1454,18 +1478,11 @@ div.tests-result-head { cursor: default; }
 .v3d-problems { max-width: 420px; padding: 6px 12px; }
 .v3d-problems p { margin: 4px 0; font-size: 13px; line-height: 1.4; overflow-wrap: anywhere; }
 .v3d-custom { padding: 6px 12px 8px; }
-.v3d-partsmenu { max-height: min(60vh, 520px); overflow-y: auto; padding: 4px 8px; min-width: 280px; }
 .v3d-warn { color: color-mix(in srgb, var(--wait) 60%, var(--ink)); }
 .v3d-triple { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
 .v3d-num { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .v3d-num > span { font-size: 12px; color: var(--ink-3); }
 .v3d-note { margin: 0; font-size: 13px; line-height: 1.45; color: var(--ink-2); overflow-wrap: anywhere; }
-.v3d-parts { display: flex; flex-direction: column; gap: 1px; margin: 0; padding: 0; list-style: none; }
-.v3d-parts .row { gap: 6px; min-height: 28px; }
-.v3d-parts .link-btn { text-align: left; color: var(--ink); font-size: 14px; text-decoration: none; }
-.v3d-parts .link-btn:hover { text-decoration: underline; }
-.v3d-swatch { flex: none; width: 12px; height: 12px; border: 1px solid var(--rule); border-radius: 3px; background: var(--cabinet); }
-.v3d-swatch.hole { background: repeating-linear-gradient(45deg, transparent 0 2px, var(--ink-3) 2px 3px); }
 @media (max-width: 1100px) {
   .app.with-3d .panel-3d { width: min(1180px, 100vw); }
 }
@@ -1473,5 +1490,4 @@ div.tests-result-head { cursor: default; }
   .v3d-head { flex-wrap: wrap; }
   .v3d-tab { padding: 4px 9px 5px; font-size: 12.5px; }
   .v3d-heads-row { justify-content: center; }
-  .v3d-quick { margin-left: 0; }
 }

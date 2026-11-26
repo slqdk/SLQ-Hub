@@ -741,7 +741,8 @@ export const SECTIONS: HelpSection[] = [
           + "picked part - its name, solid or hole, its size, centre and turn by the numbers, onto the plate, mirror, "
           + "pattern, duplicate and delete; Lines rounds, cuts and resizes its lines; Text - its font and size, bold, "
           + "italic and its lines - opens when a text is added or clicked. A narrow editor folds a tab's groups into "
-          + "buttons, each opening its group. Parts lists every part, to pick or hide one.",
+          + "buttons, each opening its group. Parts, at the left of the view under its bar, lists every part as a "
+          + "tree: click one to pick it (Shift: one more), Hide or Show on its row; its title folds it away.",
           "Select (the arrow, at the left over the view) is on to begin with: click a part to pick it - the Part tab "
           + "opens - or click right by one of its lines to pick the line (it lights up as you point at it), and the "
           + "Lines tab opens. Nothing moves. Shift-click picks more - or turn on Select multiple - double-click a part "

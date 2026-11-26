@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.96.1 - 2026-11-26
+
+- The 3D editor's Parts list is now a tree at the left of the view, under
+  the bar with Select - as in SolidWorks. Click a part to pick it (Shift:
+  one more), hide or show it on its row, and fold the list away with its
+  title.
+
 ## 0.96.0 - 2026-11-26
 
 - The 3D editor's ribbon looks like Office 2007: tabs on a strip, groups

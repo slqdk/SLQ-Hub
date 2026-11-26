@@ -4,7 +4,19 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## Next session - start here (written 2026-11-26, at 0.96.0)
+## Next session - start here (written 2026-11-26, at 0.96.1)
+
+**0.96.1 (2026-11-26): Parts as a tree over the view - pushed, not yet installed.** Søren, 13:22, with an arrow from
+the Parts menu (right of the tabs) to the view's left under the bar: "Move parts" - and "hvad gør Hole / Solid?"
+(answered: a solid adds material and joins the others; a hole cuts what it overlaps, drawn as a grey ghost; H
+switches; in a group it cuts only the group's parts). Built (DESIGN §8 "Parts as a tree over the view (0.96.1)"): the
+tree at the view's left under the bar, where SolidWorks has its FeatureManager - shape pictures, groups indented,
+picked rows amber, a click picks (Shift: one more) and opens the part's tab (Lines stays), Hide/Show on the row, "Parts
+(n)" folds it and is remembered, Pick all; the menu at the right of the tabs is gone. Seen in the dev server (a cloud
+of ten parts with a group and a hole, light and dark): rows and their pictures, a click, a Shift-click, the text
+opening Text, Lines kept, Cloud Bottom hidden (the file says so, its row "Show"), folded and opened (kept in
+localStorage) - no console errors. Not seen: his screens; a design with 40 parts (the tree scrolls past 55% of the
+window's height).
 
 **0.96.0 (2026-11-26): the ribbon in Office 2007's look, Select, the views at the right - pushed, not yet installed.**
 Søren, 12:27-12:47: what is "Snap 1 mm" (answered: moving in 1 mm steps, turning in 15°, the arrow keys' step); then 1 mm
@@ -406,7 +418,7 @@ finds them and fingers still come out wrong). Decided: no Facebook posting (he c
 
 Known flake: tests/test_training.py::test_the_trainer_stops_a_job fails now and then in a full run and passes alone.
 
-## State (0.96.0, 2026-11-26)
+## State (0.96.1, 2026-11-26)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -2484,6 +2496,8 @@ flow, see "Next session". |
       converter's cases are ComfyUI 0.42.3's own templates; files from other sites (Civitai, OpenArt) are
       untried - an export is the way to see what went wrong. When COMFYUI_REF changes, the editor's format may
       too: tools/workflow_oracle/ (convert.js, compare.py) is how the converter was checked - run it again.
+115. **Parts as a tree (0.96.1)** - in the dev server's headless Chromium: where he wants it - always open over the
+    view's left, or folded by default? It covers the model's left on a narrow editor.
 114. **Office 2007 and Select (0.96.0)** - only in the dev server's headless Chromium:
     - **His screens**: the ribbon at his zoom with Segoe UI (here the fallback font), light and dark; is it the Office
       2007 he has in mind, and are the toned icons right?
