@@ -3118,7 +3118,8 @@ into the Hub, Tinkercad's level, his printer a Bambu Lab P2S but chosen per desi
   assistant with an example its build checks): `{"format": "slq-hub-3d", "version": 1, "printer", "bed", "parts"}`;
   a part has an id, a shape, `size` (its own box before turning), `at` (that box's middle), `rotate` (degrees, X then
   Y then Z, as OpenSCAD), and `hole`, `hidden`, `mirror` (its own X), `color`, `sides`, `radius`, `top`, `text` and
-  its options (0.89.0, below), `file` (a mesh, from the design's folder), `parts` (a group: nothing of its own). In
+  its options (0.89.0, below), `file` (a mesh, from the design's folder), `on` (kept on a face of a box, 0.98.0,
+  below), `parts` (a group: nothing of its own). In
   each list the solids are joined and then that list's holes cut them; a group is built first and counts as one
   solid, or one hole. Millimetres, Z up, x 0 y 0 the plate's middle, z 0 its top. Missing or wrong values get
   defaults and are said; the file is written with a fixed key order, 3 decimals, ids kept.
@@ -3331,6 +3332,52 @@ into the Hub, Tinkercad's level, his printer a Bambu Lab P2S but chosen per desi
     amber; a click picks it as a click on the model does - Shift or Select multiple: one more - and opens its tab (a
     text's: Text) unless Lines is open, where a part is picked for its lines by name; Hide or Show on the row (Show
     always shown on a hidden one, which is grey and slanted). The menu at the right of the tabs is gone.
+- **On a face of a box, kept there (0.98.0).** Søren, 13:57: "Hvad gør jeg hvis jeg gerne vil lave en 2D cirkel et sted
+  på kassen, og derefter skære hullet ud hele vejen igennem kassen ? Ligesom i solid works ? Hvor jeg tegner en cirkel
+  på den side jeg ønsker, og så låser afstandene til kanterne? Og så Boss Extrude ?" - and, asked whether the distances
+  should stay locked and follow the box (14:05): "på Select, og jeg klikker på en flade ( ikke en linie), så skal
+  muligheden komme frem oppe i menuen".
+  - **The format: `on`** - `{"part": box, "face": "front", "from": {"left": 20, "top": 15}, "through": true}`, or
+    `"depth": mm` (how far a hole goes in or a solid stands out), `"angle"` (degrees turned on the face). The face is
+    the box's own (front its -Y side before it is turned); `from` names an edge by the face beyond it, one across the
+    face and one up it (`FACE_FRAMES`: each face's normal n, across u, up v - u x v = n, so a text reads across it,
+    upright on a wall - and the faces beyond its edges); an axis with neither is the middle. Neither depth nor through:
+    as deep (or high) as the part's size z. A group cannot be put on a face (said); `on` names a box (else said, and the
+    part left where it is - also for a box not there, or a circle of `on`s, whose first part is freed). The writer keeps
+    `on` on one line, after `at` and `rotate`, which it decides - so a reader that knows nothing of `on` still gets the
+    part where it is.
+  - **Placed whenever the design is read or changed** (`settle`, hub3d's `_settle`, the same sums in the same order -
+    the parity test compares to 1e-9 on a box turned 10/20/33° and mirrored, every face, a boss on a face with a hole
+    on the boss): each part after the box it is on, `placeOn` turning it so its own Z is out of the face and its X across
+    it (turned by `angle`; for a mirrored box U = V x N, so it stays a turn), unmirrored, its middle over the spot; a
+    solid stands out as far as its depth with 0.2 mm in the face, a hole goes in as deep with its top 0.2 mm out, a
+    through hole the box's depth plus 0.2 mm out on each side - its size z what that takes, its `at` to 0.001 mm as the
+    file keeps it. So when the box moves, turns or grows, what is on it goes with it and the distances stay.
+  - **The editor's edits** (`settle(parts, _, before)` in `commit`; `edited`): a part on a face moved (dragged, its
+    Centre typed, the arrow keys) has its spot where its middle now is (`respot`: from the same edges; one in the
+    middle stays there while it is there) - moved off the face, it goes back onto it; turned about the face's normal its
+    `angle` follows, turned off the face it is freed; a new size z is a new depth (through: kept through). Its anchor
+    typed, or nothing done to it, and it is placed by its anchor. Its box and it moved together keep their distances;
+    the box gone, it stays where it is. Duplicate gives a copy on its box's copy, or 5 mm on across the same face
+    (`onCopies`, `respot`); Letters apart puts each letter on the face where it is; while a box is dragged, what is on
+    its faces is in the preview with it (`riders`; not while it is sized).
+  - **The Face tab**: in Select, a click on a solid box's face - not by a line (that picks the line), not a hole, not
+    one in a hole group, not a repeated box - picks the face (`faceAt`: the face whose normal the model's face there
+    has, in the box's own frame, the spot on its outside) and the spot, from the nearer edges to 1 mm (`spotAt`); the
+    box is picked as a click on it picks it and a gold contextual tab, Face, opens. On the model the face is outlined
+    in the picked part's blue, with a circle or square where the spot is and a line from each measured edge to it, its
+    millimetres written beside it as SolidWorks writes a sketch's dimensions (`faceMarks`; `Viewport.setLabels`: words
+    over the view, placed each time it draws). Groups: **Face** (which, of which box, how big); **Where** (From left /
+    right / Middle and the mm, up and across - changing which edge keeps the spot - and In the middle); **Shape**
+    (Round or Square, its diameter or side); **Cut or add**: **Cut hole** (through all, or Depth), **Add boss**
+    (Height; the box's colour), **Text here** (1 mm out; upright on a wall, along the view's right on a top - Text
+    opens). Each puts the part beside the box in the tree - in its group, so a hole cuts what the box is in - kept on
+    the face (`on`), picks it and opens its tab. The tab's settings stay from one face to the next.
+  - **On the face** (the Part tab, for a part kept on a face): its distances as in Where, Through all and Depth (a hole)
+    or Height (a solid), and **Free it**: placed by its own numbers again, where it is. Its distances show on the model
+    while it is picked. Size, centre and turn folds first there (its centre and turn follow the face).
+  - **On a face** (0.97.0) onto a box's face now keeps the part there as well (its depth its size z less the 0.2 mm in
+    the face, as before; a text upright as the Face tab sets it); onto another shape's face it is placed as before, free.
 - **Insert, Part, Lines (0.94.0).** Søren, with the editor beside the chat: "Shapes skal hedde 'Insert'. Når man klikker
   på en Part, så skal parts menuen komme frem. Parts menuen skal også inkludere Size, place, arrange. (alle på en tab).
   Hvis man klikker på en streg, så skal menuen Lines komme frem, (edges i dag). Under lines, skal jeg have mulighed for
@@ -3366,7 +3413,7 @@ into the Hub, Tinkercad's level, his printer a Bambu Lab P2S but chosen per desi
   - **A hole's fillet rounds what it cut.** The cutter rounded on its upright edges leaves the pocket round inside
     corners, on its bottom edges a rounded floor edge - its edges inside the part. On its edges at the opening the
     cutter rounded cuts less there, so a lip is left round the opening (rounding the rim itself is a fillet where the
-    hole meets the part: 0.98.0). So a hole's lines are picked as a part's - clicked, by name, Resized - and Fillet
+    hole meets the part: 0.99.0). So a hole's lines are picked as a part's - clicked, by name, Resized - and Fillet
     and Chamfer go to those inside it only (`holeEdges`); the others are named in a toast. Take off takes off any.
   - **Inside or at an opening** (`holeEdges`; hub3d's `hole_edges`, the same): points 0.2 mm off the edge, out
     between its two faces (`edgeOutside`: along a straight edge at its eighths, round a rim at eight places, up each of
@@ -3416,7 +3463,7 @@ into the Hub, Tinkercad's level, his printer a Bambu Lab P2S but chosen per desi
     that one; and the part's names now, each a button that takes it off. A box with All rounded (its radius, in Part)
     says to set that to 0; setting it clears the fillets. Holes' and meshes' edges say they cannot be rounded yet
     (a hole's can since 0.95.0, inside the part).
-  - **Not yet - 0.98.0**: edges where parts meet (the rim of a hole's opening, a wall on a base: on the built solid, a
+  - **Not yet - 0.99.0**: edges where parts meet (the rim of a hole's opening, a wall on a base: on the built solid, a
     fillet's cutter or filler swept along the picked crease) and straight sharp edges of imported meshes.
 - **Picking first (0.92.0).** Søren, 07:23: "Er det ikke muligt at vælge et enkelt bogstav og ændre på det ? altså ved
   at klikke på bogstavet ? Og hvis jeg så vil ændre på flere, så kan jeg vælge en mode for at vælge flere" - one letter

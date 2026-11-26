@@ -4,7 +4,31 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## Next session - start here (written 2026-11-26, at 0.97.0)
+## Next session - start here (written 2026-11-26, at 0.98.0)
+
+**0.98.0 (2026-11-26): a hole, a boss or a text on a box's face, kept there - pushed, not yet installed.** Søren, 13:57:
+"Hvad gør jeg hvis jeg gerne vil lave en 2D cirkel et sted på kassen, og derefter skære hullet ud hele vejen igennem
+kassen ? Ligesom i solid works ? Hvor jeg tegner en cirkel på den side jeg ønsker, og så låser afstandene til kanterne?
+Og så Boss Extrude ?" - and at 14:05, to the distances being locked to the box: "på Select, og jeg klikker på en flade
+( ikke en linie), så skal muligheden komme frem oppe i menuen". Built (DESIGN §8 "On a face of a box, kept there
+(0.98.0)"): a part's `on` - the box, its face, mm from two of its edges (or the middle), through or a depth, an angle -
+placed by both readers the same way (`settle`, hub3d's `_settle`), so it goes with the box when the box moves, turns or
+grows. In Select a click on a box's face opens a gold **Face** tab: the spot's distances on the model (SolidWorks-style
+labels), From left/right/Middle and the mm, Round or Square and its size, **Cut hole** (Through all or a Depth), **Add
+boss** (a Height), **Text here**. A part kept on a face has **On the face** in its Part tab (distances, depth or height,
+Free it) and shows its distances while picked; moved by hand its distances follow, turned on the face its angle, turned
+off it it is freed, sized in Z its depth. On a face (0.97.0) onto a box's face keeps the part there too. `hub3d format`
+describes `on`; its key tag's ring hole uses it. Seen in the dev server (his box 100 x 50 x 50, light and dark, 1440
+and 700 px): the front face clicked (Face tab, distances 49 and 19), 25 from the left and 15 from the top typed, Ø10,
+Cut hole through (at x -25, z 35, 50.4 long); the box made 140 wide (the hole 25 from its left still), moved 10 mm with
+the arrow keys (the hole along); the hole picked (On the face, its distances on the model); a boss 8 mm on the top, a
+text on the right face (upright); a hollow box turned 30° - its front picked, In the middle, an 8 mm hole through both
+walls (301 mm³ gone, two 3 mm walls: 302), Undo and Redo; a new text clicked onto the turned front (kept there,
+upright); the box dragged in Move with its hole and text in the preview, both following - no console errors; tests: the
+two readers to 1e-9 and the same solid on all six faces of a box turned and mirrored, the editor's moves, turns,
+sizes, typing, box gone, a copy, problems said alike. Not seen: his mouse on a real design (his box has a pocket that is
+not on a face - it does not follow the box; group them); a box with fillets (a click on the round band picks no face:
+the Part tab opens); faces of other shapes (a cylinder's top) - only boxes so far.
 
 **0.97.0 (2026-11-26): On a face, and Turn 90° - pushed, not yet installed.** Søren, 13:30, with a text standing
 crooked in his spare-parts box and the box turned -90° in X: "Når jeg sætter text ind, kan jeg så vælge hvilken flade
@@ -52,7 +76,8 @@ their Align grid, Letters apart then the Text tab for three letters, Select keep
 errors. Not seen: his screens (Segoe UI there, so closer to Office than here), whether this is the Office 2007 he means.
 **Asked, not built**: Resize of one line alone - "Når jeg resizer en streg, så følger alle 4 med.. kan vi kun justere
 den side jeg har valgt?" A box's four parallel lines are its size; one changing alone makes a free block of 8 corners
-(SketchUp: a corner raised, a top sloping, sides tapering) that loses Fillet. Waiting for his answer.
+(SketchUp: a corner raised, a top sloping, sides tapering) that loses Fillet. Asked again at 0.98.0; waiting for his
+answer.
 
 **0.95.0 (2026-11-26): a hole's lines - picked inside a pocket and filleted - pushed, not yet installed.** Søren, 11:30,
 with his spare-parts box (`reservedels_kasse.3d.json`: a box and a box hole "Innerum" 94 x 44 x 37 from 3 mm up, the
@@ -147,7 +172,7 @@ picking the 4 edges with their size, Take off - no console errors; the band fits
 seen: on his screens, a real mouse's feel of the hover and the pick, a design with many letters (40 parts: the build
 time), letters apart on a text inside a group.
 
-**Next: 0.98.0, fillets where parts meet and on imported meshes** - unchanged from 0.91.0's plan below, now on the
+**Next: 0.99.0, fillets where parts meet and on imported meshes** - unchanged from 0.91.0's plan below, now on the
 pick-first Lines tab: crease chains on the built mesh picked and hovered like the part's own edges (`setMarks`), then
 Fillet or Chamfer. The rim of a hole's opening is the first case (0.95.0 leaves it sharp and says so).
 
@@ -163,7 +188,7 @@ them. Seen in the dev server ("name plate"): the plate's vertical edges filleted
 the top view and picked off again, a chip taken off, a text saying it has no edges - no console errors. Not seen: with a
 real model ("rund kanterne" - does it use `fillet`?), on his screens, printed.
 
-**Next (planned as 0.92.0, then 0.95.0 to 0.97.0, now 0.98.0): fillets where parts meet and on imported meshes** - the other two of the three Søren chose ("Er det
+**Next (planned as 0.92.0, then 0.95.0 to 0.98.0, now 0.99.0): fillets where parts meet and on imported meshes** - the other two of the three Søren chose ("Er det
 muligt at lave en funktion hvor man efterfølgende kan lave fillet på et kant/side?": the parts' own edges - done in
 0.91.0 -, also where parts meet - a hole's rim, a wall on a base -, also on imported STLs - straight sharp edges). The
 design so far: picked edges `edges: [{fillet|chamfer, path, closed, face, sides, part}]` on a group or the design (mm,
@@ -432,7 +457,7 @@ finds them and fingers still come out wrong). Decided: no Facebook posting (he c
 
 Known flake: tests/test_training.py::test_the_trainer_stops_a_job fails now and then in a full run and passes alone.
 
-## State (0.97.0, 2026-11-26)
+## State (0.98.0, 2026-11-26)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -2510,6 +2535,13 @@ flow, see "Next session". |
       converter's cases are ComfyUI 0.42.3's own templates; files from other sites (Civitai, OpenArt) are
       untried - an export is the way to see what went wrong. When COMFYUI_REF changes, the editor's format may
       too: tools/workflow_oracle/ (convert.js, compare.py) is how the converter was checked - run it again.
+117. **On a face of a box, kept there (0.98.0)** - in the tests and the dev server's headless Chromium:
+    - **His box**: a hole through its side and a boss on its lid with his mouse; does the Face tab opening on every
+      click on a box suit him, or should the Part tab stay (one click to Face)? Does Through all mean what he wants on
+      the hollow box (both walls - a hole through one wall is a Depth of the wall's thickness)?
+    - **Printed**: a through hole's size (Ø10 typed: is it 10 on the print?), a boss joined to the face (0.2 mm in).
+    - **The assistant**: does a model use `on` from `hub3d format` ("lav et hul 20 mm fra venstre kant") - and keep it
+      when it changes a design?
 116. **On a face and Turn (0.97.0)** - in the tests and the dev server's headless Chromium: a text on his box's sides
     and lid with his mouse; does a new text asking for its face at once suit him, or should it only come from the
     button? Embossed 0.2 mm in and 1.8 mm out (the default 2 mm text) - printed, readable?

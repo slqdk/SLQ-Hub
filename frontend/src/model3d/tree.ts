@@ -45,11 +45,59 @@ export function remove(parts: Part[], ids: Set<string>): Part[] {
   return parts.filter((p) => !ids.has(p.id)).map((p) => (p.parts ? { ...p, parts: remove(p.parts, ids) } : p));
 }
 
-/** A copy with new ids everywhere (for Duplicate), taking ids from `seen`. */
-export function copy(p: Part, seen: Set<string>): Part {
+/** A copy with new ids everywhere (for Duplicate), taking ids from `seen` - each old id's new one put in `ids`. */
+export function copy(p: Part, seen: Set<string>, ids?: Map<string, string>): Part {
   const id = freshId(seen);
   seen.add(id);
-  return { ...p, id, parts: p.parts?.map((c) => copy(c, seen)) };
+  ids?.set(p.id, id);
+  return { ...p, id, parts: p.parts?.map((c) => copy(c, seen, ids)) };
+}
+
+/** Copies on faces of copies (0.98.0): each "on" that names a part copied with them names its copy. */
+export function onCopies(parts: Part[], ids: Map<string, string>): Part[] {
+  return parts.map((p) => {
+    const q = p.on && ids.has(p.on.part) ? { ...p, on: { ...p.on, part: ids.get(p.on.part)! } } : p;
+    return q.parts ? { ...q, parts: onCopies(q.parts, ids) } : q;
+  });
+}
+
+/** The parts on faces of these (0.98.0) - and on theirs - that are not among them: they go where a box goes. */
+export function riders(parts: Part[], ids: string[]): Part[] {
+  const moving = new Set<string>();
+  for (const id of ids) {
+    const f = find(parts, id);
+    if (f) allIds([f.part], moving);
+  }
+  const leaves: Part[] = [];
+  const walk = (list: Part[]) => list.forEach((p) => (p.parts ? walk(p.parts) : leaves.push(p)));
+  walk(parts);
+  const out: Part[] = [];
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const p of leaves) {
+      if (p.on && moving.has(p.on.part) && !moving.has(p.id)) {
+        moving.add(p.id);
+        out.push(p);
+        grew = true;
+      }
+    }
+  }
+  return out;
+}
+
+/** The parts with `add` just after the part `after`, beside it - in its group if it is in one; at the end when there
+ *  is no such part. */
+export function insertAfter(parts: Part[], after: string, add: Part): Part[] {
+  const into = (list: Part[]): Part[] | null => {
+    const i = list.findIndex((p) => p.id === after);
+    if (i >= 0) return [...list.slice(0, i + 1), add, ...list.slice(i + 1)];
+    for (let j = 0; j < list.length; j++) {
+      const inner = list[j].parts ? into(list[j].parts!) : null;
+      if (inner) return list.map((p, k) => (k === j ? { ...p, parts: inner } : p));
+    }
+    return null;
+  };
+  return into(parts) ?? [...parts, add];
 }
 
 /** The parts with these ids, in the tree's order. */

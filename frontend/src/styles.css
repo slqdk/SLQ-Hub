@@ -1465,6 +1465,13 @@ div.tests-result-head { cursor: default; }
 .v3d-view:focus-visible { box-shadow: inset 0 0 0 2px var(--act); }
 .v3d-view.picking { cursor: crosshair; }
 .v3d-canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
+/* A face's distances on the model (0.98.0), as SolidWorks writes a sketch's dimensions: over the view, moved with it */
+.v3d-dims { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.v3d-dim { position: absolute; left: 0; top: 0; padding: 0 4px; border: 1px solid var(--act); border-radius: 3px;
+  background: var(--sheet); color: var(--act); font-size: 11.5px; line-height: 16px; white-space: nowrap; }
+.v3d-dim[hidden] { display: none; }
+.v3d-ribbon .v3d-from .select { width: 102px; padding-right: 18px; }
+.v3d-clip { max-width: 132px; overflow: hidden; text-overflow: ellipsis; }
 .v3d-overlay, .v3d-empty { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); max-width: 80%;
   padding: 10px 14px; border-radius: 8px; background: var(--sheet); box-shadow: var(--shadow); color: var(--ink-2);
   font-size: 14px; text-align: center; pointer-events: none; }

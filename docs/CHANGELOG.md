@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.98.0 - 2026-11-26
+
+- A hole, a boss or a text on a box's face, as in SolidWorks: in Select,
+  click a box's face and the Face tab opens. The spot you clicked shows on
+  the model with its distances from two of the face's edges; change them
+  (From left, From right or Middle), choose round or square and its size,
+  then Cut hole (through all of the box, or so deep), Add boss (so high) or
+  Text here.
+- What is put on a face stays there: move, turn or resize the box and it
+  goes with it, the distances kept. Picked, its Part tab has On the face -
+  its distances, depth or height, and Free it. Moved by hand, its distances
+  follow.
+- On a face onto a box's face now keeps the part there too.
+- The assistant's design format has "on" for this (`hub3d format`).
+
 ## 0.97.0 - 2026-11-26
 
 - On a face, in the 3D editor: click a face of the model and the picked

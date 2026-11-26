@@ -813,7 +813,7 @@ DESIGN_FORMAT = "slq-hub-3d"
 DESIGN_SHAPES = ("box", "cylinder", "cone", "sphere", "wedge", "text", "outline", "mesh", "group")
 PART_KEYS = ("id", "name", "shape", "size", "at", "rotate", "mirror", "hole", "hidden", "color", "sides", "radius",
              "top", "text", "font", "bold", "italic", "align", "letter_spacing", "line_spacing", "points", "holes",
-             "file", "repeat", "fillet", "chamfer", "parts")
+             "file", "repeat", "fillet", "chamfer", "on", "parts")
 MAX_COPIES = 100
 ROUND_SHAPES = ("cylinder", "cone", "sphere")
 DEFAULT_SIDES = 64
@@ -849,7 +849,8 @@ DESIGN_EXAMPLE = """\
   "parts": [
     {"id": "tag", "name": "Tag", "shape": "box", "size": [50, 22, 3], "at": [0, 0, 1.5], "fillet": {"vertical": 4},
      "chamfer": {"top": 0.6}, "color": "#2b7bd9"},
-    {"id": "ring", "name": "Key ring hole", "shape": "cylinder", "size": [5, 5, 6], "at": [-19, 0, 1.5], "hole": true},
+    {"id": "ring", "name": "Key ring hole", "shape": "cylinder", "size": [5, 5, 3.4], "at": [-19, 0, 1.5],
+     "on": {"part": "tag", "face": "top", "from": {"left": 6}, "through": true}, "hole": true},
     {"id": "word", "name": "Name", "shape": "text", "text": "SLQ", "size": [0, 8, 1], "at": [-1, 0, 3.5],
      "color": "#d9822b"},
     {"id": "clip", "name": "Clip", "shape": "group", "parts": [
@@ -957,6 +958,14 @@ A part:
             hole's {{"vertical": 5, "bottom": 2}} - never its edges at the opening, which would leave a lip round it
   chamfer   the same names, the edges cut off instead (the size along each face): {{"bottom": 0.6}} - a bottom edge
             that does not bulge onto the plate
+  on        kept on a face of a box, as a circle sketched on a face and dimensioned from two of its edges:
+            {{"part": "tag", "face": "top", "from": {{"left": 6, "front": 4}}, "through": true}} is 6 mm from the
+            box's left edge and 4 mm from its front one, through all of the box (a hole). face: the box's own top,
+            bottom, front (its -Y side before it is turned), back, left or right; from: mm from an edge across the
+            face and one up it, each named by the face beyond it - one left out: the middle; depth: how far a hole
+            goes in or a solid stands out (left out: its size z); angle: degrees it is turned on the face. Its at,
+            rotate and size z then follow from the box: it moves, turns and grows with it. To move it, change from;
+            to place it yourself, leave on out
 
   box       radius: every edge and corner rounded (mm), sides: how round (default 64) - or fillet some edges
   cylinder  along Z; sides (default 64) - sides 6 makes a hexagon (a nut trap), 3 a triangle
@@ -1035,7 +1044,7 @@ def read_design(text: str) -> tuple[dict, list[str]]:
     if not isinstance(data.get("parts"), list):
         problems.append('it has no "parts" list')
     odd = {"parts": 0, "keys": set(), "shapes": []}
-    design = {"parts": _read_parts(parts, seen, problems, odd)}
+    design = {"parts": _settle(_read_parts(parts, seen, problems, odd), problems)}    # parts on faces placed (0.98.0)
     first = []                    # a model that guessed the format: what it did not know first, once - not per part
     if odd["parts"]:
         n = odd["parts"]
@@ -1234,7 +1243,228 @@ def _read_part(p: dict, seen: set, problems: list, odd: dict) -> dict:
             part["chamfer"] = chamfer
         if fillet and shape in ("box", "wedge", "outline") and _num(p.get("sides")):
             part["sides"] = max(3, min(256, _round(p["sides"])))         # how round its fillets are
+    if "on" in p:
+        if shape == "group":
+            problems.append(f'{pid}: a group cannot go "on" a face (its parts can) - left out')
+        else:
+            on = _read_on(p["on"], part, problems)
+            if on:
+                part["on"] = on
     return part
+
+
+# ---------------------------------------------------------------- on a face of a box (0.98.0)
+# A part kept on a face of a box - the editor's Anchor (geometry.ts): so far from two of the face's edges, its own Z
+# out of the face, as deep (a hole) or as high (a solid) as it says, or through all of the box. Placed there whenever
+# the design is read, so it goes with the box when the box moves, turns or grows.
+
+FACES = ("top", "bottom", "front", "back", "left", "right")
+_ON_KEYS = ("part", "face", "from", "depth", "through", "angle")
+# Each face in the box's own frame: which way it looks (n), across it (u), up it (v) - u x v = n - and the faces
+# beyond its edges, across and then up, each axis from its - end. The editor's FACE_FRAMES.
+FACE_FRAMES = {
+    "top": ((0, 0, 1), (1, 0, 0), (0, 1, 0), (("left", "right"), ("front", "back"))),
+    "bottom": ((0, 0, -1), (1, 0, 0), (0, -1, 0), (("left", "right"), ("back", "front"))),
+    "front": ((0, -1, 0), (1, 0, 0), (0, 0, 1), (("left", "right"), ("bottom", "top"))),
+    "back": ((0, 1, 0), (-1, 0, 0), (0, 0, 1), (("right", "left"), ("bottom", "top"))),
+    "left": ((-1, 0, 0), (0, -1, 0), (0, 0, 1), (("back", "front"), ("bottom", "top"))),
+    "right": ((1, 0, 0), (0, 1, 0), (0, 0, 1), (("front", "back"), ("bottom", "top"))),
+}
+
+
+def _read_on(v, part: dict, problems: list) -> dict | None:
+    """A part's "on": the box and its face, the distances from the face's edges, how deep, the turn on it - the
+    editor's readOn. Neither a depth nor through: as deep (or as high) as the part is thick."""
+    pid = part["id"]
+    if not isinstance(v, dict) or not isinstance(v.get("part"), str) or not v["part"].strip():
+        problems.append(f'{pid}: "on" names the box it is on: {{"part": id, "face": "front", "from": {{"left": 20, '
+                        f'"top": 15}}}} - left out')
+        return None
+    face = v["face"].strip().lower() if isinstance(v.get("face"), str) else ""
+    if face not in FACES:
+        problems.append(f"{pid}: \"on\" needs the box's face: {', '.join(FACES)} - left out")
+        return None
+    odd = [k for k in v if k not in _ON_KEYS]
+    if odd:
+        problems.append(f'{pid}: "on" has no {", ".join(chr(34) + k + chr(34) for k in odd)} - its keys: '
+                        f'{", ".join(_ON_KEYS)}')
+    out: dict = {"part": v["part"].strip(), "face": face}
+    ends = FACE_FRAMES[face][3]
+    edges = ", ".join(e for pair in ends for e in pair)
+    if "from" in v:
+        f = v["from"]
+        if not isinstance(f, dict):
+            problems.append(f"{pid}: \"from\" is {{edge: mm}} - the {face}'s edges: {edges}; put in the middle")
+        else:
+            frm: dict = {}
+            for raw, d in f.items():
+                key = str(raw).strip().lower()
+                axis = next((i for i, pair in enumerate(ends) if key in pair), -1)
+                if axis < 0:
+                    problems.append(f'{pid}: the {face}\'s edges are {edges}, so many mm from each - "{raw}" left out')
+                elif not _num(d):
+                    problems.append(f'{pid}: "from" is mm from an edge - "{raw}" is not a number; left out')
+                elif any(e in frm for e in ends[axis]):
+                    problems.append(f'{pid}: "from" has {" and ".join(ends[axis])} - one of the two; "{raw}" left out')
+                else:
+                    frm[key] = float(d)
+            if frm:
+                out["from"] = frm
+    if v.get("through") is True:
+        out["through"] = True
+    if "depth" in v:
+        if _num(v["depth"]) and v["depth"] > 0:
+            out["depth"] = float(v["depth"])
+        else:
+            problems.append(f'{pid}: "depth" is mm, more than 0 - left out')
+    if not out.get("through") and "depth" not in out:
+        out["depth"] = part["size"][2]
+    if "angle" in v:
+        if not _num(v["angle"]):
+            problems.append(f'{pid}: "angle" is degrees - left out')
+        elif abs(math.fmod(v["angle"], 360)) > 1e-9:
+            out["angle"] = float(v["angle"])
+    return out
+
+
+def _r3(v: float) -> float:
+    return _round(v * 1000) / 1000 + 0.0           # the editor's r3: to a thousandth, no -0
+
+
+def _rotation_rows(r) -> list[float]:
+    """_rotation_matrix as the editor's rotation() writes it out, row by row - the same sums in the same order."""
+    x, y, z = (d * math.pi / 180 for d in r)
+    cx, sx, cy, sy, cz, sz = math.cos(x), math.sin(x), math.cos(y), math.sin(y), math.cos(z), math.sin(z)
+    return [cz * cy, cz * sy * sx - sz * cx, cz * sy * cx + sz * sx,
+            sz * cy, sz * sy * sx + cz * cx, sz * sy * cx - cz * sx,
+            -sy, cy * sx, cy * cx]
+
+
+def _apply(m: list[float], v) -> tuple[float, float, float]:
+    return (m[0] * v[0] + m[1] * v[1] + m[2] * v[2], m[3] * v[0] + m[4] * v[1] + m[5] * v[2],
+            m[6] * v[0] + m[7] * v[1] + m[8] * v[2])
+
+
+def _angles(m: list[float]) -> list[float]:
+    """The angles (degrees, X then Y then Z) of a rotation matrix, row by row - _rotation_rows' inverse, the editor's
+    angles()."""
+    sy = max(-1.0, min(1.0, -m[6]))
+    y = math.asin(sy)
+    if abs(sy) < 0.9999999:
+        x, z = math.atan2(m[7], m[8]), math.atan2(m[3], m[0])
+    else:                                            # straight up or down: all of it in X
+        x, z = math.atan2(-m[5], m[4]), 0.0
+
+    def deg(a: float) -> float:
+        r = _round(a * 180 / math.pi * 1e6) / 1e6
+        return 0.0 if abs(r) < 1e-9 else r
+    return [deg(x), deg(y), deg(z)]
+
+
+def _face_frame(box: dict, face: str):
+    """A face of a box where it is in the design - the editor's faceFrame: its width across, height up and the box's
+    depth behind it; U, V, N (across, up, out: U = V x N); and where the spot x across, y up from its middle is."""
+    n, u, v, _ = FACE_FRAMES[face]
+    m = _rotation_rows(box["rotate"])
+
+    def own(d):
+        return _apply(m, (-d[0], d[1], d[2]) if box.get("mirror") else d)
+    s = box["size"]
+
+    def reach(d):
+        return abs(d[0]) * s[0] + abs(d[1]) * s[1] + abs(d[2]) * s[2]
+    W, H, T = reach(u), reach(v), reach(n)
+    N, V = own(n), own(v)
+    U = (V[1] * N[2] - V[2] * N[1], V[2] * N[0] - V[0] * N[2], V[0] * N[1] - V[1] * N[0])
+
+    def at(x: float, y: float):
+        w = own((n[0] * T / 2 + u[0] * x + v[0] * y, n[1] * T / 2 + u[1] * x + v[1] * y, n[2] * T / 2 + u[2] * x
+                 + v[2] * y))
+        return (w[0] + box["at"][0], w[1] + box["at"][1], w[2] + box["at"][2])
+    return W, H, T, U, V, N, at
+
+
+def _spot_xy(a: dict, W: float, H: float) -> tuple[float, float]:
+    ends, f = FACE_FRAMES[a["face"]][3], a.get("from") or {}
+
+    def one(axis: int, L: float) -> float:
+        lo, hi = ends[axis]
+        return f[lo] - L / 2 if lo in f else L / 2 - f[hi] if hi in f else 0.0
+    return one(0, W), one(1, H)
+
+
+def _place_on(p: dict, box: dict) -> dict:
+    """A part where its "on" puts it on its box - the editor's placeOn: its own Z out of the face, its X across it
+    (turned by angle), unmirrored, its middle over the spot; a solid out of the face as far as its depth, 0.2 mm into
+    it, a hole in as deep with its top 0.2 mm out - or through all of the box, 0.2 mm out on both sides."""
+    a = p["on"]
+    W, H, T, U, V, N, at = _face_frame(box, a["face"])
+    x, y = _spot_xy(a, W, H)
+    pt = at(x, y)
+    t = a.get("angle", 0.0) * math.pi / 180
+    c, s = math.cos(t), math.sin(t)
+    X = (U[0] * c + V[0] * s, U[1] * c + V[1] * s, U[2] * c + V[2] * s)
+    Y = (V[0] * c - U[0] * s, V[1] * c - U[1] * s, V[2] * c - U[2] * s)
+    hole = bool(p.get("hole"))
+    h = _r3(T + 0.4 if a.get("through") and hole else a.get("depth", T) + 0.2)
+    lift = 0.2 - h / 2 if hole else h / 2 - 0.2
+    out = dict(p)
+    out["at"] = [_r3(pt[i] + N[i] * lift) for i in range(3)]
+    out["rotate"] = _angles([X[0], Y[0], N[0], X[1], Y[1], N[1], X[2], Y[2], N[2]])
+    out["size"] = [p["size"][0], p["size"][1], h]
+    out.pop("mirror", None)
+    return out
+
+
+def _settle(parts: list, problems: list | None = None) -> list:
+    """The parts, each one with "on" where its anchor puts it - after the box it is on, which may be on a face too;
+    one whose box is not there, is not a box or leads round in a circle left where it is, free (said). The editor's
+    settle()."""
+    every: dict = {}
+
+    def index(items: list) -> None:
+        for q in items:
+            every[q["id"]] = q
+            index(q.get("parts") or [])
+    index(parts)
+    if not any(q.get("on") for q in every.values()):
+        return parts
+    done: dict = {}
+    busy: set = set()
+
+    def free(q: dict, why: str) -> dict:
+        if problems is not None:
+            problems.append(f"{q['id']}: {why} - left where it is")
+        out = dict(q)
+        out.pop("on", None)
+        return out
+
+    def resolve(q: dict) -> dict:
+        if q["id"] in done:
+            return done[q["id"]]
+        out = q
+        a = q.get("on")
+        if a:
+            b = every.get(a["part"])
+            if q["id"] in busy:
+                out = free(q, 'its "on" leads round in a circle')
+            elif b is None:
+                out = free(q, f'"on" names "{a["part"]}", which the design does not have')
+            elif b["shape"] != "box":
+                out = free(q, f"\"on\" is a box's face - {b['id']} is a {b['shape']}")
+            else:
+                busy.add(q["id"])
+                box = resolve(b)
+                busy.discard(q["id"])
+                if q["id"] in done:                  # freed on the way round a circle
+                    return done[q["id"]]
+                out = _place_on(q, box)
+        done[q["id"]] = out
+        return out
+
+    def walk(items: list) -> list:
+        return [dict(q, parts=walk(q.get("parts") or [])) if q["shape"] == "group" else resolve(q) for q in items]
+    return walk(parts)
 
 
 # ---------------------------------------------------------------- edges: fillets and chamfers (0.91.0)

@@ -1154,3 +1154,186 @@ def test_on_a_face_and_turned_90(h3):
     assert t["back"] == [0, 0, 0]
     (x0, y0, _), (x1, y1, _) = t["group"]["box"]
     assert (x1 - x0, y1 - y0) == pytest.approx((10, 20))
+
+
+# ---------------------------------------------------------------- on a face of a box (0.98.0)
+
+def faces_design(h3, box: dict) -> dict:
+    """On each face of `box`: a round hole through it, from the first edge across and the second up; a square boss
+    turned on it, from the second edge across, in the middle up; on the top, a hole on that boss - and a text on the
+    front, in the middle."""
+    parts = [box]
+    for i, face in enumerate(h3.FACES):
+        (lo0, hi0), (lo1, hi1) = h3.FACE_FRAMES[face][3]
+        parts.append({"id": f"h-{face}", "shape": "cylinder", "size": [6, 6, 1], "hole": True, "sides": 32,
+                      "on": {"part": "box", "face": face, "from": {lo0: 12 + i, hi1: 7}, "through": True}})
+        parts.append({"id": f"s-{face}", "shape": "box", "size": [8, 5, 1],
+                      "on": {"part": "box", "face": face, "from": {hi0: 9}, "depth": 3, "angle": 30 * i}})
+    parts.append({"id": "pin", "shape": "cylinder", "size": [2, 2, 1], "hole": True, "sides": 16,
+                  "on": {"part": "s-top", "face": "top", "depth": 2}})
+    parts.append({"id": "word", "shape": "text", "text": "SLQ", "size": [0, 6, 1],
+                  "on": {"part": "box", "face": "front", "depth": 0.8}})
+    return {"parts": parts}
+
+
+FACES_JS = """
+const out = input.designs.map((d) => {
+  const r = G.readDesign(JSON.stringify(d));
+  const b = G.build(r.design, { wasm, fonts, meshes: new Map() });
+  const again = G.readDesign(G.writeDesign(r.design));
+  return { parts: r.design.parts, problems: r.problems, volume: b.volume, triangles: b.triangles.length / 3,
+           box: b.box, text: G.writeDesign(r.design), again: G.writeDesign(again.design) };
+});
+process.stdout.write(JSON.stringify(out));
+"""
+
+
+def test_parts_on_a_face_are_placed_and_built_the_same_in_both(h3):
+    """A part kept on a face of a box (0.98.0): the editor and hub3d put it in the same place - on each of the six faces
+    of a box turned and mirrored, from either edge or the middle, turned on the face, through the box or so deep or so
+    high, on a boss on the box - and build the same solid. The file keeps "on" on one line and reads back the same."""
+    pytest.importorskip("manifold3d")
+    plain = {"id": "box", "shape": "box", "size": [80, 40, 30], "at": [0, 0, 15]}
+    turned = {"id": "box", "shape": "box", "size": [80, 40, 30], "at": [3, -2, 25], "rotate": [10, 20, 33], "mirror": True}
+    designs = [faces_design(h3, plain), faces_design(h3, turned)]
+    js = run_js(FACES_JS, {"designs": designs})
+    for d, j in zip(designs, js):
+        py, problems = h3.read_design(json.dumps(d))
+        assert problems == [] and j["problems"] == []
+        for a, b in zip(py["parts"], j["parts"]):
+            assert a["id"] == b["id"] and a.get("on") == b.get("on")
+            for key in ("at", "rotate", "size"):
+                assert a[key] == pytest.approx(b[key], abs=1e-9), (a["id"], key, a[key], b[key])
+        solid = h3.build_design(py).solid
+        assert j["volume"] == pytest.approx(solid.volume(), rel=1e-9)
+        assert j["triangles"] == len(solid.to_mesh().tri_verts)
+        assert j["again"] == j["text"]                                   # read back: the same file
+        assert '"on": {"part": "box", "face": "front", "from": {"left": 14, "top": 7}, "through": true}' in j["text"]
+    by = {p["id"]: p for p in js[0]["parts"]}
+    assert by["h-front"]["at"] == [-26, 0, 23] and by["h-front"]["size"] == [6, 6, 40.4]     # 14 from left, 7 from top
+    assert by["h-front"]["rotate"] == [90, 0, 0]                                             # its Z out of the front
+    assert by["h-top"]["at"] == [-28, 13, 15] and by["h-top"]["size"][2] == 30.4             # 12 from left, 7 from back
+    assert by["h-right"]["at"] == [0, -3, 23] and by["h-right"]["size"][2] == 80.4           # 17 from the front
+    s = by["s-top"]                                                       # 9 from the right, the middle front to back
+    assert s["at"] == [31, 0, 31.4] and s["size"] == [8, 5, 3.2] and s["rotate"] == [0, 0, 0]
+    assert by["s-bottom"]["rotate"] == [180, 0, -30]                     # turned 30 degrees on the underside
+    assert by["pin"]["at"] == [31, 0, 32.1] and by["pin"]["size"][2] == 2.2   # in the boss's top, 2 mm deep
+    w = by["word"]
+    assert w["at"] == [0, -20.3, 15] and w["rotate"] == [90, 0, 0] and w["size"][2] == 1  # 0.8 out of the front's middle
+    hollow = js[0]["volume"]
+    whole = h3.build_design(h3.read_design(json.dumps({"parts": [plain]}))[0]).solid.volume()
+    assert hollow != pytest.approx(whole)
+
+
+EDITS_JS = """
+const box = { id: "b", shape: "box", size: [80, 40, 30], at: [0, 0, 15], rotate: [0, 0, 0] };
+const hole = { id: "h", shape: "cylinder", size: [6, 6, 1], at: [0, 0, 0], rotate: [0, 0, 0], hole: true, sides: 32,
+  on: { part: "b", face: "front", from: { left: 20, top: 10 }, depth: 5 } };
+const get = (ps, id) => { for (const p of ps) { if (p.id === id) return p; const q = p.parts && get(p.parts, id); if (q) return q; } };
+const edit = (ps, id, fn) => ps.map((p) => (p.id === id ? fn(p) : p.parts ? { ...p, parts: edit(p.parts, id, fn) } : p));
+const step = (ps, id, fn) => G.settle(edit(ps, id, fn), undefined, ps);
+const out = {};
+let cur = G.settle([box, hole]);
+out.placed = get(cur, "h");
+out.moved = get(step(cur, "h", (p) => G.transformPart(p, [0, 0, 0], [5, 3, -2], null)), "h");
+const boxMoved = step(cur, "b", (p) => G.transformPart(p, [0, 0, 0], [10, 0, 0], null));
+out.boxMoved = get(boxMoved, "h");
+const both = G.settle(cur.map((p) => G.transformPart(p, [0, 0, 0], [7, 7, 7], null)), undefined, cur);
+out.both = get(both, "h");
+const boxTurned = step(cur, "b", (p) => G.transformPart(p, p.at, [0, 0, 0], G.rotation([0, 0, 90])));
+out.boxTurned = get(boxTurned, "h");
+out.boxGrown = get(step(cur, "b", (p) => ({ ...p, size: [100, 50, 40] })), "h");
+out.spun = get(step(cur, "h", (p) => G.transformPart(p, p.at, [0, 0, 0], G.rotation([0, 90, 0]))), "h");
+out.tipped = get(step(cur, "h", (p) => G.turned90(p, 2, 1)), "h");
+out.deeper = get(step(cur, "h", (p) => ({ ...p, size: [6, 6, 8] })), "h");
+out.typed = get(step(cur, "h", (p) => ({ ...p, on: { ...p.on, from: { right: 5, bottom: 4 } } })), "h");
+out.gone = get(G.settle(cur.filter((p) => p.id !== "b"), undefined, cur), "h");
+const through = G.settle([box, { ...hole, on: { part: "b", face: "front", through: true } }]);
+out.through = get(through, "h");
+out.throughGrown = get(step(through, "b", (p) => ({ ...p, size: [80, 60, 30] })), "h");
+out.mirrored = get(step(cur, "h", (p) => G.mirrorPart(p, 0, [0, 0, 0])), "h");
+// a copy respotted where it was put; riders; insertAfter in a group
+out.copy = G.respot(G.transformPart({ ...out.placed, id: "h2" }, [0, 0, 0], [5, 5, 0], null), box).on;
+const boss = { id: "s", shape: "box", size: [8, 8, 1], at: [0, 0, 0], rotate: [0, 0, 0], on: { part: "b", face: "top", depth: 4 } };
+const pin = { id: "p", shape: "cylinder", size: [2, 2, 1], at: [0, 0, 0], rotate: [0, 0, 0], hole: true,
+  on: { part: "s", face: "top", depth: 2 } };
+const tree = [{ id: "g", shape: "group", size: [0, 0, 0], at: [0, 0, 0], rotate: [0, 0, 0], parts: [box, boss] }, pin, hole];
+out.riders = T.riders(tree, ["g"]).map((p) => p.id);
+out.inserted = T.insertAfter(tree, "b", { id: "new", shape: "box" })[0].parts.map((p) => p.id);
+// the face a click is on, the spot it is at, a text set upright
+const tb = { ...box, rotate: [0, 0, 30] };
+const FR = G.faceFrame(tb, "front");
+const at = FR.at(-13.3, 7.6);
+out.clicked = [G.faceAt(tb, at, FR.N), G.spotAt(tb, "front", at), G.faceAt(tb, at, [0, 0, 1]),
+  G.faceAt(tb, [at[0] - 10 * FR.N[0], at[1] - 10 * FR.N[1], at[2]], FR.N)];
+out.angles = [G.faceAngle(box, "top", [0, -1, 0]), G.faceAngle(box, "top", [1, 0, 0]),
+  G.faceAngle({ ...box, rotate: [180, 0, 0] }, "front", [1, 0, 0]), G.faceAngle(box, "right", [0, 0, 1])];
+out.marks = G.faceMarks(box, "front", { left: 20, top: 10 }, true, 6).dims;
+process.stdout.write(JSON.stringify(out));
+"""
+
+
+def test_a_part_on_a_face_goes_with_its_box_and_keeps_what_is_done_to_it(tmp_path):
+    """In the editor (0.98.0): a box moved, turned or grown takes what is on its faces with it, the distances kept; a
+    part on a face moved is moved on it (its distances follow, out of the face it goes back onto it), turned about the
+    face's normal keeps the turn, turned off the face is free, sized in Z gets that depth; its box gone, it stays. A
+    click on a box's face picks the face and the spot; a text on a face is set upright."""
+    tree = tmp_path / "tree.ts"                         # tree.ts, its geometry import a path node finds
+    tree.write_text(GEOMETRY.with_name("tree.ts").read_text(encoding="utf-8").replace('from "./geometry"',
+                    f"from {json.dumps(str(GEOMETRY))}"), encoding="utf-8")
+    out = run_js(f"import * as T from {json.dumps(str(tree))};\n" + EDITS_JS, {})
+    assert out["placed"]["at"] == [-20, -17.6, 20] and out["placed"]["size"] == [6, 6, 5.2]   # 5 deep, 0.2 out
+    assert out["moved"]["on"]["from"] == {"left": 25, "top": 12} and out["moved"]["at"] == [-15, -17.6, 18]
+    assert out["boxMoved"]["at"] == [-10, -17.6, 20] and out["boxMoved"]["on"]["from"] == {"left": 20, "top": 10}
+    assert out["both"]["on"]["from"] == {"left": 20, "top": 10} and out["both"]["at"] == [-13, -10.6, 27]
+    assert out["boxTurned"]["at"] == [17.6, -20, 20] and out["boxTurned"]["rotate"] == [90, 0, 90]
+    assert out["boxGrown"]["at"] == [-30, -22.6, 25]                       # 20 from the left, 10 from the top still
+    assert "on" not in out["tipped"] and out["tipped"]["rotate"] == [90, 0, 90]   # turned off the face: free
+    assert out["spun"]["on"]["angle"] == -90 and out["spun"]["at"] == out["placed"]["at"]   # turned on it: kept
+    assert out["deeper"]["on"]["depth"] == 7.8 and out["deeper"]["size"][2] == 8
+    assert out["typed"]["at"] == [35, -17.6, 4]
+    assert out["gone"]["at"] == out["placed"]["at"] and "on" not in out["gone"]
+    assert out["through"]["at"] == [0, 0, 15] and out["through"]["size"][2] == 40.4          # the middle of the front
+    assert out["throughGrown"]["size"][2] == 60.4
+    assert out["mirrored"]["on"]["from"] == {"left": 60, "top": 10} and "mirror" not in out["mirrored"]
+    assert out["copy"]["from"] == {"left": 25, "top": 10}                  # 5 mm on across the face; its 5 in y is out
+    assert out["riders"] == ["p", "h"] and out["inserted"] == ["b", "new", "s"]
+    face, spot, wrong, inside = out["clicked"]
+    assert face == "front" and spot == {"left": 27, "top": 7} and wrong is None and inside is None
+    assert out["angles"] == [-90, 0, 180, 0]
+    assert [d["mm"] for d in out["marks"]] == [20, 10]
+
+
+ODD_ON = {"parts": [
+    {"id": "b", "shape": "box", "size": [40, 20, 10], "at": [0, 0, 5]},
+    {"id": "c", "shape": "cylinder", "size": [10, 10, 10], "at": [50, 0, 5]},
+    {"id": "f1", "shape": "box", "on": {"part": "b", "face": "side"}},
+    {"id": "f2", "shape": "box", "on": {"part": "b", "face": "Top", "from": 3, "x": 1}},
+    {"id": "f3", "shape": "box", "on": {"part": "b", "face": "top", "from": {"left": 1, "right": 2, "up": 3, "front": "a"}}},
+    {"id": "f4", "shape": "box", "on": {"part": "b", "face": "front", "depth": -1, "angle": "x"}},
+    {"id": "f5", "shape": "box", "on": None},
+    {"id": "f6", "shape": "group", "on": {"part": "b", "face": "top"}, "parts": []},
+    {"id": "f7", "shape": "box", "on": {"part": "nope", "face": "top"}},
+    {"id": "f8", "shape": "box", "on": {"part": "c", "face": "top"}},
+    {"id": "f9", "shape": "box", "on": {"part": "f10", "face": "top"}},
+    {"id": "f10", "shape": "box", "on": {"part": "f9", "face": "top"}},
+    {"id": "f11", "shape": "box", "size": [4, 4, 3], "on": {"part": "b", "face": "top", "angle": 720}},
+]}
+
+
+def test_both_read_on_the_same_and_say_the_same(h3):
+    js = run_js("const r = G.readDesign(JSON.stringify(input)); "
+                "process.stdout.write(JSON.stringify({parts: r.design.parts, problems: r.problems}));", ODD_ON)
+    py, problems = h3.read_design(json.dumps(ODD_ON))
+    assert [x.rstrip(".") for x in js["problems"]] == problems, (js["problems"], problems)
+    assert [x.split(":")[0] for x in problems] == ["f1", "f2", "f2", "f3", "f3", "f3", "f4", "f4", "f5", "f6", "f7",
+                                                 "f8", "f9"]
+    assert 'f3: "from" is mm from an edge - "front" is not a number; left out' in problems
+    for a, b in zip(flat(py["parts"]), flat(js["parts"])):
+        assert a.get("on") == b.get("on") and a["at"] == pytest.approx(b["at"]) and a["rotate"] == pytest.approx(b["rotate"])
+    by = {p["id"]: p for p in py["parts"]}
+    assert by["f2"]["on"] == {"part": "b", "face": "top", "depth": 20}       # its own size z: as high as it is
+    assert by["f3"]["on"]["from"] == {"left": 1}
+    assert "on" not in by["f9"] and by["f10"]["on"]["part"] == "f9"          # round in a circle: the first freed
+    assert by["f11"]["on"] == {"part": "b", "face": "top", "depth": 3} and by["f11"]["at"] == [0, 0, 11.4]
+    assert 'on        kept on a face of a box' in h3.DESIGN_GUIDE

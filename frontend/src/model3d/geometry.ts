@@ -24,7 +24,7 @@ export const MAX_COPIES = 100;
 /** The keys a part may have; others are said once (a model guessing the format: "type", "radius", "position"). */
 export const PART_KEYS = ["id", "name", "shape", "size", "at", "rotate", "mirror", "hole", "hidden", "color", "sides",
   "radius", "top", "text", "font", "bold", "italic", "align", "letter_spacing", "line_spacing", "points", "holes",
-  "file", "repeat", "fillet", "chamfer", "parts"];
+  "file", "repeat", "fillet", "chamfer", "on", "parts"];
 
 /** A text's fonts (0.89.0), as fonts/index.json names them (tools/make_3d_font.py makes both): the first is the
  *  default. Other names a model may write for them, and the words in a name that ask for bold or italic. */
@@ -88,6 +88,7 @@ export interface Part {
   repeat?: Repeat;            // copies of it
   fillet?: EdgeSizes;         // its own edges rounded (0.91.0): box, wedge, cylinder, cone, an outline's corners
   chamfer?: EdgeSizes;        // ... or cut off: the same names, the size along each face
+  on?: Anchor;                // kept on a face of a box (0.98.0): its at, rotate and size z follow from it - settle()
   parts?: Part[];             // group
 }
 
@@ -126,6 +127,7 @@ export function readDesign(text: string): { design: Design; problems: string[] }
   if (!Array.isArray(d.parts)) problems.push('It has no "parts" list.');
   const odd: Odd = { parts: 0, keys: new Set<string>(), shapes: [] };
   const design: Design = { format: FORMAT, version: VERSION, parts: readParts(parts, seen, problems, odd) };
+  design.parts = settle(design.parts, problems);         // parts on faces where their anchors put them (0.98.0)
   // A model that guessed the format: what it did not know first, once - not a line for each of its parts.
   const first: string[] = [];
   if (odd.parts) {
@@ -260,7 +262,66 @@ function readPart(p: Record<string, unknown>, seen: Set<string>, problems: strin
       part.sides = Math.max(3, Math.min(256, Math.round(p.sides)));        // how round its fillets are
     }
   }
+  if (p.on !== undefined) {
+    if (shape === "group") problems.push(`${id}: a group cannot go "on" a face (its parts can) - left out.`);
+    else {
+      const on = readOn(p.on, part, problems);
+      if (on) part.on = on;
+    }
+  }
   return part;
+}
+
+/** A part's "on" (0.98.0): the box and its face, the distances from the face's edges, how deep, the turn on it - or
+ *  undefined, said. Neither a depth nor through: as deep (or as high) as the part is thick. */
+function readOn(v: unknown, part: Part, problems: string[]): Anchor | undefined {
+  const id = part.id;
+  const o = v as Record<string, unknown>;
+  if (!o || typeof o !== "object" || Array.isArray(o) || typeof o.part !== "string" || !o.part.trim()) {
+    problems.push(`${id}: "on" names the box it is on: {"part": id, "face": "front", "from": {"left": 20, "top": 15}}`
+      + " - left out.");
+    return undefined;
+  }
+  const face = (typeof o.face === "string" ? o.face.trim().toLowerCase() : "") as FaceName;
+  if (!FACES.includes(face)) {
+    problems.push(`${id}: "on" needs the box's face: ${FACES.join(", ")} - left out.`);
+    return undefined;
+  }
+  const odd = Object.keys(o).filter((k) => !ON_KEYS.includes(k));
+  if (odd.length) problems.push(`${id}: "on" has no ${odd.map((k) => `"${k}"`).join(", ")} - its keys: ${ON_KEYS.join(", ")}.`);
+  const out: Anchor = { part: o.part.trim(), face };
+  const ends = FACE_FRAMES[face].ends;
+  if (o.from !== undefined) {
+    const f = o.from as Record<string, unknown>;
+    if (!f || typeof f !== "object" || Array.isArray(f)) {
+      problems.push(`${id}: "from" is {edge: mm} - the ${face}'s edges: ${ends.flat().join(", ")}; put in the middle.`);
+    } else {
+      const from: Record<string, number> = {};
+      for (const [raw, d] of Object.entries(f)) {
+        const key = raw.trim().toLowerCase();
+        const axis = ends.findIndex((e) => e.includes(key));
+        if (axis < 0) {
+          problems.push(`${id}: the ${face}'s edges are ${ends.flat().join(", ")}, so many mm from each - "${raw}" left out.`);
+        } else if (!num(d)) {
+          problems.push(`${id}: "from" is mm from an edge - "${raw}" is not a number; left out.`);
+        } else if (ends[axis].some((e) => e in from)) {
+          problems.push(`${id}: "from" has ${ends[axis].join(" and ")} - one of the two; "${raw}" left out.`);
+        } else from[key] = d;
+      }
+      if (Object.keys(from).length) out.from = from;
+    }
+  }
+  if (o.through === true) out.through = true;
+  if (o.depth !== undefined) {
+    if (num(o.depth) && o.depth > 0) out.depth = o.depth;
+    else problems.push(`${id}: "depth" is mm, more than 0 - left out.`);
+  }
+  if (!out.through && out.depth === undefined) out.depth = part.size[2];
+  if (o.angle !== undefined) {
+    if (!num(o.angle)) problems.push(`${id}: "angle" is degrees - left out.`);
+    else if (Math.abs(o.angle % 360) > 1e-9) out.angle = o.angle;
+  }
+  return out;
 }
 
 /** Whether a 0 in a part's size follows what it draws: a text's width or height (from its letters - one of the two
@@ -340,6 +401,16 @@ function cleanPart(p: Part): Record<string, unknown> {
     o.at = p.at.map(r3);
     if (p.rotate.some((v) => v !== 0)) o.rotate = p.rotate.map(r3);
   }
+  if (p.on) {                                        // after at and rotate: they follow from it
+    const a: Record<string, unknown> = { part: p.on.part, face: p.on.face };
+    if (p.on.from && Object.keys(p.on.from).length) {
+      a.from = Object.fromEntries(Object.entries(p.on.from).map(([key, v]) => [key, r3(v)]));
+    }
+    if (p.on.depth !== undefined) a.depth = r3(p.on.depth);
+    if (p.on.through) a.through = true;
+    if (p.on.angle) a.angle = r3(p.on.angle);
+    o.on = a;
+  }
   if (p.mirror) o.mirror = true;
   if (p.hole) o.hole = true;
   if (p.hidden) o.hidden = true;
@@ -388,7 +459,10 @@ export function writeDesign(d: Design): string {
     .replace(new RegExp(`\\[\\s+(${n}),\\s+(${n})\\s+\\]`, "g"), "[$1, $2]")
     // an outline's points on one line
     .replace(new RegExp(`\\[\\s+(\\[${n}, ${n}\\](?:,\\s+\\[${n}, ${n}\\])*)\\s+\\]`, "g"),
-      (_m, inner: string) => `[${inner.replace(/,\s+/g, ", ")}]`) + "\n";
+      (_m, inner: string) => `[${inner.replace(/,\s+/g, ", ")}]`)
+    // a part's "on" on one line too (0.98.0)
+    .replace(/"on": \{[^{}]*(?:\{[^{}]*\}[^{}]*)?\}/g, (m) => m.replace(/\s*\n\s*/g, " ").replace(/\{ /g, "{")
+      .replace(/ \}/g, "}")) + "\n";
 }
 
 export function newDesign(printer?: string, bed?: Vec3): Design {
@@ -663,6 +737,268 @@ export function mirrorPart(p: Part, axis: number, centre: Vec3): Part {
     out.repeat = r;
   }
   return out;
+}
+
+// ---------------------------------------------------------------- on a face of a box (0.98.0)
+//
+// Søren: "Hvad gør jeg hvis jeg gerne vil lave en 2D cirkel et sted på kassen, og derefter skære hullet ud hele vejen
+// igennem kassen? Ligesom i SolidWorks? Hvor jeg tegner en cirkel på den side jeg ønsker, og så låser afstandene til
+// kanterne? Og så Boss Extrude?" A part may be kept on a face of a box: so far from two of the face's edges, its own Z
+// out of the face, as deep (a hole) or as high (a solid) as it says - or through all of the box. It is placed there
+// whenever the design is read or changed, so it goes with the box when the box moves, turns or grows: the distances
+// stay, as a sketch's dimensions do.
+
+export type FaceName = "top" | "bottom" | "front" | "back" | "left" | "right";
+export const FACES: readonly FaceName[] = ["top", "bottom", "front", "back", "left", "right"];
+const ON_KEYS = ["part", "face", "from", "depth", "through", "angle"];
+
+/** Where a part is kept on a box (the part's "on"). */
+export interface Anchor {
+  part: string;                    // the box
+  face: FaceName;                  // the box's own face - front is its -Y side before it is turned
+  from?: Record<string, number>;   // mm from an edge across the face and from one up it, each named by the face beyond
+                                   // it: {"left": 20, "top": 15}; an axis with neither: the middle
+  depth?: number;                  // how far a hole goes in, or a solid stands out, mm
+  through?: boolean;               // a hole: through all of the box
+  angle?: number;                  // degrees about the face's normal, from across the face toward up it
+}
+
+/** A box's faces in its own frame: which way each looks (n), across it (u) and up it (v) - u x v = n, so a text on it
+ *  reads across it, upright on a wall - and the faces beyond its edges: across, then up, each axis from its - end. */
+export const FACE_FRAMES: Record<FaceName, { n: Vec3; u: Vec3; v: Vec3; ends: [[string, string], [string, string]] }> = {
+  top: { n: [0, 0, 1], u: [1, 0, 0], v: [0, 1, 0], ends: [["left", "right"], ["front", "back"]] },
+  bottom: { n: [0, 0, -1], u: [1, 0, 0], v: [0, -1, 0], ends: [["left", "right"], ["back", "front"]] },
+  front: { n: [0, -1, 0], u: [1, 0, 0], v: [0, 0, 1], ends: [["left", "right"], ["bottom", "top"]] },
+  back: { n: [0, 1, 0], u: [-1, 0, 0], v: [0, 0, 1], ends: [["right", "left"], ["bottom", "top"]] },
+  left: { n: [-1, 0, 0], u: [0, -1, 0], v: [0, 0, 1], ends: [["back", "front"], ["bottom", "top"]] },
+  right: { n: [1, 0, 0], u: [0, 1, 0], v: [0, 0, 1], ends: [["front", "back"], ["bottom", "top"]] },
+};
+
+const dot3 = (a: Vec3, b: Vec3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const cross3 = (a: Vec3, b: Vec3): Vec3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+const reach = (d: Vec3, s: Vec3) => Math.abs(d[0]) * s[0] + Math.abs(d[1]) * s[1] + Math.abs(d[2]) * s[2];
+
+/** A face of a box where it is in the design: its width across, height up and the box's depth behind it (mm); which
+ *  way it looks, up it and across it (N, V, U = V x N: a turn's columns, a mirrored box's too) - and `at`, where the
+ *  spot x across and y up from its middle is. */
+export function faceFrame(box: Part, face: FaceName): { W: number; H: number; T: number; U: Vec3; V: Vec3; N: Vec3;
+  at: (x: number, y: number) => Vec3 } {
+  const f = FACE_FRAMES[face];
+  const m = rotation(box.rotate);
+  const own = (d: Vec3): Vec3 => apply(m, box.mirror ? [-d[0], d[1], d[2]] : d);
+  const W = reach(f.u, box.size), H = reach(f.v, box.size), T = reach(f.n, box.size);
+  const N = own(f.n), V = own(f.v), U = cross3(V, N);
+  const at = (x: number, y: number): Vec3 => {
+    const w = own([f.n[0] * T / 2 + f.u[0] * x + f.v[0] * y, f.n[1] * T / 2 + f.u[1] * x + f.v[1] * y,
+      f.n[2] * T / 2 + f.u[2] * x + f.v[2] * y]);
+    return [w[0] + box.at[0], w[1] + box.at[1], w[2] + box.at[2]];
+  };
+  return { W, H, T, U, V, N, at };
+}
+
+/** Where an anchor's spot is: x across and y up from its face's middle, mm. */
+export function spotXY(a: Anchor, W: number, H: number): [number, number] {
+  const ends = FACE_FRAMES[a.face].ends, f = a.from ?? {};
+  const one = (axis: 0 | 1, L: number) => {
+    const [lo, hi] = ends[axis];
+    return f[lo] !== undefined ? f[lo] - L / 2 : f[hi] !== undefined ? L / 2 - f[hi] : 0;
+  };
+  return [one(0, W), one(1, H)];
+}
+
+/** The distances for a spot x across and y up from a face's middle: from the edges `like` names - an axis it names
+ *  neither of stays in the middle while the spot is there - else from the nearer edge; `step` rounds them (a click:
+ *  1 mm). undefined: the middle both ways. */
+export function spotFrom(face: FaceName, x: number, y: number, W: number, H: number, like?: Record<string, number>,
+  step = 0): Record<string, number> | undefined {
+  const ends = FACE_FRAMES[face].ends;
+  const out: Record<string, number> = {};
+  ([[x, W], [y, H]] as const).forEach(([c, L], axis) => {
+    const [lo, hi] = ends[axis];
+    const key = like?.[lo] !== undefined ? lo : like?.[hi] !== undefined ? hi : like && Math.abs(c) < 1e-3 ? ""
+      : c < 0 ? lo : hi;
+    if (!key) return;
+    const d = key === lo ? c + L / 2 : L / 2 - c;
+    out[key] = step ? Math.round(d / step) * step + 0 : r3(d);
+  });
+  return Object.keys(out).length ? out : undefined;
+}
+
+/** A part where its anchor puts it on its box: its own Z out of the face and its X across it (turned by `angle`),
+ *  unmirrored, its middle over the spot. A solid stands out of the face as far as its depth, 0.2 mm into it so the two
+ *  join; a hole goes in as deep, its top 0.2 mm out so it cuts cleanly - or through all of the box, 0.2 mm out on both
+ *  sides. Its size z is what that takes. */
+export function placeOn(p: Part, box: Part): Part {
+  const a = p.on!;
+  const F = faceFrame(box, a.face);
+  const [x, y] = spotXY(a, F.W, F.H);
+  const at = F.at(x, y);
+  const t = ((a.angle ?? 0) * Math.PI) / 180, c = Math.cos(t), s = Math.sin(t);
+  const X: Vec3 = [F.U[0] * c + F.V[0] * s, F.U[1] * c + F.V[1] * s, F.U[2] * c + F.V[2] * s];
+  const Y: Vec3 = [F.V[0] * c - F.U[0] * s, F.V[1] * c - F.U[1] * s, F.V[2] * c - F.U[2] * s];
+  const h = r3(a.through && p.hole ? F.T + 0.4 : (a.depth ?? F.T) + 0.2);
+  const lift = p.hole ? 0.2 - h / 2 : h / 2 - 0.2;
+  const out: Part = { ...p, at: [r3(at[0] + F.N[0] * lift), r3(at[1] + F.N[1] * lift), r3(at[2] + F.N[2] * lift)],
+    rotate: angles([X[0], Y[0], F.N[0], X[1], Y[1], F.N[1], X[2], Y[2], F.N[2]]), size: [p.size[0], p.size[1], h] };
+  delete out.mirror;
+  return out;
+}
+
+export function sameAnchor(a: Anchor, b: Anchor): boolean {
+  const fa = a.from ?? {}, fb = b.from ?? {};
+  const ka = Object.keys(fa);
+  return a.part === b.part && a.face === b.face && !!a.through === !!b.through && a.depth === b.depth
+    && (a.angle ?? 0) === (b.angle ?? 0) && ka.length === Object.keys(fb).length && ka.every((k) => fa[k] === fb[k]);
+}
+
+/** A part on a face with its anchor's distances for where its middle is now: from the same edges - one in the middle
+ *  stays there while it is - to the spot under it on the face. */
+export function respot(p: Part, box: Part): Part {
+  const a = p.on!;
+  const f = FACE_FRAMES[a.face], F = faceFrame(box, a.face);
+  const l = toPart(box, p.at);
+  const from = spotFrom(a.face, dot3(l, f.u), dot3(l, f.v), F.W, F.H, a.from ?? {});
+  const on: Anchor = { ...a, from };
+  if (!from) delete on.from;
+  return { ...p, on };
+}
+
+/** A part on a face as an edit in the editor left it (`was`: before it): moved, its spot is where its middle is now
+ *  (respot) - moved off the face, it goes back onto it; turned about the face's normal, its angle follows - turned off
+ *  the face, it is free; a new size z is a new depth. Its anchor changed, or nothing: placed by its anchor. */
+function edited(p: Part, was: Part | undefined, box: Part): Part {
+  const a = p.on;
+  if (!a || !was?.on || !sameAnchor(a, was.on)) return p;
+  let q = p;
+  if (!!p.mirror !== !!was.mirror || p.rotate.some((v, i) => Math.abs(v - was.rotate[i]) > 1e-3)) {
+    const F = faceFrame(box, a.face), m = rotation(p.rotate);
+    const z: Vec3 = [m[2], m[5], m[8]], x: Vec3 = p.mirror ? [-m[0], -m[3], -m[6]] : [m[0], m[3], m[6]];
+    if (dot3(z, F.N) < 0.9999) {
+      q = { ...p };
+      delete q.on;
+      return q;
+    }
+    const angle = r3((Math.atan2(dot3(x, F.V), dot3(x, F.U)) * 180) / Math.PI);
+    const on: Anchor = { ...a, angle };
+    if (!angle) delete on.angle;
+    q = { ...q, on };
+  }
+  if (p.at.some((v, i) => Math.abs(v - was.at[i]) > 1e-4)) q = respot(q, box);
+  if (Math.abs(p.size[2] - was.size[2]) > 1e-6 && !(a.through && p.hole)) {
+    q = { ...q, on: { ...q.on!, depth: Math.max(MIN_SIZE, r3(p.size[2] - 0.2)) } };
+  }
+  return q;
+}
+
+/** The parts, each one with "on" where its anchor puts it - after the box it is on, which may be on a face too. One
+ *  whose box is not there, is not a box or leads round in a circle is left where it is, free (said in `problems`).
+ *  `before` (the editor's): the parts as they were before an edit - one moved, turned or sized by it gets its anchor
+ *  for what was done (edited, above) before it is placed. */
+export function settle(parts: Part[], problems?: string[], before?: Part[]): Part[] {
+  const index = (list: Part[], into: Map<string, Part>) => {
+    for (const p of list) {
+      into.set(p.id, p);
+      if (p.parts) index(p.parts, into);
+    }
+    return into;
+  };
+  const all = index(parts, new Map());
+  if (![...all.values()].some((p) => p.on)) return parts;
+  const was = before ? index(before, new Map()) : null;
+  const done = new Map<string, Part>(), busy = new Set<string>();
+  const free = (p: Part, why: string): Part => {
+    problems?.push(`${p.id}: ${why} - left where it is.`);
+    const q = { ...p };
+    delete q.on;
+    return q;
+  };
+  const resolve = (p: Part): Part => {
+    const had = done.get(p.id);
+    if (had) return had;
+    let out = p;
+    const a = p.on;
+    if (a) {
+      const b = all.get(a.part);
+      if (busy.has(p.id)) out = free(p, `its "on" leads round in a circle`);
+      else if (!b) out = free(p, `"on" names "${a.part}", which the design does not have`);
+      else if (b.shape !== "box") out = free(p, `"on" is a box's face - ${b.id} is a ${b.shape}`);
+      else {
+        busy.add(p.id);
+        const box = resolve(b);
+        busy.delete(p.id);
+        const freed = done.get(p.id);              // on the way round a circle
+        if (freed) return freed;
+        const q = was ? edited(p, was.get(p.id), box) : p;
+        out = q.on ? placeOn(q, box) : q;
+      }
+    }
+    done.set(p.id, out);
+    return out;
+  };
+  const walk = (list: Part[]): Part[] => list.map((p) => (p.shape === "group" ? { ...p, parts: walk(p.parts ?? []) }
+    : resolve(p)));
+  return walk(parts);
+}
+
+/** Which face of a box a spot on it is on, from which way the model's face there looks (0.98.0: a click picks it) -
+ *  null on a rounded or cut edge, or off its outside. */
+export function faceAt(box: Part, point: Vec3, normal: Vec3): FaceName | null {
+  if (box.shape !== "box") return null;
+  const m = rotation(box.rotate);
+  const l: Vec3 = [m[0] * normal[0] + m[3] * normal[1] + m[6] * normal[2], m[1] * normal[0] + m[4] * normal[1]
+    + m[7] * normal[2], m[2] * normal[0] + m[5] * normal[1] + m[8] * normal[2]];
+  const n = unit(box.mirror ? [-l[0], l[1], l[2]] : l);
+  const face = FACES.find((x) => dot3(n, FACE_FRAMES[x].n) > 0.999);
+  if (!face) return null;
+  const f = FACE_FRAMES[face];
+  return Math.abs(dot3(toPart(box, point), f.n) - reach(f.n, box.size) / 2) < 0.05 ? face : null;
+}
+
+/** The spot on a box's face a point on it is at (a click), as distances from the nearer edges - to `step` mm. */
+export function spotAt(box: Part, face: FaceName, point: Vec3, step = 1): Record<string, number> | undefined {
+  const f = FACE_FRAMES[face], F = faceFrame(box, face), l = toPart(box, point);
+  return spotFrom(face, dot3(l, f.u), dot3(l, f.v), F.W, F.H, undefined, step);
+}
+
+/** The angle that sets a text upright on a face: on a wall its letters' up as near the design's up as a quarter turn
+ *  gets; on a top or an underside its lines along `right` - the view's right, as On a face reads (0.97.0). */
+export function faceAngle(box: Part, face: FaceName, right: Vec3): number {
+  const F = faceFrame(box, face);
+  let best = 0, score = -Infinity;
+  for (const angle of [0, 90, 180, -90]) {
+    const t = (angle * Math.PI) / 180, c = Math.cos(t), s = Math.sin(t);
+    const X: Vec3 = [F.U[0] * c + F.V[0] * s, F.U[1] * c + F.V[1] * s, F.U[2] * c + F.V[2] * s];
+    const v = Math.abs(F.N[2]) < 0.9 ? F.V[2] * c - F.U[2] * s : dot3(X, right);
+    if (v > score + 1e-9) {
+      best = angle;
+      score = v;
+    }
+  }
+  return best;
+}
+
+/** What shows a spot on a face (0.98.0, the editor's Face tab): the face's outline; a circle or a square `size` across
+ *  there, a cross at its middle; and a line to its middle from each edge it is measured from, with how far. */
+export function faceMarks(box: Part, face: FaceName, from: Record<string, number> | undefined, round: boolean,
+  size: number): { outline: Vec3[]; shape: Vec3[][]; dims: { line: Vec3[]; mm: number }[] } {
+  const F = faceFrame(box, face), ends = FACE_FRAMES[face].ends, f = from ?? {};
+  const [x, y] = spotXY({ part: box.id, face, from }, F.W, F.H);
+  const w = F.W / 2, h = F.H / 2, r = size / 2;
+  const shape: Vec3[][] = [];
+  if (round) {
+    const ring: Vec3[] = [];
+    for (let i = 0; i <= 48; i++) ring.push(F.at(x + r * Math.cos((Math.PI * i) / 24), y + r * Math.sin((Math.PI * i) / 24)));
+    shape.push(ring);
+  } else shape.push([F.at(x - r, y - r), F.at(x + r, y - r), F.at(x + r, y + r), F.at(x - r, y + r), F.at(x - r, y - r)]);
+  const k = Math.max(0.5, Math.min(2, r / 2));
+  shape.push([F.at(x - k, y), F.at(x + k, y)], [F.at(x, y - k), F.at(x, y + k)]);
+  const dims: { line: Vec3[]; mm: number }[] = [];
+  const [[lo0, hi0], [lo1, hi1]] = ends;
+  if (f[lo0] !== undefined) dims.push({ line: [F.at(-w, y), F.at(x, y)], mm: f[lo0] });
+  else if (f[hi0] !== undefined) dims.push({ line: [F.at(x, y), F.at(w, y)], mm: f[hi0] });
+  if (f[lo1] !== undefined) dims.push({ line: [F.at(x, -h), F.at(x, y)], mm: f[lo1] });
+  else if (f[hi1] !== undefined) dims.push({ line: [F.at(x, y), F.at(x, h)], mm: f[hi1] });
+  return { outline: [F.at(-w, -h), F.at(w, -h), F.at(w, h), F.at(-w, h), F.at(-w, -h)], shape, dims };
 }
 
 // ---------------------------------------------------------------- edges: fillets and chamfers (0.91.0)

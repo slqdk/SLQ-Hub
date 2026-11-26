@@ -76,6 +76,8 @@ export class Viewport {
   private ro: ResizeObserver;
   private bed: Vec3 = [256, 256, 256];
   private raycaster = new THREE.Raycaster();
+  private labels: { at: Vec3; el: HTMLElement }[] = [];
+  private labelBox = document.createElement("div");
   onChange: (() => void) | null = null;
 
   constructor(private host: HTMLElement) {
@@ -83,6 +85,9 @@ export class Viewport {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     this.renderer.domElement.className = "v3d-canvas";
     host.appendChild(this.renderer.domElement);
+    this.labelBox.className = "v3d-dims";
+    this.labelBox.setAttribute("aria-hidden", "true");
+    host.appendChild(this.labelBox);
     this.camera = new THREE.PerspectiveCamera(38, 1, 0.5, 20000);
     this.camera.up.set(0, 0, 1);
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
@@ -125,6 +130,7 @@ export class Viewport {
     for (const g of [this.plate, this.result, this.ghosts, this.outline, this.preview, this.marks]) disposeGroup(g);
     this.renderer.dispose();
     this.renderer.domElement.remove();
+    this.labelBox.remove();
   }
 
   private resize(): void {
@@ -141,6 +147,7 @@ export class Viewport {
     this.frame = requestAnimationFrame(() => {
       this.frame = 0;
       this.renderer.render(this.scene, this.camera);
+      if (this.labels.length) this.placeLabels();
     });
   }
 
@@ -263,8 +270,9 @@ export class Viewport {
   }
 
   /** Lines over the model (0.92.0): the edges picked for a fillet or chamfer, thick and green - not the picked part's
-   *  blue - and the one under the pointer thinner, amber: drawn over everything, so an edge behind shows too. */
-  setMarks(list: { lines: Vec3[][]; hover?: boolean }[]): void {
+   *  blue - and the one under the pointer thinner, amber: drawn over everything, so an edge behind shows too. `face`
+   *  (0.98.0): the picked face, what goes on it and its distances - in the picked part's blue, that many px wide. */
+  setMarks(list: { lines: Vec3[][]; hover?: boolean; face?: number }[]): void {
     disposeGroup(this.marks);
     this.lineMats = [];
     const w = Math.max(1, this.host.clientWidth), h = Math.max(1, this.host.clientHeight);
@@ -274,8 +282,9 @@ export class Viewport {
       if (!pos.length) continue;
       const g = new LineSegmentsGeometry();
       g.setPositions(pos);
-      const mat = new LineMaterial({ color: m.hover ? css("--wait", "#d99a00").getHex() : css("--run", "#2f9e44").getHex(),
-        linewidth: m.hover ? 3 : 6, depthTest: false, transparent: true, opacity: m.hover ? 0.85 : 0.95 });
+      const color = m.face ? css("--act", "#1c64b4") : m.hover ? css("--wait", "#d99a00") : css("--run", "#2f9e44");
+      const mat = new LineMaterial({ color: color.getHex(), linewidth: m.face ?? (m.hover ? 3 : 6), depthTest: false,
+        transparent: true, opacity: m.hover ? 0.85 : 0.95 });
       mat.resolution.set(w, h);
       const seg = new LineSegments2(g, mat);
       seg.renderOrder = 7;
@@ -283,6 +292,28 @@ export class Viewport {
       this.lineMats.push(mat);
     }
     this.render();
+  }
+
+  /** Words over the model where points of it are (0.98.0: a face's distances, as SolidWorks writes its dimensions):
+   *  moved with the view, each time it is drawn. */
+  setLabels(list: { at: Vec3; text: string }[]): void {
+    for (const l of this.labels) l.el.remove();
+    this.labels = list.map(({ at, text }) => {
+      const el = document.createElement("span");
+      el.className = "v3d-dim num";
+      el.textContent = text;
+      this.labelBox.appendChild(el);
+      return { at, el };
+    });
+    this.render();
+  }
+
+  private placeLabels(): void {
+    for (const { at, el } of this.labels) {
+      const p = this.toScreen(at);
+      el.hidden = !p;
+      if (p) el.style.transform = `translate(${Math.round(p[0])}px, ${Math.round(p[1])}px) translate(-50%, -50%)`;
+    }
   }
 
   /** While something is dragged: it alone, as it was when the drag began (moved by `matrix`), the rest faded. */

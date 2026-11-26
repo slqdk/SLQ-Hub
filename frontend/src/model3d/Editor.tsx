@@ -8,26 +8,29 @@ import { createContext, Fragment, useCallback, useContext, useEffect, useLayoutE
 import * as THREE from "three";
 import Module from "manifold-3d/manifold";
 import wasmUrl from "manifold-3d/manifold.wasm?url";
-import { AlignCenter, AlignLeft, AlignRight, ArrowDownToLine, ArrowDownUp, Bold, Box, ChevronDown, CircleDot, Columns3, Cone,
-  Copy, Cylinder, Download, Eraser, Eye, EyeOff, FlipHorizontal2, FlipVertical2, Group, Italic, ListTree, Maximize2,
+import { AlignCenter, AlignLeft, AlignRight, ArrowDownToLine, ArrowDownUp, Bold, Box, ChevronDown, CircleDashed, CircleDot,
+  Columns3, Cone, Copy, Crosshair, Cylinder, Download, Eraser, Eye, EyeOff, FlipHorizontal2, FlipVertical2, Group, Italic,
+  ListTree, Maximize2,
   MessageSquareShare, Minimize2, MousePointer2, MousePointerClick, Move3d, PanelBottom, Printer as PrinterIcon,
   Redo2, Repeat2, Rotate3d, RotateCcw, RotateCw, Ruler, Scaling, Shapes, Split, SquareDashed, SquareMousePointer,
   SquareRoundCorner, Stamp, Trash2,
-  TriangleAlert, Triangle, Type, Undo2, Ungroup, Upload, X } from "lucide-react";
+  TriangleAlert, Triangle, Type, Undo2, Ungroup, Unlink, Upload, X } from "lucide-react";
 import fontIndex from "./fonts/index.json";
 import { useApp } from "../state";
 import { ConfirmButton, MenuButton } from "../components/ui";
 import type { DesignFolder } from "./folder";
-import { allIds, build, buildPart, COLORS, edgeLength, edgeLines, edgePlan, EDGES, edgesOf, extent, extentOf, FONT_FAMILIES,
-  fontFile, follows, freshId, holeEdges, joined, lettersApart, MAX_COPIES, MIN_SIZE, mirrorPart, nearestEdge, nearestToRay,
-  newDesign, onFace, partSize, readDesign, repeatAround, retext, SPACING, stl, textGlyphs, textMeasure, threeMf,
-  transformPart, treatEdges, turned90, withCapitals, withEdgeLength, writeDesign, type Align, type Box3, type Built,
-  type Design, type EdgeKind, type FontData, type FontIndex, type Fonts, type Kit, type Mat3, type MeshData, type Part,
-  type Repeat, type Shape, type Vec3, type Wasm } from "./geometry";
+import { allIds, build, buildPart, COLORS, edgeLength, edgeLines, edgePlan, EDGES, edgesOf, extent, extentOf, FACE_FRAMES,
+  faceAngle, faceAt, faceFrame, faceMarks, FONT_FAMILIES, fontFile, follows, freshId, holeEdges, joined, lettersApart,
+  MAX_COPIES, MIN_SIZE, mirrorPart, nearestEdge, nearestToRay, newDesign, onFace, partSize, readDesign, repeatAround, respot,
+  retext, settle, SPACING, spotAt, stl, textGlyphs, textMeasure, threeMf, transformPart, treatEdges, turned90, withCapitals,
+  withEdgeLength, writeDesign, type Align, type Anchor, type Box3, type Built, type Design, type EdgeKind, type FaceName,
+  type FontData, type FontIndex, type Fonts, type Kit, type Mat3, type MeshData, type Part, type Repeat, type Shape,
+  type Vec3, type Wasm } from "./geometry";
 import { baseName, dirOf, fmt, joinPath, MESH_FILE, pointMark, relativePath } from "./files";
 import { parseMesh } from "./meshio";
 import { lastPrinter, PRINTERS, printerOf, rememberPrinter, type Printer } from "./printers";
-import { centre, copy, cuts, cutters, find, group, label, pick, remove, replaceWith, ungroup, update } from "./tree";
+import { centre, copy, cuts, cutters, find, group, insertAfter, label, onCopies, pick, remove, replaceWith, riders, ungroup,
+  update } from "./tree";
 import { Viewport, type Hit, type ViewName } from "./Viewport";
 
 // Select (0.96.0): a click only picks - no handles, nothing moves; Move, Turn and Size show their handles.
@@ -228,6 +231,9 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
   const [hoverEdge, setHoverEdge] = useState<{ part: string; edge: string } | null>(null);
   const hoverFrame = useRef(0);
   const [several, setSeveral] = useState(false);                               // Select multiple: a click adds
+  // A box's face clicked (0.98.0): the spot on it, and what the Face tab puts there - kept from one face to the next.
+  const [faceSel, setFaceSel] = useState<FacePick | null>(null);
+  const [feature, setFeature] = useState<Feature>({ round: true, size: 6, through: true, depth: 5, height: 5 });
   // The parts' tree over the view (0.96.1): open or folded, kept for next time - folded at first on a phone.
   const [treeOpen, setTreeOpenState] = useState(() => {
     try {
@@ -317,7 +323,8 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
     saveTimer.current = window.setTimeout(() => void saveRef.current(), 1200);
   }, []);
 
-  /** A change made here: kept for Undo, shown, and saved a moment later. */
+  /** A change made here: kept for Undo, shown, and saved a moment later. Parts on faces (0.98.0) go where their boxes
+   *  are now - and one moved, turned or sized itself keeps what was done to it on its face. */
   const commit = useCallback((next: Design) => {
     const cur = designRef.current;
     if (cur) {
@@ -325,7 +332,7 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
       if (past.current.length > 100) past.current.shift();
     }
     future.current = [];
-    setDesign(next);
+    setDesign({ ...next, parts: settle(next.parts, undefined, cur?.parts) });
     later();
   }, [setDesign, later]);
 
@@ -593,11 +600,19 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
     v.attach(one ? one.at : b ? centre(b) : [0, 0, 0], one ? one.rotate : null, mode, SNAP);
   }, [design, selected, mode, ready, tool, meshTick]);
 
-  // The picked lines (0.92.0) drawn over the model, and the one a click would pick (0.94.0: near a line, on any tab).
+  // The picked lines (0.92.0) drawn over the model, and the one a click would pick (0.94.0: near a line, on any tab);
+  // in the Face tab (0.98.0) the face picked, what goes on it and how far it is from its edges - as SolidWorks draws a
+  // sketch's dimensions.
+  const faceBox = (() => {
+    const f = faceSel && design ? find(design.parts, faceSel.part)?.part : null;
+    return f && f.shape === "box" && !f.repeat ? f : null;
+  })();
+  const facing = tab === "face" && !!faceBox;
   useEffect(() => {
     const v = vp.current;
     if (!v || !ready) return;
-    const list: { lines: Vec3[][]; hover?: boolean }[] = [];
+    const list: { lines: Vec3[][]; hover?: boolean; face?: number }[] = [];
+    const words: { at: Vec3; text: string }[] = [];
     if (design) {
       for (const [id, edges] of Object.entries(edgeSel)) {
         const f = find(design.parts, id);
@@ -605,9 +620,30 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
       }
       const f = hoverEdge ? find(design.parts, hoverEdge.part) : null;
       if (f && hoverEdge) list.push({ lines: edgeLines(f.part, [hoverEdge.edge]), hover: true });
+      const dimension = (box: Part, face: FaceName, from: Record<string, number> | undefined, round: boolean | null,
+        size: number) => {
+        const m = faceMarks(box, face, from, !!round, size);
+        list.push({ lines: [m.outline], face: 4 }, { lines: round === null ? m.shape.slice(1) : m.shape, face: 2.5 },
+          { lines: m.dims.map((x) => x.line), face: 1.5 });
+        for (const x of m.dims) {
+          const [a, b] = x.line;
+          words.push({ at: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2], text: fmt(x.mm) });
+        }
+        const ring = m.shape[0];
+        if (round !== null) words.push({ at: ring[Math.round(ring.length / 8)], text: round ? `Ø${fmt(size)}` : `${fmt(size)} x ${fmt(size)}` });
+      };
+      if (facing && faceBox && faceSel) dimension(faceBox, faceSel.face, faceSel.from, feature.round, feature.size);
+      // A part on a face, picked: where it is kept, as the Face tab showed it (0.98.0)
+      const kept = !facing && tab === "part" && selected.length === 1 ? find(design.parts, selected[0])?.part : null;
+      const on = kept?.on, box = on ? find(design.parts, on.part)?.part : null;
+      if (kept && on && box) {
+        dimension(box, on.face, on.from, kept.shape === "cylinder" ? true : kept.shape === "box" ? false : null,
+          kept.shape === "cylinder" || kept.shape === "box" ? kept.size[0] : 0);
+      }
     }
     v.setMarks(list);
-  }, [design, edgeSel, hoverEdge, ready]);
+    v.setLabels(words);
+  }, [design, edgeSel, hoverEdge, ready, facing, faceBox, faceSel, feature.round, feature.size, tab, selected]);
 
   useEffect(() => {                                   // Pick lines belongs to the Lines tab
     if (tab !== "lines" && tool === "edge") setTool(null);
@@ -627,7 +663,9 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
     v.proxy.updateMatrixWorld(true);
     start.current = { design: d, ids, pos: v.proxy.position.clone(), quat: v.proxy.quaternion.clone(),
       matrix: v.proxy.matrixWorld.clone(), body };
-    v.setPreview(pick(d.parts, ids).map((p) => ({ built: buildPart(p, k), color: p.hole ? GREY : p.color ?? GREY })));
+    // What is on their faces goes with them (0.98.0) - not when they are sized: what is on them keeps its own size.
+    const going = [...pick(d.parts, ids), ...(v.gizmo.mode === "scale" && !body ? [] : riders(d.parts, ids))];
+    v.setPreview(going.map((p) => ({ built: buildPart(p, k), color: p.hole ? GREY : p.color ?? GREY })));
   }, []);
 
   const finishDrag = useCallback(() => {
@@ -740,9 +778,67 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
     const { front, solid } = v.picks(x, y, allIds([f.part]));      // not on itself
     const h = solid ?? front;
     if (!h) return;                                    // nothing there: click a face
-    const next = onFace(f.part, h.point, h.normal, v.cameraRight(), buildPart(f.part, k).box);
-    commit({ ...d, parts: update(d.parts, f.part.id, () => tidy(next)) });
+    const box = solidBox(h.part), face = box && f.part.shape !== "group" ? faceAt(box, h.point, h.normal) : null;
+    if (box && face) {                                 // a box's face: kept on it where it was clicked (0.98.0)
+      const p = f.part;
+      const on: Anchor = { part: box.id, face, from: spotAt(box, face, h.point), depth: Math.max(MIN_SIZE, r3(p.size[2] - 0.2)) };
+      const angle = p.shape === "text" ? faceAngle(box, face, v.cameraRight()) : 0;
+      if (angle) on.angle = angle;
+      if (!on.from) delete on.from;
+      commit({ ...d, parts: update(d.parts, p.id, () => tidy({ ...p, on })) });
+    } else {
+      const next = onFace(f.part, h.point, h.normal, v.cameraRight(), buildPart(f.part, k).box);
+      delete next.on;                                  // on another shape's face: free
+      commit({ ...d, parts: update(d.parts, f.part.id, () => tidy(next)) });
+    }
     setTool(null);
+  };
+
+  /** The solid box a click is on (0.98.0) - one a face can be picked on: not a hole, nor in a hole group, nor repeated. */
+  const solidBox = (id: string): Part | null => {
+    const d = designRef.current;
+    const p = d ? find(d.parts, id)?.part : null;
+    return d && p && p.shape === "box" && !p.repeat && !cuts(d.parts, p.id) ? p : null;
+  };
+
+  /** Cut hole, Add boss, Text here (0.98.0, the Face tab): a part kept on the picked face, at its spot - beside the box
+   *  in the tree, so a hole cuts what the box is in - then picked, its tab open. */
+  const onTheFace = (kind: "hole" | "boss" | "text") => {
+    const d = designRef.current, v = vp.current;
+    const box = faceSel && d ? find(d.parts, faceSel.part)?.part : null;
+    if (!d || !faceSel || !box) return;
+    const seen = allIds(d.parts);
+    const id = freshId(seen);
+    const base: Anchor = { part: box.id, face: faceSel.face };
+    if (faceSel.from) base.from = { ...faceSel.from };
+    const s = Math.max(MIN_SIZE, feature.size);
+    let p: Part;
+    if (kind === "text") {
+      const F = faceFrame(box, faceSel.face);
+      const angle = faceAngle(box, faceSel.face, v?.cameraRight() ?? [1, 0, 0]);
+      p = { id, shape: "text", text: "Text", size: [0, r3(Math.min(10, Math.max(2, Math.min(F.W, F.H) * 0.5))), 1],
+        at: [0, 0, 0], rotate: [0, 0, 0], color: COLORS[seen.size % COLORS.length], on: { ...base, depth: 1 } };
+      if (angle) p.on!.angle = angle;
+    } else {
+      const round = feature.round, hole = kind === "hole";
+      p = { id, name: hole ? (round ? "Round hole" : "Square hole") : round ? "Boss" : "Square boss",
+        shape: round ? "cylinder" : "box", size: [s, s, 1], at: [0, 0, 0], rotate: [0, 0, 0] };
+      if (round) p.sides = 64;
+      if (hole) {
+        p.hole = true;
+        p.on = feature.through ? { ...base, through: true } : { ...base, depth: Math.max(MIN_SIZE, feature.depth) };
+      } else {
+        p.color = box.color;
+        p.on = { ...base, depth: Math.max(MIN_SIZE, feature.height) };
+      }
+    }
+    shown3d.current = [id];
+    commit({ ...d, parts: insertAfter(d.parts, box.id, p) });
+    setSelected([id]);
+    setEdgeSel({});
+    setFaceSel(null);
+    setTab(kind === "text" ? "text" : "part");
+    host.current?.focus({ preventScroll: true });     // its button is gone: Esc and the arrow keys work on
   };
 
   /** Turn (0.97.0): each part picked turned 90 degrees about X, Y or Z through its middle, as Office's Rotate. */
@@ -857,6 +953,7 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
     const now = edgePlan(part)[edge];
     if (now && (!add || !had)) setEdgeSize(now.size);
     setSelected([part.id]);
+    setFaceSel(null);
     setTab("lines");
   };
 
@@ -968,11 +1065,13 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
     const d = designRef.current, kk = kit.current;
     const f = d ? find(d.parts, id) : null;
     if (!d || !kk || !f || f.part.shape !== "text") return;
-    const letters = lettersApart(f.part, kk.fonts, allIds(d.parts));
+    let letters = lettersApart(f.part, kk.fonts, allIds(d.parts));
     if (!letters) {
       toast("Its font is not loaded yet - try again in a moment.", "fault");
       return;
     }
+    const on = f.part.on, box = on ? find(d.parts, on.part)?.part : null;     // a text on a face: each letter on it
+    if (on && box) letters = letters.map((l) => respot({ ...l, on: { ...on } }, box));
     commit({ ...d, parts: replaceWith(d.parts, id, letters) });
     setSelected(letters.map((l) => l.id));
     setTab("text");
@@ -1021,6 +1120,7 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
       if (!e.shiftKey && !several) {
         setSelected([]);
         setEdgeSel({});
+        setFaceSel(null);
       }
       return;
     }
@@ -1030,12 +1130,21 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
       return;
     }
     const id = topOf(hit.part);                        // a part: it, and the Part tab
+    setFaceSel(null);
     if (e.shiftKey || several) {
       const cur = selectedRef.current;
       setSelected(cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]);
     } else {
       setSelected([id]);
       setEdgeSel({});
+      // A box's face (0.98.0, Søren: "på Select, og jeg klikker på en flade (ikke en linie), så skal muligheden komme
+      // frem oppe i menuen"): the spot clicked on it, and the Face tab - a hole, a boss or a text there.
+      const box = mode === "select" ? solidBox(hit.part) : null, face = box ? faceAt(box, hit.point, hit.normal) : null;
+      if (box && face) {
+        setFaceSel({ part: box.id, face, from: spotAt(box, face, hit.point) });
+        setTab("face");
+        return;
+      }
     }
     const text = designRef.current ? find(designRef.current.parts, id)?.part.shape === "text" : false;
     setTab(text ? "text" : "part");                    // a text: its font and size first (0.96.0), as in Office
@@ -1045,6 +1154,7 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
    *  multiple - its tab opening (a text's: Text), but Lines stays: there a part is picked for its lines by name. */
   const pickFromTree = (id: string, add: boolean) => {
     const cur = selectedRef.current;
+    setFaceSel(null);
     if (add || several) setSelected(cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]);
     else {
       setSelected([id]);
@@ -1114,6 +1224,7 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
     commit({ ...d, parts: [...d.parts, p] });
     setSelected([id]);
     setEdgeSel({});
+    setFaceSel(null);
     if (shape === "text") {
       setTab("text");                              // its font and size, as Office shows them for a new text box (0.96.0)
       if (d.parts.some((x) => !x.hidden && !x.hole)) setTool("face");      // and the face it goes on (0.97.0)
@@ -1160,8 +1271,17 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
   const duplicate = () => {
     const d = designRef.current;
     if (!d || !selectedRef.current.length) return;
-    const seen = allIds(d.parts);
-    const copies = pick(d.parts, selectedRef.current).map((p) => tidy(transformPart(copy(p, seen), [0, 0, 0], [5, 5, 0], null)));
+    const seen = allIds(d.parts), ids = new Map<string, string>();
+    const moved = onCopies(pick(d.parts, selectedRef.current).map((p) => copy(p, seen, ids)), ids)
+      .map((p) => tidy(transformPart(p, [0, 0, 0], [5, 5, 0], null)));
+    // A copy on a face (0.98.0) is where it was put - on its box's copy, or beside the part it copies on the same box.
+    const all = [...d.parts, ...moved];
+    const spot = (p: Part): Part => {
+      if (p.parts) return { ...p, parts: p.parts.map(spot) };
+      const box = p.on ? find(all, p.on.part)?.part : null;
+      return box ? respot(p, box) : p;
+    };
+    const copies = moved.map(spot);
     shown3d.current = copies.map((c) => c.id);
     commit({ ...d, parts: [...d.parts, ...copies] });
     setSelected(copies.map((c) => c.id));
@@ -1278,9 +1398,10 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
       Delete: del, Backspace: del, Escape: () => {
         if (host.current?.closest(".panel-3d")?.querySelector(".menu")) return;   // it closes the menu, nothing more
         if (tool) setTool(null);
-        else if (selectedRef.current.length || Object.keys(edgeSel).length) {
+        else if (selectedRef.current.length || Object.keys(edgeSel).length || faceSel) {
           setSelected([]);
           setEdgeSel({});
+          setFaceSel(null);
         } else setMode("select");                     // nothing picked: back to Select
       },
       ArrowLeft: () => nudge([-step, 0, 0]), ArrowRight: () => nudge([step, 0, 0]),
@@ -1335,7 +1456,7 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
     error: "Not saved" }[status];
   const view = (name: ViewName) => vp.current?.view(name, built?.box ?? (design ? extentOf(design.parts) : null));
   const texts = items.length && items.every((p) => p.shape === "text") ? items : null;
-  const shownTab: Tab = tab === "text" && !texts ? "part" : tab;
+  const shownTab: Tab = (tab === "text" && !texts) || (tab === "face" && !faceBox) ? "part" : tab;
   const pickedEdges = Object.entries(edgeSel).reduce((n, [id, es]) => n + (find(parts, id) ? es.length : 0), 0);
   const oneLine = (() => {                             // the one line picked: how long it is (Resize)
     const all = Object.entries(edgeSel).flatMap(([id, es]) => es.map((e) => [id, e] as const));
@@ -1343,13 +1464,14 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
     return f ? edgeLength(f.part, all[0][1]) : null;
   })();
   // What the band shows: a change folds its groups afresh to the room there is (0.94.0).
-  const fitKey = [shownTab, selected.join(","), items.map((x) => `${x.shape}${x.radius ? "r" : ""}${x.repeat ? (x.repeat.step ? "s" : "a")
+  const fitKey = [shownTab, faceSel?.face, feature.round, feature.through, one?.on ? `${one.on.face}${one.on.through ? "t" : ""}` : "",
+    selected.join(","), items.map((x) => `${x.shape}${x.radius ? "r" : ""}${x.repeat ? (x.repeat.step ? "s" : "a")
     : ""}${x.hole ? "h" : ""}`).join(","), pickedEdges, one ? (edgeSel[one.id] ?? []).length : 0, oneLine ? 1 : 0].join("|");
   const allProblems = [...problems, ...(built?.problems ?? [])];
   const hide = (id: string) => change(id, (p) => ({ ...p, hidden: !p.hidden || undefined }));
-  const pickFirst = <p className="v3d-tip">Click a part on the model to change it - or a line on it, to round, cut or
-    resize that line. Shift-click (or Select multiple) picks more, a double click picks a part inside a group; Move, Turn
-    and Size put handles on what is picked.</p>;
+  const pickFirst = <p className="v3d-tip">Click a part on the model to change it - a box's face, to put a hole, a boss or
+    a text on it - or a line, to round, cut or resize that line. Shift-click (or Select multiple) picks more, a double
+    click picks a part inside a group; Move, Turn and Size put handles on what is picked.</p>;
 
   return (
     <aside ref={panel} className="panel panel-3d" aria-label="3D editor" onKeyDown={onKey}>
@@ -1403,9 +1525,13 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
                 onClick={() => setTab("text")} title={texts.length > 1 ? "The picked texts: their font and letters"
                   : "The picked text: its letters, font and lines"}>Text</button>
             )}
+            {faceBox && faceSel && (
+              <button type="button" role="tab" aria-selected={shownTab === "face"} className={`v3d-tab context${shownTab === "face" ? " on" : ""}`}
+                onClick={() => setTab("face")} title={`The face picked - the ${faceSel.face} of ${label(faceBox)}: a hole, a boss or a text on it`}>Face</button>
+            )}
           </div>
         </div>
-        <Band label={shownTab === "text" ? "Text" : TABS.find(([id]) => id === shownTab)?.[1]} fit={fitKey}>
+        <Band label={shownTab === "text" ? "Text" : shownTab === "face" ? "Face" : TABS.find(([id]) => id === shownTab)?.[1]} fit={fitKey}>
           {shownTab === "insert" && (
             <>
               <Grp label="Solids">
@@ -1466,12 +1592,17 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
               {one && k && <PartBand part={one} fonts={k.fonts} lock={lock} setLock={setLock} change={(fn) => change(one.id, fn)}
                 onDuplicate={duplicate} onDelete={del} onApart={() => splitLetters(one.id)} onDrop={drop}
                 onFlat={() => setTool(tool === "flat" ? null : "flat")} flat={tool === "flat"} onUngroup={doUngroup} onMirror={mirror}
-                onFace={() => setTool(tool === "face" ? null : "face")} face={tool === "face"} onTurn={turn90} />}
+                onFace={() => setTool(tool === "face" ? null : "face")} face={tool === "face"} onTurn={turn90}
+                box={one.on ? find(parts, one.on.part)?.part ?? null : null} depth={feature.depth} />}
             </>
           )}
           {shownTab === "text" && texts && k && <TextBand parts={texts} fonts={k.fonts} onApart={() => splitLetters(texts[0].id)}
             onFace={() => setTool(tool === "face" ? null : "face")} face={tool === "face"}
             change={(fn) => (texts.length > 1 ? changeEach(texts.map((t) => t.id), fn) : change(texts[0].id, fn))} />}
+          {shownTab === "face" && faceBox && faceSel && (
+            <FaceBand box={faceBox} spot={faceSel} feature={feature} onFeature={(f) => setFeature((cur) => ({ ...cur, ...f }))}
+              onFrom={(from) => setFaceSel({ ...faceSel, from })} onMake={onTheFace} />
+          )}
           {shownTab === "lines" && (
             <LinesBand part={one} many={items.length > 1} picked={pickedEdges} pickedOn={one ? edgeSel[one.id] ?? [] : []}
               size={edgeSize} picking={tool === "edge"} onPicking={() => setTool(tool === "edge" ? null : "edge")}
@@ -1486,7 +1617,7 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
         <div className={`v3d-view${tool ? " picking" : ""}`} ref={host} tabIndex={0} onPointerDown={onPointerDown}
           onPointerMove={onPointerMove} onPointerUp={onPointerUp} onDoubleClick={onDoubleClick}
           onPointerLeave={() => { cancelAnimationFrame(hoverFrame.current); setHoverEdge(null); }}
-          aria-label="The design in 3D. Drag to turn the view, right-drag to pan, scroll to zoom. Click a part to pick it, a line to pick the line." />
+          aria-label="The design in 3D. Drag to turn the view, right-drag to pan, scroll to zoom. Click a part to pick it, a box's face to put something on it, a line to pick the line." />
         {resizing && (
           <div className="v3d-resize" style={{ left: resizing.x, top: resizing.y }} role="dialog" aria-label={`${resizing.what} of the line`}>
             <label>
@@ -1594,7 +1725,11 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
 // 0.94.0: Insert (was Shapes); Part - with Size and place and Arrange in it; Lines (was Edges). Søren: "Shapes skal
 // hedde Insert ... Parts menuen skal også inkludere Size, place, arrange (alle på en tab) ... Hvis man klikker på en
 // streg, så skal menuen Lines komme frem".
-type Tab = "insert" | "part" | "lines" | "text";
+type Tab = "insert" | "part" | "lines" | "text" | "face";
+/** A box's face clicked (0.98.0): which, and the spot on it - so many mm from its edges (none: the middle). */
+type FacePick = { part: string; face: FaceName; from?: Record<string, number> };
+/** What the Face tab puts on a face: round or square, how wide; a hole through all or so deep; a boss so high. */
+type Feature = { round: boolean; size: number; through: boolean; depth: number; height: number };
 const TABS: [Tab, string][] = [["insert", "Insert"], ["part", "Part"], ["lines", "Lines"]];
 const ALIGNS: [string, string[]][] = [["X", ["Left", "Middle", "Right"]], ["Y", ["Front", "Middle", "Back"]],
   ["Z", ["Bottom", "Middle", "Top"]]];
@@ -1899,10 +2034,10 @@ const kindOf = (p: Part) => (p.shape === "group" ? "Group" : p.shape === "mesh" 
 /** The Part tab for one part (0.94.0: with what Size and place and Arrange had): its name, solid or hole and colour;
  *  its size, centre and turn; what its shape has of its own; the plate; mirror and pattern; duplicate, hide, delete. */
 function PartBand({ part, fonts, lock, setLock, change, onDuplicate, onDelete, onApart, onDrop, onFlat, flat, onUngroup,
-  onMirror, onFace, face, onTurn }: { part: Part; fonts: Fonts; lock: boolean; setLock: (v: boolean) => void;
+  onMirror, onFace, face, onTurn, box: onBox, depth }: { part: Part; fonts: Fonts; lock: boolean; setLock: (v: boolean) => void;
   change: (fn: (p: Part) => Part) => void; onDuplicate: () => void; onDelete: () => void; onApart: () => void;
   onDrop: () => void; onFlat: () => void; flat: boolean; onUngroup: () => void; onMirror: (axis: 0 | 1 | 2) => void;
-  onFace: () => void; face: boolean; onTurn: (axis: 0 | 1 | 2, sign: 1 | -1) => void }) {
+  onFace: () => void; face: boolean; onTurn: (axis: 0 | 1 | 2, sign: 1 | -1) => void; box: Part | null; depth: number }) {
   const g = part.shape === "group";
   const box = extent(part);
   return (
@@ -1931,11 +2066,13 @@ function PartBand({ part, fonts, lock, setLock, change, onDuplicate, onDelete, o
         </Stack>
       </Grp>
       {!g && (
-        <Grp id="place" short="Size" label={part.shape === "outline" ? "Size, its points' 0,0 and turn" : "Size, centre and turn"} fold={6}
+        <Grp id="place" short="Size" label={part.shape === "outline" ? "Size, its points' 0,0 and turn" : "Size, centre and turn"}
+          fold={part.on ? 2 : 6}
           icon={<Scaling size={20} />}>
           <PlaceTable part={part} fonts={fonts} lock={lock} setLock={setLock} change={change} bottom={box?.[0][2] ?? 0} />
         </Grp>
       )}
+      {part.on && onBox && <OnFaceGroup part={part} box={onBox} change={change} depth={depth} />}
       {g && (
         <Grp label="Group" fold={3} icon={<Group size={20} />}>
           <p className="v3d-note num">{box ? `${fmt(box[1][0] - box[0][0])} x ${fmt(box[1][1] - box[0][1])} x ${fmt(box[1][2] - box[0][2])} mm, ` : ""}
@@ -2128,6 +2265,135 @@ function TextBand({ parts, fonts, change, onApart, onFace, face }: { parts: Part
         </Stack>
       </Grp>
     </>
+  );
+}
+
+/** Where on a face, one way across it (0.98.0): from which edge - or in the middle - and how far, mm. */
+function FromRow({ face, axis, size, from, onSet }: { face: FaceName; axis: 0 | 1; size: number;
+  from?: Record<string, number>; onSet: (from: Record<string, number> | undefined) => void }) {
+  const [lo, hi] = FACE_FRAMES[face].ends[axis];
+  const f = from ?? {};
+  const key = f[lo] !== undefined ? lo : f[hi] !== undefined ? hi : "";
+  const fromLo = key === lo ? f[lo] : key === hi ? size - f[hi] : size / 2;          // the spot, from the first edge
+  const set = (k: string, mm: number) => {
+    const next = { ...f };
+    delete next[lo];
+    delete next[hi];
+    if (k) next[k] = r3(mm);
+    onSet(Object.keys(next).length ? next : undefined);
+  };
+  const way = axis ? "Up the face" : "Across the face";
+  return (
+    <div className="v3d-field v3d-from">
+      <select className="select" value={key} aria-label={`${way}: measured from`}
+        title={`${way}: which edge the distance is from - or in the middle`}
+        onChange={(e) => set(e.target.value, e.target.value === lo ? fromLo : e.target.value === hi ? size - fromLo : 0)}>
+        <option value={lo}>From {lo}</option>
+        <option value={hi}>From {hi}</option>
+        <option value="">Middle</option>
+      </select>
+      <span className="v3d-field-in"><NumInput value={key ? f[key] : r3(size / 2)} step={1}
+        label={`${way}, mm from the ${key || lo} edge`} onSet={(v) => set(key || lo, v)} /></span>
+      <small>mm</small>
+    </div>
+  );
+}
+
+/** The Face tab (0.98.0): the face picked on a box and the spot on it - so many mm from two of its edges, as a sketch
+ *  on a face is dimensioned in SolidWorks - and what goes there: a round or a square hole through all of the box or
+ *  so deep (an extruded cut), a boss so high (a boss extrude), or a text. Each is kept there: it goes with the box. */
+function FaceBand({ box, spot, feature, onFeature, onFrom, onMake }: { box: Part; spot: FacePick; feature: Feature;
+  onFeature: (f: Partial<Feature>) => void; onFrom: (from: Record<string, number> | undefined) => void;
+  onMake: (kind: "hole" | "boss" | "text") => void }) {
+  const F = faceFrame(box, spot.face);
+  const name = spot.face[0].toUpperCase() + spot.face.slice(1);
+  const across = feature.round ? `round, ${fmt(feature.size)} mm across` : `square, ${fmt(feature.size)} mm wide`;
+  const keeps = "it stays here when the box moves, turns or grows";
+  return (
+    <>
+      <Grp label="Face" fold={1} icon={<Box size={20} />}>
+        <Stack>
+          <span className="v3d-col-strong v3d-clip">{name}</span>
+          <small className="v3d-col-note v3d-clip" title={label(box)}>of {label(box)}</small>
+          <small className="v3d-col-note num">{fmt(F.W)} x {fmt(F.H)} mm</small>
+        </Stack>
+      </Grp>
+      <Grp label="Where" fold={3} icon={<Crosshair size={20} />}>
+        <Stack>
+          <FromRow face={spot.face} axis={0} size={F.W} from={spot.from} onSet={onFrom} />
+          <FromRow face={spot.face} axis={1} size={F.H} from={spot.from} onSet={onFrom} />
+          <Small icon={<Crosshair size={16} />} label="In the middle" onClick={() => onFrom(undefined)}
+            title="The middle of the face, both ways" />
+        </Stack>
+      </Grp>
+      <Grp label="Shape" fold={2} icon={<CircleDashed size={20} />}>
+        <Stack>
+          <div className="v3d-row" role="group" aria-label="Round or square">
+            <Small icon={<CircleDashed size={16} />} label="Round" active={feature.round} onClick={() => onFeature({ round: true })} />
+            <Small icon={<SquareDashed size={16} />} label="Square" active={!feature.round} onClick={() => onFeature({ round: false })} />
+          </div>
+          <Field label={feature.round ? "Diameter" : "Side"} unit="mm" value={feature.size} min={0.1} step={1}
+            onSet={(v) => onFeature({ size: Math.max(0.1, v) })} />
+        </Stack>
+      </Grp>
+      <Grp label="Cut or add">
+        <Big tone="grey" icon={feature.round ? <CircleDashed size={20} /> : <SquareDashed size={20} />} label="Cut hole"
+          onClick={() => onMake("hole")} title={`A hole here, ${across}, ${feature.through ? "through all of the box"
+            : `${fmt(feature.depth)} mm deep`} - ${keeps}`} />
+        <Big tone="orange" icon={feature.round ? <Cylinder size={20} /> : <Box size={20} />} label="Add boss"
+          onClick={() => onMake("boss")} title={`A boss here, ${across}, ${fmt(feature.height)} mm out of the face - ${keeps}`} />
+        <Big tone="violet" icon={<Type size={20} />} label="Text here" onClick={() => onMake("text")}
+          title={`A text here, 1 mm out of the face - its letters, font and size in the Text tab; ${keeps}`} />
+        <Stack>
+          <label className="v3d-check" title="The hole through all of the box - however thick it gets">
+            <input type="checkbox" checked={feature.through} onChange={(e) => onFeature({ through: e.target.checked })} /> Through all</label>
+          {!feature.through && <Field label="Depth" unit="mm" value={feature.depth} min={0.1} step={1} width={44}
+            title="How far the hole goes into the box, mm" onSet={(v) => onFeature({ depth: Math.max(0.1, v) })} />}
+          <Field label="Height" unit="mm" value={feature.height} min={0.1} step={1} width={44}
+            title="How far the boss stands out of the face, mm" onSet={(v) => onFeature({ height: Math.max(0.1, v) })} />
+        </Stack>
+      </Grp>
+    </>
+  );
+}
+
+/** The Part tab's On the face (0.98.0): where the part is kept on its box's face - from which edges, how far - how
+ *  deep a hole goes or how high a solid stands, and Free it: its own numbers place it again, where it is now. */
+function OnFaceGroup({ part, box, change, depth }: { part: Part; box: Part; change: (fn: (p: Part) => Part) => void;
+  depth: number }) {
+  const a = part.on!;
+  const F = faceFrame(box, a.face);
+  const setOn = (patch: Partial<Anchor>) => change((p) => {
+    if (!p.on) return p;
+    const on: Anchor = { ...p.on, ...patch };
+    for (const k of Object.keys(patch) as (keyof Anchor)[]) if (patch[k] === undefined) delete on[k];
+    return { ...p, on };
+  });
+  return (
+    <Grp id="onface" short="On the face" label="On the face" fold={7} icon={<Crosshair size={20} />}>
+      <Stack>
+        <FromRow face={a.face} axis={0} size={F.W} from={a.from} onSet={(from) => setOn({ from })} />
+        <FromRow face={a.face} axis={1} size={F.H} from={a.from} onSet={(from) => setOn({ from })} />
+        <small className="v3d-col-note v3d-clip" title={`The ${a.face} of ${label(box)}: ${fmt(F.W)} x ${fmt(F.H)} mm`}>
+          {a.face[0].toUpperCase() + a.face.slice(1)} of {label(box)}</small>
+      </Stack>
+      <Stack>
+        {part.hole ? (
+          <>
+            <label className="v3d-check" title="Through all of the box - however thick it gets">
+              <input type="checkbox" checked={!!a.through} onChange={(e) => setOn(e.target.checked ? { through: true, depth: undefined }
+                : { through: undefined, depth: a.depth ?? depth })} /> Through all</label>
+            {!a.through && <Field label="Depth" unit="mm" value={a.depth ?? depth} min={MIN_SIZE} step={1}
+              title="How far into the box, mm" onSet={(v) => setOn({ depth: Math.max(MIN_SIZE, v) })} />}
+          </>
+        ) : (
+          <Field label="Height" unit="mm" value={a.depth ?? F.T} min={MIN_SIZE} step={1} title="How far out of the face, mm"
+            onSet={(v) => setOn({ depth: Math.max(MIN_SIZE, v) })} />
+        )}
+        <Small icon={<Unlink size={16} />} label="Free it" onClick={() => change((p) => { const q = { ...p }; delete q.on; return q; })}
+          title="Not kept on the face any more: it stays where it is now, and stays there when the box moves" />
+      </Stack>
+    </Grp>
   );
 }
 

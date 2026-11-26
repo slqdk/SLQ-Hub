@@ -751,9 +751,16 @@ export const SECTIONS: HelpSection[] = [
           + "at a time. The arrow keys move what is picked 1 mm (Shift: 10). Fit, Top, Front and Right, at the right, "
           + "turn the camera.",
           "A hole cuts the solids beside it. Group parts (Ctrl+G) to keep a hole to them.",
+          "Click a box's face in Select and the Face tab opens, as SolidWorks lets you sketch on a face: the spot you "
+          + "clicked, so many mm from two of the face's edges - the distances show on the model, and From left, From "
+          + "right or Middle and a number move it. Cut hole puts a round or square hole there, through all of the box "
+          + "or so deep; Add boss a round or square boss so high; Text here a text. Each stays on the face: move, turn "
+          + "or resize the box and it goes with it, the distances kept. Picked, its Part tab has On the face - its "
+          + "distances, depth or height, and Free it.",
           "On a face (Part's Arrange, and Text) puts the part on a face you click - a new text asks for its face at once: "
           + "its letters lie on it, upright on a wall, a little into it so the two print as one; a hole text sinks in "
-          + "and is cut. Turn (Arrange) turns what is picked 90° - stand a flat text up with Tip forward.",
+          + "and is cut. On a box's face it stays there, as a part from the Face tab does. Turn (Arrange) turns what "
+          + "is picked 90° - stand a flat text up with Tip forward.",
           "Pattern repeats a part or a group round a point or in a row: one arm of a snowflake becomes six, one hole "
           + "a ring of holes. The assistant can also draw flat outlines of its own - stars, leaves, letters' shapes.",
           "Lines works on a part's own lines, picked first: click one on the model - Pick lines to pick several - or "
