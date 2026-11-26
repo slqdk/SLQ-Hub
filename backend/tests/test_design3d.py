@@ -644,3 +644,120 @@ def test_flat_things_are_drawn_straight_down(h3, tmp_path, capsys, monkeypatch):
     cube.write_text(json.dumps({"parts": [{"id": "c", "shape": "box"}]}))
     h3.main(["design", str(cube), "--views", str(tmp_path / "cube.png")])
     assert "from the front, the side and above" in capsys.readouterr().out
+
+
+# 0.91.0: fillets and chamfers on a part's own edges. Søren: "Er det muligt at lave en funktion hvor man efterfølgende
+# kan lave fillet på et kant/side?"
+EDGED = [
+    {"parts": [{"id": "b", "shape": "box", "size": [40, 30, 20], "at": [0, 0, 10], "fillet": {"top": 4}}]},
+    {"parts": [{"id": "b", "shape": "box", "size": [40, 30, 20], "at": [0, 0, 10], "fillet": {"all": 4}}]},
+    {"parts": [{"id": "b", "shape": "box", "size": [40, 30, 20], "at": [0, 0, 10], "fillet": {"vertical": 6},
+                "chamfer": {"top": 2, "bottom-front": 3}}]},
+    {"parts": [{"id": "b", "shape": "box", "size": [40, 30, 20], "at": [0, 0, 10], "fillet": {"top": 4, "vertical": 4}}]},
+    {"parts": [{"id": "b", "shape": "box", "size": [40, 30, 20], "at": [0, 0, 10], "fillet": {"top": 6, "vertical": 3},
+                "sides": 16}]},
+    {"parts": [{"id": "w", "shape": "wedge", "size": [40, 30, 20], "at": [0, 0, 10], "fillet": {"all": 2}}]},
+    {"parts": [{"id": "w", "shape": "wedge", "size": [40, 30, 20], "at": [0, 0, 10], "chamfer": {"slope": 1.5},
+                "fillet": {"bottom-left": 3}, "rotate": [0, 0, 30], "mirror": True}]},
+    {"parts": [{"id": "c", "shape": "cylinder", "size": [30, 30, 20], "at": [0, 0, 10], "fillet": {"top": 4},
+                "chamfer": {"bottom": 1}}]},
+    {"parts": [{"id": "c", "shape": "cylinder", "size": [30, 20, 20], "at": [0, 0, 10], "sides": 6, "chamfer": {"all": 1}}]},
+    {"parts": [{"id": "k", "shape": "cone", "size": [30, 30, 20], "at": [0, 0, 10], "top": 0.4, "fillet": {"all": 3}}]},
+    {"parts": [{"id": "k", "shape": "cone", "size": [30, 30, 20], "at": [0, 0, 10], "fillet": {"top": 3, "bottom": 2}}]},
+    {"parts": [{"id": "o", "shape": "outline", "size": [0, 0, 4], "points": [[0, 0], [40, 0], [40, 30], [20, 15], [0, 30]],
+                "holes": [[[8, 5], [14, 5], [14, 11], [8, 11]]], "fillet": {"corners": 3}}]},
+    {"parts": [{"id": "o", "shape": "outline", "size": [60, 0, 3], "points": [[0, -2], [52, -2], [60, 0], [52, 2], [0, 2]],
+                "chamfer": {"vertical": 0.8}, "repeat": {"count": 6, "around": [0, 0]}}]},
+    {"parts": [{"id": "b", "shape": "box", "size": [40, 30, 20], "at": [0, 0, 10], "fillet": {"top": 40}}]},
+    {"parts": [{"id": "plate", "shape": "box", "size": [60, 40, 4], "at": [0, 0, 2], "fillet": {"vertical": 5},
+                "chamfer": {"top": 0.6}},
+               {"id": "h", "shape": "cylinder", "size": [6, 6, 10], "at": [20, 10, 2], "hole": True,
+                "repeat": {"count": 4, "around": [0, 0]}},
+               {"id": "post", "shape": "cylinder", "size": [10, 10, 15], "at": [0, 0, 11], "fillet": {"top": 2}},
+               {"id": "g", "shape": "group", "parts": [
+                   {"id": "w", "shape": "wedge", "size": [12, 8, 8], "at": [-24, -14, 8], "fillet": {"slope": 1}}]}]},
+    {"parts": [{"id": "x", "shape": "box", "size": [10, 10, 10], "fillet": {"upper": 2, "top": -1}, "chamfer": [1]},
+               {"id": "y", "shape": "sphere", "fillet": {"all": 1}},
+               {"id": "z", "shape": "box", "radius": 2, "fillet": {"top": 1}},
+               {"id": "t", "shape": "text", "text": "A", "chamfer": {"all": 1}, "size": [0, 10, 2], "at": [30, 0, 1]}]},
+    {"parts": [{"id": "r", "shape": "box", "size": [40, 30, 20], "at": [0, 0, 10], "radius": 4, "sides": 32}]},
+]
+
+
+def test_fillets_and_chamfers_build_the_same_in_both(h3):
+    pytest.importorskip("manifold3d")
+    js = run_js(BUILD_JS, {"files": {}, "designs": EDGED})
+    for d, j in zip(EDGED, js):
+        design, problems = h3.read_design(json.dumps(d))
+        b = h3.build_design(design, ".")
+        mesh = b.solid.to_mesh()
+        v = np.asarray(mesh.vert_properties)[:, :3]
+        assert j["triangles"] == len(mesh.tri_verts), d
+        assert j["volume"] == pytest.approx(b.solid.volume(), rel=1e-9, abs=1e-6)
+        assert np.allclose(j["box"], [v.min(0), v.max(0)], atol=1e-4)
+        assert j["problems"] == len(b.problems), (d, b.problems)
+    said = run_js("process.stdout.write(JSON.stringify(input.map((d) => G.readDesign(JSON.stringify(d)).problems.length)));",
+                  EDGED)
+    assert said == [len(h3.read_design(json.dumps(d))[1]) for d in EDGED]
+    vol = [j["volume"] for j in js]
+    box = 40 * 30 * 20
+    assert vol[0] < box and vol[3] < vol[0]                         # rounder: less
+    assert js[1]["triangles"] == js[16]["triangles"] and vol[1] == pytest.approx(vol[16], rel=1e-12)  # all = radius
+    assert js[0]["box"] == [[-20, -15, 0], [20, 15, 20]]              # its size stays
+    assert js[13]["problems"] == 1 and said[15] == 6                   # too big: made smaller; names it did not know
+    assert np.allclose(js[9]["box"][1][:2], [13.3594, 13.3594], atol=1e-3)  # a cone's rounded rim: in from 15
+
+
+EDGE_JS = """
+const box = { id: "b", shape: "box", size: [40, 30, 20], at: [5, -3, 10], rotate: [0, 0, 90], mirror: true };
+const read = G.readDesign(JSON.stringify({ parts: [{ id: "n", shape: "box", fillet: { "Front_Top": 1, "LEFT back": 2,
+  top: 3, vertical: 1 }, chamfer: { "bottom left": 0.5, all: 0.2 } }, { id: "o", shape: "outline", points: [[0, 0], [9, 0], [0, 9]],
+  fillet: { corners: 1 } }, { id: "w", shape: "wedge", chamfer: { "slope front": 1 } }] }));
+const n = read.design.parts[0];
+const at = (p, v) => { const m = G.rotation(p.rotate); const l = [p.mirror ? -v[0] : v[0], v[1], v[2]];
+  const w = G.apply(m, l); return [w[0] + p.at[0], w[1] + p.at[1], w[2] + p.at[2]]; };
+const ring = { id: "c", shape: "cylinder", size: [10, 10, 4], at: [20, 0, 2], rotate: [0, 0, 0], repeat: { count: 4, around: [0, 0] } };
+process.stdout.write(JSON.stringify({
+  names: [n.fillet, n.chamfer, read.design.parts[1].fillet, read.design.parts[2].chamfer],
+  plan: G.edgePlan(n), problems: read.problems,
+  near: [G.nearestEdge(box, at(box, [-19.6, 0, 9.8])), G.nearestEdge(box, at(box, [20, 15, 0])),
+         G.nearestEdge(box, at(box, [-20, -15, 3]))],
+  copy: G.nearestEdge(ring, G.copyOf(ring, 2, [20, 0, 3.9])),
+  wedge: G.nearestEdge({ id: "w", shape: "wedge", size: [40, 30, 20], at: [0, 0, 10], rotate: [0, 0, 0] }, [0, -15, 10]),
+  replaced: G.withEdge({ ...box, fillet: { "top-front": 2, front: 1 }, chamfer: { top: 1 } }, "top", "fillet", 3),
+  all: G.withEdge({ ...box, fillet: { "top-front": 2 }, chamfer: { bottom: 1 } }, "all", "chamfer", 0.5),
+  off: G.withoutEdge({ ...box, fillet: { top: 2 } }, "fillet", "top"),
+  ties: G.edgePlan({ ...box, fillet: { top: 2, front: 3 }, chamfer: { top: 1, left: 4 } }),
+}));
+"""
+
+
+def test_edge_names_and_picking_an_edge(h3):
+    """Edge names as a model may write them; which name wins; the editor's Pick an edge on a turned, mirrored and
+    repeated part; its group buttons replace what they cover."""
+    out = run_js(EDGE_JS, {})
+    fillet, chamfer, corners, wedge = out["names"]
+    assert fillet == {"top-front": 1, "back-left": 2, "top": 3, "vertical": 1} and chamfer == {"bottom-left": 0.5, "all": 0.2}
+    assert corners == {"vertical": 1} and wedge == {"front-slope": 1} and out["problems"] == []
+    plan = out["plan"]
+    assert plan["top-front"] == {"kind": "fillet", "size": 1}           # the edge itself over its face
+    assert plan["top-back"] == {"kind": "fillet", "size": 3}            # the face over all
+    assert plan["bottom-left"] == {"kind": "chamfer", "size": 0.5} and plan["bottom-front"] == {"kind": "chamfer", "size": 0.2}
+    assert plan["back-left"] == {"kind": "fillet", "size": 2} and plan["front-right"] == {"kind": "fillet", "size": 1}
+    py = h3._edge_plan(h3.read_design(json.dumps({"parts": [{"id": "n", "shape": "box", "fillet": fillet,
+                                                               "chamfer": chamfer}]}))[0]["parts"][0])
+    assert {k: {"kind": v[0], "size": v[1]} for k, v in py.items()} == plan
+    ties = out["ties"]                     # as exact: a fillet over a chamfer, then the larger
+    assert ties["top-front"] == {"kind": "fillet", "size": 3} and ties["top-back"] == {"kind": "fillet", "size": 2}
+    assert ties["top-left"] == {"kind": "fillet", "size": 2} and ties["back-left"] == {"kind": "chamfer", "size": 4}
+    py = h3._edge_plan({"shape": "box", "fillet": {"top": 2, "front": 3}, "chamfer": {"top": 1, "left": 4}})
+    assert {k: {"kind": v[0], "size": v[1]} for k, v in py.items()} == ties
+    near = [x["edge"] for x in out["near"]]
+    assert near == ["top-left", "back-right", "front-left"], out["near"]   # in its own frame: mirrored, turned 90
+    assert out["copy"]["edge"] == "top" and out["copy"]["distance"] < 0.2 and out["wedge"]["edge"] == "front-slope"
+    r = out["replaced"]
+    assert r["fillet"] == {"front": 1, "top": 3} and "chamfer" not in r or r.get("chamfer") is None
+    assert out["all"].get("fillet") is None and out["all"]["chamfer"] == {"all": 0.5} and out["off"].get("fillet") is None
+    js_tables = run_js("process.stdout.write(JSON.stringify({faces: G.EDGE_FACES, edges: G.EDGES}));", {})
+    assert js_tables["faces"] == {k: list(v) for k, v in h3.EDGE_FACES.items()}
+    assert js_tables["edges"] == {k: list(v) for k, v in h3.EDGES.items()}

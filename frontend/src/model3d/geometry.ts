@@ -24,7 +24,7 @@ export const MAX_COPIES = 100;
 /** The keys a part may have; others are said once (a model guessing the format: "type", "radius", "position"). */
 export const PART_KEYS = ["id", "name", "shape", "size", "at", "rotate", "mirror", "hole", "hidden", "color", "sides",
   "radius", "top", "text", "font", "bold", "italic", "align", "letter_spacing", "line_spacing", "points", "holes",
-  "file", "repeat", "parts"];
+  "file", "repeat", "fillet", "chamfer", "parts"];
 
 /** A text's fonts (0.89.0), as fonts/index.json names them (tools/make_3d_font.py makes both): the first is the
  *  default. Other names a model may write for them, and the words in a name that ask for bold or italic. */
@@ -86,6 +86,8 @@ export interface Part {
   holes?: Point2[][];         // outline: shapes cut out of it
   file?: string;              // mesh: an STL, 3MF or OBJ in the working folder
   repeat?: Repeat;            // copies of it
+  fillet?: EdgeSizes;         // its own edges rounded (0.91.0): box, wedge, cylinder, cone, an outline's corners
+  chamfer?: EdgeSizes;        // ... or cut off: the same names, the size along each face
   parts?: Part[];             // group
 }
 
@@ -247,6 +249,17 @@ function readPart(p: Record<string, unknown>, seen: Set<string>, problems: strin
   }
   const repeat = readRepeat(p.repeat, id, problems);
   if (repeat) part.repeat = repeat;
+  const fillet = readEdgeSizes(p.fillet, part, "fillet", problems);
+  const chamfer = readEdgeSizes(p.chamfer, part, "chamfer", problems);
+  if ((fillet || chamfer) && part.radius) {
+    problems.push(`${id}: a box with a radius is rounded all round already - its fillet and chamfer were left out.`);
+  } else {
+    if (fillet) part.fillet = fillet;
+    if (chamfer) part.chamfer = chamfer;
+    if (fillet && (shape === "box" || shape === "wedge" || shape === "outline") && num(p.sides)) {
+      part.sides = Math.max(3, Math.min(256, Math.round(p.sides)));        // how round its fillets are
+    }
+  }
   return part;
 }
 
@@ -331,7 +344,7 @@ function cleanPart(p: Part): Record<string, unknown> {
   if (p.hole) o.hole = true;
   if (p.hidden) o.hidden = true;
   if (p.color && p.shape !== "group") o.color = p.color;
-  if (p.sides !== undefined && (ROUND.includes(p.shape) || p.radius)) o.sides = p.sides;
+  if (p.sides !== undefined && (ROUND.includes(p.shape) || p.radius || p.fillet)) o.sides = p.sides;
   if (p.radius) o.radius = r3(p.radius);
   if (p.shape === "cone") o.top = r3(p.top ?? 0);
   if (p.shape === "text") {
@@ -354,6 +367,10 @@ function cleanPart(p: Part): Record<string, unknown> {
       if (p.repeat.angle !== undefined && Math.abs(p.repeat.angle) < 360) r.angle = r3(p.repeat.angle);
     }
     o.repeat = r;
+  }
+  for (const kind of ["fillet", "chamfer"] as const) {
+    const m = p[kind];
+    if (m && Object.keys(m).length) o[kind] = Object.fromEntries(Object.entries(m).map(([key, v]) => [key, r3(v)]));
   }
   if (p.shape === "group") o.parts = (p.parts ?? []).map(cleanPart);
   return o;
@@ -550,6 +567,10 @@ export function transformPart(p: Part, centre: Vec3, move: Vec3, turn: Mat3 | nu
         out.size = [drawn[0] * k, drawn[1] * k, Math.max(MIN_SIZE, p.size[2] * k)];
       }
       if (p.radius) out.radius = p.radius * k;
+      for (const kind of ["fillet", "chamfer"] as const) {
+        const m = p[kind];
+        if (m) out[kind] = Object.fromEntries(Object.entries(m).map(([key, v]) => [key, v * k]));
+      }
     }
   }
   if (p.repeat) {
@@ -599,6 +620,321 @@ export function mirrorPart(p: Part, axis: number, centre: Vec3): Part {
     out.repeat = r;
   }
   return out;
+}
+
+// ---------------------------------------------------------------- edges: fillets and chamfers (0.91.0)
+
+/** A part's own edges: its faces (each names the edges round it) and each edge as the two faces it lies between, in
+ *  the faces' order here - "top-front", never "front-top". */
+export const EDGE_FACES: Partial<Record<Shape, string[]>> = {
+  box: ["top", "bottom", "front", "back", "left", "right"],
+  wedge: ["bottom", "left", "front", "back", "slope"],
+  cylinder: ["top", "bottom"],
+  cone: ["top", "bottom"],
+};
+export const EDGES: Partial<Record<Shape, string[]>> = {
+  box: ["top-front", "top-back", "top-left", "top-right", "bottom-front", "bottom-back", "bottom-left", "bottom-right",
+    "front-left", "front-right", "back-left", "back-right"],
+  wedge: ["bottom-left", "bottom-front", "bottom-back", "bottom-slope", "left-front", "left-back", "left-slope",
+    "front-slope", "back-slope"],
+  cylinder: ["top", "bottom"],
+  cone: ["top", "bottom"],
+  outline: ["vertical"],
+};
+const VERTICAL: Partial<Record<Shape, string[]>> = {
+  box: ["front-left", "front-right", "back-left", "back-right"], wedge: ["left-front", "left-back"], outline: ["vertical"],
+};
+export type EdgeKind = "fillet" | "chamfer";
+/** Edge name -> mm: a face ("top": the edges round it), two faces ("top-front": the edge between them), "vertical",
+ *  "all" - an outline's "vertical" (or "corners") are the edges at its points. */
+export type EdgeSizes = Record<string, number>;
+export interface EdgeSpec { kind: EdgeKind; size: number }
+
+/** An edge name as the file keeps it ("Front_Top" -> "top-front"), or null when the shape has no such edge. */
+export function edgeName(shape: Shape, raw: string): string | null {
+  const edges = EDGES[shape];
+  if (!edges) return null;
+  const words = raw.trim().toLowerCase().split(/[\s_-]+/).filter(Boolean);
+  const key = words.join("-");
+  if (key === "all" || (key === "vertical" && VERTICAL[shape])) return key;
+  if (shape === "outline") return key === "corners" ? "vertical" : null;
+  const faces = EDGE_FACES[shape] ?? [];
+  if (words.length === 1 && faces.includes(key)) return key;
+  if (words.length === 2) {
+    const pair = [...words].sort((a, b) => faces.indexOf(a) - faces.indexOf(b)).join("-");
+    if (edges.includes(pair)) return pair;
+  }
+  return null;
+}
+
+/** The edges a name stands for. */
+export function edgesOf(shape: Shape, key: string): string[] {
+  return (EDGES[shape] ?? []).filter((e) => covers(shape, key, e) >= 0);
+}
+
+/** How exactly a name means an edge: "all" 0, "vertical" or a face 1, the edge itself 2; -1 when it does not. */
+function covers(shape: Shape, key: string, edge: string): number {
+  if (key === "all") return 0;
+  if (key === "vertical") return VERTICAL[shape]?.includes(edge) ? 1 : -1;
+  if (key === edge) return 2;
+  return edge.split("-").includes(key) ? 1 : -1;
+}
+
+/** Each of a part's edges that is rounded or cut, and how: the name that means it most exactly wins ("top-front"
+ *  over "top" over "all"), a fillet over a chamfer, then the larger size. */
+export function edgePlan(p: Part): Record<string, EdgeSpec> {
+  const out: Record<string, EdgeSpec> = {};
+  for (const edge of EDGES[p.shape] ?? []) {
+    let best: (EdgeSpec & { spec: number }) | null = null;
+    for (const kind of ["chamfer", "fillet"] as const) {
+      for (const [key, size] of Object.entries(p[kind] ?? {})) {
+        const spec = covers(p.shape, key, edge);
+        if (spec < 0) continue;
+        const rank = kind === "fillet" ? 1 : 0, was = best?.kind === "fillet" ? 1 : 0;
+        if (!best || spec > best.spec || (spec === best.spec && (rank > was || (rank === was && size > best.size)))) {
+          best = { kind, size, spec };
+        }
+      }
+    }
+    if (best) out[edge] = { kind: best.kind, size: best.size };
+  }
+  return out;
+}
+
+/** A polygon with corner i rounded (fillet: an arc of radius size, `quarter` straight pieces to a right angle) or cut
+ *  (chamfer: size along each side) by corners[i]. A size that does not fit - half a side where the corner at its
+ *  other end is treated too, nearly all of it where not - is made smaller, and `clamped` says so. */
+export function roundCorners(poly: Point2[], corners: (EdgeSpec | undefined)[], quarter: number): { poly: Point2[];
+  clamped: boolean; sizes: number[] } {
+  const n = poly.length;
+  const out: Point2[] = [];
+  const sizes: number[] = poly.map(() => 0);
+  let clamped = false;
+  for (let i = 0; i < n; i++) {
+    const c = poly[i], spec = corners[i];
+    if (!spec) {
+      out.push(c);
+      continue;
+    }
+    const a = poly[(i + n - 1) % n], b = poly[(i + 1) % n];
+    const lin = Math.sqrt((c[0] - a[0]) * (c[0] - a[0]) + (c[1] - a[1]) * (c[1] - a[1]));
+    const lout = Math.sqrt((b[0] - c[0]) * (b[0] - c[0]) + (b[1] - c[1]) * (b[1] - c[1]));
+    const din: Point2 = [(c[0] - a[0]) / lin, (c[1] - a[1]) / lin], dout: Point2 = [(b[0] - c[0]) / lout, (b[1] - c[1]) / lout];
+    const turn = Math.atan2(din[0] * dout[1] - din[1] * dout[0], din[0] * dout[0] + din[1] * dout[1]);
+    if (Math.abs(turn) < 1e-9) {
+      out.push(c);
+      continue;
+    }
+    const k = Math.tan(Math.abs(turn) / 2);
+    let t = spec.kind === "fillet" ? spec.size * k : spec.size;
+    const room = Math.min(lin * (corners[(i + n - 1) % n] ? 0.5 : 0.999), lout * (corners[(i + 1) % n] ? 0.5 : 0.999));
+    if (t > room) {
+      t = room;
+      clamped = true;
+    }
+    const p1: Point2 = [c[0] - t * din[0], c[1] - t * din[1]], p2: Point2 = [c[0] + t * dout[0], c[1] + t * dout[1]];
+    if (spec.kind === "chamfer") {
+      sizes[i] = t;
+      out.push(p1, p2);
+      continue;
+    }
+    const r = t / k;
+    sizes[i] = r;
+    const side = turn > 0 ? 1 : -1;                                  // the centre is on the inside of the turn
+    const o: Point2 = [p1[0] - side * r * din[1], p1[1] + side * r * din[0]];
+    const a0 = Math.atan2(p1[1] - o[1], p1[0] - o[0]);
+    const m = Math.max(1, Math.round((quarter * Math.abs(turn)) / (Math.PI / 2)));
+    for (let j = 0; j <= m; j++) {
+      const ang = a0 + (turn * j) / m;
+      out.push([o[0] + r * Math.cos(ang), o[1] + r * Math.sin(ang)]);
+    }
+  }
+  return { poly: out, clamped, sizes };
+}
+
+/** Whether a part has an edge rounded or cut. */
+export const hasEdges = (p: Part) => Object.keys(edgePlan(p)).length > 0;
+
+/** Straight pieces in a quarter circle of a part's fillets: a quarter of its sides (default 32 for a box). */
+export const edgeQuarter = (p: Part) => Math.max(1, Math.round((p.sides ?? 32) / 4));
+
+/** The prisms a box or wedge with treated edges is the intersection of: each a polygon in a plane (axes u and v),
+ *  extruded `length` along u x v and centred on the part's middle. A box's: its outline seen along each axis with
+ *  the corners of the edges along that axis treated. A wedge's: its triangle seen from the side, and three slabs as
+ *  deep as the wedge under its bottom, left end and slope, their front and back edges treated. Only those with an
+ *  edge treated - the first is always there. */
+export function edgePrisms(p: Part): { prisms: { poly: Point2[]; u: Vec3; v: Vec3; length: number }[]; clamped: boolean;
+  balls: { centre: Vec3; corner: Vec3; r: number }[] } {
+  const plan = edgePlan(p);
+  const q = edgeQuarter(p);
+  const [sx, sy, sz] = p.size;
+  const x = sx / 2, y = sy / 2, z = sz / 2;
+  const X: Vec3 = [1, 0, 0], Y: Vec3 = [0, 1, 0], Z: Vec3 = [0, 0, 1];
+  const out: { poly: Point2[]; u: Vec3; v: Vec3; length: number }[] = [];
+  const got: Record<string, number> = {};                     // the fillet each edge got, after making room
+  let clamped = false;
+  const add = (poly: Point2[], names: (string | null)[], u: Vec3, v: Vec3, length: number, always = false) => {
+    const corners = names.map((nm) => (nm ? plan[nm] : undefined));
+    if (!always && !corners.some(Boolean)) return;
+    const r = roundCorners(poly, corners, q);
+    clamped ||= r.clamped;
+    names.forEach((nm, i) => { if (nm && plan[nm]?.kind === "fillet") got[nm] = r.sizes[i]; });
+    out.push({ poly: r.poly, u, v, length });
+  };
+  // A box's corner where three fillets of one size meet is a ball's eighth (as CAD makes it), not where the three
+  // rounded prisms cross: the build cuts the cube of that size at the corner and puts the ball's piece there.
+  const balls: { centre: Vec3; corner: Vec3; r: number }[] = [];
+  const corners = () => {
+    for (const a of [-1, 1]) for (const b of [-1, 1]) for (const c of [-1, 1]) {
+      const ud = c > 0 ? "top" : "bottom", fb = b < 0 ? "front" : "back", lr = a < 0 ? "left" : "right";
+      const r = got[`${ud}-${fb}`];
+      if (!r || got[`${ud}-${lr}`] !== r || got[`${fb}-${lr}`] !== r) continue;
+      balls.push({ centre: [a * (x - r), b * (y - r), c * (z - r)], corner: [a * x, b * y, c * z], r });
+    }
+  };
+  if (p.shape === "box") {
+    add([[-x, -y], [x, -y], [x, y], [-x, y]], ["front-left", "front-right", "back-right", "back-left"], X, Y, sz);
+    add([[-y, -z], [y, -z], [y, z], [-y, z]], ["bottom-front", "bottom-back", "top-back", "top-front"], Y, Z, sx);
+    add([[-z, -x], [z, -x], [z, x], [-z, x]], ["bottom-left", "top-left", "top-right", "bottom-right"], Z, X, sy);
+    corners();
+  } else if (p.shape === "wedge") {
+    const len = Math.sqrt(sx * sx + sz * sz), deep = sx + sz;
+    const n: Vec3 = [sz / len, 0, sx / len];                       // the slope's outward normal; it runs through 0,0,0
+    add([[-z, -x], [z, -x], [-z, x]], ["bottom-left", "left-slope", "bottom-slope"], Z, X, sy, true);
+    add([[-y, -z], [y, -z], [y, -z + deep], [-y, -z + deep]], ["bottom-front", "bottom-back", null, null], Y, Z, sx);
+    add([[-x, -y], [-x + deep, -y], [-x + deep, y], [-x, y]], ["left-front", null, null, "left-back"], X, Y, sz);
+    add([[-y, -deep], [y, -deep], [y, 0], [-y, 0]], [null, null, "back-slope", "front-slope"], Y, n, len);
+  }
+  return { prisms: out, clamped, balls };
+}
+
+/** A box whose 12 edges are all fillets of one size: rounded all round, as a box with a radius (the hull of eight
+ *  balls) - that size, or 0. */
+export function roundAll(p: Part): number {
+  if (p.shape !== "box") return 0;
+  const plan = edgePlan(p), edges = EDGES.box ?? [];
+  const r = plan[edges[0]]?.size ?? 0;
+  return edges.every((e) => plan[e]?.kind === "fillet" && plan[e].size === r) ? r : 0;
+}
+
+/** A cylinder's or cone's half outline (x: the radius, y: up) with its rims treated - turned round to make it. */
+export function edgeProfile(p: Part): { poly: Point2[]; clamped: boolean } {
+  const plan = edgePlan(p);
+  const r = p.size[0] / 2, h = p.size[2] / 2, top = p.shape === "cone" ? r * (p.top ?? 0) : r;
+  if (top > 1e-9) return roundCorners([[0, -h], [r, -h], [top, h], [0, h]], [undefined, plan.bottom, plan.top, undefined], edgeQuarter(p));
+  return roundCorners([[0, -h], [r, -h], [0, h]], [undefined, plan.bottom, undefined], edgeQuarter(p));
+}
+
+/** Where a point in the design is on a part (its copy `copy`): in the part's own frame, before it is mirrored, turned
+ *  and moved. */
+export function toPart(p: Part, v: Vec3, copy = 0): Vec3 {
+  let w: Vec3 = v;
+  if (copy && p.repeat) {
+    const r = p.repeat;
+    if (r.step) w = [v[0] - r.step[0] * copy, v[1] - r.step[1] * copy, v[2] - r.step[2] * copy];
+    else {
+      const [ax, ay] = repeatAround(p);
+      const t = (-repeatStep(r) * copy * Math.PI) / 180, c = Math.cos(t), s = Math.sin(t);
+      w = [ax + c * (v[0] - ax) - s * (v[1] - ay), ay + s * (v[0] - ax) + c * (v[1] - ay), v[2]];
+    }
+  }
+  const m = rotation(p.rotate);
+  const d: Vec3 = [w[0] - p.at[0], w[1] - p.at[1], w[2] - p.at[2]];
+  const l: Vec3 = [m[0] * d[0] + m[3] * d[1] + m[6] * d[2], m[1] * d[0] + m[4] * d[1] + m[7] * d[2], m[2] * d[0] + m[5] * d[1] + m[8] * d[2]];
+  return p.mirror ? [-l[0], l[1], l[2]] : l;
+}
+
+/** The part's own edge nearest a point on it (the editor's "Pick an edge"), with how far it is (mm) - null for a
+ *  shape without named edges. A repeated part: the copy the point is on. */
+export function nearestEdge(p: Part, v: Vec3): { edge: string; distance: number } | null {
+  const [sx, sy, sz] = p.size;
+  const x = sx / 2, y = sy / 2, z = sz / 2;
+  let lines: [string, Vec3, Vec3][] = [];
+  if (p.shape === "box") {
+    const c = (a: number, b: number, d: number): Vec3 => [a * x, b * y, d * z];
+    lines = [["top-front", c(-1, -1, 1), c(1, -1, 1)], ["top-back", c(-1, 1, 1), c(1, 1, 1)],
+      ["top-left", c(-1, -1, 1), c(-1, 1, 1)], ["top-right", c(1, -1, 1), c(1, 1, 1)],
+      ["bottom-front", c(-1, -1, -1), c(1, -1, -1)], ["bottom-back", c(-1, 1, -1), c(1, 1, -1)],
+      ["bottom-left", c(-1, -1, -1), c(-1, 1, -1)], ["bottom-right", c(1, -1, -1), c(1, 1, -1)],
+      ["front-left", c(-1, -1, -1), c(-1, -1, 1)], ["front-right", c(1, -1, -1), c(1, -1, 1)],
+      ["back-left", c(-1, 1, -1), c(-1, 1, 1)], ["back-right", c(1, 1, -1), c(1, 1, 1)]];
+  } else if (p.shape === "wedge") {
+    const A: Vec3 = [-x, -y, -z], B: Vec3 = [x, -y, -z], C: Vec3 = [x, y, -z], D: Vec3 = [-x, y, -z], E: Vec3 = [-x, -y, z],
+      F: Vec3 = [-x, y, z];
+    lines = [["bottom-left", A, D], ["bottom-front", A, B], ["bottom-back", D, C], ["bottom-slope", B, C],
+      ["left-front", A, E], ["left-back", D, F], ["left-slope", E, F], ["front-slope", E, B], ["back-slope", F, C]];
+  } else if (p.shape !== "cylinder" && p.shape !== "cone") return null;
+  const copies = p.repeat && p.repeat.count > 1 ? p.repeat.count : 1;
+  let best: { edge: string; distance: number } | null = null;
+  for (let i = 0; i < copies; i++) {
+    const l = toPart(p, v, i);
+    const outside = Math.hypot(Math.max(0, Math.abs(l[0]) - x), Math.max(0, Math.abs(l[1]) - y), Math.max(0, Math.abs(l[2]) - z));
+    if (outside > 0.5 && i < copies - 1) continue;                  // not this copy
+    let got: { edge: string; distance: number };
+    if (p.shape === "cylinder" || p.shape === "cone") {
+      got = Math.abs(l[2] - z) <= Math.abs(l[2] + z) ? { edge: "top", distance: Math.abs(l[2] - z) }
+        : { edge: "bottom", distance: Math.abs(l[2] + z) };
+    } else {
+      got = { edge: "", distance: Infinity };
+      for (const [name, a, b] of lines) {
+        const ab: Vec3 = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+        const len2 = ab[0] * ab[0] + ab[1] * ab[1] + ab[2] * ab[2];
+        const t = Math.max(0, Math.min(1, ((l[0] - a[0]) * ab[0] + (l[1] - a[1]) * ab[1] + (l[2] - a[2]) * ab[2]) / len2));
+        const d = Math.hypot(l[0] - a[0] - t * ab[0], l[1] - a[1] - t * ab[1], l[2] - a[2] - t * ab[2]);
+        if (d < got.distance) got = { edge: name, distance: d };
+      }
+    }
+    if (!best || outside + got.distance < best.distance) best = { edge: got.edge, distance: outside + got.distance };
+  }
+  return best;
+}
+
+/** A part with an edge name rounded or cut (the editor's Edges): names wholly within it go - it replaces them. */
+export function withEdge(p: Part, key: string, kind: EdgeKind, size: number): Part {
+  const covered = new Set(edgesOf(p.shape, key));
+  const rest = (m?: EdgeSizes) => {
+    const out = Object.fromEntries(Object.entries(m ?? {}).filter(([k]) => k !== key && !edgesOf(p.shape, k).every((e) => covered.has(e))));
+    return Object.keys(out).length ? out : undefined;
+  };
+  const other = kind === "fillet" ? "chamfer" : "fillet";
+  return { ...p, [kind]: { ...rest(p[kind]), [key]: size }, [other]: rest(p[other]) };
+}
+
+/** A part without one of its edge names. */
+export function withoutEdge(p: Part, kind: EdgeKind, key: string): Part {
+  const out = Object.fromEntries(Object.entries(p[kind] ?? {}).filter(([k]) => k !== key));
+  return { ...p, [kind]: Object.keys(out).length ? out : undefined };
+}
+
+function readEdgeSizes(v: unknown, part: Part, kind: EdgeKind, problems: string[]): EdgeSizes | undefined {
+  if (v === undefined) return undefined;
+  if (!v || typeof v !== "object" || Array.isArray(v)) {
+    problems.push(`${part.id}: "${kind}" is { edge: mm } - left out.`);
+    return undefined;
+  }
+  if (!EDGES[part.shape]) {
+    problems.push(`${part.id}: a ${part.shape} has no edges of its own to ${kind} - left out.`);
+    return undefined;
+  }
+  const out: EdgeSizes = {};
+  for (const [key, size] of Object.entries(v as Record<string, unknown>)) {
+    const name = edgeName(part.shape, key);
+    if (!name || !num(size) || size <= 0) {
+      problems.push(`${part.id}: no ${kind} "${key}" - ${edgeChoices(part.shape)}, each with its size in mm.`);
+      continue;
+    }
+    out[name] = Math.max(out[name] ?? 0, size);
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+/** What the names of a shape's edges are, said for a problem and in hub3d format. */
+export function edgeChoices(shape: Shape): string {
+  if (shape === "outline") return "an outline's edges: vertical (its corners), all";
+  if (shape === "cylinder" || shape === "cone") return `a ${shape}'s edges: top, bottom, all`;
+  const faces = EDGE_FACES[shape] ?? [];
+  return `a ${shape}'s edges: ${faces.join(", ")} (the edges round that face), vertical, all, or two faces: `
+    + (shape === "box" ? "top-front" : "left-slope");
 }
 
 // ---------------------------------------------------------------- text
@@ -826,9 +1162,54 @@ export function build(design: Design, kit: Kit): Built {
   const problems: string[] = [];
   const loose: { part: string; mesh: MeshData }[] = [];
 
+  // A part with its own edges rounded or cut (0.91.0): a box or a wedge the intersection of its prisms, a cylinder or
+  // a cone its treated half outline turned round, an outline its corners treated (in "outline" below).
+  const tooBig = (p: Part) => problems.push(`${p.id}: a fillet or chamfer larger than its edges have room for was made smaller.`);
+  const prism = (poly: Point2[], u: Vec3, v: Vec3, length: number): Obj => {
+    const e: Vec3 = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
+    const m = keep(keep(new CrossSection([poly], "NonZero")).extrude(length));
+    return keep(m.transform([u[0], u[1], u[2], 0, v[0], v[1], v[2], 0, e[0], e[1], e[2], 0,
+      (-e[0] * length) / 2, (-e[1] * length) / 2, (-e[2] * length) / 2, 1]));
+  };
+  const edged = (p: Part): Obj | null => {
+    const all = roundAll(p);
+    if (all) {
+      const [sx, sy, sz] = p.size;
+      const r = Math.min(all, (Math.min(sx, sy, sz) / 2) * 0.999);
+      if (r < all) tooBig(p);
+      const balls: Obj[] = [];
+      for (const a of [-1, 1]) for (const b of [-1, 1]) for (const c of [-1, 1]) {
+        balls.push(keep(keep(Manifold.sphere(r, 4 * edgeQuarter(p))).translate([a * (sx / 2 - r), b * (sy / 2 - r), c * (sz / 2 - r)])));
+      }
+      return keep(Manifold.hull(balls));
+    }
+    if (p.shape === "cylinder" || p.shape === "cone") {
+      const { poly, clamped } = edgeProfile(p);
+      if (clamped) tooBig(p);
+      const m = keep(keep(new CrossSection([poly], "NonZero")).revolve(p.sides ?? DEFAULT_SIDES, 360));
+      return Math.abs(p.size[1] - p.size[0]) > 1e-9 ? keep(m.scale([1, p.size[1] / p.size[0], 1])) : m;
+    }
+    const { prisms, clamped, balls } = edgePrisms(p);
+    if (clamped) tooBig(p);
+    let m: Obj | null = null;
+    for (const pr of prisms) {
+      const one = prism(pr.poly, pr.u, pr.v, pr.length);
+      m = m ? done(keep(m.intersect(one))) : one;
+    }
+    for (const b of balls) {
+      if (!m) break;
+      const lo = b.centre.map((v, i) => Math.min(v, b.corner[i])), hi = b.centre.map((v, i) => Math.max(v, b.corner[i]));
+      const cube = keep(keep(Manifold.cube([hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]], false)).translate(lo));
+      const ball = keep(keep(Manifold.sphere(b.r, 4 * edgeQuarter(p))).translate(b.centre));
+      m = done(keep(keep(m.subtract(cube)).add(done(keep(ball.intersect(cube))))));
+    }
+    return m;
+  };
+
   const shape = (p: Part): Obj | null => {
     const [sx, sy, sz] = p.size;
     const sides = p.sides ?? DEFAULT_SIDES;
+    if ((p.fillet || p.chamfer) && !p.radius && p.shape !== "outline" && hasEdges(p)) return edged(p);
     switch (p.shape) {
       case "box": {
         const r = Math.min(p.radius ?? 0, (Math.min(sx, sy, sz) / 2) * 0.999);
@@ -861,8 +1242,19 @@ export function build(design: Design, kit: Kit): Built {
         return keep(keep(keep(new CrossSection(polys, "NonZero")).extrude(sz)).translate([0, 0, -sz / 2]));
       }
       case "outline": {                    // EvenOdd: a hole is a hole whichever way round its points run
-        const polys = outlinePolygons(p);
+        let polys = outlinePolygons(p);
         if (!polys) return null;
+        const spec = edgePlan(p).vertical;
+        if (spec) {
+          const q = edgeQuarter(p);
+          let clamped = false;
+          polys = polys.map((poly) => {
+            const r = roundCorners(poly as Point2[], poly.map(() => spec), q);
+            clamped ||= r.clamped;
+            return r.poly;
+          });
+          if (clamped) tooBig(p);
+        }
         const cs = keep(new CrossSection(polys, "EvenOdd"));
         if (cs.isEmpty()) return null;
         return keep(keep(cs.extrude(sz)).translate([0, 0, -sz / 2]));

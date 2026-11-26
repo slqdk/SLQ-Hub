@@ -3228,6 +3228,7 @@ into the Hub, Tinkercad's level, his printer a Bambu Lab P2S but chosen per desi
     sides, a cylinder's sides, a cone's top, an outline's points, a mesh's file, a group's size); Duplicate, Hide,
     Delete. Several parts: Duplicate, Delete.
   - **Size and place**: size (keep proportions), centre ("its bottom at z ..."), turned; Onto the plate, Lay flat.
+  - **Edges** (0.91.0, below): fillets and chamfers on the part's own edges, and Pick an edge.
   - **Arrange**: Group, Ungroup; mirror left-right, front-back, up-down; align (two or more: left/middle/right,
     front/middle/back, bottom/middle/top); Pattern (Around, In a row - then copies, angle, the point or the step,
     Remove).
@@ -3240,6 +3241,36 @@ into the Hub, Tinkercad's level, his printer a Bambu Lab P2S but chosen per desi
     the warnings, and "2 problems" (a menu with what the file's reader and the build said). The head: Undo, Redo,
     Export, Full width / Show the chat, Close - all with their words. With nothing picked, Part, Size and place and
     Arrange say how to pick. On a narrow panel the ribbon scrolls sideways; on a phone the tabs wrap.
+- **Fillets and chamfers (0.91.0).** Søren: "Er det muligt at lave en funktion hvor man efterfølgende kan lave fillet
+  på et kant/side?" - asked, he chose all three: the parts' own edges, also where parts meet, also on imported STLs.
+  0.91.0 is the first: a part's own edges.
+  - **The format**: `fillet` and `chamfer`, each `{edge: mm}`. A box's faces are top, bottom, front, back, left, right,
+    a wedge's bottom, left, front, back, slope; a face's name means the edges round it, two faces' ("top-front") the
+    edge between them, "vertical" the upright ones, "all" every edge; a cylinder's or cone's edges are top and bottom
+    (its rims), an outline's "vertical" (or "corners") its points' corners. The readers take "Front_Top", "front top",
+    "TOP-FRONT" for "top-front" and say names they do not know; spheres, text, meshes and groups have no edges of their
+    own (said), and a box with a `radius` keeps it and drops them (said). Per edge the name that means it most exactly
+    wins (the edge, then a face or "vertical", then "all"), then a fillet over a chamfer, then the larger size
+    (`edgePlan`). `sides` makes a filleted box's, wedge's or outline's arcs rounder (default 32: 8 pieces to a quarter).
+  - **The build** (`geometry.ts` edgePrisms, edgeProfile, roundCorners - hub3d's `_edge_prisms`... step for step):
+    a box is the intersection of its outline seen along each axis, extruded, with the corners of the edges along that
+    axis rounded or cut in 2D (only the axes that have one); where three fillets of one size meet, the cube of that size
+    at the corner is cut away and a ball's eighth put there (a CAD corner - the prisms alone cross in creases); all
+    twelve the same fillet is the box with a radius (the hull of eight balls). A wedge: its side triangle extruded,
+    with its three corners treated, and slabs under its bottom, left end and slope with their front and back edges
+    treated. A cylinder or cone: its half outline with its rims treated, revolved with its `sides` (scaled for an
+    ellipse). An outline: every corner of its points and holes treated in 2D - a corner turning in rounds outwards.
+    A fillet's arc has the 2D turn's share of a quarter's pieces; a size that does not fit (half a side where the other
+    end is treated too, nearly all of it where not) is made smaller and said once. Every intersection is worked out
+    where it is made, as the joins are; the parity test has 17 such designs.
+  - **The editor**: an **Edges** tab - Fillet or Chamfer and a size; Top, Bottom, Vertical, All (a wedge's Slope, a
+    cylinder's Both, an outline's Corners), which also drop the names they cover (All after "top-front" leaves "all");
+    **Pick an edge**: click edges on the model - the spot is taken into the part's own frame (unmoved, unturned,
+    unmirrored; a repeated part's copy found) and the nearest named edge gets the treatment, or loses it when it has
+    that one; and the part's names now, each a button that takes it off. A box with All rounded (its radius, in Part)
+    says to set that to 0; setting it clears the fillets. Holes' and meshes' edges say they cannot be rounded yet.
+  - **Not yet - 0.92.0**: edges where parts meet (a hole's rim, a wall on a base: on the built solid, a fillet's
+    cutter or filler swept along the picked crease) and straight sharp edges of imported meshes.
 
 ### Workflows (0.67.0)
 

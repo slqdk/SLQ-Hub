@@ -813,7 +813,7 @@ DESIGN_FORMAT = "slq-hub-3d"
 DESIGN_SHAPES = ("box", "cylinder", "cone", "sphere", "wedge", "text", "outline", "mesh", "group")
 PART_KEYS = ("id", "name", "shape", "size", "at", "rotate", "mirror", "hole", "hidden", "color", "sides", "radius",
              "top", "text", "font", "bold", "italic", "align", "letter_spacing", "line_spacing", "points", "holes",
-             "file", "repeat", "parts")
+             "file", "repeat", "fillet", "chamfer", "parts")
 MAX_COPIES = 100
 ROUND_SHAPES = ("cylinder", "cone", "sphere")
 DEFAULT_SIDES = 64
@@ -847,8 +847,8 @@ DESIGN_EXAMPLE = """\
   "printer": "bambu-p2s",
   "bed": [256, 256, 256],
   "parts": [
-    {"id": "tag", "name": "Tag", "shape": "box", "size": [50, 22, 3], "at": [0, 0, 1.5], "radius": 1, "sides": 32,
-     "color": "#2b7bd9"},
+    {"id": "tag", "name": "Tag", "shape": "box", "size": [50, 22, 3], "at": [0, 0, 1.5], "fillet": {"vertical": 4},
+     "chamfer": {"top": 0.6}, "color": "#2b7bd9"},
     {"id": "ring", "name": "Key ring hole", "shape": "cylinder", "size": [5, 5, 6], "at": [-19, 0, 1.5], "hole": true},
     {"id": "word", "name": "Name", "shape": "text", "text": "SLQ", "size": [0, 8, 1], "at": [-1, 0, 3.5],
      "color": "#d9822b"},
@@ -916,8 +916,14 @@ A part:
             part's at, evenly all round - "around": [x, y] another point (a group's default: 0, 0), "angle": 90
             spreads them over 90 degrees; {{"count": 4, "step": [25, 0, 0]}} puts them in a row. A hole's copies are
             holes too
+  fillet    its own edges rounded, {{edge: mm}}: {{"top": 2}} rounds the edges round its top, {{"vertical": 3}} the
+            upright ones, {{"all": 1}} every one, {{"top-front": 2}} the one between two faces. A box's faces: top,
+            bottom, front, back, left, right; a wedge's: bottom, left, front, back, slope; a cylinder's or a cone's
+            edges: top, bottom; an outline's: vertical (its corners). The name that means an edge most exactly wins
+  chamfer   the same names, the edges cut off instead (the size along each face): {{"bottom": 0.6}} - a bottom edge
+            that does not bulge onto the plate
 
-  box       radius: rounded edges and corners (mm), sides: how round (default 64)
+  box       radius: every edge and corner rounded (mm), sides: how round (default 64) - or fillet some edges
   cylinder  along Z; sides (default 64) - sides 6 makes a hexagon (a nut trap), 3 a triangle
   cone      top: the top's diameter as a share of the bottom's (0: a point, 1: a cylinder)
   sphere    sides; different sizes make an ellipsoid
@@ -1171,7 +1177,232 @@ def _read_part(p: dict, seen: set, problems: list, odd: dict) -> dict:
     repeat = _read_repeat(p.get("repeat"), pid, problems)
     if repeat:
         part["repeat"] = repeat
+    fillet = _read_edge_sizes(p, "fillet", part, problems)
+    chamfer = _read_edge_sizes(p, "chamfer", part, problems)
+    if (fillet or chamfer) and part.get("radius"):
+        problems.append(f"{pid}: a box with a radius is rounded all round already - its fillet and chamfer were left out")
+    else:
+        if fillet:
+            part["fillet"] = fillet
+        if chamfer:
+            part["chamfer"] = chamfer
+        if fillet and shape in ("box", "wedge", "outline") and _num(p.get("sides")):
+            part["sides"] = max(3, min(256, _round(p["sides"])))         # how round its fillets are
     return part
+
+
+# ---------------------------------------------------------------- edges: fillets and chamfers (0.91.0)
+
+# A part's own edges - the editor's EDGE_FACES and EDGES (geometry.ts), name for name: its faces (each names the
+# edges round it) and each edge as the two faces it lies between, in the faces' order.
+EDGE_FACES = {"box": ("top", "bottom", "front", "back", "left", "right"),
+              "wedge": ("bottom", "left", "front", "back", "slope"),
+              "cylinder": ("top", "bottom"), "cone": ("top", "bottom")}
+EDGES = {"box": ("top-front", "top-back", "top-left", "top-right", "bottom-front", "bottom-back", "bottom-left",
+                 "bottom-right", "front-left", "front-right", "back-left", "back-right"),
+         "wedge": ("bottom-left", "bottom-front", "bottom-back", "bottom-slope", "left-front", "left-back", "left-slope",
+                   "front-slope", "back-slope"),
+         "cylinder": ("top", "bottom"), "cone": ("top", "bottom"), "outline": ("vertical",)}
+_VERTICAL = {"box": ("front-left", "front-right", "back-left", "back-right"), "wedge": ("left-front", "left-back"),
+             "outline": ("vertical",)}
+
+
+def _edge_name(shape: str, raw: str) -> str | None:
+    """An edge name as the file keeps it ("Front_Top" -> "top-front"), or None - the editor's edgeName."""
+    edges = EDGES.get(shape)
+    if not edges:
+        return None
+    words = [w for w in re.split(r"[\s_-]+", raw.strip().lower()) if w]
+    key = "-".join(words)
+    if key == "all" or (key == "vertical" and shape in _VERTICAL):
+        return key
+    if shape == "outline":
+        return "vertical" if key == "corners" else None
+    faces = EDGE_FACES.get(shape, ())
+    if len(words) == 1 and key in faces:
+        return key
+    if len(words) == 2:
+        pair = "-".join(sorted(words, key=lambda w: faces.index(w) if w in faces else -1))
+        if pair in edges:
+            return pair
+    return None
+
+
+def _covers(shape: str, key: str, edge: str) -> int:
+    if key == "all":
+        return 0
+    if key == "vertical":
+        return 1 if edge in _VERTICAL.get(shape, ()) else -1
+    if key == edge:
+        return 2
+    return 1 if key in edge.split("-") else -1
+
+
+def _edge_plan(p: dict) -> dict:
+    """Each of a part's edges that is rounded or cut: {edge: (kind, size)} - the editor's edgePlan."""
+    out = {}
+    for edge in EDGES.get(p["shape"], ()):
+        best = None
+        for kind in ("chamfer", "fillet"):
+            for key, size in (p.get(kind) or {}).items():
+                spec = _covers(p["shape"], key, edge)
+                if spec < 0:
+                    continue
+                rank, was = (1 if kind == "fillet" else 0), (1 if best and best[0] == "fillet" else 0)
+                if best is None or spec > best[2] or (spec == best[2] and (rank > was or (rank == was
+                                                                                           and size > best[1]))):
+                    best = (kind, size, spec)
+        if best:
+            out[edge] = (best[0], best[1])
+    return out
+
+
+def _edge_quarter(p: dict) -> int:
+    return max(1, _round(p.get("sides", 32) / 4))
+
+
+def _round_corners(poly: list, corners: list, quarter: int):
+    """A polygon with its corners rounded or cut - the editor's roundCorners, step for step: (points, clamped,
+    the size each corner got)."""
+    n = len(poly)
+    out: list = []
+    sizes = [0.0] * n
+    clamped = False
+    for i in range(n):
+        c, spec = poly[i], corners[i]
+        if not spec:
+            out.append(c)
+            continue
+        a, b = poly[(i + n - 1) % n], poly[(i + 1) % n]
+        lin = math.sqrt((c[0] - a[0]) * (c[0] - a[0]) + (c[1] - a[1]) * (c[1] - a[1]))
+        lout = math.sqrt((b[0] - c[0]) * (b[0] - c[0]) + (b[1] - c[1]) * (b[1] - c[1]))
+        din = ((c[0] - a[0]) / lin, (c[1] - a[1]) / lin)
+        dout = ((b[0] - c[0]) / lout, (b[1] - c[1]) / lout)
+        turn = math.atan2(din[0] * dout[1] - din[1] * dout[0], din[0] * dout[0] + din[1] * dout[1])
+        if abs(turn) < 1e-9:
+            out.append(c)
+            continue
+        k = math.tan(abs(turn) / 2)
+        t = spec[1] * k if spec[0] == "fillet" else spec[1]
+        room = min(lin * (0.5 if corners[(i + n - 1) % n] else 0.999), lout * (0.5 if corners[(i + 1) % n] else 0.999))
+        if t > room:
+            t = room
+            clamped = True
+        p1 = (c[0] - t * din[0], c[1] - t * din[1])
+        p2 = (c[0] + t * dout[0], c[1] + t * dout[1])
+        if spec[0] == "chamfer":
+            sizes[i] = t
+            out += [p1, p2]
+            continue
+        r = t / k
+        sizes[i] = r
+        side = 1 if turn > 0 else -1
+        o = (p1[0] - side * r * din[1], p1[1] + side * r * din[0])
+        a0 = math.atan2(p1[1] - o[1], p1[0] - o[0])
+        m = max(1, _round(quarter * abs(turn) / (math.pi / 2)))
+        for j in range(m + 1):
+            ang = a0 + turn * j / m
+            out.append((o[0] + r * math.cos(ang), o[1] + r * math.sin(ang)))
+    return out, clamped, sizes
+
+
+def _round_all(p: dict) -> float:
+    """A box whose 12 edges are all fillets of one size: that size (built as a box with a radius), else 0."""
+    if p["shape"] != "box":
+        return 0.0
+    plan = _edge_plan(p)
+    r = plan.get(EDGES["box"][0], ("", 0.0))[1]
+    return r if all(plan.get(e) == ("fillet", r) for e in EDGES["box"]) else 0.0
+
+
+def _edge_prisms(p: dict):
+    """The prisms a box or wedge with treated edges is the intersection of, and a box's corners where three fillets of
+    one size meet (a ball's piece goes there) - the editor's edgePrisms: ([(polygon, u, v, length)], clamped,
+    [(centre, corner, r)])."""
+    plan = _edge_plan(p)
+    q = _edge_quarter(p)
+    sx, sy, sz = p["size"]
+    x, y, z = sx / 2, sy / 2, sz / 2
+    X, Y, Z = (1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)
+    out: list = []
+    got: dict = {}
+    clamped = False
+
+    def add(poly, names, u, v, length, always=False):
+        nonlocal clamped
+        corners = [plan.get(nm) if nm else None for nm in names]
+        if not always and not any(corners):
+            return
+        pts, c, sizes = _round_corners(poly, corners, q)
+        clamped = clamped or c
+        for i, nm in enumerate(names):
+            if nm and plan.get(nm, ("",))[0] == "fillet":
+                got[nm] = sizes[i]
+        out.append((pts, u, v, length))
+
+    balls: list = []
+    if p["shape"] == "box":
+        add([(-x, -y), (x, -y), (x, y), (-x, y)], ["front-left", "front-right", "back-right", "back-left"], X, Y, sz)
+        add([(-y, -z), (y, -z), (y, z), (-y, z)], ["bottom-front", "bottom-back", "top-back", "top-front"], Y, Z, sx)
+        add([(-z, -x), (z, -x), (z, x), (-z, x)], ["bottom-left", "top-left", "top-right", "bottom-right"], Z, X, sy)
+        for a in (-1, 1):
+            for b in (-1, 1):
+                for c in (-1, 1):
+                    ud, fb, lr = ("top" if c > 0 else "bottom"), ("front" if b < 0 else "back"), \
+                        ("left" if a < 0 else "right")
+                    r = got.get(f"{ud}-{fb}")
+                    if not r or got.get(f"{ud}-{lr}") != r or got.get(f"{fb}-{lr}") != r:
+                        continue
+                    balls.append(((a * (x - r), b * (y - r), c * (z - r)), (a * x, b * y, c * z), r))
+    elif p["shape"] == "wedge":
+        length, deep = math.sqrt(sx * sx + sz * sz), sx + sz
+        n = (sz / length, 0.0, sx / length)
+        add([(-z, -x), (z, -x), (-z, x)], ["bottom-left", "left-slope", "bottom-slope"], Z, X, sy, True)
+        add([(-y, -z), (y, -z), (y, -z + deep), (-y, -z + deep)], ["bottom-front", "bottom-back", None, None], Y, Z, sx)
+        add([(-x, -y), (-x + deep, -y), (-x + deep, y), (-x, y)], ["left-front", None, None, "left-back"], X, Y, sz)
+        add([(-y, -deep), (y, -deep), (y, 0.0), (-y, 0.0)], [None, None, "back-slope", "front-slope"], Y, n, length)
+    return out, clamped, balls
+
+
+def _edge_profile(p: dict):
+    """A cylinder's or cone's half outline with its rims treated - the editor's edgeProfile."""
+    plan = _edge_plan(p)
+    r, h = p["size"][0] / 2, p["size"][2] / 2
+    top = r * p.get("top", 0.0) if p["shape"] == "cone" else r
+    if top > 1e-9:
+        return _round_corners([(0.0, -h), (r, -h), (top, h), (0.0, h)], [None, plan.get("bottom"), plan.get("top"), None],
+                              _edge_quarter(p))
+    return _round_corners([(0.0, -h), (r, -h), (0.0, h)], [None, plan.get("bottom"), None], _edge_quarter(p))
+
+
+def _read_edge_sizes(p: dict, kind: str, part: dict, problems: list):
+    if kind not in p:
+        return None
+    v = p[kind]
+    if not isinstance(v, dict):
+        problems.append(f'{part["id"]}: "{kind}" is {{ edge: mm }} - left out')
+        return None
+    if part["shape"] not in EDGES:
+        problems.append(f'{part["id"]}: a {part["shape"]} has no edges of its own to {kind} - left out')
+        return None
+    out: dict = {}
+    for key, size in v.items():
+        name = _edge_name(part["shape"], key)
+        if not name or not _num(size) or size <= 0:
+            problems.append(f'{part["id"]}: no {kind} "{key}" - {_edge_choices(part["shape"])}, each with its size in mm')
+            continue
+        out[name] = max(out.get(name, 0), float(size))
+    return out or None
+
+
+def _edge_choices(shape: str) -> str:
+    if shape == "outline":
+        return "an outline's edges: vertical (its corners), all"
+    if shape in ("cylinder", "cone"):
+        return f"a {shape}'s edges: top, bottom, all"
+    faces = EDGE_FACES.get(shape, ())
+    return (f"a {shape}'s edges: {', '.join(faces)} (the edges round that face), vertical, all, or two faces: "
+            + ("top-front" if shape == "box" else "left-slope"))
 
 
 def _outline_polygons(p: dict):
@@ -1331,10 +1562,60 @@ def build_design(design: dict, folder=".") -> DesignBuild:
     loose: list = []
     base = Path(folder)
 
+    def too_big(p: dict) -> None:
+        problems.append(f"{p['id']}: a fillet or chamfer larger than its edges have room for was made smaller.")
+
+    def prism(poly, u, v, length):
+        """The polygon (u, v) extruded `length` along u x v, centred on 0,0,0 - the editor's prism."""
+        e = (u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0])
+        m = m3d.CrossSection([np.array(poly, dtype=np.float64)], m3d.FillRule.NonZero).extrude(length)
+        return m.transform(np.array([[u[0], v[0], e[0], -e[0] * length / 2], [u[1], v[1], e[1], -e[1] * length / 2],
+                                     [u[2], v[2], e[2], -e[2] * length / 2]], dtype=np.float64))
+
+    def edged(p: dict):
+        """A part with its own edges rounded or cut (0.91.0) - the editor's edged, in its order."""
+        all_round = _round_all(p)
+        if all_round:
+            sx, sy, sz = p["size"]
+            r = min(all_round, min(sx, sy, sz) / 2 * 0.999)
+            if r < all_round:
+                too_big(p)
+            balls = [M.sphere(r, 4 * _edge_quarter(p)).translate((a * (sx / 2 - r), b * (sy / 2 - r), c * (sz / 2 - r)))
+                     for a in (-1, 1) for b in (-1, 1) for c in (-1, 1)]
+            return M.batch_hull(balls)
+        if p["shape"] in ("cylinder", "cone"):
+            poly, clamped, _ = _edge_profile(p)
+            if clamped:
+                too_big(p)
+            m = m3d.CrossSection([np.array(poly, dtype=np.float64)], m3d.FillRule.NonZero).revolve(
+                p.get("sides", DEFAULT_SIDES), 360.0)
+            if abs(p["size"][1] - p["size"][0]) > 1e-9:
+                m = m.scale((1.0, p["size"][1] / p["size"][0], 1.0))
+            return m
+        prisms, clamped, balls = _edge_prisms(p)
+        if clamped:
+            too_big(p)
+        m = None
+        for poly, u, v, length in prisms:
+            one = prism(poly, u, v, length)
+            m = done(m ^ one) if m is not None else one
+        for centre, corner, r in balls:
+            if m is None:
+                break
+            lo = [min(a, b) for a, b in zip(centre, corner)]
+            hi = [max(a, b) for a, b in zip(centre, corner)]
+            cube = M.cube((hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]), False).translate(tuple(lo))
+            ball = M.sphere(r, 4 * _edge_quarter(p)).translate(tuple(centre))
+            cut = done(m - cube)
+            m = done(cut + done(ball ^ cube))
+        return m
+
     def shape(p: dict):
         sx, sy, sz = p["size"]
         sides = p.get("sides", DEFAULT_SIDES)
         kind = p["shape"]
+        if (p.get("fillet") or p.get("chamfer")) and not p.get("radius") and kind != "outline" and _edge_plan(p):
+            return edged(p)
         if kind == "box":
             r = min(p.get("radius", 0.0), min(sx, sy, sz) / 2 * 0.999)
             if r <= 0:
@@ -1361,6 +1642,16 @@ def build_design(design: dict, folder=".") -> DesignBuild:
             polys = _outline_polygons(p)
             if polys is None:
                 return None
+            spec = _edge_plan(p).get("vertical")
+            if spec:
+                q, clamped, rounded = _edge_quarter(p), False, []
+                for poly in polys:
+                    pts, c, _ = _round_corners([(float(a), float(b)) for a, b in poly], [spec] * len(poly), q)
+                    clamped = clamped or c
+                    rounded.append(np.array(pts, dtype=np.float64))
+                polys = rounded
+                if clamped:
+                    too_big(p)
             cs = m3d.CrossSection(polys, m3d.FillRule.EvenOdd)
             if cs.is_empty():
                 return None

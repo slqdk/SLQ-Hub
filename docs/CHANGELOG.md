@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.91.0 - 2026-11-26
+
+- Fillets and chamfers in 3D designs: a part's own edges can be rounded or
+  cut off - a box's (any of its twelve), a wedge's, a cylinder's or cone's
+  rims, and the corners of an outline. Three fillets of one size meet in a
+  rounded corner, as in CAD.
+- The editor's new Edges tab: choose Fillet or Chamfer and a size, then
+  Top, Bottom, Vertical or All - or Pick an edge and click the edges on the
+  model; a second click takes one off. What is rounded now is listed there,
+  each with a button to take it off.
+- The assistant knows them: `hub3d format` describes `fillet` and
+  `chamfer`, and its example key tag has rounded corners and a cut top edge.
+- Not yet: edges where two parts meet (a hole's rim, a wall on a base) and
+  edges of imported STL files.
+
 ## 0.90.0 - 2026-11-26
 
 - The 3D editor has its tools in tabs at the top, as in SolidWorks, and

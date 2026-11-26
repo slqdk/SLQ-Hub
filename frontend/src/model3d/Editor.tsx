@@ -9,18 +9,18 @@ import Module from "manifold-3d/manifold";
 import wasmUrl from "manifold-3d/manifold.wasm?url";
 import { AlignCenter, AlignLeft, AlignRight, ArrowDownToLine, ArrowDownUp, Bold, Box, ChevronDown, CircleDot, Columns3, Cone,
   Copy, Crosshair, Cylinder, Download, Eye, EyeOff, FlipHorizontal2, FlipVertical2, Group, Home, Italic, ListTree, Maximize2,
-  Minimize2, Move3d, PanelBottom, Printer as PrinterIcon, Redo2, Repeat2, Rotate3d, Scaling, SquareDashed, Trash2, TriangleAlert, Triangle,
+  Minimize2, MousePointerClick, Move3d, PanelBottom, Printer as PrinterIcon, Redo2, Repeat2, Rotate3d, Scaling, SquareDashed, Trash2, TriangleAlert, Triangle,
   Type, Undo2, Ungroup, Upload, X } from "lucide-react";
 import fontIndex from "./fonts/index.json";
 import { api, type FileData, type TreeData } from "../lib/api";
 import { useApp } from "../state";
 import { ConfirmButton, MenuButton } from "../components/ui";
 import type { Folder } from "../components/Files";
-import { allIds, build, buildPart, COLORS, extent, extentOf, FONT_FAMILIES, fontFile, follows, freshId, joined,
-  MAX_COPIES, MIN_SIZE, mirrorPart, newDesign, partSize, readDesign, repeatAround, retext, SPACING, stl, textMeasure,
-  threeMf, transformPart, withCapitals, writeDesign, type Align, type Box3, type Built, type Design, type FontData,
-  type FontIndex, type Fonts, type Kit, type Mat3, type MeshData, type Part, type Repeat, type Shape, type Vec3,
-  type Wasm } from "./geometry";
+import { allIds, build, buildPart, COLORS, EDGES, extent, extentOf, FONT_FAMILIES, fontFile, follows, freshId, joined,
+  MAX_COPIES, MIN_SIZE, mirrorPart, nearestEdge, newDesign, partSize, readDesign, repeatAround, retext, SPACING, stl,
+  textMeasure, threeMf, transformPart, withCapitals, withEdge, withoutEdge, writeDesign, type Align, type Box3,
+  type Built, type Design, type EdgeKind, type FontData, type FontIndex, type Fonts, type Kit, type Mat3, type MeshData,
+  type Part, type Repeat, type Shape, type Vec3, type Wasm } from "./geometry";
 import { baseName, dirOf, fmt, inFolder, joinPath, MESH_FILE, pointMark, relativePath } from "./files";
 import { parseMesh } from "./meshio";
 import { lastPrinter, PRINTERS, printerOf, rememberPrinter, type Printer } from "./printers";
@@ -216,7 +216,9 @@ export function Editor({ folder, path, create, own = "", onPath, onClose, max, o
   const [status, setStatus] = useState<Status>("loading");
   const [problems, setProblems] = useState<string[]>([]);
   const [outside, setOutside] = useState<string | null>(null);
-  const [tool, setTool] = useState<null | "point" | "flat">(null);
+  const [tool, setTool] = useState<null | "point" | "flat" | "edge">(null);
+  const [edgeKind, setEdgeKind] = useState<EdgeKind>("fillet");
+  const [edgeSize, setEdgeSize] = useState(2);
   const [failed, setFailed] = useState<string | null>(null);
   const [meshTick, setMeshTick] = useState(0);
   const [lock, setLock] = useState(false);
@@ -704,6 +706,28 @@ export function Editor({ folder, path, create, own = "", onPath, onClose, max, o
     v.movePreview(v.proxy.matrixWorld.clone().multiply(s.matrix.clone().invert()));
   };
 
+  /** "Pick an edge" (0.91.0): the clicked part's own edge nearest the spot gets the Edges tab's fillet or chamfer - or
+   *  loses it, clicked again. */
+  const pickEdge = (hit: Hit) => {
+    const d = designRef.current;
+    const part = d ? find(d.parts, hit.part)?.part : null;
+    if (!part) return;
+    if (part.hole || part.radius || !EDGES[part.shape] || part.shape === "outline") {
+      toast(part.hole ? "A hole's rim where it meets a part cannot be rounded yet."
+        : part.radius ? "That box is rounded all round: set All rounded (Part) to 0 to round single edges."
+          : part.shape === "outline" ? "An outline's corners are rounded all at once: Corners." : "That part has no edges of its own.", "fault");
+      return;
+    }
+    const near = nearestEdge(part, hit.point);
+    if (!near) return;
+    const was = part[edgeKind]?.[near.edge];
+    setSelected([part.id]);
+    change(part.id, (p) => (was !== undefined && Math.abs(was - edgeSize) < 1e-9 ? withoutEdge(p, edgeKind, near.edge)
+      : withEdge(p, near.edge, edgeKind, edgeSize)));
+    toast(was !== undefined && Math.abs(was - edgeSize) < 1e-9 ? `${near.edge}: ${edgeKind} taken off`
+      : `${near.edge}: ${edgeKind} ${fmt(edgeSize)} mm`, "run");
+  };
+
   const onPointerUp = (e: React.PointerEvent) => {
     const v = vp.current, p = pointer.current;
     pointer.current = null;
@@ -722,6 +746,10 @@ export function Editor({ folder, path, create, own = "", onPath, onClose, max, o
     }
     if (tool === "flat") {
       if (hit) layFlat(hit);
+      return;
+    }
+    if (tool === "edge") {
+      if (hit) pickEdge(hit);
       return;
     }
     if (!hit) {
@@ -1112,6 +1140,31 @@ export function Editor({ folder, path, create, own = "", onPath, onClose, max, o
             </>
           )}
           {shownTab === "text" && textPart && k && <TextBand part={textPart} fonts={k.fonts} change={(fn) => change(textPart.id, fn)} />}
+          {shownTab === "edges" && (
+            <>
+              <Grp label="Make">
+                <div className="v3d-stack">
+                  <div className="v3d-seg" role="group" aria-label="Fillet or chamfer">
+                    <button className={`btn small${edgeKind === "fillet" ? " on" : ""}`} aria-pressed={edgeKind === "fillet"}
+                      title="Fillet: the edge rounded" onClick={() => setEdgeKind("fillet")}>Fillet</button>
+                    <button className={`btn small${edgeKind === "chamfer" ? " on" : ""}`} aria-pressed={edgeKind === "chamfer"}
+                      title="Chamfer: the edge cut off" onClick={() => setEdgeKind("chamfer")}>Chamfer</button>
+                  </div>
+                  <label className="v3d-inline" title={edgeKind === "fillet" ? "The fillet's radius" : "How far the chamfer reaches along each face"}>
+                    <span>Size, mm</span><NumInput value={edgeSize} min={0.1} step={0.5} onSet={setEdgeSize} label="Size" />
+                  </label>
+                </div>
+              </Grp>
+              <Grp label="One edge">
+                <Big icon={<MousePointerClick size={20} />} label="Pick an edge" active={tool === "edge"}
+                  title="Click edges on the model: each gets the fillet or chamfer - clicked again, it goes. Esc stops."
+                  onClick={() => setTool(tool === "edge" ? null : "edge")} />
+              </Grp>
+              {!items.length && pickFirst}
+              {items.length > 1 && <p className="v3d-tip">Pick one part to round or cut its edges - or Pick an edge on the model.</p>}
+              {one && <EdgesBand part={one} kind={edgeKind} size={edgeSize} change={(fn) => change(one.id, fn)} />}
+            </>
+          )}
           {shownTab === "arrange" && (
             <>
               {!items.length && pickFirst}
@@ -1175,7 +1228,8 @@ export function Editor({ folder, path, create, own = "", onPath, onClose, max, o
               active={tool === "point"} onClick={() => setTool(tool === "point" ? null : "point")}><span>Point at</span></Tool>
           </div>
           {tool && <div className="v3d-hint">{tool === "point" ? "Click the spot on the model. Esc stops."
-            : "Click the face that should lie on the plate. Esc stops."}</div>}
+            : tool === "edge" ? `Click an edge of a part: ${edgeKind} ${fmt(edgeSize)} mm - again to take it off. Esc stops.`
+              : "Click the face that should lie on the plate. Esc stops."}</div>}
         </div>
         {(failed || !ready || status === "loading") && <div className="v3d-overlay">{failed ?? "Loading the 3D editor"}</div>}
         {ready && !failed && design && !parts.length && (
@@ -1224,8 +1278,9 @@ export function Editor({ folder, path, create, own = "", onPath, onClose, max, o
   );
 }
 
-type Tab = "shapes" | "part" | "place" | "text" | "arrange";
-const TABS: [Tab, string][] = [["shapes", "Shapes"], ["part", "Part"], ["place", "Size and place"], ["arrange", "Arrange"]];
+type Tab = "shapes" | "part" | "place" | "edges" | "text" | "arrange";
+const TABS: [Tab, string][] = [["shapes", "Shapes"], ["part", "Part"], ["place", "Size and place"], ["edges", "Edges"],
+  ["arrange", "Arrange"]];
 const ALIGNS: [string, string[]][] = [["X", ["Left", "Middle", "Right"]], ["Y", ["Front", "Middle", "Back"]],
   ["Z", ["Bottom", "Middle", "Top"]]];
 
@@ -1298,8 +1353,9 @@ function PartBand({ part, change, onDuplicate, onDelete }: { part: Part; change:
       </Grp>
       {part.shape === "box" && (
         <Grp label="Box">
-          <Num label="Rounded edges" value={part.radius ?? 0} min={0} step={0.5}
-            onSet={(v) => change((p) => ({ ...p, radius: v > 0 ? v : undefined, sides: v > 0 ? p.sides ?? 32 : undefined }))} />
+          <Num label="All rounded" unit="mm: every edge and corner - or round some edges in Edges" value={part.radius ?? 0} min={0} step={0.5}
+            onSet={(v) => change((p) => (v > 0 ? { ...p, radius: v, sides: p.sides ?? 32, fillet: undefined, chamfer: undefined }
+              : { ...p, radius: undefined, sides: p.fillet ? p.sides : undefined }))} />
           {!!part.radius && <Num label="Sides" unit="segments round a corner" value={part.sides ?? 64} min={3} step={8}
             onSet={(v) => change((p) => ({ ...p, sides: Math.round(Math.min(256, Math.max(3, v))) }))} />}
         </Grp>
@@ -1460,6 +1516,61 @@ function TextBand({ part, fonts, change }: { part: Part; fonts: Fonts; change: (
         </div>
       </Grp>
     </>
+  );
+}
+
+/** The Edges tab for one part (0.91.0): its edges by name - the face's, the upright ones, all - and what they are now. */
+function EdgesBand({ part, kind, size, change }: { part: Part; kind: EdgeKind; size: number;
+  change: (fn: (p: Part) => Part) => void }) {
+  if (part.radius) {
+    return <p className="v3d-tip">This box is rounded all round: All rounded, in Part. Set it to 0 to round or cut some of
+      its edges here.</p>;
+  }
+  if (!EDGES[part.shape] || part.hole) {
+    return <p className="v3d-tip">{part.hole ? "A hole's rim where it meets a part cannot be rounded yet."
+      : part.shape === "group" ? "A group's edges are its parts': double-click one on the model to pick it."
+        : part.shape === "mesh" ? "An imported mesh's edges cannot be rounded yet."
+          : `A ${kindOf(part).toLowerCase()} has no edges of its own to round.`}</p>;
+  }
+  const names: [string, string][] = part.shape === "outline" ? [["vertical", "Corners"]]
+    : part.shape === "cylinder" || part.shape === "cone" ? [["top", "Top"], ["bottom", "Bottom"], ["all", "Both"]]
+      : part.shape === "wedge" ? [["slope", "Slope"], ["bottom", "Bottom"], ["vertical", "Vertical"], ["all", "All"]]
+        : [["top", "Top"], ["bottom", "Bottom"], ["vertical", "Vertical"], ["all", "All"]];
+  const now = (["fillet", "chamfer"] as const).flatMap((k) => Object.entries(part[k] ?? {}).map(([key, v]) => ({ k, key, v })));
+  return (
+    <>
+      <Grp label={`${kindOf(part)} ${part.id}: the edges`}>
+        {names.map(([key, name]) => (
+          <Big key={key} icon={<EdgeIcon which={key} />} label={name} title={`${kind} ${fmt(size)} mm on ${key === "all" ? "every edge"
+            : key === "vertical" ? (part.shape === "outline" ? "its corners" : "the upright edges") : `the edges round its ${key}`}`}
+            onClick={() => change((p) => withEdge(p, key, kind, size))} />
+        ))}
+      </Grp>
+      <Grp label="Now - click one to take it off">
+        <div className="v3d-edgelist">
+          {now.length ? now.map(({ k, key, v }) => (
+            <button key={k + key} type="button" className="btn small v3d-chip" title="Take it off"
+              onClick={() => change((p) => withoutEdge(p, k, key))}>{key} · {k} {fmt(v)} ✕</button>
+          )) : <span className="faint">No edge rounded or cut</span>}
+          {now.length > 1 && <button type="button" className="btn small quiet" onClick={() => change((p) => ({ ...p, fillet: undefined, chamfer: undefined }))}>None</button>}
+        </div>
+      </Grp>
+    </>
+  );
+}
+
+/** A small picture of which edges a button rounds. */
+function EdgeIcon({ which }: { which: string }) {
+  const on = (x: string) => (which === "all" || which === x ? "currentColor" : "none");
+  return (
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true">
+      <rect x="3" y="5" width="14" height="11" rx="1" opacity="0.45" />
+      <path d="M3 5h14" stroke={which === "top" || which === "slope" || which === "all" ? "currentColor" : "none"} strokeWidth="3" />
+      <path d="M3 16h14" stroke={on("bottom")} strokeWidth="3" />
+      <path d="M3 5v11M17 5v11" stroke={which === "vertical" || which === "all" ? "currentColor" : "none"} strokeWidth="3" />
+      {which === "top" || which === "bottom" || which === "vertical" || which === "all" || which === "slope" ? null
+        : <circle cx="10" cy="10.5" r="3" stroke="currentColor" />}
+    </svg>
   );
 }
 

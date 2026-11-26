@@ -1240,6 +1240,8 @@ div.tests-result-head { cursor: default; }
 .v3d-textarea { width: 175px; min-height: 58px; resize: vertical; }
 .v3d-band .v3d-seg .btn.small { padding: 0 8px; }
 .v3d-tip { align-self: center; max-width: 520px; margin: 0 12px; font-size: 13px; line-height: 1.45; color: var(--ink-2); }
+.v3d-edgelist { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; max-width: 320px; }
+.v3d-band .v3d-chip { height: 24px; padding: 0 8px; font-family: var(--font); font-weight: 400; font-size: 12.5px; }
 .v3d-aligngrid { display: grid; grid-template-columns: 16px repeat(3, auto); gap: 3px 4px; align-items: center; }
 .v3d-aligngrid .btn { height: 21px; padding: 0 8px; font-size: 12px; box-shadow: none; }
 .v3d-stage { position: relative; flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
