@@ -121,7 +121,7 @@ RUN runuser -u sandbox -- /opt/py/bin/pip install manifold3d==3.5.4 trimesh==5.2
 # like a module is not imported instead. The self-test runs the recipe's examples: a recipe that no longer matches
 # the library stops the build.
 COPY hub3d.py /opt/hub3d/hub3d.py
-COPY hub3d-font.json /opt/hub3d/hub3d-font.json
+COPY fonts/ /opt/hub3d/fonts/
 RUN echo /opt/hub3d > "$(/opt/py/bin/python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')/hub3d.pth" \
     && printf '#!/bin/sh\nexec /opt/py/bin/python -I -m hub3d "$@"\n' > /usr/local/bin/hub3d \
     && chmod 755 /usr/local/bin/hub3d \

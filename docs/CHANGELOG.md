@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.89.0 - 2026-11-26
+
+- Text in a 3D design comes in six fonts: sans (Barlow), serif (Bitter),
+  rounded (Nunito), script (Pacifico), stencil (Saira Stencil) and mono
+  (JetBrains Mono), most of them bold and italic too. A font without an
+  italic is slanted instead. Lines of text can be centred, left or right,
+  and the spacing of letters and lines can be changed.
+- The editor's inspector has the font, bold, italic, the lines' alignment,
+  Letters (how tall the capitals are), Spacing and Lines. Changing the
+  text, font or style keeps the letters as tall as they were.
+- Fixed: the design format called a text's height its "letter height", but
+  it is the height of all its lines together, so two lines came out at a
+  third of the size the assistant meant. `hub3d format` now says so, a
+  width or height of 0 follows the letters (`[70, 0, 2]` is 70 mm wide),
+  and `hub3d design` says how big each text came out and how tall its
+  capitals are.
+- Flat designs - plates, signs, coasters - are drawn straight down in the
+  check picture, with their edges outlined, so the assistant can see the
+  letters on a plate and how much of it they fill.
+- Lines of text are now centred unless they say otherwise; texts made
+  before 0.89.0 had their lines starting at the left.
+
 ## 0.88.0 - 2026-11-25
 
 - Designs can have flat outlines of their own - any shape, with holes in it -

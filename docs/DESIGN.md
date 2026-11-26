@@ -3103,9 +3103,9 @@ Søren (2026-11-25): "Jeg vil virkelig gerne ha en stl editor i browseren sammen
 into the Hub, Tinkercad's level, his printer a Bambu Lab P2S but chosen per design.
 
 - **What.** A design is a file, `NAME.3d.json`, in the chat's or the project's folder, shown in a panel beside the
-  chat (`frontend/src/model3d/`, its own lazily loaded chunk: three.js r187, manifold-3d 3.5.5 as WebAssembly, a
-  flattened font - about 740 kB, 540 kB and 250 kB; the chat's 3D button and the Files panel load only `files.ts`
-  and `DesignMenu.tsx`). Parts - box (rounded edges), cylinder, cone, sphere, wedge, text, an imported STL/3MF/OBJ,
+  chat (`frontend/src/model3d/`, its own lazily loaded chunk: three.js r187, manifold-3d 3.5.5 as WebAssembly - about
+  740 kB and 540 kB - and the default font, 250 kB; another font when a design first uses it; the chat's 3D button
+  and the Files panel load only `files.ts` and `DesignMenu.tsx`). Parts - box (rounded edges), cylinder, cone, sphere, wedge, text, an imported STL/3MF/OBJ,
   groups - solid or hole, on the chosen printer's plate. Mouse: click picks the top item, Shift-click adds, a double
   click picks the part inside its group, dragging a picked part moves it on the plate (in the plane of the point
   grabbed), the handles (three.js TransformControls on a stand-in object) move, turn and size it; G, R, S switch them,
@@ -3117,16 +3117,16 @@ into the Hub, Tinkercad's level, his printer a Bambu Lab P2S but chosen per desi
 - **The format** (`geometry.ts` readDesign/writeDesign, hub3d's `read_design`; `hub3d format` prints it for the
   assistant with an example its build checks): `{"format": "slq-hub-3d", "version": 1, "printer", "bed", "parts"}`;
   a part has an id, a shape, `size` (its own box before turning), `at` (that box's middle), `rotate` (degrees, X then
-  Y then Z, as OpenSCAD), and `hole`, `hidden`, `mirror` (its own X), `color`, `sides`, `radius`, `top`, `text` (width
-  0: as wide as the letters), `file` (a mesh, from the design's folder), `parts` (a group: nothing of its own). In
+  Y then Z, as OpenSCAD), and `hole`, `hidden`, `mirror` (its own X), `color`, `sides`, `radius`, `top`, `text` and
+  its options (0.89.0, below), `file` (a mesh, from the design's folder), `parts` (a group: nothing of its own). In
   each list the solids are joined and then that list's holes cut them; a group is built first and counts as one
   solid, or one hole. Millimetres, Z up, x 0 y 0 the plate's middle, z 0 its top. Missing or wrong values get
   defaults and are said; the file is written with a fixed key order, 3 decimals, ids kept.
 - **One geometry, two places.** The browser builds the design with manifold-3d (JS) and the sandbox with manifold3d
   (Python, `hub3d design`), the same steps in the same order: unit shapes scaled (a rounded box is the hull of eight
   spheres), mirrored, turned, moved, `asOriginal` so every triangle knows its part (the colours, the picking), joined,
-  cut. Text is Barlow SemiBold flattened into polygons by `tools/make_3d_font.py` into two identical JSON files, one
-  for each side. A mesh that is not a closed solid is "loose": shown in amber and exported as it is, never joined or
+  cut. Text is drawn from fonts flattened into polygons by `tools/make_3d_font.py`: `fonts/` in
+  `frontend/src/model3d/` and in `services/sandbox/` (the image's `/opt/hub3d/fonts/`), the same bytes. A mesh that is not a closed solid is "loose": shown in amber and exported as it is, never joined or
   cut. `tests/test_design3d.py` runs geometry.ts in node against hub3d: the same triangle count, the volume to 1e-9,
   the box to 1e-4 mm, for designs with every shape, æøå, rounded boxes, mirrored and turned meshes, nested holes
   and the format's example.
@@ -3179,6 +3179,45 @@ into the Hub, Tinkercad's level, his printer a Bambu Lab P2S but chosen per desi
   in when nothing else holds it - and Python frees objects at once while the browser keeps them until the build ends,
   so a design with a group of solids alone at the top built different triangles in the two (the same volume). Both now
   evaluate each level's join, its holes and each repeat as they are made; the parity test has such a group.
+- **Text (0.89.0).** Chat 330: a 10 x 10 cm plate with "Søren Lyder" on two lines, centred. Gemma gave the text
+  `size [0, 12, 2]` - "letter height 12", as the format said - and the plate came out with letters 4 mm tall: the
+  build fitted the height of *all* the lines to it (two lines of Barlow are about 2.1 em high, its capitals 0.7 em),
+  and nothing said so. "Teksten skal være større. Og skrifttypen skal være skråskrift": larger made 20 (capitals
+  6.6 mm), italics did not exist - there was one font. Søren: "Jeg tror vi skal ha lavet noget ved text
+  mulighederne også".
+  - **Size.** A text's `size` stays its box, like every part's, but `hub3d format` says so ("the box all its lines
+    fill, not one letter's height") and a width or a height of 0 follows the letters - `[70, 0, 2]` is 70 mm wide,
+    the way to fill a plate. Both 0 is said and made 10 mm tall; a text without a size is `[0, 10, 2]`.
+    `hub3d design` prints each text: "text name: 2 lines in Barlow SemiBold Italic, 80.0 x 68.4 x 2.0 mm - its
+    capitals 22.7 mm tall".
+  - **Fonts.** `font`: sans (Barlow, the default - the 0.87 font, so earlier texts keep their letters), serif
+    (Bitter), rounded (Nunito), script (Pacifico), stencil (Saira Stencil One: cut through a plate, its letters keep
+    their middles) and mono (JetBrains Mono), in weights that print - no hairlines (`tools/make_3d_font.py`
+    FAMILIES). `bold` takes the family's bold (800, Nunito 900; script and stencil have none), `italic` its italic -
+    a family without one is slanted by tan 9 degrees in both builds. All SIL OFL 1.1: `fonts/OFL.txt` has the
+    licence and the copyright lines; Barlow and JetBrains Mono come from the frontend's own @fontsource packages,
+    the others from packages installed for the script (pinned in its docstring). `fonts/index.json` names each
+    family's files; the readers take a model's other names too - "Arial" (sans), "Times New Roman" (serif),
+    "monospace", "cursive", OpenSCAD's "Liberation Sans:style=Bold Italic" - and say an unknown one, drawn in sans.
+    The two readers' alias tables are the same (a test).
+  - **Layout** (`geometry.ts` textContours, hub3d `_text_contours`, the same arithmetic in the same order): each
+    letter after the last by its advance, times `letter_spacing` between letters (OpenSCAD's `spacing`); each line
+    `ascender - descender` (the font's own line height, Barlow's 1.2 em as before) times `line_spacing` below the
+    last; lines aligned on their advance widths by `align` - centred unless "left" or "right". Texts before 0.89.0
+    had their lines starting at the left; a design with one line looks as it did. No kerning (the fonts' GPOS is
+    not read). Both spacings are 0.5 to 4.
+  - **The browser** loads `fonts/index.json` with the editor and each font file the first time a design's text
+    needs it (Vite asset URLs from `import.meta.glob`); the build waits for it, the default font comes with the
+    engine. The inspector: Text, Font, bold, italic (a family without an italic says it is slanted), the lines'
+    alignment, Letters (how tall the capitals are: setting it scales the text), Spacing and Lines, and what it is
+    ("2 lines, Bitter SemiBold Italic. Its height follows the letters."). Changing the text, font, style or spacing
+    keeps the capitals as tall as they were - the text grows around them - unless the text was stretched to a box
+    of its own (a width and height that are not the letters'), which the new letters fill; "Width from the letters"
+    undoes a stretch.
+  - **Pictures of flat things.** From the front and the side a plate is a line, and at an angle from above its
+    letters were small and skewed - Gemma could not see how big they were. A model no taller than a quarter of its
+    width or depth is drawn straight down first ("top"), then at an angle and from the front; straight down, higher
+    faces are lighter and a dark line marks every step in depth, so letters on a plate read.
 
 ### Workflows (0.67.0)
 

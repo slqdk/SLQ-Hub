@@ -560,8 +560,9 @@ def views(model, path, size: int = 400, quiet: bool = False) -> str:
     p.write_bytes(_picture(v, f, size))
     ext = v[np.unique(f)].max(0) - v[np.unique(f)].min(0)
     if not quiet:
-        print(f"Wrote {p}: {name} from the front, the side and above ({ext[0]:.0f} x {ext[1]:.0f} x {ext[2]:.0f} mm)"
-              " - look at it with view_image.")
+        sides = "straight down, from above and from the front" if _flat(ext) else "from the front, the side and above"
+        print(f"Wrote {p}: {name} {sides} ({ext[0]:.0f} x {ext[1]:.0f} x {ext[2]:.0f} mm) - look at it with "
+              "view_image.")
     return str(p)
 
 
@@ -570,6 +571,10 @@ def views(model, path, size: int = 400, quiet: bool = False) -> str:
 BACK = (238, 238, 236)
 CLAY = np.array([196, 160, 120], dtype=np.float64)
 VIEWS = (("front", 0.0, 0.0), ("side", 90.0, 0.0), ("above", 35.0, 35.0))
+# Something flat - a plate, a sign, a coaster: from the front and the side it is a line, so straight down first, its
+# heights shaded and its edges drawn - letters on a plate read there (0.89.0, chat 330).
+FLAT_VIEWS = (("top", 0.0, 90.0), ("above", 35.0, 35.0), ("front", 0.0, 0.0))
+FLAT = 0.25              # flat: no taller than this share of its width or depth
 
 
 def _rotation(yaw: float, pitch: float) -> np.ndarray:
@@ -581,7 +586,9 @@ def _rotation(yaw: float, pitch: float) -> np.ndarray:
     return rx @ look @ rz
 
 
-def _view(v: np.ndarray, f: np.ndarray, rot: np.ndarray, size: int) -> Image.Image:
+def _view(v: np.ndarray, f: np.ndarray, rot: np.ndarray, size: int, relief: bool = False) -> Image.Image:
+    """The model drawn as seen through `rot`. relief: higher faces lighter, and a dark line where the depth jumps
+    (an edge) - for the view straight down, where the faces on top all face the light alike."""
     pts = v @ rot.T
     lo, hi = pts[:, :2].min(0), pts[:, :2].max(0)
     span = float(max(hi - lo)) or 1.0
@@ -597,11 +604,29 @@ def _view(v: np.ndarray, f: np.ndarray, rot: np.ndarray, size: int) -> Image.Ima
     n[keep] /= norm[keep, None]
     light = np.array([0.35, 0.55, 0.76])
     shade = 0.28 + 0.72 * np.abs(n @ light)               # both sides lit: open shells still read
+    if relief:
+        zf = z[f].mean(1)
+        lo_z, hi_z = float(z.min()), float(z.max())
+        shade = shade * (0.62 + 0.38 * (zf - lo_z) / ((hi_z - lo_z) or 1.0))
     colour = np.clip(CLAY[None, :] * shade[:, None], 0, 255)
     depth = np.full(size * size, -np.inf)
     img = np.empty((size * size, 3))
     img[:] = BACK
     _raster(tri, z[f], colour, size, depth, img)
+    if relief:
+        d = depth.reshape(size, size)
+        jump = max(0.2, 2 / scale)          # mm: a step of more than two pixels' slope is an edge
+        with np.errstate(invalid="ignore"):              # beside the background: -inf - -inf
+            down = ~(np.abs(d[1:, :] - d[:-1, :]) <= jump)
+            across = ~(np.abs(d[:, 1:] - d[:, :-1]) <= jump)
+        edge = np.zeros((size, size), dtype=bool)
+        edge[1:, :] |= down
+        edge[:-1, :] |= down
+        edge[:, 1:] |= across
+        edge[:, :-1] |= across
+        img = img.reshape(size, size, 3)
+        img[edge & np.isfinite(d)] *= 0.45
+        img = img.reshape(size * size, 3)
     return Image.fromarray(img.reshape(size, size, 3).astype(np.uint8))
 
 
@@ -658,20 +683,27 @@ def _nearest(pix: np.ndarray, d: np.ndarray, col: np.ndarray, depth: np.ndarray,
     img[pix[nearer]] = col[nearer]
 
 
+def _flat(ext) -> bool:
+    return float(ext[2]) <= FLAT * max(float(ext[0]), float(ext[1]))
+
+
 def _picture(v: np.ndarray, f: np.ndarray, size: int = 400, max_faces: int = 400_000) -> bytes:
-    """A PNG: the model from the front, from the side and from above at an angle, with its size under it."""
+    """A PNG: the model from the front, from the side and from above at an angle, with its size under it - something
+    flat straight down, at an angle and from the front."""
     v = np.asarray(v, dtype=np.float64)
     f = np.asarray(f, dtype=np.int64)
     if len(f) > max_faces:                                 # a picture needs no more (every n-th triangle)
         f = f[np.linspace(0, len(f) - 1, max_faces).astype(np.int64)]
     pad = 28
-    sheet = Image.new("RGB", (size * len(VIEWS), size + pad), BACK)
+    used = v[np.unique(f)]
+    ext = used.max(0) - used.min(0)
+    shown = FLAT_VIEWS if _flat(ext) else VIEWS
+    sheet = Image.new("RGB", (size * len(shown), size + pad), BACK)
     draw = ImageDraw.Draw(sheet)
-    for i, (name, yaw, pitch) in enumerate(VIEWS):
-        sheet.paste(_view(v, f, _rotation(yaw, pitch), size), (i * size, 0))
+    for i, (name, yaw, pitch) in enumerate(shown):
+        sheet.paste(_view(v, f, _rotation(yaw, pitch), size, relief=name == "top"), (i * size, 0))
         draw.text((i * size + 10, size + 8), name, fill=(90, 90, 90))
-    ext = v.max(0) - v.min(0)
-    draw.text((size * len(VIEWS) - 220, size + 8), f"{ext[0]:.0f} x {ext[1]:.0f} x {ext[2]:.0f} mm",
+    draw.text((size * len(shown) - 220, size + 8), f"{ext[0]:.0f} x {ext[1]:.0f} x {ext[2]:.0f} mm",
               fill=(90, 90, 90))
     buf = io.BytesIO()
     sheet.save(buf, "PNG", optimize=True)
@@ -780,13 +812,33 @@ In bash:  hub3d check FILE [--bed 180]    hub3d views FILE OUT.png
 DESIGN_FORMAT = "slq-hub-3d"
 DESIGN_SHAPES = ("box", "cylinder", "cone", "sphere", "wedge", "text", "outline", "mesh", "group")
 PART_KEYS = ("id", "name", "shape", "size", "at", "rotate", "mirror", "hole", "hidden", "color", "sides", "radius",
-             "top", "text", "points", "holes", "file", "repeat", "parts")
+             "top", "text", "font", "bold", "italic", "align", "letter_spacing", "line_spacing", "points", "holes",
+             "file", "repeat", "parts")
 MAX_COPIES = 100
 ROUND_SHAPES = ("cylinder", "cone", "sphere")
 DEFAULT_SIDES = 64
 MIN_SIZE = 0.01
-FONT_FILE = Path(__file__).with_name("hub3d-font.json")     # Barlow SemiBold as polygons (tools/make_3d_font.py)
+FONT_DIR = Path(__file__).with_name("fonts")        # the fonts as polygons (tools/make_3d_font.py): index.json, ...
 _font_cache: dict = {}
+# A text's fonts (0.89.0) as fonts/index.json names them, the first the default; other names a model may write for
+# them, and the words in a name that ask for bold or italic - the editor's (geometry.ts), word for word.
+FONT_FAMILIES = ("sans", "serif", "rounded", "script", "stencil", "mono")
+FONT_ALIASES = {
+    "barlow": "sans", "sans serif": "sans", "arial": "sans", "helvetica": "sans", "liberation sans": "sans",
+    "dejavu sans": "sans", "roboto": "sans", "open sans": "sans", "inter": "sans",
+    "bitter": "serif", "slab": "serif", "times": "serif", "times new roman": "serif", "georgia": "serif",
+    "liberation serif": "serif", "roboto slab": "serif",
+    "nunito": "rounded", "round": "rounded", "arial rounded": "rounded", "varela round": "rounded",
+    "pacifico": "script", "cursive": "script", "handwriting": "script", "lobster": "script", "brush script": "script",
+    "saira stencil one": "stencil", "saira stencil": "stencil",
+    "jetbrains mono": "mono", "monospace": "mono", "courier": "mono", "courier new": "mono", "consolas": "mono",
+    "liberation mono": "mono", "dejavu sans mono": "mono",
+}
+BOLD_WORDS = ("bold", "extrabold", "black", "heavy")
+ITALIC_WORDS = ("italic", "oblique")
+PLAIN_WORDS = ("regular", "normal", "semibold", "medium", "book", "style")
+SLANT = 0.15838444032453627          # an italic in a font that has none: its letters lean tan 9 degrees
+SPACING = (0.5, 4.0)                 # letter_spacing and line_spacing: shares of the font's own
 
 DESIGN_EXAMPLE = """\
 {
@@ -870,9 +922,14 @@ A part:
   cone      top: the top's diameter as a share of the bottom's (0: a point, 1: a cylinder)
   sphere    sides; different sizes make an ellipsoid
   wedge     a ramp: its full height at its -X end, sloping down to nothing at +X
-  text      text: the letters (Barlow SemiBold; æøå, digits, punctuation; \\n starts a new line), lying flat and
-            reading along X; size [width, letter height, thickness] - width 0: as wide as the letters at that height.
-            Standing up: rotate [90, 0, 0]
+  text      text: the letters (æøå, digits, punctuation; \\n starts a new line), lying flat and reading along X.
+            size [width, height, thickness] is the box all its lines fill, not one letter's height: two lines 40
+            high have capitals about 13 mm tall (hub3d design says how tall they came out). A width or height of 0
+            follows the letters: [70, 0, 2] is 70 mm wide - text on a plate fills most of its width. font: sans
+            (Barlow, the default), serif (Bitter), rounded (Nunito), script (Pacifico), stencil (Saira Stencil: cut
+            through a plate, its letters keep their middles) or mono (JetBrains Mono); bold: true, italic: true
+            (script and stencil have no bold); align: "left", "center" (the default) or "right" - the lines;
+            letter_spacing, line_spacing: 1 is the font's own (1.3: wider apart). Standing up: rotate [90, 0, 0]
   outline   points: [[x, y], ...] - a flat shape of your own, drawn in mm around the part's 0,0 and size z thick, as
             OpenSCAD's translate(at) rotate(rotate) linear_extrude(size z, center=true) polygon(points). So here at
             is where the points' 0,0 goes, not the middle (left out: [0, 0, thickness / 2] - the points where they
@@ -994,6 +1051,60 @@ def _round(v: float) -> int:
     return int(math.floor(v + 0.5))                 # as JavaScript's Math.round
 
 
+def _follows(shape: str, i: int, v: float) -> bool:
+    """Whether a 0 in a part's size follows what it draws: a text's width or height (from its letters - one of the
+    two is given), an outline's width and depth (from its points)."""
+    return v <= 0 and i < 2 and shape in ("text", "outline")
+
+
+def _font_name(raw: str) -> tuple[str, bool, bool]:
+    """A font as a design may name it - "serif", "Pacifico", "Arial Bold", OpenSCAD's "Liberation Sans:style=Bold
+    Italic" - as one of FONT_FAMILIES, and the bold and italic its words ask for; family "" when it is none."""
+    words = [w for w in re.split(r"[\s:_,=-]+", raw.lower()) if w]
+    bold = any(w in BOLD_WORDS for w in words)
+    italic = any(w in ITALIC_WORDS for w in words)
+    name = " ".join(w for w in words if w not in BOLD_WORDS and w not in ITALIC_WORDS and w not in PLAIN_WORDS)
+    family = FONT_FAMILIES[0] if not name else name if name in FONT_FAMILIES else FONT_ALIASES.get(name, "")
+    return family, bold, italic
+
+
+def _read_text_style(p: dict, part: dict, problems: list) -> None:
+    pid = part["id"]
+    if "font" in p:
+        family, bold, italic = _font_name(p["font"]) if isinstance(p["font"], str) else ("", False, False)
+        if not family:
+            problems.append(f'{pid}: no font "{p["font"]}" - the fonts are {", ".join(FONT_FAMILIES)}; drawn in '
+                            f'{FONT_FAMILIES[0]}')
+        elif family != FONT_FAMILIES[0]:
+            part["font"] = family
+        if bold:
+            part["bold"] = True
+        if italic:
+            part["italic"] = True
+    if p.get("bold") is True:
+        part["bold"] = True
+    if p.get("italic") is True:
+        part["italic"] = True
+    if "align" in p:
+        a = p["align"].strip().lower() if isinstance(p["align"], str) else ""
+        if a in ("left", "right"):
+            part["align"] = a
+        elif a not in ("center", "centre", "middle"):
+            problems.append(f'{pid}: align is "left", "center" or "right" - centred')
+    for key in ("letter_spacing", "line_spacing"):
+        if key not in p:
+            continue
+        v = p[key]
+        if not _num(v):
+            problems.append(f"{pid}: {key} is a number, 1 the font's own - left out")
+            continue
+        c = max(SPACING[0], min(SPACING[1], float(v)))
+        if c != v:
+            problems.append(f"{pid}: {key} is {SPACING[0]:g} to {SPACING[1]:g} - made {c:g}")
+        if c != 1:
+            part[key] = c
+
+
 def _read_part(p: dict, seen: set, problems: list, odd: dict) -> dict:
     pid = p["id"].strip() if isinstance(p.get("id"), str) and p["id"].strip() else ""
     if not pid or pid in seen:
@@ -1016,11 +1127,11 @@ def _read_part(p: dict, seen: set, problems: list, odd: dict) -> dict:
         part["parts"] = _read_parts(p.get("parts") if isinstance(p.get("parts"), list) else [], seen, problems, odd)
         part["size"], part["at"] = [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]
     else:
-        # 0 keeps a text's width as its letters make it, and an outline's width and depth as its points draw them
-        def auto(i: int, v: float) -> bool:
-            return v <= 0 and ((shape == "text" and i == 0) or (shape == "outline" and i < 2))
-        size = _vec(p.get("size"), [0, 0, 2] if shape == "outline" else [20, 20, 2 if shape == "text" else 20])
-        part["size"] = [0.0 if auto(i, v) else max(MIN_SIZE, abs(v)) for i, v in enumerate(size)]
+        size = _vec(p.get("size"), [0, 0, 2] if shape == "outline" else [0, 10, 2] if shape == "text" else [20, 20, 20])
+        part["size"] = [0.0 if _follows(shape, i, v) else max(MIN_SIZE, abs(v)) for i, v in enumerate(size)]
+        if shape == "text" and part["size"][0] == 0 and part["size"][1] == 0:
+            part["size"][1] = 10.0
+            problems.append(f"{pid}: a text needs a width or a height (size x or y) - made 10 mm tall")
         part["at"] = _vec(p.get("at"), [0, 0, part["size"][2] / 2])
         part["rotate"] = _vec(p.get("rotate"), [0, 0, 0])
     for flag in ("mirror", "hole", "hidden"):
@@ -1038,6 +1149,7 @@ def _read_part(p: dict, seen: set, problems: list, odd: dict) -> dict:
         part["top"] = max(0.0, min(1.0, float(top))) if _num(top) else 0.0
     if shape == "text":
         part["text"] = p["text"] if isinstance(p.get("text"), str) else "Text"
+        _read_text_style(p, part, problems)
     if shape == "outline":
         pts = _points(p.get("points"))
         if pts:
@@ -1090,42 +1202,96 @@ def _repeat_step(r: dict) -> float:
     return a / (r["count"] - 1) if r["count"] > 1 else 0.0
 
 
-def _font() -> dict:
-    if "font" not in _font_cache:
+def _font_index() -> dict:
+    if "index" not in _font_cache:
         import json
-        _font_cache["font"] = json.loads(FONT_FILE.read_text(encoding="utf-8"))
-    return _font_cache["font"]
+        _font_cache["index"] = json.loads((FONT_DIR / "index.json").read_text(encoding="utf-8"))
+    return _font_cache["index"]
 
 
-def _text_contours(text: str, font: dict) -> list[list[tuple[float, float]]]:
+def _font(file: str) -> dict:
+    if file not in _font_cache:
+        import json
+        _font_cache[file] = json.loads((FONT_DIR / f"{file}.json").read_text(encoding="utf-8"))
+    return _font_cache[file]
+
+
+def _font_file(p: dict) -> tuple[str, float]:
+    """The font file a text part is drawn in, and how far its letters lean - the editor's fontFile: a family without
+    an italic slants its upright; one without a bold draws its regular."""
+    index = _font_index()
+    fam = index["families"].get(p.get("font") or "") or index["families"][index["default"]]
+    style = ("bold-italic" if p.get("bold") and p.get("italic") else "bold" if p.get("bold")
+             else "italic" if p.get("italic") else "regular")
+    if fam.get(style):
+        return fam[style], 0.0
+    return (p.get("bold") and fam.get("bold")) or fam["regular"], SLANT if p.get("italic") else 0.0
+
+
+def _text_contours(p: dict, font: dict, slant: float = 0.0) -> list[list[tuple[float, float]]]:
+    """A text's outlines in font units, laid out as the editor's textContours: letter after letter by their advances
+    (times letter_spacing between them), line under line by the font's line height (times line_spacing), the lines
+    centred on x 0 or starting or ending there (align), slanted by `slant`."""
     out = []
-    line_height = 1.2 * font["unitsPerEm"]
-    for row, line in enumerate(text.split("\n")):
-        x, y = 0.0, -row * line_height
+    ls = p.get("letter_spacing", 1.0)
+    step = (font["ascender"] - font["descender"]) * p.get("line_spacing", 1.0)
+    align = p.get("align")
+    for row, line in enumerate(p.get("text", "").split("\n")):
+        placed, x, last = [], 0.0, 0.0
         for ch in line:
             g = font["glyphs"].get(ch) or font["glyphs"].get("?")
             if not g:
                 continue
-            for c in g["c"]:
-                out.append([(c[i] + x, c[i + 1] + y) for i in range(0, len(c), 2)])
-            x += g["a"]
+            placed.append((g["c"], x))
+            last = g["a"]
+            x += g["a"] * ls
+        width = x - last * ls + last if placed else 0.0
+        off = 0.0 if align == "left" else -width if align == "right" else -width / 2
+        y = -row * step
+        for cs, gx in placed:
+            for c in cs:
+                out.append([(c[i] + gx + off + slant * c[i + 1], c[i + 1] + y) for i in range(0, len(c), 2)])
     return out
 
 
-def _text_polygons(text: str, size, font: dict):
-    contours = _text_contours(text, font)
-    if not contours:
-        return None
+def _ink_box(contours: list) -> tuple[float, float, float, float] | None:
     xs = [x for c in contours for x, _ in c]
     ys = [y for c in contours for _, y in c]
-    x0, x1, y0, y1 = min(xs), max(xs), min(ys), max(ys)
-    w, h = x1 - x0, y1 - y0
-    if w <= 0 or h <= 0:
+    if not xs:
         return None
-    ky = size[1] / h
-    kx = size[0] / w if size[0] > 0 else ky
+    x0, x1, y0, y1 = min(xs), max(xs), min(ys), max(ys)
+    return (x0, y0, x1, y1) if x1 > x0 and y1 > y0 else None
+
+
+def _text_scale(size, w: float, h: float) -> tuple[float, float]:
+    """mm per font unit across and up, for letters w x h font units in a part of `size`: a 0 follows the other."""
+    ky = size[1] / h if size[1] > 0 else size[0] / w
+    return (size[0] / w if size[0] > 0 else ky), ky
+
+
+def _text_polygons(p: dict, font: dict, slant: float = 0.0):
+    contours = _text_contours(p, font, slant)
+    b = _ink_box(contours)
+    if b is None:
+        return None
+    x0, y0, x1, y1 = b
+    kx, ky = _text_scale(p["size"], x1 - x0, y1 - y0)
     cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
     return [np.array([((x - cx) * kx, (y - cy) * ky) for x, y in c], dtype=np.float64) for c in contours]
+
+
+def _text_measure(p: dict) -> dict | None:
+    """What a text part comes out as - the editor's textMeasure: width and height (mm), lines, its capitals' height
+    and the font's name."""
+    file, slant = _font_file(p)
+    font = _font(file)
+    b = _ink_box(_text_contours(p, font, slant))
+    if b is None:
+        return None
+    w, h = b[2] - b[0], b[3] - b[1]
+    kx, ky = _text_scale(p["size"], w, h)
+    return {"width": w * kx, "height": h * ky, "lines": len(p.get("text", "").split("\n")),
+            "capitals": font.get("capHeight", 0.7 * font["unitsPerEm"]) * ky, "font": font.get("name", file)}
 
 
 def _rotation_matrix(r) -> np.ndarray:
@@ -1186,7 +1352,8 @@ def build_design(design: dict, folder=".") -> DesignBuild:
             return M.hull_points(np.array([[-x, -y, -z], [x, -y, -z], [-x, y, -z], [x, y, -z], [-x, -y, z],
                                            [-x, y, z]], dtype=np.float64))
         if kind == "text":
-            polys = _text_polygons(p.get("text", ""), p["size"], _font())
+            file, slant = _font_file(p)
+            polys = _text_polygons(p, _font(file), slant)
             if polys is None:
                 return None
             return m3d.CrossSection(polys, m3d.FillRule.NonZero).extrude(sz).translate((0, 0, -sz / 2))
@@ -1306,6 +1473,24 @@ def _count_shapes(parts: list, into: dict) -> dict:
     return into
 
 
+def _text_lines(parts: list) -> list[str]:
+    """What each shown text comes out as (0.89.0, chat 330: "letter height 20" was the height of two lines, and
+    capitals 6.6 mm tall were too small for the plate - nothing said so)."""
+    out = []
+    for p in parts:
+        if p.get("hidden"):
+            continue
+        if p["shape"] == "group":
+            out += _text_lines(p.get("parts", []))
+        elif p["shape"] == "text":
+            m = _text_measure(p)
+            if m:
+                lines = f"{m['lines']} lines" if m["lines"] > 1 else "1 line"
+                out.append(f"text {p['id']}: {lines} in {m['font']}, {m['width']:.1f} x {m['height']:.1f} x "
+                           f"{p['size'][2]:.1f} mm - its capitals {m['capitals']:.1f} mm tall")
+    return out
+
+
 def design_report(path, bed=None, stl=None, three_mf=None, png=None) -> int:
     """`hub3d design`: what a design makes, checked against its printer's bed; writes a picture, an STL or a 3MF."""
     p = Path(path)
@@ -1318,6 +1503,8 @@ def design_report(path, bed=None, stl=None, three_mf=None, png=None) -> int:
     if d.get("printer") or bed:
         where = "; laid out for " + (d.get("printer") or "a bed") + (f" ({_dims(_bed(bed))} mm)" if bed else "")
     print(f"{p.name}: {said}{where}")
+    for line in _text_lines(d["parts"]):
+        print(line)
     for msg in problems + b.problems:
         print(f"- {msg}")
     models = ([b.solid] if b.solid is not None and not b.solid.is_empty() else []) + [(v, f) for _, v, f in b.loose]
@@ -1399,6 +1586,14 @@ def selftest() -> int:
             plate = design("plate.3d.json", quiet=True)
             expect(str(plate.status()).endswith("NoError") and len(plate.decompose()) == 1
                    and 2000 < plate.volume() < 2500, f"the design is not one plate with its letters: {plate.volume()}")
+            index = _font_index()                                    # every font is in the image, and draws
+            for fid in FONT_FAMILIES:
+                for style in ("regular", "bold", "italic", "bold-italic"):
+                    if style == "regular" or style in index["families"][fid]:
+                        t = {"id": "t", "shape": "text", "text": "Aæ", "size": [0, 8, 1], "font": fid,
+                             "bold": "bold" in style, "italic": "italic" in style}
+                        m = _text_measure(t)
+                        expect(m is not None and 2 < m["capitals"] < 8, f"the font {fid} {style} draws nothing")
             Path("tag.3d.json").write_text(DESIGN_EXAMPLE)          # hub3d format's example
             tag = check(design("tag.3d.json", quiet=True), bed=256)
             expect(tag.ok and tag.parts == 1 and not tag.warnings, f"hub3d format's example is not ready:\n{tag}")

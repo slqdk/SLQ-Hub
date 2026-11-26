@@ -1,0 +1,41 @@
+{
+ "default": "sans",
+ "families": {
+  "sans": {
+   "name": "Barlow",
+   "regular": "barlow-600",
+   "bold": "barlow-800",
+   "italic": "barlow-600-italic",
+   "bold-italic": "barlow-800-italic"
+  },
+  "serif": {
+   "name": "Bitter",
+   "regular": "bitter-600",
+   "bold": "bitter-800",
+   "italic": "bitter-600-italic",
+   "bold-italic": "bitter-800-italic"
+  },
+  "rounded": {
+   "name": "Nunito",
+   "regular": "nunito-700",
+   "bold": "nunito-900",
+   "italic": "nunito-700-italic",
+   "bold-italic": "nunito-900-italic"
+  },
+  "script": {
+   "name": "Pacifico",
+   "regular": "pacifico-400"
+  },
+  "stencil": {
+   "name": "Saira Stencil One",
+   "regular": "saira-stencil-one-400"
+  },
+  "mono": {
+   "name": "JetBrains Mono",
+   "regular": "jetbrains-mono-700",
+   "bold": "jetbrains-mono-800",
+   "italic": "jetbrains-mono-700-italic",
+   "bold-italic": "jetbrains-mono-800-italic"
+  }
+ }
+}

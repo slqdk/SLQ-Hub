@@ -7,17 +7,18 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import * as THREE from "three";
 import Module from "manifold-3d/manifold";
 import wasmUrl from "manifold-3d/manifold.wasm?url";
-import { ArrowDownToLine, Box, ChevronDown, CircleDot, Cone, Copy, Crosshair, Cylinder, Download, Eye, EyeOff,
-  FlipHorizontal2, Group, Home, Maximize2, Minimize2, Move3d, PanelBottom, Redo2, Repeat2, Rotate3d, Scaling, SquareDashed,
-  Trash2, Triangle, Type, Undo2, Ungroup, Upload, X } from "lucide-react";
-import fontUrl from "./font-barlow-600.json?url";
+import { AlignCenter, AlignLeft, AlignRight, ArrowDownToLine, Bold, Box, ChevronDown, CircleDot, Cone, Copy, Crosshair,
+  Cylinder, Download, Eye, EyeOff, FlipHorizontal2, Group, Home, Italic, Maximize2, Minimize2, Move3d, PanelBottom, Redo2,
+  Repeat2, Rotate3d, Scaling, SquareDashed, Trash2, Triangle, Type, Undo2, Ungroup, Upload, X } from "lucide-react";
+import fontIndex from "./fonts/index.json";
 import { api, type FileData, type TreeData } from "../lib/api";
 import { useApp } from "../state";
 import { ConfirmButton, MenuButton } from "../components/ui";
 import type { Folder } from "../components/Files";
-import { allIds, build, buildPart, COLORS, extent, extentOf, freshId, joined, MAX_COPIES, MIN_SIZE, mirrorPart, newDesign,
-  partSize, readDesign, repeatAround, stl, textWidth, threeMf, transformPart, writeDesign, type Box3, type Built,
-  type Design, type FontData, type Kit, type Mat3, type MeshData, type Part, type Repeat, type Shape, type Vec3,
+import { allIds, build, buildPart, COLORS, extent, extentOf, FONT_FAMILIES, fontFile, follows, freshId, joined,
+  MAX_COPIES, MIN_SIZE, mirrorPart, newDesign, partSize, readDesign, repeatAround, retext, SPACING, stl, textMeasure,
+  threeMf, transformPart, withCapitals, writeDesign, type Align, type Box3, type Built, type Design, type FontData,
+  type FontIndex, type Fonts, type Kit, type Mat3, type MeshData, type Part, type Repeat, type Shape, type Vec3,
   type Wasm } from "./geometry";
 import { baseName, dirOf, fmt, inFolder, joinPath, MESH_FILE, pointMark, relativePath } from "./files";
 import { parseMesh } from "./meshio";
@@ -28,15 +29,48 @@ import { Viewport, type Hit, type ViewName } from "./Viewport";
 type Mode = "translate" | "rotate" | "scale";
 type Status = "loading" | "new" | "saved" | "saving" | "unsaved" | "error";
 
-let kitPromise: Promise<{ wasm: Wasm; font: FontData }> | null = null;
-function loadKit(): Promise<{ wasm: Wasm; font: FontData }> {
+// The fonts (0.89.0): the index now, each font's polygons when a design first uses it (they are 130-330 kB each).
+const FONT_URLS = import.meta.glob<string>("./fonts/*.json", { query: "?url", import: "default", eager: true });
+const FONTS: Fonts = { index: fontIndex as FontIndex, loaded: {} };
+const fontLoads = new Map<string, Promise<void>>();
+const fontFailed = new Set<string>();
+
+function loadFont(file: string): Promise<void> {
+  let p = fontLoads.get(file);
+  if (!p) {
+    const url = FONT_URLS[`./fonts/${file}.json`];
+    p = (url ? fetch(url).then((r) => {
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return r.json() as Promise<FontData>;
+    }) : Promise.reject(new Error("no such font"))).then((f) => { FONTS.loaded[file] = f; },
+      (e) => { fontFailed.add(file); throw e; });
+    fontLoads.set(file, p);
+  }
+  return p;
+}
+
+/** The font files a design's texts need that are not loaded (nor failed to load). */
+function fontsWanted(parts: Part[], into = new Set<string>()): Set<string> {
+  for (const p of parts) {
+    if (p.shape === "text") {
+      const { file } = fontFile(p, FONTS.index);
+      if (!FONTS.loaded[file] && !fontFailed.has(file)) into.add(file);
+    }
+    if (p.parts) fontsWanted(p.parts, into);
+  }
+  return into;
+}
+
+let kitPromise: Promise<{ wasm: Wasm; fonts: Fonts }> | null = null;
+function loadKit(): Promise<{ wasm: Wasm; fonts: Fonts }> {
+  const first = fontFile({ id: "", shape: "text", size: [0, 10, 2], at: [0, 0, 0], rotate: [0, 0, 0] }, FONTS.index).file;
   kitPromise ??= Promise.all([
     Module({ locateFile: () => wasmUrl }).then((w) => {
       w.setup();
       return w as Wasm;
     }),
-    fetch(fontUrl).then((r) => r.json() as Promise<FontData>),
-  ]).then(([wasm, font]) => ({ wasm, font }));
+    loadFont(first),
+  ]).then(([wasm]) => ({ wasm, fonts: FONTS }));
   kitPromise.catch(() => { kitPromise = null; });       // a failed load is tried again next time
   return kitPromise;
 }
@@ -52,8 +86,8 @@ function quatTurn(q: THREE.Quaternion): Mat3 {
   return [e[0], e[4], e[8], e[1], e[5], e[9], e[2], e[6], e[10]];
 }
 
-/** A part's size, with a text's width worked out when it follows its letters, an outline's from its points. */
-const sized = (p: Part, font: FontData): Vec3 => partSize(p, font);
+/** A part's size, with a text's width or height worked out when it follows its letters, an outline's from its points. */
+const sized = (p: Part, fonts: Fonts): Vec3 => partSize(p, fonts);
 
 /** A part that moves like a group: its copies go with it, and it is sized the same way in every direction. */
 const asGroup = (p: Part) => p.shape === "group" || !!p.repeat;
@@ -86,8 +120,7 @@ function within(parts: Part[], outer: string, inner: string): boolean {
 /** Numbers as the file keeps them. */
 function tidy(p: Part): Part {
   const out: Part = { ...p, at: p.at.map(r3) as Vec3, rotate: p.rotate.map(r4) as Vec3 };
-  const auto = (i: number, v: number) => v <= 0 && ((p.shape === "text" && i === 0) || (p.shape === "outline" && i < 2));
-  if (p.shape !== "group") out.size = p.size.map((v, i) => (auto(i, v) ? 0 : Math.max(MIN_SIZE, r3(v)))) as Vec3;
+  if (p.shape !== "group") out.size = p.size.map((v, i) => (follows(p.shape, i, v) ? 0 : Math.max(MIN_SIZE, r3(v)))) as Vec3;
   if (p.radius) out.radius = r3(p.radius);
   if (p.repeat) {
     const r = { ...p.repeat };
@@ -463,6 +496,15 @@ export function Editor({ folder, path, create, own = "", onPath, onClose, max, o
   useEffect(() => {
     const v = vp.current, k = kit.current;
     if (!design || !v || !k || !ready) return;
+    const wanted = [...fontsWanted(design.parts)];
+    if (wanted.length) {                               // a text in a font not loaded yet: built when it is
+      Promise.allSettled(wanted.map(loadFont)).then((done) => {
+        if (!alive.current) return;
+        if (done.some((r) => r.status === "rejected")) toast(`A font did not load (${wanted.join(", ")}).`, "fault");
+        setMeshTick((t) => t + 1);
+      });
+      return;
+    }
     try {
       const b = build(design, k);
       setBuilt(b);
@@ -546,7 +588,7 @@ export function Editor({ folder, path, create, own = "", onPath, onClose, max, o
       const next: Part = { ...one, at: [pos.x, pos.y, pos.z],
         rotate: [(e.x * 180) / Math.PI, (e.y * 180) / Math.PI, (e.z * 180) / Math.PI] };
       if (v.gizmo.mode === "scale") {
-        const was = sized(one, k.font), f = [Math.abs(sc.x), Math.abs(sc.y), Math.abs(sc.z)];
+        const was = sized(one, k.fonts), f = [Math.abs(sc.x), Math.abs(sc.y), Math.abs(sc.z)];
         next.size = was.map((x, i) => Math.max(MIN_SIZE, x * f[i])) as Vec3;
         const low = buildPart(one, k).box?.[0][2];
         if (low !== undefined && Math.abs(low) < 0.01) {            // it stood on the plate: it still does
@@ -734,7 +776,7 @@ export function Editor({ folder, path, create, own = "", onPath, onClose, max, o
       p.at = [r3(c[0]), r3(c[1]), r3(c[2])];
     } else {
       const all = built?.box ?? extentOf(d.parts);
-      const w = sized(p, kk.font)[0];
+      const w = sized(p, kk.fonts)[0];
       const x = all ? Math.ceil(all[1][0] + 5 + w / 2) : 0;
       const fits = Math.abs(x) + w / 2 <= printer.bed[0] / 2;
       p.at = [fits ? x : 0, all && fits ? Math.round((all[0][1] + all[1][1]) / 2) : 0, hole ? size[2] / 2 - 1 : size[2] / 2];
@@ -1059,7 +1101,7 @@ export function Editor({ folder, path, create, own = "", onPath, onClose, max, o
               </div>
             </section>
           )}
-          {one && k && <PartFields part={one} font={k.font} lock={lock} setLock={setLock} change={(fn) => change(one.id, fn)}
+          {one && k && <PartFields part={one} fonts={k.fonts} lock={lock} setLock={setLock} change={(fn) => change(one.id, fn)}
             onDuplicate={duplicate} onDelete={del} onDrop={drop} onMirror={mirror} onUngroup={doUngroup}
             onFlat={() => setTool(tool === "flat" ? null : "flat")} flat={tool === "flat"} />}
           {!items.length && design && (
@@ -1119,26 +1161,22 @@ function PartList({ parts, onPick, onHide, depth = 0 }: { parts: Part[]; onPick:
   );
 }
 
-function PartFields({ part, font, lock, setLock, change, onDuplicate, onDelete, onDrop, onMirror, onUngroup, onFlat, flat }: {
-  part: Part; font: FontData; lock: boolean; setLock: (v: boolean) => void; change: (fn: (p: Part) => Part) => void;
+function PartFields({ part, fonts, lock, setLock, change, onDuplicate, onDelete, onDrop, onMirror, onUngroup, onFlat, flat }: {
+  part: Part; fonts: Fonts; lock: boolean; setLock: (v: boolean) => void; change: (fn: (p: Part) => Part) => void;
   onDuplicate: () => void; onDelete: () => void; onDrop: () => void; onMirror: (axis: number) => void; onUngroup: () => void;
   onFlat: () => void; flat: boolean }) {
   const g = part.shape === "group";
   const box = extent(part);
-  const now = sized(part, font);
+  const now = sized(part, fonts);
   const sizeOf = (i: number, v: number) => change((p) => {
-    if (!lock) {                                       // a text's width 0 stays: its letters decide it
+    if (!lock) {                                       // a text's other 0 stays: its letters decide it
       const s = [...p.size] as Vec3;
       s[i] = v;
       return { ...p, size: s };
     }
-    const f = v / (sized(p, font)[i] || 1);         // an outline's 0s become sizes; a text's width 0 stays
-    const size = (p.shape === "outline" ? sized(p, font) : p.size).map((x) => x * f) as Vec3;
+    const f = v / (sized(p, fonts)[i] || 1);        // an outline's 0s become sizes; a text's 0 stays
+    const size = (p.shape === "outline" ? sized(p, fonts) : p.size).map((x) => x * f) as Vec3;
     return { ...p, size, radius: p.radius ? p.radius * f : p.radius };
-  });
-  const textOf = (t: string) => change((p) => {
-    const follows = p.size[0] > 0 && Math.abs(p.size[0] - textWidth(p.text ?? "", p.size[1], font)) < 0.05;
-    return { ...p, text: t, size: follows ? [textWidth(t, p.size[1], font), p.size[1], p.size[2]] : p.size };
   });
   const kind = g ? "Group" : part.shape === "mesh" ? "Imported mesh" : part.shape[0].toUpperCase() + part.shape.slice(1);
   return (
@@ -1180,13 +1218,7 @@ function PartFields({ part, font, lock, setLock, change, onDuplicate, onDelete, 
               onSet={(v) => change((p) => ({ ...p, sides: Math.round(Math.min(256, Math.max(3, v))) }))} />}
           {part.shape === "cone" && <Num label="Top, % of the base" unit="%" value={(part.top ?? 0) * 100} min={0} step={10}
             onSet={(v) => change((p) => ({ ...p, top: Math.min(1, v / 100) || undefined }))} />}
-          {part.shape === "text" && (
-            <label className="field"><span>Text</span>
-              <textarea className="textarea" rows={2} defaultValue={part.text ?? ""} key={`${part.id}:${part.text ?? ""}`}
-                onBlur={(e) => { if (e.target.value !== part.text) textOf(e.target.value); }} />
-              <small>{part.size[0] <= 0 ? "Its width follows the letters." : "Its width is fixed: X above."}</small>
-            </label>
-          )}
+          {part.shape === "text" && <TextFields part={part} fonts={fonts} change={change} />}
           {part.shape === "mesh" && <p className="v3d-note mono" title="The file, from the design's folder">{part.file}</p>}
           {part.shape === "outline" && <p className="v3d-note">An outline of {part.points?.length ?? 0} points
             {part.holes?.length ? `, ${part.holes.length} hole${part.holes.length > 1 ? "s" : ""} in it` : ""}, {fmt(now[2])} mm
@@ -1207,6 +1239,61 @@ function PartFields({ part, font, lock, setLock, change, onDuplicate, onDelete, 
       <Mirror onMirror={onMirror} />
       <Pattern part={part} change={change} />
     </section>
+  );
+}
+
+/** A text's letters, font and spacing (0.89.0). "Letters" is how tall its capitals come out: it sizes the text. */
+function TextFields({ part, fonts, change }: { part: Part; fonts: Fonts; change: (fn: (p: Part) => Part) => void }) {
+  const t = textMeasure(part, fonts);
+  const fam = fonts.index.families[part.font ?? ""] ?? fonts.index.families[fonts.index.default];
+  const restyle = (patch: Partial<Part>) => change((p) => retext(p, patch, fonts));
+  const align = part.align ?? "center";
+  const spacing = (key: "letter_spacing" | "line_spacing") => (v: number) => {
+    const c = Math.max(SPACING[0], Math.min(SPACING[1], v));
+    restyle({ [key]: Math.abs(c - 1) < 1e-9 ? undefined : c });
+  };
+  const fixed = part.size[0] > 0 && part.size[1] > 0;
+  const own = fixed ? textMeasure({ ...part, size: [0, part.size[1], part.size[2]] }, fonts)?.width : undefined;
+  const ALIGNS: [Align, ReactNode][] = [["left", <AlignLeft size={15} />], ["center", <AlignCenter size={15} />],
+    ["right", <AlignRight size={15} />]];
+  return (
+    <>
+      <label className="field"><span>Text</span>
+        <textarea className="textarea" rows={2} defaultValue={part.text ?? ""} key={`${part.id}:${part.text ?? ""}`}
+          onBlur={(e) => { if (e.target.value !== part.text) restyle({ text: e.target.value }); }} />
+      </label>
+      <label className="field"><span>Font</span>
+        <select className="select" value={part.font ?? fonts.index.default}
+          onChange={(e) => restyle({ font: e.target.value === fonts.index.default ? undefined : e.target.value })}>
+          {FONT_FAMILIES.map((f) => <option key={f} value={f}>{f[0].toUpperCase() + f.slice(1)} - {fonts.index.families[f]?.name}</option>)}
+        </select>
+      </label>
+      <div className="v3d-seg" role="group" aria-label="Style and lines">
+        <button className={`btn small${part.bold && fam.bold ? " on" : ""}`} aria-pressed={!!part.bold} disabled={!fam.bold}
+          title={fam.bold ? "Bold" : `${fam.name} has no bold`} onClick={() => restyle({ bold: !part.bold || undefined })}><Bold size={15} /></button>
+        <button className={`btn small${part.italic ? " on" : ""}`} aria-pressed={!!part.italic}
+          title={fam.italic ? "Italic" : `Slanted (${fam.name} has no italic)`}
+          onClick={() => restyle({ italic: !part.italic || undefined })}><Italic size={15} /></button>
+        <span className="v3d-sep" />
+        {ALIGNS.map(([a, icon]) => (
+          <button key={a} className={`btn small${align === a ? " on" : ""}`} aria-pressed={align === a}
+            title={`Lines ${a === "center" ? "centred" : `to the ${a}`}`} onClick={() => restyle({ align: a === "center" ? undefined : a })}>{icon}</button>
+        ))}
+      </div>
+      <div className="v3d-triple">
+        <Num label="Letters" unit="mm: how tall its capitals are" value={r3(t?.capitals ?? 0)} min={0.1}
+          onSet={(v) => change((p) => withCapitals(p, v, fonts))} />
+        <Num label="Spacing" unit="from letter to letter: 1 is the font's own" step={0.05} value={part.letter_spacing ?? 1}
+          min={SPACING[0]} onSet={spacing("letter_spacing")} />
+        <Num label="Lines" unit="from line to line: 1 is the font's own" step={0.05} value={part.line_spacing ?? 1}
+          min={SPACING[0]} onSet={spacing("line_spacing")} />
+      </div>
+      <p className="v3d-note">{t ? `${t.lines > 1 ? `${t.lines} lines, ` : ""}${t.font}. ` : ""}
+        {part.size[0] <= 0 ? "Its width follows the letters." : part.size[1] <= 0 ? "Its height follows the letters."
+          : own !== undefined && Math.abs(own - part.size[0]) >= 0.05 ? <>Stretched to X. <button className="link-btn small"
+            onClick={() => change((p) => ({ ...p, size: [0, p.size[1], p.size[2]] }))}>Width from the letters</button></>
+            : "Its width follows the letters."}</p>
+    </>
   );
 }
 

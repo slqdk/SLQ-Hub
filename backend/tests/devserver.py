@@ -4,7 +4,8 @@
 
 Signs in as soren / "correct horse battery". The fake model answers by
 keyword: "files" (writes and runs a script), "key tag" (a design: the 3D editor opens; "bigger hole" changes it),
-"snowflake" (a design with an outline repeated round a centre), "ask me" (a question card it waits for), "install" (code that needs the
+"snowflake" (a design with an outline repeated round a centre), "name plate" (chat 330's plate: two lines of
+italic text in a serif font), "ask me" (a question card it waits for), "install" (code that needs the
 internet), "read dr.dk" (web_fetch), "jingle" (a command makes a
 sound, a PDF and notes: the card under the answer), "announce" (speech),
 "song" (music), "horn" (a sound effect), "video" (Wan 2.2 5B: ffmpeg's test
@@ -214,6 +215,16 @@ def _snowflake() -> str:
 
 
 SNOWFLAKE = _snowflake()
+NAME_PLATE = """{
+  "format": "slq-hub-3d",
+  "version": 1,
+  "parts": [
+    {"id": "plate", "name": "Plate", "shape": "box", "size": [100, 100, 3], "at": [0, 0, 1.5], "color": "#cccccc"},
+    {"id": "name", "name": "Name", "shape": "text", "text": "Søren\\nLyder", "font": "serif", "italic": true,
+     "size": [80, 0, 2], "at": [0, 0, 3.9], "color": "#2b7bd9"}
+  ]
+}
+"""
 
 
 def responder(body: dict) -> dict:
@@ -427,6 +438,11 @@ def responder(body: dict) -> dict:
             return {"content": "A snowflake: one arm, repeated six times.", "tool_calls": [{"name": "write_file",
                     "arguments": {"path": "snowflake.3d.json", "content": SNOWFLAKE}}]}
         return {"content": "The snowflake is open in the 3D editor: 120 mm across, 3 mm thick, flat on the plate."}
+    if "name plate" in low:                             # 0.89.0: chat 330's plate - its text big, italic, in a serif
+        if tools_done == 0:
+            return {"content": "A 100 mm plate with the name on two lines.", "tool_calls": [{"name": "write_file",
+                    "arguments": {"path": "plate.3d.json", "content": NAME_PLATE}}]}
+        return {"content": "The plate is open in the 3D editor: the name in italic Bitter, 80 mm wide."}
     if "bigger hole" in low:                            # ... and a change to it while it is open
         if tools_done == 0:
             return {"content": "Making the hole 8 mm.", "tool_calls": [{"name": "edit_file", "arguments": {

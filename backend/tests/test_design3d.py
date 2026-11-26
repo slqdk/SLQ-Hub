@@ -20,7 +20,7 @@ SOURCE = ROOT / "services" / "sandbox" / "hub3d.py"
 GEOMETRY = ROOT / "frontend" / "src" / "model3d" / "geometry.ts"
 FILES = ROOT / "frontend" / "src" / "model3d" / "files.ts"
 MANIFOLD_JS = ROOT / "frontend" / "node_modules" / "manifold-3d" / "manifold.js"
-FONT = ROOT / "frontend" / "src" / "model3d" / "font-barlow-600.json"
+FONTS = ROOT / "frontend" / "src" / "model3d" / "fonts"
 
 
 @pytest.fixture(scope="module")
@@ -52,8 +52,12 @@ def run_js(script: str, payload) -> dict:
     if "wasm" in script:
         if not MANIFOLD_JS.exists():
             pytest.skip("frontend/node_modules has no manifold-3d (npm ci in frontend/)")
-        head += (f"import Module from {json.dumps(str(MANIFOLD_JS))};\nconst wasm = await Module(); wasm.setup();\n"
-                 f"const font = JSON.parse(readFileSync({json.dumps(str(FONT))}, 'utf8'));\n")
+        head += f"import Module from {json.dumps(str(MANIFOLD_JS))};\nconst wasm = await Module(); wasm.setup();\n"
+    if "wasm" in script or "fonts" in script:          # every font, loaded: as the editor loads those a design uses
+        head += (f"const FONTS = {json.dumps(str(FONTS))};\n"
+                 "const fonts = { index: JSON.parse(readFileSync(FONTS + '/index.json', 'utf8')), loaded: {} };\n"
+                 "for (const f of (await import('node:fs')).readdirSync(FONTS)) if (f.endsWith('.json') && "
+                 "f !== 'index.json') fonts.loaded[f.slice(0, -5)] = JSON.parse(readFileSync(FONTS + '/' + f, 'utf8'));\n")
     head += "const input = JSON.parse(readFileSync(0, 'utf8'));\n"
     out = subprocess.run([node, "--experimental-strip-types", "--no-warnings", "--input-type=module", "-e",
                           head + script], input=json.dumps(payload), capture_output=True, text=True, timeout=120)
@@ -61,13 +65,25 @@ def run_js(script: str, payload) -> dict:
     return json.loads(out.stdout)
 
 
-def test_the_font_is_the_same_in_both_places():
-    sandbox = ROOT / "services" / "sandbox" / "hub3d-font.json"
-    assert FONT.read_bytes() == sandbox.read_bytes(), "tools/make_3d_font.py writes both: run it again"
-    font = json.loads(FONT.read_text(encoding="utf-8"))
-    assert font["unitsPerEm"] == 1000 and all(ch in font["glyphs"] for ch in "AZaz09æøåÆØÅ?.,-+°")
+def test_the_fonts_are_the_same_in_both_places(h3):
+    sandbox = ROOT / "services" / "sandbox" / "fonts"
+    names = sorted(f.name for f in FONTS.iterdir())
+    assert names == sorted(f.name for f in sandbox.iterdir()) and "OFL.txt" in names
+    for name in names:
+        assert (FONTS / name).read_bytes() == (sandbox / name).read_bytes(), f"{name}: run tools/make_3d_font.py again"
+    index = json.loads((FONTS / "index.json").read_text(encoding="utf-8"))
+    assert list(index["families"]) == list(h3.FONT_FAMILIES) and index["default"] == h3.FONT_FAMILIES[0]
+    files = {f for fam in index["families"].values() for k, f in fam.items() if k != "name"}
+    assert files == {n[:-5] for n in names if n.endswith(".json") and n != "index.json"}       # none missing, none extra
+    for file in files:
+        font = json.loads((FONTS / f"{file}.json").read_text(encoding="utf-8"))
+        assert font["unitsPerEm"] == 1000 and all(ch in font["glyphs"] for ch in "AZaz09æøåÆØÅ?.,-+°"), file
+        assert font["license"].startswith("SIL Open Font License 1.1 - Copyright ") and 500 < font["capHeight"] < 900
+    assert index["families"]["sans"]["regular"] == "barlow-600"          # 0.87's one font: its texts stay as they were
     docker = (ROOT / "services" / "sandbox" / "Dockerfile").read_text()
-    assert "COPY hub3d-font.json /opt/hub3d/hub3d-font.json" in docker
+    assert "COPY fonts/ /opt/hub3d/fonts/" in docker
+    js = run_js("process.stdout.write(JSON.stringify({families: G.FONT_FAMILIES, aliases: G.FONT_ALIASES}));", {})
+    assert js == {"families": list(h3.FONT_FAMILIES), "aliases": h3.FONT_ALIASES}
 
 
 ODD = {"format": "slq-hub-3d", "version": 1, "printer": "bambu-p2s", "bed": [256, 256, 256], "parts": [
@@ -87,7 +103,7 @@ ODD = {"format": "slq-hub-3d", "version": 1, "printer": "bambu-p2s", "bed": [256
     {"id": "bad", "shape": "box", "repeat": "six", "type": "cylinder", "position": [1, 2, 3]},
     {"id": "gr", "shape": "group", "repeat": {"count": 3, "angle": 90}, "radius": 4, "parts": []}]}
 GEOMETRIC = ("id", "shape", "size", "at", "rotate", "mirror", "hole", "hidden", "sides", "radius", "top", "text",
-             "file", "points", "holes", "repeat")
+             "font", "bold", "italic", "align", "letter_spacing", "line_spacing", "file", "points", "holes", "repeat")
 
 
 def flat(parts: list) -> list[dict]:
@@ -206,7 +222,7 @@ const meshes = new Map();
 for (const [name, b64] of Object.entries(input.files)) meshes.set(name, G.readStl(Buffer.from(b64, "base64")));
 const out = input.designs.map((d) => {
   const { design } = G.readDesign(JSON.stringify(d));
-  const b = G.build(design, { wasm, font, meshes });
+  const b = G.build(design, { wasm, fonts, meshes });
   const owners = {};
   for (const id of b.triPart) owners[id] = (owners[id] || 0) + 1;
   return { triangles: b.triangles.length / 3, volume: b.volume, box: b.box, loose: b.loose.map((l) => l.part),
@@ -264,10 +280,11 @@ out.once = once; out.twice = twice;
 const turned = G.transformPart(box, [0, 0, 0], [5, 0, 0], G.rotation([0, 0, 90]), 2);
 out.turned = turned;
 out.extent = G.extent(box);
-const build = (parts) => { const b = G.build({ format: G.FORMAT, version: 1, parts }, { wasm, font, meshes: new Map() });
+const build = (parts) => { const b = G.build({ format: G.FORMAT, version: 1, parts }, { wasm, fonts, meshes: new Map() });
   return { volume: b.volume, box: b.box }; };
 out.built = [build([box]), build([once]), build([twice]), build([turned])];
-out.width = G.textWidth("SLQ", 10, font);
+out.width = G.textMeasure({ id: "t", shape: "text", text: "SLQ", size: [0, 10, 2], at: [0, 0, 1], rotate: [0, 0, 0] },
+  fonts).width;
 process.stdout.write(JSON.stringify(out));
 """
 
@@ -298,6 +315,7 @@ def test_the_design_command(h3, tmp_path, capsys, monkeypatch):
     assert out.startswith("stand.3d.json: 2 box, 1 cylinder hole, 1 cone, 1 wedge, 1 sphere, 1 text, 2 group, "
                           "1 box hole, 1 cylinder, 2 mesh; laid out for a bed (256 x 256 x 256 mm)"), out
     assert "- sheet: open.stl is not a closed solid" in out and (tmp_path / "v.png").stat().st_size > 10_000
+    assert "\ntext label: 2 lines in Barlow SemiBold, " in out and " x 8.0 x 2.0 mm - its capitals " in out
     assert (tmp_path / "out.3mf").exists()
     solid = h3.design(f, quiet=True)
     assert solid.volume() > 25_000
@@ -365,7 +383,7 @@ const arm = { id: "arm", shape: "outline", size: [0, 0, 3], at: [0, 0, 1.5], rot
   points: [[0, -2], [40, -2], [44, 0], [40, 2], [0, 2]], repeat: { count: 6 } };
 const g = { id: "g", shape: "group", size: [0, 0, 0], at: [0, 0, 0], rotate: [0, 0, 0], repeat: { count: 3 },
   parts: [{ id: "b", shape: "box", size: [10, 3, 3], at: [12, 0, 1.5], rotate: [0, 0, 0] }] };
-const kit = { wasm, font, meshes: new Map() };
+const kit = { wasm, fonts, meshes: new Map() };
 const one = (p) => { const b = G.build({ format: G.FORMAT, version: 1, parts: [p] }, kit); return { volume: b.volume,
   box: b.box, tri: b.triangles.length / 3, rests: b.rests }; };
 const turn = G.rotation([0, 0, 30]);
@@ -431,7 +449,7 @@ def test_what_a_solid_stands_on(h3, tmp_path, capsys, monkeypatch):
     report = h3.check(h3.design(tmp_path / "rods.3d.json", quiet=True))
     assert 0 < report.contact < 0.4 * report.footprint
     js = run_js("""const out = input.map((d) => { const { design } = G.readDesign(JSON.stringify(d));
-      return G.build(design, { wasm, font, meshes: new Map() }).rests; }); process.stdout.write(JSON.stringify(out));""",
+      return G.build(design, { wasm, fonts, meshes: new Map() }).rests; }); process.stdout.write(JSON.stringify(out));""",
                 [rods, flat])
     assert js[0]["contact"] == pytest.approx(report.contact, rel=1e-3)
     assert js[0]["footprint"] == pytest.approx(report.footprint, rel=1e-3)
@@ -439,3 +457,190 @@ def test_what_a_solid_stands_on(h3, tmp_path, capsys, monkeypatch):
     # a file of its own (an STL) is told the same - but not where it lies: slicers put it on the plate themselves
     pen = h3.check(h3.design(tmp_path / "flat.3d.json", quiet=True))
     assert not any("stands on" in w for w in pen.warnings)
+
+
+# 0.89.0: text in six fonts, bold and italic, its lines aligned and spaced. Chat 330: "the text must be bigger, and
+# in italics" - there was one font, and the format's "letter height" was the height of all the lines: two lines at
+# 20 had capitals 6.6 mm tall on a 100 mm plate, and nothing said so.
+TEXTS = [{"parts": [{"id": "t", "shape": "text", "text": "Søren\nLyder ÆØÅ 08", "size": [0, 20, 2], "font": f,
+                     "bold": b, "italic": i}]}
+         for f in ("sans", "serif", "rounded", "script", "stencil", "mono") for b in (False, True) for i in (False, True)]
+TEXTS += [
+    {"parts": [{"id": "t", "shape": "text", "text": "Venstre\nhøjre side\nx", "align": "left", "size": [50, 0, 2]}]},
+    {"parts": [{"id": "t", "shape": "text", "text": "Venstre\nhøjre side\nx", "align": "right", "size": [50, 30, 2],
+                "letter_spacing": 1.3, "line_spacing": 0.8}]},
+    {"parts": [{"id": "t", "shape": "text", "text": "Stående", "font": "Arial:style=Bold Italic", "size": [0, 8, 1],
+                "rotate": [90, 0, 0], "at": [0, 0, 4], "mirror": True}]},
+    {"parts": [{"id": "plate", "shape": "box", "size": [100, 100, 3], "at": [0, 0, 1.5]},
+               {"id": "t", "shape": "text", "text": "Søren\nLyder", "size": [80, 0, 2], "at": [0, 0, 3.9],
+                "italic": True},
+               {"id": "cut", "shape": "text", "text": "HUB", "font": "stencil", "size": [40, 0, 5], "at": [0, -38, 1.5],
+                "hole": True}]},
+]
+TEXT_JS = """
+const out = input.map((d) => {
+  const r = G.readDesign(JSON.stringify(d));
+  const b = G.build(r.design, { wasm, fonts, meshes: new Map() });
+  const t = r.design.parts.find((p) => p.id === "t");
+  return { triangles: b.triangles.length / 3, volume: b.volume, box: b.box, problems: r.problems.length + b.problems.length,
+           measure: G.textMeasure(t, fonts) };
+});
+process.stdout.write(JSON.stringify(out));
+"""
+
+
+def test_text_in_every_font_and_style_builds_the_same_in_both(h3):
+    pytest.importorskip("manifold3d")
+    js = run_js(TEXT_JS, TEXTS)
+    names = set()
+    for d, j in zip(TEXTS, js):
+        design, problems = h3.read_design(json.dumps(d))
+        b = h3.build_design(design, ".")
+        mesh = b.solid.to_mesh()
+        v = np.asarray(mesh.vert_properties)[:, :3]
+        assert j["triangles"] == len(mesh.tri_verts), d
+        assert j["volume"] == pytest.approx(b.solid.volume(), rel=1e-9, abs=1e-6)
+        assert np.allclose(j["box"], [v.min(0), v.max(0)], atol=1e-4)
+        assert j["problems"] == len(problems + b.problems) == 0, d
+        m = h3._text_measure(next(p for p in design["parts"] if p["id"] == "t"))
+        for k in ("width", "height", "capitals"):
+            assert j["measure"][k] == pytest.approx(m[k], rel=1e-12), (k, d)
+        assert j["measure"]["font"] == m["font"] and j["measure"]["lines"] == m["lines"]
+        names.add(m["font"])
+    # every family in its own font; a bold where there is one; an italic, or the upright slanted
+    assert {"Barlow SemiBold", "Barlow ExtraBold Italic", "Bitter SemiBold Italic", "Nunito Black",
+            "Pacifico Regular", "Saira Stencil One Regular", "JetBrains Mono ExtraBold"} <= names
+    widths = [j["measure"]["width"] for j in js[:24]]
+    assert widths[12] == widths[14] != widths[13] == widths[15]          # script: no bold; italic slants it
+    assert js[0]["measure"]["capitals"] == pytest.approx(6.64, abs=0.01)  # chat 330's: 20 high, two lines
+    assert js[24]["measure"]["width"] == pytest.approx(50) and js[24]["measure"]["height"] > 30   # its height follows
+    plate = js[27]
+    assert plate["measure"]["width"] == pytest.approx(80) and plate["measure"]["capitals"] == pytest.approx(22.7, abs=0.1)
+
+
+ODD_TEXT = {"parts": [
+    {"id": "a", "shape": "text", "text": "x", "font": "Arial:style=Bold Italic"},       # OpenSCAD's way: sans, both
+    {"id": "b", "shape": "text", "text": "x", "font": "Comic Sans", "align": "justify", "size": [0, 0, 2]},
+    {"id": "c", "shape": "text", "text": "x", "font": "Pacifico", "bold": True, "align": "Right", "letter_spacing": 9,
+     "line_spacing": "wide"},
+    {"id": "d", "shape": "text", "text": "x", "font": "serif", "italic": "yes", "align": "centre", "letter_spacing": 1,
+     "line_spacing": 0.8},
+    {"id": "e", "shape": "text", "text": "x", "font": 7, "size": [-30, 12, 1]},
+    {"id": "f", "shape": "box", "font": "serif", "bold": True},                         # known keys, no text: unused
+    {"id": "g", "shape": "text", "text": "x", "font": "JetBrains Mono ExtraBold", "align": "left"}]}
+
+
+def test_both_read_text_options_the_same(h3):
+    js = run_js("const r = G.readDesign(JSON.stringify(input)); process.stdout.write(JSON.stringify({parts: "
+                "r.design.parts, problems: r.problems, text: G.writeDesign(r.design)}));", ODD_TEXT)
+    py, problems = h3.read_design(json.dumps(ODD_TEXT))
+    assert flat(js["parts"]) == flat(py["parts"])
+    assert len(js["problems"]) == len(problems) == 6, (js["problems"], problems)
+    assert [x.split(":")[0] for x in problems] == ["b", "b", "b", "c", "c", "e"]
+    assert 'no font "Comic Sans" - the fonts are sans, serif, rounded, script, stencil, mono; drawn in sans' in problems[1]
+    by_id = {p["id"]: p for p in py["parts"]}
+    assert by_id["a"]["size"] == [0, 10, 2] and by_id["a"]["bold"] and by_id["a"]["italic"] and "font" not in by_id["a"]
+    assert by_id["b"]["size"] == [0, 10, 2] and "font" not in by_id["b"] and "align" not in by_id["b"]
+    c = by_id["c"]
+    assert c["font"] == "script" and c["bold"] and c["align"] == "right" and c["letter_spacing"] == 4
+    assert "line_spacing" not in c
+    d = by_id["d"]
+    assert d["font"] == "serif" and "italic" not in d and "align" not in d and "letter_spacing" not in d
+    assert d["line_spacing"] == 0.8 and by_id["e"]["size"] == [0, 12, 1]
+    assert by_id["g"] == {**by_id["g"], "font": "mono", "bold": True, "align": "left"}
+    again, said = h3.read_design(js["text"])                        # what the editor writes reads back as it was
+    assert flat(again["parts"]) == flat(py["parts"]) and said == []
+    assert '"font": "script",\n' in js["text"] and '"letter_spacing": 4' in js["text"] and '"font": "sans"' not in js["text"]
+
+
+LAYOUT_JS = """
+const base = { id: "t", shape: "text", size: [0, 10, 2], at: [0, 0, 1], rotate: [0, 0, 0] };
+const font = fonts.loaded["barlow-600"];
+const lines = (p) => {                       // each line's ink from x to x: line 1 above y -300, line 2 below
+  const cs = G.textContours({ ...base, ...p }, font);
+  const span = (sel) => { const xs = cs.filter(sel).flat().map((q) => q[0]); return [Math.min(...xs), Math.max(...xs)]; };
+  return [span((c) => c[0][1] > -300), span((c) => c[0][1] <= -300), Math.min(...cs.flat().map((q) => q[1]))];
+};
+process.stdout.write(JSON.stringify({
+  left: lines({ text: "WW\\nW", align: "left" }), right: lines({ text: "WW\\nW", align: "right" }),
+  centre: lines({ text: "WW\\nW" }), wide: lines({ text: "WW\\nW", letter_spacing: 2 }),
+  apart: lines({ text: "WW\\nW", line_spacing: 1.5 }), w: font.glyphs["W"].a,
+  contours: G.textContours({ ...base, text: "Hej\\nmed dig", align: "right", letter_spacing: 1.2, line_spacing: 0.9 },
+                           font, G.SLANT),
+}));
+"""
+
+
+def test_text_lines_align_and_space_as_said(h3):
+    out = run_js(LAYOUT_JS, {})
+    (l1, l2, _), (r1, r2, _), (c1, c2, low) = out["left"], out["right"], out["centre"]
+    assert l1[0] == pytest.approx(l2[0]) and r1[1] == pytest.approx(r2[1])           # left: they start together ...
+    assert (c1[0] + c1[1]) / 2 == pytest.approx((c2[0] + c2[1]) / 2, abs=1)           # ... centred: share a middle
+    (w1, _, _), (_, _, lower) = out["wide"], out["apart"]
+    assert (w1[1] - w1[0]) - (c1[1] - c1[0]) == pytest.approx(out["w"])               # one gap more: one advance
+    assert lower == pytest.approx(low - 600)                                          # 1.5 lines of 1200 down
+    p = {"id": "t", "shape": "text", "text": "Hej\nmed dig", "align": "right", "letter_spacing": 1.2, "line_spacing": 0.9}
+    py = h3._text_contours(p, h3._font("barlow-600"), h3.SLANT)
+    assert py == [[tuple(q) for q in c] for c in out["contours"]]                     # to the last bit
+
+
+EDIT_JS = """
+const t = { id: "t", shape: "text", text: "SLQ", size: [0, 10, 2], at: [0, 0, 1], rotate: [0, 0, 0] };
+const m = (p) => G.textMeasure(p, fonts);
+const own = m(t).width, caps = m(t).capitals;
+const fixed = { ...t, size: [own, 10, 2] }, stretched = { ...t, size: [own * 2, 10, 2] };
+const wide = { ...t, size: [60, 0, 2] };
+const longer = G.retext(t, { text: "SLQ Hub\\nVojens" }, fonts), serif = G.retext(fixed, { text: "SLQ Hub", font: "serif" }, fonts);
+process.stdout.write(JSON.stringify({
+  own, caps, capitals: m(G.withCapitals(t, 15, fonts)),
+  longer: [longer.size, m(longer).capitals], wide: [G.retext(wide, { bold: true }, fonts).size, m(G.retext(wide, { bold: true }, fonts)).capitals],
+  serif: [serif.size, m(serif).capitals, m({ ...serif, size: [0, serif.size[1], 2] }).width],
+  stretched: G.retext(stretched, { text: "SLQ Hub" }, fonts).size,
+  high: G.partSize({ ...t, size: [70, 0, 2] }, fonts), file: G.fontFile({ ...t, font: "script", italic: true }, fonts.index),
+}));
+"""
+
+
+def test_the_editor_sizes_text_by_its_letters():
+    """The editor's "Letters" sets how tall the capitals come out; a new text, font or style keeps them that tall -
+    the text grows around them - and a text stretched to a box of its own stays in it."""
+    out = run_js(EDIT_JS, {})
+    assert out["capitals"]["capitals"] == pytest.approx(15) and out["capitals"]["width"] > out["own"] * 1.4
+    size, caps = out["longer"]                         # two lines now: twice as high and more, the letters as they were
+    assert size[0] == 0 and size[1] > 20 and caps == pytest.approx(out["caps"])
+    size, caps = out["wide"]                           # its width was the given one: bolder, it is wider
+    assert size[0] > 60 and size[1] == 0
+    size, caps, natural = out["serif"]                 # a box the letters fitted: they still do, as tall
+    assert caps == pytest.approx(out["caps"]) and size[0] == pytest.approx(natural) and size[1] != 10
+    assert out["stretched"][0] == pytest.approx(out["own"] * 2) and out["stretched"][1] == 10
+    assert out["high"][0] == 70 and 10 < out["high"][1] < 40 and out["high"][2] == 2
+    assert out["file"] == {"file": "pacifico-400", "slant": pytest.approx(0.1583844, abs=1e-7)}
+
+
+def test_flat_things_are_drawn_straight_down(h3, tmp_path, capsys, monkeypatch):
+    """Chat 330: from the front and the side a plate is a line, and its letters were small at an angle above. A flat
+    design is drawn straight down first - its letters show there - and hub3d design says how big each text came
+    out."""
+    pytest.importorskip("manifold3d")
+    from PIL import Image
+    monkeypatch.setenv("MPLCONFIGDIR", str(tmp_path / "mpl"))
+    plate = {"parts": [{"id": "plate", "shape": "box", "size": [100, 100, 3], "at": [0, 0, 1.5]},
+                       {"id": "name", "shape": "text", "text": "Søren\nLyder", "size": [0, 20, 2], "at": [0, 0, 4]}]}
+    bare = {"parts": plate["parts"][:1]}
+    panels = []
+    for name, d in (("plate", plate), ("bare", bare)):
+        f = tmp_path / f"{name}.3d.json"
+        f.write_text(json.dumps(d))
+        h3.main(["design", str(f), "--views", str(tmp_path / f"{name}.png")])
+        out = capsys.readouterr().out
+        assert "straight down, from above and from the front" in out
+        img = np.asarray(Image.open(tmp_path / f"{name}.png").convert("L"), dtype=np.int16)
+        panels.append(img[:, :img.shape[1] // 3])
+        if name == "plate":
+            assert "text name: 2 lines in Barlow SemiBold, 23.8 x 20.0 x 2.0 mm - its capitals 6.6 mm tall" in out
+    changed = (np.abs(panels[0] - panels[1]) > 12).mean()
+    assert changed > 0.01, changed                         # the letters, seen from straight above
+    cube = tmp_path / "cube.3d.json"
+    cube.write_text(json.dumps({"parts": [{"id": "c", "shape": "box"}]}))
+    h3.main(["design", str(cube), "--views", str(tmp_path / "cube.png")])
+    assert "from the front, the side and above" in capsys.readouterr().out

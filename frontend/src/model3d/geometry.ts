@@ -8,7 +8,7 @@
 // part or group can be repeated: copies turned about the up axis, or in a row. Parts that are holes are cut out of
 // the solids beside them - in their group, or in the design itself - as in Tinkercad.
 //
-// Nothing here imports anything (manifold-3d and the font are handed in), so the browser and a test run with node
+// Nothing here imports anything (manifold-3d and the fonts are handed in), so the browser and a test run with node
 // (--experimental-strip-types) use the same code. services/sandbox/hub3d.py's design() builds designs the same way
 // in the sandbox, for the assistant; tests/test_design3d.py runs both on the same designs and compares.
 
@@ -23,7 +23,31 @@ export const SHAPES: readonly Shape[] = ["box", "cylinder", "cone", "sphere", "w
 export const MAX_COPIES = 100;
 /** The keys a part may have; others are said once (a model guessing the format: "type", "radius", "position"). */
 export const PART_KEYS = ["id", "name", "shape", "size", "at", "rotate", "mirror", "hole", "hidden", "color", "sides",
-  "radius", "top", "text", "points", "holes", "file", "repeat", "parts"];
+  "radius", "top", "text", "font", "bold", "italic", "align", "letter_spacing", "line_spacing", "points", "holes",
+  "file", "repeat", "parts"];
+
+/** A text's fonts (0.89.0), as fonts/index.json names them (tools/make_3d_font.py makes both): the first is the
+ *  default. Other names a model may write for them, and the words in a name that ask for bold or italic. */
+export const FONT_FAMILIES = ["sans", "serif", "rounded", "script", "stencil", "mono"];
+export const FONT_ALIASES: Record<string, string> = {
+  "barlow": "sans", "sans serif": "sans", "arial": "sans", "helvetica": "sans", "liberation sans": "sans",
+  "dejavu sans": "sans", "roboto": "sans", "open sans": "sans", "inter": "sans",
+  "bitter": "serif", "slab": "serif", "times": "serif", "times new roman": "serif", "georgia": "serif",
+  "liberation serif": "serif", "roboto slab": "serif",
+  "nunito": "rounded", "round": "rounded", "arial rounded": "rounded", "varela round": "rounded",
+  "pacifico": "script", "cursive": "script", "handwriting": "script", "lobster": "script", "brush script": "script",
+  "saira stencil one": "stencil", "saira stencil": "stencil",
+  "jetbrains mono": "mono", "monospace": "mono", "courier": "mono", "courier new": "mono", "consolas": "mono",
+  "liberation mono": "mono", "dejavu sans mono": "mono",
+};
+const BOLD_WORDS = ["bold", "extrabold", "black", "heavy"];
+const ITALIC_WORDS = ["italic", "oblique"];
+const PLAIN_WORDS = ["regular", "normal", "semibold", "medium", "book", "style"];
+export type Align = "left" | "center" | "right";
+/** How far an italic leans in a font that has none (tan 9°, the others' angle), and what letter_spacing and
+ *  line_spacing may be: shares of the font's own spacing. */
+export const SLANT = 0.15838444032453627;
+export const SPACING: readonly [number, number] = [0.5, 4];
 
 export type Point2 = [number, number];
 
@@ -51,7 +75,13 @@ export interface Part {
   sides?: number;             // cylinder, cone, sphere: segments around (and box corners when rounded)
   radius?: number;            // box: rounded edges, mm
   top?: number;               // cone: the top's diameter as a share of the bottom's (0: a point)
-  text?: string;              // text
+  text?: string;              // text: its letters, \n between lines
+  font?: string;              // text: one of FONT_FAMILIES (left out: the first)
+  bold?: boolean;             // text: the family's bold, where it has one
+  italic?: boolean;           // text: its italic, or its letters slanted
+  align?: Align;              // text: its lines (left out: centred)
+  letter_spacing?: number;    // text: the space from one letter to the next, as a share of the font's (left out: 1)
+  line_spacing?: number;      // text: the same from one line to the next
   points?: Point2[];          // outline: its shape, mm, around its own 0,0 (which `at` places)
   holes?: Point2[][];         // outline: shapes cut out of it
   file?: string;              // mesh: an STL, 3MF or OBJ in the working folder
@@ -173,10 +203,12 @@ function readPart(p: Record<string, unknown>, seen: Set<string>, problems: strin
   if (shape === "group") {
     part.parts = readParts(Array.isArray(p.parts) ? p.parts : [], seen, problems, odd);
   } else {
-    // 0 keeps a text's width as its letters make it, and an outline's width and depth as its points draw them
-    const auto = (i: number, v: number) => v <= 0 && ((shape === "text" && i === 0) || (shape === "outline" && i < 2));
-    const size = vec(p.size, shape === "outline" ? [0, 0, 2] : [20, 20, shape === "text" ? 2 : 20]);
-    part.size = size.map((v, i) => (auto(i, v) ? 0 : Math.max(MIN_SIZE, Math.abs(v)))) as Vec3;
+    const size = vec(p.size, shape === "outline" ? [0, 0, 2] : shape === "text" ? [0, 10, 2] : [20, 20, 20]);
+    part.size = size.map((v, i) => (follows(shape, i, v) ? 0 : Math.max(MIN_SIZE, Math.abs(v)))) as Vec3;
+    if (shape === "text" && part.size[0] === 0 && part.size[1] === 0) {
+      part.size[1] = 10;
+      problems.push(`${id}: a text needs a width or a height (size x or y) - made 10 mm tall.`);
+    }
     part.at = vec(p.at, [0, 0, part.size[2] / 2]);
   }
   if (shape === "group") part.size = [0, 0, 0];     // a group is where its parts are: nothing of its own
@@ -194,7 +226,10 @@ function readPart(p: Record<string, unknown>, seen: Set<string>, problems: strin
   }
   if (shape === "box" && num(p.radius) && p.radius > 0) part.radius = p.radius;
   if (shape === "cone") part.top = num(p.top) ? Math.max(0, Math.min(1, p.top)) : 0;
-  if (shape === "text") part.text = typeof p.text === "string" ? p.text : "Text";
+  if (shape === "text") {
+    part.text = typeof p.text === "string" ? p.text : "Text";
+    readTextStyle(p, part, problems);
+  }
   if (shape === "outline") {
     const pts = pointsOf(p.points);
     if (pts) part.points = pts;
@@ -213,6 +248,57 @@ function readPart(p: Record<string, unknown>, seen: Set<string>, problems: strin
   const repeat = readRepeat(p.repeat, id, problems);
   if (repeat) part.repeat = repeat;
   return part;
+}
+
+/** Whether a 0 in a part's size follows what it draws: a text's width or height (from its letters - one of the two
+ *  is given), an outline's width and depth (from its points). */
+export function follows(shape: Shape, i: number, v: number): boolean {
+  return v <= 0 && i < 2 && (shape === "text" || shape === "outline");
+}
+
+/** A font as a design may name it - "serif", "Pacifico", "Arial Bold", OpenSCAD's "Liberation Sans:style=Bold
+ *  Italic" - as one of FONT_FAMILIES, and the bold or italic its words ask for. family "" when it is none of them. */
+export function fontName(raw: string): { family: string; bold: boolean; italic: boolean } {
+  const words = raw.toLowerCase().split(/[\s:_,=-]+/).filter(Boolean);
+  const bold = words.some((w) => BOLD_WORDS.includes(w));
+  const italic = words.some((w) => ITALIC_WORDS.includes(w));
+  const name = words.filter((w) => !BOLD_WORDS.includes(w) && !ITALIC_WORDS.includes(w) && !PLAIN_WORDS.includes(w))
+    .join(" ");
+  const family = !name ? FONT_FAMILIES[0] : FONT_FAMILIES.includes(name) ? name : FONT_ALIASES[name] ?? "";
+  return { family, bold, italic };
+}
+
+function readTextStyle(p: Record<string, unknown>, part: Part, problems: string[]): void {
+  const id = part.id;
+  if (p.font !== undefined) {
+    const f = typeof p.font === "string" ? fontName(p.font) : { family: "", bold: false, italic: false };
+    if (!f.family) {
+      problems.push(`${id}: no font "${String(p.font)}" - the fonts are ${FONT_FAMILIES.join(", ")}; drawn in `
+        + `${FONT_FAMILIES[0]}.`);
+    } else if (f.family !== FONT_FAMILIES[0]) part.font = f.family;
+    if (f.bold) part.bold = true;
+    if (f.italic) part.italic = true;
+  }
+  if (p.bold === true) part.bold = true;
+  if (p.italic === true) part.italic = true;
+  if (p.align !== undefined) {
+    const a = typeof p.align === "string" ? p.align.trim().toLowerCase() : "";
+    if (a === "left" || a === "right") part.align = a;
+    else if (!["center", "centre", "middle"].includes(a)) {
+      problems.push(`${id}: align is "left", "center" or "right" - centred.`);
+    }
+  }
+  for (const key of ["letter_spacing", "line_spacing"] as const) {
+    const v = p[key];
+    if (v === undefined) continue;
+    if (!num(v)) {
+      problems.push(`${id}: ${key} is a number, 1 the font's own - left out.`);
+      continue;
+    }
+    const c = Math.max(SPACING[0], Math.min(SPACING[1], v));
+    if (c !== v) problems.push(`${id}: ${key} is ${SPACING[0]} to ${SPACING[1]} - made ${c}.`);
+    if (c !== 1) part[key] = c;
+  }
 }
 
 export function freshId(seen: Set<string>): string {
@@ -248,7 +334,15 @@ function cleanPart(p: Part): Record<string, unknown> {
   if (p.sides !== undefined && (ROUND.includes(p.shape) || p.radius)) o.sides = p.sides;
   if (p.radius) o.radius = r3(p.radius);
   if (p.shape === "cone") o.top = r3(p.top ?? 0);
-  if (p.shape === "text") o.text = p.text ?? "";
+  if (p.shape === "text") {
+    o.text = p.text ?? "";
+    if (p.font && p.font !== FONT_FAMILIES[0]) o.font = p.font;
+    if (p.bold) o.bold = true;
+    if (p.italic) o.italic = true;
+    if (p.align && p.align !== "center") o.align = p.align;
+    if (p.letter_spacing !== undefined && p.letter_spacing !== 1) o.letter_spacing = r3(p.letter_spacing);
+    if (p.line_spacing !== undefined && p.line_spacing !== 1) o.line_spacing = r3(p.line_spacing);
+  }
   if (p.shape === "outline" && p.points) o.points = p.points.map((q) => q.map(r3));
   if (p.shape === "outline" && p.holes?.length) o.holes = p.holes.map((h) => h.map((q) => q.map(r3)));
   if (p.shape === "mesh" && p.file) o.file = p.file;
@@ -355,10 +449,13 @@ export function ownBox(p: Part): Box3 {
   return [[-sx / 2, -sy / 2, -sz / 2], [sx / 2, sy / 2, sz / 2]];
 }
 
-/** A part's size with the 0s worked out: a text's width from its letters (given the font), an outline's from its
- *  points. */
-export function partSize(p: Part, font?: FontData): Vec3 {
-  if (p.shape === "text" && p.size[0] <= 0 && font) return [textWidth(p.text ?? "", p.size[1], font), p.size[1], p.size[2]];
+/** A part's size with the 0s worked out: a text's width or height from its letters (given its font), an outline's
+ *  from its points. */
+export function partSize(p: Part, fonts?: Fonts): Vec3 {
+  if (p.shape === "text" && (p.size[0] <= 0 || p.size[1] <= 0)) {
+    const t = fonts && textMeasure(p, fonts);
+    return t ? [t.width, t.height, p.size[2]] : p.size;
+  }
   if (p.shape === "outline" && (p.size[0] <= 0 || p.size[1] <= 0)) {
     const [lo, hi] = ownBox(p);
     return [hi[0] - lo[0], hi[1] - lo[1], p.size[2]];
@@ -446,9 +543,8 @@ export function transformPart(p: Part, centre: Vec3, move: Vec3, turn: Mat3 | nu
     const at: Vec3 = [centre[0] + r[0] * k + move[0], centre[1] + r[1] * k + move[1], centre[2] + r[2] * k + move[2]];
     out = { ...p, at };
     if (turn) out.rotate = angles(mul(turn, rotation(p.rotate)));
-    if (k !== 1) {                         // a text's width 0 (it follows its letters) stays 0, an outline's 0s too
-      const auto = (i: number, v: number) => v <= 0 && ((p.shape === "text" && i === 0) || (p.shape === "outline" && i < 2));
-      out.size = p.size.map((v, i) => (auto(i, v) ? 0 : Math.max(MIN_SIZE, v * k))) as Vec3;
+    if (k !== 1) {                         // a text's 0 (it follows its letters) stays 0, an outline's 0s too
+      out.size = p.size.map((v, i) => (follows(p.shape, i, v) ? 0 : Math.max(MIN_SIZE, v * k))) as Vec3;
       if (p.shape === "outline" && (p.size[0] <= 0 || p.size[1] <= 0)) {
         const drawn = partSize(p);                    // scaled: its 0s become the drawn size times k
         out.size = [drawn[0] * k, drawn[1] * k, Math.max(MIN_SIZE, p.size[2] * k)];
@@ -507,60 +603,130 @@ export function mirrorPart(p: Part, axis: number, centre: Vec3): Part {
 
 // ---------------------------------------------------------------- text
 
+/** A font as tools/make_3d_font.py flattens it: per character its advance and its outlines, in font units. */
 export interface FontData {
+  name?: string;
   unitsPerEm: number;
   ascender: number;
   descender: number;
+  capHeight?: number;
   glyphs: Record<string, { a: number; c: number[][] }>;
 }
 
-/** The outlines of `text` in font units: one line after another, each glyph moved along by its advance. */
-export function textContours(text: string, font: FontData): number[][][] {
+/** fonts/index.json: each family's font files by style (a family may have only "regular"). */
+export interface FontIndex {
+  default: string;
+  families: Record<string, { name: string; regular: string; bold?: string; italic?: string; "bold-italic"?: string }>;
+}
+
+/** The fonts a build draws text with: the index, and the font files loaded so far (by their names in it). */
+export interface Fonts { index: FontIndex; loaded: Record<string, FontData> }
+
+/** The font file a text part is drawn in, and how far its letters lean (a family without an italic: SLANT). A
+ *  family without a bold draws its regular. */
+export function fontFile(p: Part, index: FontIndex): { file: string; slant: number } {
+  const fam = index.families[p.font ?? ""] ?? index.families[index.default];
+  const style = p.bold && p.italic ? "bold-italic" : p.bold ? "bold" : p.italic ? "italic" : "regular";
+  const file = fam[style];
+  if (file) return { file, slant: 0 };
+  return { file: (p.bold && fam.bold) || fam.regular, slant: p.italic ? SLANT : 0 };
+}
+
+/** A text part's font and slant - null while its file is not loaded. */
+export function textFont(p: Part, fonts: Fonts): { font: FontData; slant: number } | null {
+  const { file, slant } = fontFile(p, fonts.index);
+  const font = fonts.loaded[file];
+  return font ? { font, slant } : null;
+}
+
+/** A text's outlines in font units, laid out: each letter after the last by its advance (times letter_spacing
+ *  between letters), each line below the last by the font's line height (ascender to descender, times
+ *  line_spacing), the lines centred on x 0 - or starting or ending there (align) - and slanted by `slant`. */
+export function textContours(p: Part, font: FontData, slant = 0): number[][][] {
   const out: number[][][] = [];
-  const lines = text.split("\n");
-  const lineHeight = 1.2 * font.unitsPerEm;
-  lines.forEach((line, row) => {
-    let x = 0;
-    const y = -row * lineHeight;
+  const ls = p.letter_spacing ?? 1;
+  const step = (font.ascender - font.descender) * (p.line_spacing ?? 1);
+  (p.text ?? "").split("\n").forEach((line, row) => {
+    const placed: [number[][], number][] = [];
+    let x = 0, last = 0;
     for (const ch of line) {
       const g = font.glyphs[ch] ?? font.glyphs["?"];
       if (!g) continue;
-      for (const c of g.c) {
-        const poly: number[][] = [];
-        for (let i = 0; i < c.length; i += 2) poly.push([c[i] + x, c[i + 1] + y]);
-        out.push(poly);
-      }
-      x += g.a;
+      placed.push([g.c, x]);
+      last = g.a;
+      x += g.a * ls;
+    }
+    const width = placed.length ? x - last * ls + last : 0;
+    const off = p.align === "left" ? 0 : p.align === "right" ? -width : -width / 2;
+    const y = -row * step;
+    for (const [cs, gx] of placed) for (const c of cs) {
+      const poly: number[][] = [];
+      for (let i = 0; i < c.length; i += 2) poly.push([c[i] + gx + off + slant * c[i + 1], c[i + 1] + y]);
+      out.push(poly);
     }
   });
   return out;
 }
 
-/** The outlines scaled into a part's size (width and height in mm, the box centred; width 0: as wide as the height
- *  makes it). null when the text draws nothing. */
-export function textPolygons(text: string, size: Vec3, font: FontData): number[][][] | null {
-  const contours = textContours(text, font);
-  if (!contours.length) return null;
+function inkBox(contours: number[][][]): [number, number, number, number] | null {
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
   for (const c of contours) for (const [x, y] of c) {
     x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y);
   }
-  const w = x1 - x0, h = y1 - y0;
-  if (w <= 0 || h <= 0) return null;
-  const ky = size[1] / h;
-  const kx = size[0] > 0 ? size[0] / w : ky;
+  return x1 > x0 && y1 > y0 ? [x0, y0, x1, y1] : null;
+}
+
+/** mm per font unit across and up, for letters `w` x `h` font units in a part of `size`: a 0 follows the other. */
+function textScale(size: Vec3, w: number, h: number): [number, number] {
+  const ky = size[1] > 0 ? size[1] / h : size[0] / w;
+  return [size[0] > 0 ? size[0] / w : ky, ky];
+}
+
+/** The outlines in mm, scaled into the part's size and centred on its 0,0. null when the text draws nothing. */
+export function textPolygons(p: Part, font: FontData, slant = 0): number[][][] | null {
+  const contours = textContours(p, font, slant);
+  const b = inkBox(contours);
+  if (!b) return null;
+  const [x0, y0, x1, y1] = b;
+  const [kx, ky] = textScale(p.size, x1 - x0, y1 - y0);
   const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
   return contours.map((c) => c.map(([x, y]) => [(x - cx) * kx, (y - cy) * ky]));
 }
 
-/** How wide text of a given height is, in mm (for a text part whose width follows its letters). */
-export function textWidth(text: string, height: number, font: FontData): number {
-  const contours = textContours(text, font);
-  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-  for (const c of contours) for (const [x, y] of c) {
-    x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y);
-  }
-  return y1 > y0 ? ((x1 - x0) * height) / (y1 - y0) : 0;
+/** What a text part comes out as: its width and height in mm (its 0s worked out), its lines, how tall its capitals
+ *  are and the font's name. null while its font is not loaded, or when it draws nothing. */
+export function textMeasure(p: Part, fonts: Fonts): { width: number; height: number; lines: number; capitals: number;
+  font: string } | null {
+  const t = textFont(p, fonts);
+  const b = t && inkBox(textContours(p, t.font, t.slant));
+  if (!t || !b) return null;
+  const w = b[2] - b[0], h = b[3] - b[1];
+  const [kx, ky] = textScale(p.size, w, h);
+  return { width: w * kx, height: h * ky, lines: (p.text ?? "").split("\n").length,
+    capitals: (t.font.capHeight ?? 0.7 * t.font.unitsPerEm) * ky, font: t.font.name ?? fontFile(p, fonts.index).file };
+}
+
+/** A text part sized so its capitals are `mm` tall (the editor's "Letters"): its size scaled, its 0s kept. */
+export function withCapitals(p: Part, mm: number, fonts: Fonts): Part {
+  const t = textMeasure(p, fonts);
+  if (!t || t.capitals <= 0 || mm <= 0) return p;
+  const f = mm / t.capitals;
+  return { ...p, size: [p.size[0] * f, p.size[1] * f, p.size[2]] };
+}
+
+/** A text part with `patch` (its letters, font, style or spacing) whose capitals stay as tall as they were - the
+ *  text grows or shrinks around them, as in any text tool - unless it was stretched to a box of its own (a width
+ *  and a height that are not the letters' own, to 0.05 mm): then the new letters fill that box. */
+export function retext(p: Part, patch: Partial<Part>, fonts: Fonts): Part {
+  const next: Part = { ...p, ...patch };
+  const was = textMeasure(p, fonts);
+  if (!was) return next;
+  const own = (q: Part) => textMeasure({ ...q, size: [0, q.size[1], q.size[2]] }, fonts)?.width;
+  const boxed = p.size[0] > 0 && p.size[1] > 0;
+  if (boxed && Math.abs(p.size[0] - (own(p) ?? p.size[0])) >= 0.05) return next;
+  const out = withCapitals(next, was.capitals, fonts);
+  const w = boxed ? own(out) : undefined;
+  return w !== undefined ? { ...out, size: [w, out.size[1], out.size[2]] } : out;
 }
 
 // ---------------------------------------------------------------- building the solid with manifold-3d
@@ -643,7 +809,7 @@ function placeMesh(m: MeshData, p: Part): MeshData {
 
 export interface Kit {
   wasm: Wasm;
-  font: FontData;
+  fonts: Fonts;
   meshes: Map<string, MeshData | string>;      // file -> its triangles, or why it could not be read
 }
 
@@ -685,7 +851,12 @@ export function build(design: Design, kit: Kit): Built {
         return keep(Manifold.hull([[-x, -y, -z], [x, -y, -z], [-x, y, -z], [x, y, -z], [-x, -y, z], [-x, y, z]]));
       }
       case "text": {
-        const polys = textPolygons(p.text ?? "", p.size, kit.font);
+        const t = textFont(p, kit.fonts);
+        if (!t) {
+          problems.push(`${p.id}: its font (${fontFile(p, kit.fonts.index).file}) is not loaded yet.`);
+          return null;
+        }
+        const polys = textPolygons(p, t.font, t.slant);
         if (!polys) return null;
         return keep(keep(keep(new CrossSection(polys, "NonZero")).extrude(sz)).translate([0, 0, -sz / 2]));
       }
