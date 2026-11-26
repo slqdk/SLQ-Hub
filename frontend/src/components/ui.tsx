@@ -1,5 +1,5 @@
 // Small building blocks: lamps, menus, modals, switches, toasts.
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { X } from "lucide-react";
 import { useApp } from "../state";
 
@@ -45,16 +45,50 @@ export function Modal({ title, onClose, children, footer, wide }: { title: strin
 }
 
 /** A button with a drop-down menu; the menu closes on any click outside or on an item. */
-export function MenuButton({ label, children, up, right, className, title, disabled, anchorClassName, menuClassName }: {
+/** A fixed menu's place, moved back onto the screen by `shift` - by its left or right, not a transform: a transform
+ *  would make a menu inside it (the 3D editor's folded groups) place itself by this one instead of the screen. */
+function fixedAt(place: CSSProperties | null, shift: number): CSSProperties {
+  if (!place) return { visibility: "hidden" };
+  return { ...place, left: typeof place.left === "number" ? place.left + shift : place.left,
+    right: typeof place.right === "number" ? place.right - shift : place.right };
+}
+
+export function MenuButton({ label, children, up, right, className, title, disabled, anchorClassName, menuClassName, fixed }: {
   label: ReactNode; children: (close: () => void) => ReactNode; up?: boolean; right?: boolean; className?: string;
-  title?: string; disabled?: boolean; anchorClassName?: string; menuClassName?: string }) {
+  title?: string; disabled?: boolean; anchorClassName?: string; menuClassName?: string;
+  /** Placed on the screen, not in its box - in a box that scrolls (the 3D editor's ribbon) it would be cut off. */
+  fixed?: boolean }) {
   const [open, setOpen] = useState(false);
   const [shift, setShift] = useState(0);
+  const [place, setPlace] = useState<CSSProperties | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   const menu = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (!open || !fixed || !ref.current) {
+      setPlace(null);
+      return;
+    }
+    const r = ref.current.getBoundingClientRect();
+    const across = right ? { right: window.innerWidth - r.right, left: "auto" } : { left: r.left };
+    setPlace(up ? { position: "fixed", bottom: window.innerHeight - r.top + 6, top: "auto", ...across }
+      : { position: "fixed", top: r.bottom + 6, bottom: "auto", ...across });
+  }, [open, fixed, up, right]);
+  useEffect(() => {                                    // a fixed menu would stay behind when its button scrolls away
+    if (!open || !fixed) return;
+    const off = (e: Event) => {
+      if (e.type === "scroll" && menu.current && e.target instanceof Node && menu.current.contains(e.target)) return;
+      setOpen(false);
+    };
+    window.addEventListener("scroll", off, true);
+    window.addEventListener("resize", off);
+    return () => {
+      window.removeEventListener("scroll", off, true);
+      window.removeEventListener("resize", off);
+    };
+  }, [open, fixed]);
   // A menu that would run past the edge of the screen (a chip near the right on a phone) moves back in.
   useLayoutEffect(() => {
-    if (!open || !menu.current) {
+    if (!open || !menu.current || (fixed && !place)) {
       setShift(0);
       return;
     }
@@ -67,7 +101,7 @@ export function MenuButton({ label, children, up, right, className, title, disab
     if (r.right > width - margin) dx = width - margin - r.right;
     if (r.left + dx < margin) dx = margin - r.left;
     setShift(dx);
-  }, [open]);
+  }, [open, fixed, place]);
   useEffect(() => {
     if (!open) return;
     const on = (e: MouseEvent) => ref.current && !ref.current.contains(e.target as Node) && setOpen(false);
@@ -86,7 +120,7 @@ export function MenuButton({ label, children, up, right, className, title, disab
         {label}
       </button>
       {open && <div ref={menu} className={`menu ${up ? "up" : "down"} ${right ? "right" : ""} ${menuClassName ?? ""}`} role="menu"
-        style={shift ? { transform: `translateX(${shift}px)` } : undefined}>
+        style={fixed ? fixedAt(place, shift) : shift ? { transform: `translateX(${shift}px)` } : undefined}>
         {children(() => setOpen(false))}
       </div>}
     </div>

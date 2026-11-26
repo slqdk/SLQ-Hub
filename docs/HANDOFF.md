@@ -4,7 +4,24 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## Next session - start here (written 2026-11-26, at 0.93.1)
+## Next session - start here (written 2026-11-26, at 0.94.0)
+
+**0.94.0 (2026-11-26): Insert, Part, Lines - and Resize a line - pushed, not yet installed.** Søren, 10:28, with the
+editor's ribbon: "Shapes skal hedde 'Insert'. Når man klikker på en Part, så skal parts menuen komme frem. Parts
+menuen skal også inkludere Size, place, arrange. (alle på en tab). Hvis man klikker på en streg, så skal menuen Lines
+komme frem, (edges i dag). Under lines, skal jeg have mulighed for at trykke 'Resize' på en linie, og så skal der komme
+en input box op, hvor jeg kan taste den længde ind jeg vil have. Enter laver det om." Built (DESIGN §8 "Insert, Part,
+Lines (0.94.0)"): three tabs; a click right by a line picks it and opens Lines, elsewhere on a part opens Part (the
+line a click would pick lights amber); Part holds name, a size/centre/turn table, the shape's own, Arrange (plate,
+Mirror menu, Pattern menu) and Duplicate/Hide/Delete; the ribbon folds groups into buttons when narrow; Resize opens a
+box by the line - Enter sets the length (a rim: its diameter), the part keeping its bottom. Fixed on the way: menus in
+the ribbon were cut off at the band's bottom (Import's since 0.90.0) - they are placed on the screen now; Esc with a
+menu open unpicked the part. Seen in the dev server (1440 beside the chat, full width, 1280, 390): the tabs, a box
+clicked on its face (Part), by its top edge (Lines, 20 mm), Resize to 50 (the box 50 x 20 x 20, still on the plate),
+Vertical picked (Resize off for four), the table setting X 33, folding at 834 and 741 (name and table open), a
+folded Arrange's Pattern menu adding six copies, Esc closing a menu only - no console errors. Not seen: his mouse -
+is 7 px the right reach for a line, and is the amber line enough; a rim or a slope resized on his designs.
+
 
 **0.93.1 (2026-11-26): standing things in `hub3d format` - pushed, not yet installed.** Søren, 08:47, with Sanne's
 tree (Gemma 4 31B, 6 min: three cones running into one, a star lying flat on the point, a thin trunk under the flat
@@ -63,7 +80,7 @@ picking the 4 edges with their size, Take off - no console errors; the band fits
 seen: on his screens, a real mouse's feel of the hover and the pick, a design with many letters (40 parts: the build
 time), letters apart on a text inside a group.
 
-**Next: 0.94.0, fillets where parts meet and on imported meshes** - unchanged from 0.91.0's plan below, now on the
+**Next: 0.95.0, fillets where parts meet and on imported meshes** - unchanged from 0.91.0's plan below, now on the
 pick-first Edges tab: crease chains on the built mesh picked and hovered like the part's own edges (`setMarks`), then
 Fillet or Chamfer.
 
@@ -79,7 +96,7 @@ them. Seen in the dev server ("name plate"): the plate's vertical edges filleted
 the top view and picked off again, a chip taken off, a text saying it has no edges - no console errors. Not seen: with a
 real model ("rund kanterne" - does it use `fillet`?), on his screens, printed.
 
-**Next (planned as 0.92.0, now 0.94.0): fillets where parts meet and on imported meshes** - the other two of the three Søren chose ("Er det
+**Next (planned as 0.92.0, now 0.95.0): fillets where parts meet and on imported meshes** - the other two of the three Søren chose ("Er det
 muligt at lave en funktion hvor man efterfølgende kan lave fillet på et kant/side?": the parts' own edges - done in
 0.91.0 -, also where parts meet - a hole's rim, a wall on a base -, also on imported STLs - straight sharp edges). The
 design so far: picked edges `edges: [{fillet|chamfer, path, closed, face, sides, part}]` on a group or the design (mm,
@@ -348,7 +365,7 @@ finds them and fingers still come out wrong). Decided: no Facebook posting (he c
 
 Known flake: tests/test_training.py::test_the_trainer_stops_a_job fails now and then in a full run and passes alone.
 
-## State (0.93.0, 2026-11-26)
+## State (0.94.0, 2026-11-26)
 
 Everything in the design is built: the install path, the Hub core (scheduler,
 llama-server supervisor, the Ollama/OpenAI/Anthropic APIs), the agent harness
@@ -1708,7 +1725,7 @@ the host if the VM ever stops by itself.
 | Model APIs | 29 tests against a fake llama-server: Ollama (chat, generate, show, tags, embed, key in the path, `HEAD /`), OpenAI (chat, stream, tools, images, the extra fields of `/v1/models`), Anthropic (messages, stream, tools, thinking), LAN guard, CORS, key priority, the `/chat` route, the home network for keys, keys that work away from home (through the proxy only - not from a direct outside peer or the sandbox; a wrong key from outside gets the same 403; an address list still applies; last used only once let in; switched back), every key from outside still only through the proxy. |
 | Agent | 62 tests: plain turns, the files a turn made or changed (by a tool and by a command; scratch files removed again, `.hub` and untouched files left out; newest first) as a run step, served for the card (a range for the player, a download, PDFs without the sandbox CSP), the folder snapshot's ignores (node_modules, `.pyc`, links) and its limit, the local time each user message was sent (in the message, the same text in later turns; summer and winter time, `TZ`), tools in chat and project folders, revisions, stopping (in a tool and while writing), retry/edit, SSE replay, messages sent while a turn works (read after a tool step, while the last answer is written, after the end, with Stop), attachments, project files put in a message (text inline and fenced, too big or binary as pointers, pictures as images, refused paths, the pointer once the message is old), image generation switching the card and back, MCP over HTTP (approval, always-allow, masked secrets) and over stdio in the sandbox, MCP on demand (0.85.0: only mcp_tools and mcp_call in the request, their listing, description and errors, mcp_call's arguments three ways, the schema with a tool's first failure, a call by the tool's own name), the error that says what fills a request too big after the refit, escalation (explicit and automatic), subagents, compaction (and a summary request that fits the context: 40 big results before the new question, 8K context), a long single turn that stays inside a 14K context (12 results of 9,000 characters, tool definitions counted), the loop guard (the same search refused, a failing read retried once then refused, the forced answer without tools and its notice, repeats with new words, the same bash step three times, a read after an edit running again), hand-over to the stronger local model (a loop, three failed calls, the escalate tool; the card switches within the lease; its own system prompt and note, no reasoning of the other model; nobody to hand over to; local first, then the cloud), what each step was sent and why it stopped, a model's own thinking and sampling, system prompts stored once and removed with the chat, the note when a picture call names another model than the chat's, skills, memory, artifacts. |
 | MCP import | 19 tests (0.86.0): one remote server in seven clients' words (Cursor, Windsurf, Gemini CLI, Codex's TOML, `claude mcp add`, amp, a README block with a comment and a trailing comma), a key in a command line moved into the environment (four forms), VS Code's inputs and settings fragment, Zed, a bare URL, `add-json`, what cannot run (Docker, Go), `/sse` and `localhost` notes, a path on another computer, a host to fill in, `mcp-remote` replaced by its URL, unique names and servers set up already, the command line run through bash with `$HOME`, backticks and quotes left as text, the catalog, the routes (no secret in their answers). |
-| 3D editor (0.87.0 - 0.92.0) | 18 tests (`tests/test_design3d.py`; geometry.ts runs in node 22.6 or newer, the builds need manifold3d in the venv and manifold-3d in frontend/node_modules - skipped without): the font the same in both places and in the sandbox image, both readers' defaults and problems, the same solid from the editor and from hub3d (triangle count, volume to 1e-9, box to 1e-4 mm) for five designs with every shape, æøå, nested holes, meshes that are and are not closed, and `hub3d format`'s example; mirroring, turning and scaling keep the shape (a text's auto width too); `hub3d design`'s report and files; Point at's words equal the prompt's and the format's; sandbox paths read as the Hub reads them. 0.88.0: outlines
+| 3D editor (0.87.0 - 0.94.0) | 19 tests (`tests/test_design3d.py`; geometry.ts runs in node 22.6 or newer, the builds need manifold3d in the venv and manifold-3d in frontend/node_modules - skipped without): the font the same in both places and in the sandbox image, both readers' defaults and problems, the same solid from the editor and from hub3d (triangle count, volume to 1e-9, box to 1e-4 mm) for five designs with every shape, æøå, nested holes, meshes that are and are not closed, and `hub3d format`'s example; mirroring, turning and scaling keep the shape (a text's auto width too); `hub3d design`'s report and files; Point at's words equal the prompt's and the format's; sandbox paths read as the Hub reads them. 0.88.0: outlines
 (holes, scaled, turned, mirrored, either way round, crossing themselves) and repeats (round, an angle, a row, of a hole,
 nested) built alike in both - with the snowflake and a group of solids alone at the top -; a repeated part or group
 moved, turned, grown and mirrored keeps its solid; what a solid stands on (rods 15 %, a flat plate 100 %, the editor's
@@ -2421,6 +2438,12 @@ by hub3d. In the dev server
       converter's cases are ComfyUI 0.42.3's own templates; files from other sites (Civitai, OpenArt) are
       untried - an export is the way to see what went wrong. When COMFYUI_REF changes, the editor's format may
       too: tools/workflow_oracle/ (convert.js, compare.py) is how the converter was checked - run it again.
+112. **Insert, Part, Lines (0.94.0)** - in the tests and the dev server's headless Chromium:
+    - **Picking a line by a click**: within 7 px of it, measured at the spot - right on his mouse and zoom? Too far
+      and a click on a small part's face picks a line; too near and lines are hard to hit. The amber line shows it.
+    - **Resize on his designs**: a rim (diameter), a cone's top, a wedge's slope, a part turned on its side - the
+      part keeps its bottom on the plate; is that what he expects, or should the line's one end stay put?
+    - **The folded groups** at his widths and zoom; nested menus (Pattern in a folded Arrange) placed by the screen.
 111. **The 3D editor for people (0.93.0)** - in the dev server's headless Chromium:
     - **Sanne's chat again** after the update: Make 3D model, then "lav et juletræ med en stjerne på toppen, 18 cm" -
       with "May run code" her model reads `hub3d format` and checks with `hub3d design` in her confined folder (the

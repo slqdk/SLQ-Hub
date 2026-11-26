@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.94.0 - 2026-11-26
+
+- The 3D editor's tabs are Insert (was Shapes), Part and Lines (was Edges).
+  Part now holds everything for the picked part: name, solid or hole,
+  colour, size, centre and turn in one small table, onto the plate, mirror,
+  pattern, duplicate, hide and delete.
+- Clicking a part opens the Part tab; clicking right by one of its lines
+  picks that line and opens the Lines tab. The line under the pointer
+  lights up before you click.
+- Resize, in Lines: with one line picked, a box opens by the line - type
+  how long it should be (a rim: how wide) and press Enter. The part stays on
+  the plate.
+- When the editor is narrow, a tab's groups fold into buttons that open
+  them, instead of the tab scrolling sideways.
+- Fixed: menus in the editor's tabs (Import) were cut off at the bottom;
+  Esc with a menu open also unpicked the part.
+
 ## 0.93.1 - 2026-11-26
 
 - The assistant's 3D designs of things that stand look and print better:

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import math
 import shutil
 import struct
 import subprocess
@@ -724,7 +725,8 @@ process.stdout.write(JSON.stringify({
   plan: G.edgePlan(n), problems: read.problems,
   near: [G.nearestEdge(box, at(box, [-19.6, 0, 9.8])), G.nearestEdge(box, at(box, [20, 15, 0])),
          G.nearestEdge(box, at(box, [-20, -15, 3]))],
-  copy: G.nearestEdge(ring, G.copyOf(ring, 2, [20, 0, 3.9])),
+  copy: G.nearestEdge(ring, G.copyOf(ring, 2, [24.9, 0, 3.9])),
+  middle: G.nearestEdge(ring, G.copyOf(ring, 2, [20, 0, 4])),
   wedge: G.nearestEdge({ id: "w", shape: "wedge", size: [40, 30, 20], at: [0, 0, 10], rotate: [0, 0, 0] }, [0, -15, 10]),
   ties: G.edgePlan({ ...box, fillet: { top: 2, front: 3 }, chamfer: { top: 1, left: 4 } }),
 }));
@@ -754,6 +756,58 @@ def test_edge_names_and_picking_an_edge(h3):
     near = [x["edge"] for x in out["near"]]
     assert near == ["top-left", "back-right", "front-left"], out["near"]   # in its own frame: mirrored, turned 90
     assert out["copy"]["edge"] == "top" and out["copy"]["distance"] < 0.2 and out["wedge"]["edge"] == "front-slope"
+    # 0.94.0: measured to the rim itself - the middle of a cylinder's top is its radius from it, so a click there picks
+    # the part, not the line
+    assert out["middle"]["edge"] == "top" and out["middle"]["distance"] == pytest.approx(5, abs=0.01)
+
+
+# 0.94.0, Søren: "Under lines, skal jeg have mulighed for at trykke 'Resize' på en linie, og så skal der komme en input
+# box op, hvor jeg kan taste den længde ind jeg vil have. Enter laver det om."
+LINES_JS = """
+const box = { id: "b", shape: "box", size: [40, 30, 20], at: [5, -3, 10], rotate: [0, 0, 90], mirror: true };
+const wedge = { id: "w", shape: "wedge", size: [40, 30, 20], at: [0, 0, 10], rotate: [0, 0, 0] };
+const cyl = { id: "c", shape: "cylinder", size: [10, 10, 4], at: [20, 0, 2], rotate: [0, 0, 0] };
+const cone = { id: "k", shape: "cone", size: [20, 20, 10], top: 0.5, at: [0, 0, 5], rotate: [0, 0, 0] };
+const outline = { id: "o", shape: "outline", points: [[0, 0], [9, 0], [9, 6], [0, 6]], size: [0, 0, 3], at: [0, 0, 1.5], rotate: [0, 0, 0] };
+const lying = { ...box, rotate: [90, 0, 0], at: [0, 0, 15] };       // its own Y is up: its bottom stays all the same
+const r = (p, e, v) => { const q = G.withEdgeLength(p, e, v); return typeof q === "string" ? q
+  : { size: q.size.map((x) => Math.round(x * 1e6) / 1e6), at: q.at.map((x) => Math.round(x * 1e6) / 1e6), top: q.top ?? null,
+      bottom: Math.round(G.extent(q)[0][2] * 1e6) / 1e6 }; };
+process.stdout.write(JSON.stringify({
+  lengths: [G.edgeLength(box, "top-front"), G.edgeLength(box, "top-left"), G.edgeLength(box, "front-left"),
+            G.edgeLength(wedge, "front-slope"), G.edgeLength(cyl, "top"), G.edgeLength(cone, "top"),
+            G.edgeLength(cone, "bottom"), G.edgeLength(outline, "vertical"), G.edgeLength(box, "nonsense"),
+            G.edgeLength({ ...cone, top: 0 }, "top")],
+  x: r(box, "top-front", 50), y: r(box, "bottom-left", 12), z: r(box, "front-left", 30), lying: r(lying, "top-left", 40),
+  slope: r(wedge, "front-slope", 2 * Math.hypot(40, 20)), wedgeUp: r(wedge, "left-front", 5),
+  rim: r(cyl, "bottom", 20), coneBottom: r(cone, "bottom", 40), coneTop: r(cone, "top", 16), tooWide: r(cone, "top", 30),
+  thick: r(outline, "vertical", 5), short: r(box, "top-front", 0), none: r(box, "nonsense", 5),
+}));
+"""
+
+
+def test_resizing_a_line(h3):
+    """Resize (0.94.0): a picked line made as long as typed - a box's or wedge's edge, the size along it (a slope its run
+    and rise alike); a rim, its diameter (a cone's other rim keeping its own); an outline's corners, its thickness - the
+    part's bottom staying where it was."""
+    out = run_js(LINES_JS, {})
+    L = out["lengths"]
+    assert [x and (round(x["length"], 6), x["what"]) for x in L[:8]] == [
+        (40, "Length"), (30, "Length"), (20, "Length"), (round(math.hypot(40, 20), 6), "Length"), (10, "Diameter"),
+        (10, "Diameter"), (20, "Diameter"), (3, "Length")]
+    assert L[8] is None and L[9] is None                 # no such line; a cone's point has no rim
+    assert out["x"] == {"size": [50, 30, 20], "at": [5, -3, 10], "top": None, "bottom": 0}
+    assert out["y"]["size"] == [40, 12, 20] and out["y"]["at"] == [5, -3, 10]
+    assert out["z"] == {"size": [40, 30, 30], "at": [5, -3, 15], "top": None, "bottom": 0}      # taller, on the plate still
+    assert out["lying"]["size"] == [40, 40, 20] and out["lying"]["bottom"] == 0 and out["lying"]["at"][2] == 20
+    assert out["slope"]["size"] == [80, 30, 40] and out["slope"]["bottom"] == 0
+    assert out["wedgeUp"]["size"] == [40, 30, 5] and out["wedgeUp"]["bottom"] == 0
+    assert out["rim"]["size"] == [20, 20, 4]
+    assert out["coneBottom"]["size"] == [40, 40, 10] and out["coneBottom"]["top"] == 0.25        # its top stays 10 across
+    assert out["coneTop"]["top"] == 0.8 and out["coneTop"]["size"] == [20, 20, 10]
+    assert "cannot be wider than the bottom" in out["tooWide"]
+    assert out["thick"]["size"] == [0, 0, 5] and out["thick"]["bottom"] == 0
+    assert "too short" in out["short"] and "no length" in out["none"]
 
 
 # 0.92.0: "I would like to pick a line FIRST, and then pick what happens to it (resize, fillet and so on)". The editor

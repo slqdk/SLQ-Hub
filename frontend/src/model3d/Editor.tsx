@@ -3,22 +3,23 @@
 // assistant works on the same file: it reads it with every message while the editor is open, writes it with its
 // file tools (and checks it with `hub3d design`), and what it writes shows here. "Point at" puts a spot on the model
 // into the message. Loaded only when opened: three.js and manifold-3d (WebAssembly) are big.
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, Fragment, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState,
+  type ReactNode } from "react";
 import * as THREE from "three";
 import Module from "manifold-3d/manifold";
 import wasmUrl from "manifold-3d/manifold.wasm?url";
 import { AlignCenter, AlignLeft, AlignRight, ArrowDownToLine, ArrowDownUp, Bold, Box, ChevronDown, CircleDot, Columns3, Cone,
   Copy, Crosshair, Cylinder, Download, Eraser, Eye, EyeOff, FlipHorizontal2, FlipVertical2, Group, Home, Italic, ListTree,
-  Maximize2, Minimize2, MousePointerClick, Move3d, PanelBottom, Printer as PrinterIcon, Redo2, Repeat2, Rotate3d, Scaling,
-  Split, SquareDashed, SquareMousePointer, SquareRoundCorner, Trash2, TriangleAlert, Triangle, Type, Undo2, Ungroup, Upload,
-  X } from "lucide-react";
+  Maximize2, Minimize2, MousePointerClick, Move3d, PanelBottom, Printer as PrinterIcon, Redo2, Repeat2, Rotate3d, Ruler,
+  Scaling, Shapes, Split, SquareDashed, SquareMousePointer, SquareRoundCorner, Trash2, TriangleAlert, Triangle, Type, Undo2,
+  Ungroup, Upload, X } from "lucide-react";
 import fontIndex from "./fonts/index.json";
 import { useApp } from "../state";
 import { ConfirmButton, MenuButton } from "../components/ui";
 import type { DesignFolder } from "./folder";
-import { allIds, build, buildPart, COLORS, edgeLines, edgePlan, EDGES, edgesOf, extent, extentOf, FONT_FAMILIES, fontFile,
+import { allIds, build, buildPart, COLORS, edgeLength, edgeLines, edgePlan, EDGES, edgesOf, extent, extentOf, FONT_FAMILIES, fontFile,
   follows, freshId, joined, lettersApart, MAX_COPIES, MIN_SIZE, mirrorPart, nearestEdge, newDesign, partSize, readDesign,
-  repeatAround, retext, SPACING, stl, textMeasure, threeMf, transformPart, treatEdges, withCapitals, writeDesign,
+  repeatAround, retext, SPACING, stl, textMeasure, threeMf, transformPart, treatEdges, withCapitals, withEdgeLength, writeDesign,
   type Align, type Box3, type Built, type Design, type EdgeKind, type FontData, type FontIndex, type Fonts, type Kit,
   type Mat3, type MeshData, type Part, type Repeat, type Shape, type Vec3, type Wasm } from "./geometry";
 import { baseName, dirOf, fmt, joinPath, MESH_FILE, pointMark, relativePath } from "./files";
@@ -227,7 +228,7 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
   const [failed, setFailed] = useState<string | null>(null);
   const [meshTick, setMeshTick] = useState(0);
   const [lock, setLock] = useState(false);
-  const [tab, setTab] = useState<Tab>("shapes");
+  const [tab, setTab] = useState<Tab>("insert");
   const meshes = useRef(new Map<string, MeshData | string>());
   const loading = useRef(new Set<string>());
   const past = useRef<Design[]>([]);
@@ -575,25 +576,25 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
     v.attach(one ? one.at : b ? centre(b) : [0, 0, 0], one ? one.rotate : null, mode, snap);
   }, [design, selected, mode, snap, ready, tool, meshTick]);
 
-  // The picked edges (0.92.0), and the one a click would pick, drawn over the model - on the Edges tab.
+  // The picked lines (0.92.0) drawn over the model, and the one a click would pick (0.94.0: near a line, on any tab).
   useEffect(() => {
     const v = vp.current;
     if (!v || !ready) return;
     const list: { lines: Vec3[][]; hover?: boolean }[] = [];
-    if (design && tab === "edges") {
+    if (design) {
       for (const [id, edges] of Object.entries(edgeSel)) {
         const f = find(design.parts, id);
         if (f) list.push({ lines: edgeLines(f.part, edges) });
       }
-      const f = hoverEdge && tool === "edge" ? find(design.parts, hoverEdge.part) : null;
+      const f = hoverEdge ? find(design.parts, hoverEdge.part) : null;
       if (f && hoverEdge) list.push({ lines: edgeLines(f.part, [hoverEdge.edge]), hover: true });
     }
     v.setMarks(list);
-  }, [design, edgeSel, hoverEdge, tool, tab, ready]);
+  }, [design, edgeSel, hoverEdge, ready]);
 
-  useEffect(() => {                                   // Pick edges belongs to the Edges tab
-    if (tab !== "edges" && tool === "edge") setTool(null);
-    if (tool !== "edge") setHoverEdge(null);
+  useEffect(() => {                                   // Pick lines belongs to the Lines tab
+    if (tab !== "lines" && tool === "edge") setTool(null);
+    if (tool && tool !== "edge") setHoverEdge(null);
   }, [tab, tool]);
 
   // ---------------------------------------------------------------- dragging: the gizmo, or the part itself
@@ -725,12 +726,13 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
 
   const onPointerMove = (e: React.PointerEvent) => {
     const v = vp.current, p = pointer.current;
-    if (v && !p && tool === "edge") {                   // the edge a click would pick, shown
+    if (v && !p && (!tool || tool === "edge")) {        // the line a click would pick, shown
       const x = e.clientX, y = e.clientY;
       cancelAnimationFrame(hoverFrame.current);
       hoverFrame.current = requestAnimationFrame(() => {
-        const hit = vp.current?.pick(x, y);
-        const got = hit ? edgeOf(hit) : null;
+        const vv = vp.current;
+        const hit = vv && !vv.overGizmo ? vv.pick(x, y) : null;
+        const got = !hit ? null : tool === "edge" ? edgeOf(hit) : lineAt(hit);
         setHoverEdge((cur) => (got && typeof got !== "string" ? (cur?.part === got.part.id && cur.edge === got.edge ? cur
           : { part: got.part.id, edge: got.edge }) : null));
       });
@@ -761,17 +763,22 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
     return near ? { part, edge: near.edge } : "";
   };
 
-  /** Pick edges (0.92.0): a click picks the edge nearest it, or unpicks it - then Fillet, Chamfer or Take off. An edge
-   *  that has one already puts its size in the size field: changing that resizes it. */
-  const pickEdge = (hit: Hit) => {
-    const got = edgeOf(hit);
-    if (typeof got === "string") {
-      if (got) toast(got, "fault");
-      return;
-    }
-    const { part, edge } = got;
-    const had = edgeSel[part.id]?.includes(edge);
+  /** A line within a few pixels of a spot on the model (0.94.0): a click there picks the line, not the part. */
+  const lineAt = (hit: Hit, px = 7): { part: Part; edge: string } | null => {
+    const v = vp.current, d = designRef.current;
+    const part = d ? find(d.parts, hit.part)?.part : null;
+    if (!v || !part || edgeless(part)) return null;
+    const near = nearestEdge(part, hit.point);
+    return near && near.distance <= px * v.mmPerPx(hit.point) ? { part, edge: near.edge } : null;
+  };
+
+  /** A line picked (0.92.0, 0.94.0): alone - or, `add` (Shift, Pick several, Pick lines), with the others, or unpicked.
+   *  A line that has a fillet or chamfer already puts its size in the size field: changing that resizes it. Its part
+   *  is the one picked, and the Lines tab shows. */
+  const pickLine = ({ part, edge }: { part: Part; edge: string }, add: boolean) => {
+    const had = !!edgeSel[part.id]?.includes(edge);
     setEdgeSel((cur) => {
+      if (!add) return { [part.id]: [edge] };
       const list = cur[part.id] ?? [];
       const next = list.includes(edge) ? list.filter((e) => e !== edge) : [...list, edge];
       const out = { ...cur };
@@ -780,8 +787,53 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
       return out;
     });
     const now = edgePlan(part)[edge];
-    if (!had && now) setEdgeSize(now.size);
+    if (now && (!add || !had)) setEdgeSize(now.size);
     setSelected([part.id]);
+    setTab("lines");
+  };
+
+  /** Pick lines (0.92.0): a click picks the line nearest it - however far - or unpicks it. */
+  const pickEdge = (hit: Hit) => {
+    const got = edgeOf(hit);
+    if (typeof got === "string") {
+      if (got) toast(got, "fault");
+      return;
+    }
+    pickLine(got, true);
+  };
+
+  // Resize (0.94.0): the one picked line made as long as you type - a box over the view beside it; Enter sets it.
+  const [resizing, setResizing] = useState<{ part: string; edge: string; length: number; what: string; x: number;
+    y: number } | null>(null);
+  const openResize = () => {
+    const d = designRef.current, v = vp.current, el = host.current;
+    const picked = Object.entries(edgeSel).flatMap(([id, es]) => es.map((e) => [id, e] as const));
+    if (!d || picked.length !== 1) return;
+    const [id, edge] = picked[0];
+    const f = find(d.parts, id);
+    const len = f ? edgeLength(f.part, edge) : null;
+    if (!f || !len) {
+      toast("That line has no length of its own to set.", "fault");
+      return;
+    }
+    const line = edgeLines(f.part, [edge])[0] ?? [];
+    const mid: Vec3 | undefined = line.length === 2 ? [(line[0][0] + line[1][0]) / 2, (line[0][1] + line[1][1]) / 2,
+      (line[0][2] + line[1][2]) / 2] : line[Math.round((line.length - 1) * 0.75)];          // a rim: its front
+    const w = el?.clientWidth ?? 400, h = el?.clientHeight ?? 300;
+    const at = mid && v ? v.toScreen(mid) : null;
+    const x = Math.max(8, Math.min(w - 196, (at?.[0] ?? w / 2) + 14)), y = Math.max(60, Math.min(h - 70, (at?.[1] ?? h / 2) - 20));
+    setResizing({ part: id, edge, length: len.length, what: len.what, x, y });
+  };
+  const applyResize = (raw: string) => {
+    const r = resizing;
+    setResizing(null);
+    const d = designRef.current;
+    const f = r && d ? find(d.parts, r.part) : null;
+    const v = Number(raw.trim().replace(",", "."));
+    if (!r || !f || !Number.isFinite(v) || Math.abs(v - r.length) < 1e-9) return;
+    const next = withEdgeLength(f.part, r.edge, v);
+    if (typeof next === "string") toast(next, "fault");
+    else change(r.part, () => next);
   };
 
   /** The picked edges given a fillet or chamfer of the size field's size, or none. */
@@ -875,14 +927,27 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
       return;
     }
     if (!hit) {
-      if (!e.shiftKey && !several) setSelected([]);
+      if (!e.shiftKey && !several) {
+        setSelected([]);
+        setEdgeSel({});
+      }
       return;
     }
-    const id = topOf(hit.part);
+    const line = lineAt(hit);                          // a line: it, and the Lines tab (0.94.0)
+    if (line) {
+      pickLine(line, e.shiftKey || several);
+      return;
+    }
+    const id = topOf(hit.part);                        // a part: it, and the Part tab
     if (e.shiftKey || several) {
       const cur = selectedRef.current;
       setSelected(cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]);
-    } else setSelected([id]);
+    } else {
+      setSelected([id]);
+      setEdgeSel({});
+    }
+    const text = designRef.current ? find(designRef.current.parts, id)?.part.shape === "text" : false;
+    setTab((t) => (t === "text" && text ? t : "part"));
   };
 
   const onDoubleClick = (e: React.MouseEvent) => {        // the part itself, inside its group
@@ -1103,6 +1168,7 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
     };
     const plain: Record<string, () => void> = {
       Delete: del, Backspace: del, Escape: () => {
+        if (host.current?.closest(".panel-3d")?.querySelector(".menu")) return;   // it closes the menu, nothing more
         if (tool) setTool(null);
         else {
           setSelected([]);
@@ -1143,10 +1209,19 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
   const texts = items.length && items.every((p) => p.shape === "text") ? items : null;
   const shownTab: Tab = tab === "text" && !texts ? "part" : tab;
   const pickedEdges = Object.entries(edgeSel).reduce((n, [id, es]) => n + (find(parts, id) ? es.length : 0), 0);
+  const oneLine = (() => {                             // the one line picked: how long it is (Resize)
+    const all = Object.entries(edgeSel).flatMap(([id, es]) => es.map((e) => [id, e] as const));
+    const f = all.length === 1 ? find(parts, all[0][0]) : null;
+    return f ? edgeLength(f.part, all[0][1]) : null;
+  })();
+  // What the band shows: a change folds its groups afresh to the room there is (0.94.0).
+  const fitKey = [shownTab, selected.join(","), items.map((x) => `${x.shape}${x.radius ? "r" : ""}${x.repeat ? (x.repeat.step ? "s" : "a")
+    : ""}${x.hole ? "h" : ""}`).join(","), pickedEdges, one ? (edgeSel[one.id] ?? []).length : 0, oneLine ? 1 : 0].join("|");
   const allProblems = [...problems, ...(built?.problems ?? [])];
   const hide = (id: string) => change(id, (p) => ({ ...p, hidden: !p.hidden || undefined }));
-  const pickFirst = <p className="v3d-tip">Pick a part on the model to change it - or in Parts. Shift-click (or Pick several)
-    picks more, a double click picks a part inside a group, and dragging a picked part moves it on the plate.</p>;
+  const pickFirst = <p className="v3d-tip">Click a part on the model to change it - or a line on it, to round, cut or
+    resize that line. Shift-click (or Pick several) picks more, a double click picks a part inside a group, and dragging a
+    picked part moves it on the plate.</p>;
 
   return (
     <aside className="panel panel-3d" aria-label="3D editor" onKeyDown={onKey}>
@@ -1219,8 +1294,8 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
             </MenuButton>
           </div>
         </div>
-        <div className="v3d-band" role="tabpanel" aria-label={shownTab === "text" ? "Text" : TABS.find(([id]) => id === shownTab)?.[1]}>
-          {shownTab === "shapes" && (
+        <Band label={shownTab === "text" ? "Text" : TABS.find(([id]) => id === shownTab)?.[1]} fit={fitKey}>
+          {shownTab === "insert" && (
             <>
               <Grp label="Solids">
                 <Big icon={<Box size={20} />} label="Box" onClick={() => add("box")} />
@@ -1230,13 +1305,13 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
                 <Big icon={<Triangle size={20} />} label="Wedge" title="A wedge: a ramp" onClick={() => add("wedge")} />
                 <Big icon={<Type size={20} />} label="Text" onClick={() => add("text")} />
               </Grp>
-              <Grp label="Holes">
+              <Grp label="Holes" fold={2} icon={<SquareDashed size={20} />}>
                 <Big icon={<SquareDashed size={20} />} label="Hole" title="A box-shaped hole - through the part picked" onClick={() => add("box", true)} />
                 <Big icon={<Cylinder size={20} strokeDasharray="3 2" />} label="Round hole" title="A round hole - through the part picked"
                   onClick={() => add("cylinder", true)} />
               </Grp>
-              <Grp label="From a file">
-                <MenuButton className="btn v3d-big" title="An STL, 3MF or OBJ into the design" menuClassName="wide"
+              <Grp label="From a file" fold={1} icon={<Upload size={20} />}>
+                <MenuButton fixed className="btn v3d-big" title="An STL, 3MF or OBJ into the design" menuClassName="wide"
                   label={<><Upload size={20} /><span>Import</span></>}>
                   {(close) => <FolderMeshes store={store} onPick={(f) => { close(); void addMesh(f); }}
                     onUpload={(f) => { close(); void upload(f); }} />}
@@ -1254,79 +1329,71 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
                     <ConfirmButton className="btn v3d-big" confirmText="Delete?" label="Delete them" onConfirm={del}>
                       <Trash2 size={20} /><span>Delete</span></ConfirmButton>
                   </Grp>
-                  <p className="v3d-tip">Arrange groups, mirrors and aligns them; Size and place puts them on the plate.</p>
-                </>
-              )}
-              {one && <PartBand part={one} change={(fn) => change(one.id, fn)} onDuplicate={duplicate} onDelete={del}
-                onApart={() => splitLetters(one.id)} />}
-            </>
-          )}
-          {shownTab === "place" && (
-            <>
-              {!items.length && pickFirst}
-              {items.length > 1 && (
-                <>
-                  <Grp label="Plate">
+                  <Grp label="Plate" fold={4} icon={<ArrowDownToLine size={20} />}>
                     <Big icon={<ArrowDownToLine size={20} />} label="Onto the plate" title="Each moved up or down so its lowest point is on the plate" onClick={drop} />
                   </Grp>
-                  <p className="v3d-tip">Pick one part to set its size and place by the numbers - or move them all with the handles.</p>
+                  <Grp label="Arrange" fold={3} icon={<Group size={20} />}>
+                    <Big icon={<Group size={20} />} label="Group" title="Group them (Ctrl+G): a hole in a group cuts only its parts" onClick={doGroup} />
+                    <MirrorButton onMirror={mirror} />
+                  </Grp>
+                  <Grp label="Align" fold={2} icon={<AlignCenter size={20} />}>
+                    <div className="v3d-aligngrid">
+                      {ALIGNS.map(([ax, names], i) => (
+                        <Fragment key={ax}>
+                          <span className="faint">{ax}</span>
+                          {names.map((n, j) => (
+                            <button key={n} type="button" className="btn small" title={`Line them up: ${n.toLowerCase()} (${ax})`}
+                              onClick={() => align(i, j as 0 | 1 | 2)}>{n}</button>))}
+                        </Fragment>
+                      ))}
+                    </div>
+                  </Grp>
                 </>
               )}
-              {one && k && <PlaceBand part={one} fonts={k.fonts} lock={lock} setLock={setLock} change={(fn) => change(one.id, fn)}
-                onDrop={drop} onFlat={() => setTool(tool === "flat" ? null : "flat")} flat={tool === "flat"} />}
+              {one && k && <PartBand part={one} fonts={k.fonts} lock={lock} setLock={setLock} change={(fn) => change(one.id, fn)}
+                onDuplicate={duplicate} onDelete={del} onApart={() => splitLetters(one.id)} onDrop={drop}
+                onFlat={() => setTool(tool === "flat" ? null : "flat")} flat={tool === "flat"} onUngroup={doUngroup} onMirror={mirror} />}
             </>
           )}
           {shownTab === "text" && texts && k && <TextBand parts={texts} fonts={k.fonts} onApart={() => splitLetters(texts[0].id)}
             change={(fn) => (texts.length > 1 ? changeEach(texts.map((t) => t.id), fn) : change(texts[0].id, fn))} />}
-          {shownTab === "edges" && (
-            <EdgesBand part={one} many={items.length > 1} picked={pickedEdges} pickedOn={one ? edgeSel[one.id] ?? [] : []}
+          {shownTab === "lines" && (
+            <LinesBand part={one} many={items.length > 1} picked={pickedEdges} pickedOn={one ? edgeSel[one.id] ?? [] : []}
               size={edgeSize} picking={tool === "edge"} onPicking={() => setTool(tool === "edge" ? null : "edge")}
               onName={(key) => { if (one) pickEdges(one, key); }}
               onChip={(key, v) => { if (one) { pickEdges(one, key); setEdgeSize(v); } }}
-              onTreat={(kind) => treatPicked(kind)} onSize={resizePicked} onClear={() => setEdgeSel({})} />
+              onTreat={(kind) => treatPicked(kind)} onSize={resizePicked} onClear={() => setEdgeSel({})}
+              length={oneLine} onResize={openResize} />
           )}
-          {shownTab === "arrange" && (
-            <>
-              {!items.length && pickFirst}
-              {items.length > 0 && (
-                <>
-                  <Grp label="Group">
-                    <Big icon={<Group size={20} />} label="Group" title="Group them (Ctrl+G): a hole in a group cuts only its parts"
-                      onClick={doGroup} disabled={items.length < 2} />
-                    <Big icon={<Ungroup size={20} />} label="Ungroup" title="Ungroup (Ctrl+Shift+G)" onClick={doUngroup}
-                      disabled={!(one && one.shape === "group")} />
-                  </Grp>
-                  <Grp label="Mirror">
-                    <Big icon={<FlipHorizontal2 size={20} />} label="Left-right" title="Mirror left-right (in X)" onClick={() => mirror(0)} />
-                    <Big icon={<FlipVertical2 size={20} />} label="Front-back" title="Mirror front-back (in Y)" onClick={() => mirror(1)} />
-                    <Big icon={<ArrowDownUp size={20} />} label="Up-down" title="Mirror up-down (in Z)" onClick={() => mirror(2)} />
-                  </Grp>
-                  {items.length > 1 && (
-                    <Grp label="Align">
-                      <div className="v3d-aligngrid">
-                        {ALIGNS.map(([ax, names], i) => (
-                          <Fragment key={ax}>
-                            <span className="faint">{ax}</span>
-                            {names.map((n, j) => (
-                              <button key={n} type="button" className="btn small" title={`Line them up: ${n.toLowerCase()} (${ax})`}
-                                onClick={() => align(i, j as 0 | 1 | 2)}>{n}</button>))}
-                          </Fragment>
-                        ))}
-                      </div>
-                    </Grp>
-                  )}
-                  {one && <PatternGroup part={one} change={(fn) => change(one.id, fn)} />}
-                </>
-              )}
-            </>
-          )}
-        </div>
+        </Band>
       </div>
       <div className="v3d-stage">
         <div className={`v3d-view${tool ? " picking" : ""}`} ref={host} tabIndex={0} onPointerDown={onPointerDown}
           onPointerMove={onPointerMove} onPointerUp={onPointerUp} onDoubleClick={onDoubleClick}
           onPointerLeave={() => { cancelAnimationFrame(hoverFrame.current); setHoverEdge(null); }}
-          aria-label="The design in 3D. Drag to turn the view, right-drag to pan, scroll to zoom. Click a part to pick it." />
+          aria-label="The design in 3D. Drag to turn the view, right-drag to pan, scroll to zoom. Click a part to pick it, a line to pick the line." />
+        {resizing && (
+          <div className="v3d-resize" style={{ left: resizing.x, top: resizing.y }} role="dialog" aria-label={`${resizing.what} of the line`}>
+            <label>
+              <span>{resizing.what}</span>
+              <input className="input mono" autoFocus defaultValue={fmt(resizing.length)} inputMode="decimal"
+                aria-label={`${resizing.what}, mm`} onFocus={(e) => e.target.select()} onBlur={() => setResizing(null)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    applyResize(e.currentTarget.value);
+                    host.current?.focus({ preventScroll: true });
+                  } else if (e.key === "Escape") {
+                    e.preventDefault();
+                    setResizing(null);
+                    host.current?.focus({ preventScroll: true });
+                  }
+                }} />
+              <span>mm</span>
+            </label>
+            <small>Enter sets it, Esc leaves it</small>
+          </div>
+        )}
         <div className="v3d-top">
           <div className="v3d-heads" role="toolbar" aria-label="Handles and view">
             <Tool icon={<Move3d size={15} />} title="Move: the handles move what is picked (G)" active={mode === "translate"}
@@ -1351,12 +1418,12 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
               active={tool === "point"} onClick={() => setTool(tool === "point" ? null : "point")}><span>Point at</span></Tool>
           </div>
           {tool && <div className="v3d-hint">{tool === "point" ? "Click the spot on the model. Esc stops."
-            : tool === "edge" ? "Click edges to pick them - again to unpick - then Fillet, Chamfer or Take off above. Esc stops."
+            : tool === "edge" ? "Click lines to pick them - again to unpick - then Fillet, Chamfer, Take off or Resize above. Esc stops."
               : "Click the face that should lie on the plate. Esc stops."}</div>}
         </div>
         {(failed || !ready || status === "loading") && <div className="v3d-overlay">{failed ?? "Loading the 3D editor"}</div>}
         {ready && !failed && design && !parts.length && (
-          <div className="v3d-empty">Add a shape from Shapes above, import an STL - or tell the assistant what to make.</div>)}
+          <div className="v3d-empty">Add a shape from Insert above, import an STL - or tell the assistant what to make.</div>)}
         <div className="v3d-status num">
           {size ? <span>{fmt(size[0])} x {fmt(size[1])} x {fmt(size[2])} mm</span> : <span>Nothing to print yet</span>}
           {built?.volume ? <span>{(built.volume / 1000).toFixed(1)} cm³</span> : null}
@@ -1401,19 +1468,108 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
   );
 }
 
-type Tab = "shapes" | "part" | "place" | "edges" | "text" | "arrange";
-const TABS: [Tab, string][] = [["shapes", "Shapes"], ["part", "Part"], ["place", "Size and place"], ["edges", "Edges"],
-  ["arrange", "Arrange"]];
+// 0.94.0: Insert (was Shapes); Part - with Size and place and Arrange in it; Lines (was Edges). Søren: "Shapes skal
+// hedde Insert ... Parts menuen skal også inkludere Size, place, arrange (alle på en tab) ... Hvis man klikker på en
+// streg, så skal menuen Lines komme frem".
+type Tab = "insert" | "part" | "lines" | "text";
+const TABS: [Tab, string][] = [["insert", "Insert"], ["part", "Part"], ["lines", "Lines"]];
 const ALIGNS: [string, string[]][] = [["X", ["Left", "Middle", "Right"]], ["Y", ["Front", "Middle", "Back"]],
   ["Z", ["Bottom", "Middle", "Top"]]];
 
-/** A group of the ribbon's tools, its name under it - as in SolidWorks' and Office's ribbons. */
-function Grp({ label, children }: { label: ReactNode; children: ReactNode }) {
+/** Which of the band's groups are folded, for want of room. */
+const Folded = createContext<ReadonlySet<string>>(new Set());
+const NONE: ReadonlySet<string> = new Set();
+
+/** The ribbon's band (0.94.0): when its groups do not all fit, the ones marked to fold first become one button each,
+ *  the group in its menu - as Office's ribbon does - until they fit. `fit` changes with what the band shows. */
+function Band({ fit, label, children }: { fit: string; label?: string; children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [folded, setFolded] = useState<ReadonlySet<string>>(NONE);
+  const [measuring, setMeasuring] = useState(true);
+  const width = useRef(0);
+  useLayoutEffect(() => setMeasuring(true), [fit]);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => {
+      if (Math.abs(el.clientWidth - width.current) < 1) return;          // its width counts, not its height
+      width.current = el.clientWidth;
+      setMeasuring(true);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const over = () => el.scrollWidth > el.clientWidth + 1;
+    const groups = () => [...el.querySelectorAll<HTMLElement>(":scope > .v3d-group[data-fold]")]
+      .sort((a, b) => Number(a.dataset.fold) - Number(b.dataset.fold));
+    if (measuring) {                                   // all open: fold the first to go, one by one, by their widths
+      const cs = getComputedStyle(el);
+      const room = el.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+      let total = [...el.children].reduce((sum, c) => sum + (c as HTMLElement).getBoundingClientRect().width, 0);
+      const next = new Set<string>();
+      for (const g of groups()) {
+        if (total <= room) break;
+        next.add(g.dataset.key ?? "");
+        total -= g.getBoundingClientRect().width - 66;   // a folded group: at least one button wide (too few: folded after)
+      }
+      setFolded(next);
+      setMeasuring(false);
+    } else if (over()) {                               // folded and still too wide: the next one too
+      const g = groups().find((x) => !folded.has(x.dataset.key ?? ""));
+      if (g) setFolded(new Set([...folded, g.dataset.key ?? ""]));
+    }
+  }, [measuring, folded]);
   return (
-    <div className="v3d-group" role="group" aria-label={typeof label === "string" ? label : undefined}>
+    <Folded.Provider value={measuring ? NONE : folded}>
+      <div ref={ref} className="v3d-band" role="tabpanel" aria-label={label}>{children}</div>
+    </Folded.Provider>
+  );
+}
+
+/** A group of the ribbon's tools, its name under it - as in SolidWorks' and Office's ribbons. `fold`: short of room it
+ *  becomes one button (`icon`, its name) with the group in its menu - the lowest number first. */
+function Grp({ label, children, fold, icon, id, short }: { label: ReactNode; children: ReactNode; fold?: number;
+  icon?: ReactNode; id?: string; short?: string }) {
+  const folded = useContext(Folded);
+  const name = typeof label === "string" ? label : undefined;
+  const key = id ?? name ?? String(fold ?? "");
+  if (fold !== undefined && folded.has(key)) {
+    return (
+      <div className="v3d-group folded" data-fold={fold} data-key={key}>
+        <div className="v3d-group-body">
+          <MenuButton fixed className="btn v3d-big" title={`${name ?? short ?? "More"}: its tools`} menuClassName="v3d-foldmenu"
+            label={<>{icon ?? <ChevronDown size={20} />}<span>{short ?? name ?? "More"} <ChevronDown size={11} /></span></>}>
+            {() => <div className="v3d-foldbody">{children}</div>}
+          </MenuButton>
+        </div>
+        <div className="v3d-group-label">&nbsp;</div>
+      </div>
+    );
+  }
+  return (
+    <div className="v3d-group" role="group" aria-label={name} data-fold={fold} data-key={key}>
       <div className="v3d-group-body">{children}</div>
       <div className="v3d-group-label">{label}</div>
     </div>
+  );
+}
+
+/** Mirror, as one button: left-right, front-back or up-down. */
+function MirrorButton({ onMirror }: { onMirror: (axis: 0 | 1 | 2) => void }) {
+  return (
+    <MenuButton fixed className="btn v3d-big" title="Mirror it - left-right, front-back or up-down"
+      label={<><FlipHorizontal2 size={20} /><span>Mirror <ChevronDown size={11} /></span></>}>
+      {(close) => (
+        <>
+          <button className="menu-item" onClick={() => { close(); onMirror(0); }}><FlipHorizontal2 size={15} /><span>Left-right<small>In X</small></span></button>
+          <button className="menu-item" onClick={() => { close(); onMirror(1); }}><FlipVertical2 size={15} /><span>Front-back<small>In Y</small></span></button>
+          <button className="menu-item" onClick={() => { close(); onMirror(2); }}><ArrowDownUp size={15} /><span>Up-down<small>In Z</small></span></button>
+        </>
+      )}
+    </MenuButton>
   );
 }
 
@@ -1452,11 +1608,14 @@ function PartList({ parts, onPick, onHide, depth = 0 }: { parts: Part[]; onPick:
 const kindOf = (p: Part) => (p.shape === "group" ? "Group" : p.shape === "mesh" ? "Imported mesh"
   : p.shape[0].toUpperCase() + p.shape.slice(1));
 
-/** The Part tab for one part: its name, solid or hole, colour, what its shape has of its own, and what to do with it. */
-function PartBand({ part, change, onDuplicate, onDelete, onApart }: { part: Part; change: (fn: (p: Part) => Part) => void;
-  onDuplicate: () => void; onDelete: () => void; onApart: () => void }) {
+/** The Part tab for one part (0.94.0: with what Size and place and Arrange had): its name, solid or hole and colour;
+ *  its size, centre and turn; what its shape has of its own; the plate; mirror and pattern; duplicate, hide, delete. */
+function PartBand({ part, fonts, lock, setLock, change, onDuplicate, onDelete, onApart, onDrop, onFlat, flat, onUngroup,
+  onMirror }: { part: Part; fonts: Fonts; lock: boolean; setLock: (v: boolean) => void; change: (fn: (p: Part) => Part) => void;
+  onDuplicate: () => void; onDelete: () => void; onApart: () => void; onDrop: () => void; onFlat: () => void; flat: boolean;
+  onUngroup: () => void; onMirror: (axis: 0 | 1 | 2) => void }) {
   const g = part.shape === "group";
-  const box = g ? extent(part) : null;
+  const box = extent(part);
   return (
     <>
       <Grp label={<>{kindOf(part)} <span className="mono">{part.id}</span></>}>
@@ -1474,9 +1633,22 @@ function PartBand({ part, change, onDuplicate, onDelete, onApart }: { part: Part
           </div>
         </div>
       </Grp>
+      {!g && (
+        <Grp id="place" short="Size" label={part.shape === "outline" ? "Size, its points' 0,0 and turn" : "Size, centre and turn"} fold={6}
+          icon={<Scaling size={20} />}>
+          <PlaceTable part={part} fonts={fonts} lock={lock} setLock={setLock} change={change} bottom={box?.[0][2] ?? 0} />
+        </Grp>
+      )}
+      {g && (
+        <Grp label="Group" fold={3} icon={<Group size={20} />}>
+          <p className="v3d-note num">{box ? `${fmt(box[1][0] - box[0][0])} x ${fmt(box[1][1] - box[0][1])} x ${fmt(box[1][2] - box[0][2])} mm, ` : ""}
+            {part.parts?.length ?? 0} parts. A hole in it cuts only its own parts; double-click one on the model to change it.
+            Move, turn and size it with the handles.</p>
+        </Grp>
+      )}
       {part.shape === "box" && (
-        <Grp label="Box">
-          <Num label="All rounded" unit="mm: every edge and corner - or round some edges in Edges" value={part.radius ?? 0} min={0} step={0.5}
+        <Grp label="Box" fold={3} icon={<Box size={20} />}>
+          <Num label="All rounded" unit="mm: every edge and corner - or round some lines in Lines" value={part.radius ?? 0} min={0} step={0.5}
             onSet={(v) => change((p) => (v > 0 ? { ...p, radius: v, sides: p.sides ?? 32, fillet: undefined, chamfer: undefined }
               : { ...p, radius: undefined, sides: p.fillet ? p.sides : undefined }))} />
           {!!part.radius && <Num label="Sides" unit="segments round a corner" value={part.sides ?? 64} min={3} step={8}
@@ -1484,7 +1656,7 @@ function PartBand({ part, change, onDuplicate, onDelete, onApart }: { part: Part
         </Grp>
       )}
       {(part.shape === "cylinder" || part.shape === "cone" || part.shape === "sphere") && (
-        <Grp label={kindOf(part)}>
+        <Grp label={kindOf(part)} fold={3} icon={part.shape === "cone" ? <Cone size={20} /> : part.shape === "sphere" ? <CircleDot size={20} /> : <Cylinder size={20} />}>
           <Num label="Sides" unit="segments around" value={part.sides ?? 64} min={3} step={8}
             onSet={(v) => change((p) => ({ ...p, sides: Math.round(Math.min(256, Math.max(3, v))) }))} />
           {part.shape === "cone" && <Num label="Top, %" unit="% of the base" value={(part.top ?? 0) * 100} min={0} step={10}
@@ -1492,22 +1664,25 @@ function PartBand({ part, change, onDuplicate, onDelete, onApart }: { part: Part
         </Grp>
       )}
       {part.shape === "outline" && (
-        <Grp label="Outline"><p className="v3d-note">{part.points?.length ?? 0} points{part.holes?.length
-          ? `, ${part.holes.length} hole${part.holes.length > 1 ? "s" : ""} in it` : ""}. Its size in Size and place scales them
+        <Grp label="Outline" fold={3} icon={<Shapes size={20} />}><p className="v3d-note">{part.points?.length ?? 0} points{part.holes?.length
+          ? `, ${part.holes.length} hole${part.holes.length > 1 ? "s" : ""} in it` : ""}. Its size scales them
           {part.size[0] <= 0 && part.size[1] <= 0 ? " (now as drawn)" : ""}.</p></Grp>
       )}
-      {part.shape === "mesh" && <Grp label="Imported mesh"><p className="v3d-note mono" title="The file, from the design's folder">{part.file}</p></Grp>}
+      {part.shape === "mesh" && <Grp label="Imported mesh" fold={3} icon={<Upload size={20} />}><p className="v3d-note mono" title="The file, from the design's folder">{part.file}</p></Grp>}
       {part.shape === "text" && (
-        <Grp label="Text">
+        <Grp label="Text" fold={3} icon={<Type size={20} />}>
           <p className="v3d-note">Its letters, font and lines: the Text tab.</p>
           <ApartButton part={part} onApart={onApart} />
         </Grp>
       )}
-      {g && (
-        <Grp label="Group"><p className="v3d-note num">{box ? `${fmt(box[1][0] - box[0][0])} x ${fmt(box[1][1] - box[0][1])} x ${fmt(box[1][2] - box[0][2])} mm, ` : ""}
-          {part.parts?.length ?? 0} parts. A hole in it cuts only its own parts; double-click one on the model to change it.</p></Grp>
-      )}
-      <Grp label="Part">
+      <Grp label="Arrange" fold={4} icon={<ArrowDownToLine size={20} />}>
+        <Big icon={<ArrowDownToLine size={20} />} label="Onto the plate" title="Moved up or down so its lowest point is on the plate" onClick={onDrop} />
+        <Big icon={<PanelBottom size={20} />} label="Lay flat" title="Lay a face flat: click the face that should lie on the plate" onClick={onFlat} active={flat} />
+        <MirrorButton onMirror={onMirror} />
+        <PatternButton part={part} change={change} />
+        {g && <Big icon={<Ungroup size={20} />} label="Ungroup" title="Ungroup (Ctrl+Shift+G)" onClick={onUngroup} />}
+      </Grp>
+      <Grp label="Part" fold={5} icon={<Copy size={20} />}>
         <Big icon={<Copy size={20} />} label="Duplicate" title="Duplicate (Ctrl+D)" onClick={onDuplicate} />
         <Big icon={part.hidden ? <EyeOff size={20} /> : <Eye size={20} />} label={part.hidden ? "Show" : "Hide"}
           title={part.hidden ? "Hidden: left out of the solid. Show it" : "Hide it: left out of the solid"}
@@ -1519,11 +1694,9 @@ function PartBand({ part, change, onDuplicate, onDelete, onApart }: { part: Part
   );
 }
 
-/** The Size and place tab for one part: size (keeping proportions or not), centre, turn, and onto the plate. */
-function PlaceBand({ part, fonts, lock, setLock, change, onDrop, onFlat, flat }: { part: Part; fonts: Fonts; lock: boolean;
-  setLock: (v: boolean) => void; change: (fn: (p: Part) => Part) => void; onDrop: () => void; onFlat: () => void; flat: boolean }) {
-  const g = part.shape === "group";
-  const box = extent(part);
+/** Size, centre (an outline: its points' 0,0) and turn by the numbers (0.94.0: one small table, X Y Z across). */
+function PlaceTable({ part, fonts, lock, setLock, change, bottom }: { part: Part; fonts: Fonts; lock: boolean;
+  setLock: (v: boolean) => void; change: (fn: (p: Part) => Part) => void; bottom: number }) {
   const now = sized(part, fonts);
   const sizeOf = (i: number, v: number) => change((p) => {
     if (!lock) {                                       // a text's other 0 stays: its letters decide it
@@ -1535,45 +1708,32 @@ function PlaceBand({ part, fonts, lock, setLock, change, onDrop, onFlat, flat }:
     const size = (p.shape === "outline" ? sized(p, fonts) : p.size).map((x) => x * f) as Vec3;
     return { ...p, size, radius: p.radius ? p.radius * f : p.radius };
   });
+  const rows: [string, string, (i: number) => number, (i: number, v: number) => void, number | undefined, number, ReactNode][] = [
+    ["Size", "mm", (i) => r3(now[i]), sizeOf, MIN_SIZE, 1,
+      <label key="lock" className="v3d-check" title="All three change together"><input type="checkbox" checked={lock}
+        onChange={(e) => setLock(e.target.checked)} /> keep ratio</label>],
+    [part.shape === "outline" ? "0,0" : "Centre", "mm", (i) => part.at[i],
+      (i, v) => change((p) => { const at = [...p.at] as Vec3; at[i] = v; return { ...p, at }; }), undefined, 1,
+      <small key="z" className="faint num" title="Its lowest point">bottom z {fmt(bottom)}</small>],
+    ["Turned", "°: X first, then Y, then Z", (i) => part.rotate[i],
+      (i, v) => change((p) => { const r = [...p.rotate] as Vec3; r[i] = v; return { ...p, rotate: r }; }), undefined, 15,
+      <span key="order" />],
+  ];
   return (
-    <>
-      {!g && (
-        <>
-          <Grp label="Size, mm">
-            <div className="v3d-stack">
-              <div className="v3d-triple">
-                {["X", "Y", "Z"].map((ax, i) => <Num key={ax} label={ax} value={r3(now[i])} min={MIN_SIZE} onSet={(v) => sizeOf(i, v)} />)}
-              </div>
-              <label className="v3d-check"><input type="checkbox" checked={lock} onChange={(e) => setLock(e.target.checked)} /> keep proportions</label>
-            </div>
-          </Grp>
-          <Grp label={part.shape === "outline" ? "Its points' 0,0, mm" : "Centre, mm"}>
-            <div className="v3d-stack">
-              <div className="v3d-triple">
-                {["X", "Y", "Z"].map((ax, i) => <Num key={ax} label={ax} value={part.at[i]}
-                  onSet={(v) => change((p) => { const at = [...p.at] as Vec3; at[i] = v; return { ...p, at }; })} />)}
-              </div>
-              <small className="faint">its bottom at z {fmt(box?.[0][2] ?? 0)}</small>
-            </div>
-          </Grp>
-          <Grp label="Turned, degrees">
-            <div className="v3d-stack">
-              <div className="v3d-triple">
-                {["X", "Y", "Z"].map((ax, i) => <Num key={ax} label={ax} unit="°" step={15} value={part.rotate[i]}
-                  onSet={(v) => change((p) => { const r = [...p.rotate] as Vec3; r[i] = v; return { ...p, rotate: r }; })} />)}
-              </div>
-              <small className="faint">X first, then Y, then Z</small>
-            </div>
-          </Grp>
-        </>
-      )}
-      {g && box && <Grp label="Group"><p className="v3d-note num">{fmt(box[1][0] - box[0][0])} x {fmt(box[1][1] - box[0][1])} x {fmt(box[1][2] - box[0][2])} mm.
-        Move, turn and size it with the handles.</p></Grp>}
-      <Grp label="Plate">
-        <Big icon={<ArrowDownToLine size={20} />} label="Onto the plate" title="Moved up or down so its lowest point is on the plate" onClick={onDrop} />
-        <Big icon={<PanelBottom size={20} />} label="Lay flat" title="Lay a face flat: click the face that should lie on the plate" onClick={onFlat} active={flat} />
-      </Grp>
-    </>
+    <div className="v3d-place">
+      {rows.map(([name, unit, get, set, min, step, after]) => (
+        <Fragment key={name}>
+          <span className="v3d-place-name">{name}</span>
+          {[0, 1, 2].map((i) => (
+            <label key={i} className="v3d-axis" title={`${name} ${"XYZ"[i]} (${unit}) - the arrow keys step it, Shift: ten steps`}>
+              <span className={`v3d-ax ax${i}`}>{"XYZ"[i]}</span>
+              <NumInput value={get(i)} min={min} step={step} onSet={(v) => set(i, v)} label={`${name} ${"XYZ"[i]}, ${unit.split(":")[0]}`} />
+            </label>
+          ))}
+          {after}
+        </Fragment>
+      ))}
+    </div>
   );
 }
 
@@ -1617,7 +1777,7 @@ function TextBand({ parts, fonts, change, onApart }: { parts: Part[]; fonts: Fon
           <ApartButton part={part} onApart={onApart} />
         </Grp>
       )}
-      <Grp label={many ? (oneFont ? fam.name : "Fonts") : t ? t.font : "Font"}>
+      <Grp id="font" short="Font" fold={2} icon={<Type size={20} />} label={many ? (oneFont ? fam.name : "Fonts") : t ? t.font : "Font"}>
         <div className="v3d-stack">
           <select className="select" value={oneFont ? fontOf(part) : ""} aria-label="Font"
             onChange={(e) => { if (e.target.value) restyle({ font: e.target.value === fonts.index.default ? undefined : e.target.value }); }}>
@@ -1633,7 +1793,8 @@ function TextBand({ parts, fonts, change, onApart }: { parts: Part[]; fonts: Fon
           </div>
         </div>
       </Grp>
-      <Grp label={many ? "Letters" : t ? `Letters: ${fmt(t.width)} x ${fmt(t.height)} mm` : "Letters"}>
+      <Grp id="letters" short="Letters" fold={3} icon={<Scaling size={20} />}
+        label={many ? "Letters" : t ? `Letters: ${fmt(t.width)} x ${fmt(t.height)} mm` : "Letters"}>
         <div className="v3d-stack">
           <div className="v3d-pair">
             <Num label="Capitals, mm" value={r3(caps[0])} min={0.1}
@@ -1651,7 +1812,7 @@ function TextBand({ parts, fonts, change, onApart }: { parts: Part[]; fonts: Fon
           )}
         </div>
       </Grp>
-      <Grp label="Lines">
+      <Grp id="lines" short="Lines" fold={1} icon={<AlignCenter size={20} />} label="Lines">
         <div className="v3d-stack">
           <div className="v3d-seg" role="group" aria-label="The lines">
             {LINES.map(([a, icon, name]) => (
@@ -1679,22 +1840,25 @@ function ApartButton({ part, onApart }: { part: Part; onApart: () => void }) {
   );
 }
 
-/** Why a part has no edges to round in the Edges tab - or null. */
+/** Why a part has no lines of its own to round, cut or resize in the Lines tab - or null. */
 function edgeless(p: Part): string | null {
   if (p.hole) return "A hole's rim where it meets a part cannot be rounded yet.";
   if (p.radius) return "That box is rounded all round: set All rounded (Part) to 0 to round single edges.";
   if (EDGES[p.shape]) return null;
-  return p.shape === "group" ? "A group's edges are its parts': Pick edges picks them on the model."
-    : p.shape === "mesh" ? "An imported mesh's edges cannot be rounded yet."
-      : `A ${kindOf(p).toLowerCase()} has no edges of its own to round.`;
+  return p.shape === "group" ? "A group's lines are its parts': click one on the model to pick it."
+    : p.shape === "mesh" ? "An imported mesh's lines cannot be rounded or resized yet."
+      : `A ${kindOf(p).toLowerCase()} has no lines of its own to round or resize.`;
 }
 
-/** The Edges tab (0.92.0): edges picked first - on the model, or by name - then what they get: a fillet, a chamfer or
- *  nothing. A new size resizes the picked edges that have one; a picked edge with one shows its size. */
-function EdgesBand({ part, many, picked, pickedOn, size, picking, onPicking, onName, onChip, onTreat, onSize, onClear }: {
+/** The Lines tab (0.92.0 as Edges): lines picked first - clicked on the model, or by name - then what they get: a
+ *  fillet, a chamfer or nothing; a new size resizes the picked lines that have one. One line picked: Resize sets how
+ *  long it is (0.94.0) - a box over the view, Enter sets it. */
+function LinesBand({ part, many, picked, pickedOn, size, picking, onPicking, onName, onChip, onTreat, onSize, onClear,
+  length, onResize }: {
   part: Part | null; many: boolean; picked: number; pickedOn: string[]; size: number; picking: boolean;
   onPicking: () => void; onName: (key: string) => void; onChip: (key: string, size: number) => void;
-  onTreat: (kind: EdgeKind | null) => void; onSize: (v: number) => void; onClear: () => void }) {
+  onTreat: (kind: EdgeKind | null) => void; onSize: (v: number) => void; onClear: () => void;
+  length: { length: number; what: string } | null; onResize: () => void }) {
   const why = part ? edgeless(part) : null;
   const shape = part?.shape;
   const names: [string, string][] = !part || why ? [] : shape === "outline" ? [["vertical", "Corners"]]
@@ -1711,10 +1875,10 @@ function EdgesBand({ part, many, picked, pickedOn, size, picking, onPicking, onN
   return (
     <>
       <Grp label={part && !why ? `Pick: ${kindOf(part).toLowerCase()} ${part.id}` : "Pick"}>
-        <Big icon={<MousePointerClick size={20} />} label="Pick edges" active={picking} onClick={onPicking}
-          title="Click edges on the model to pick them - again to unpick. Then Fillet, Chamfer or Take off. Esc stops." />
+        <Big icon={<MousePointerClick size={20} />} label="Pick lines" active={picking} onClick={onPicking}
+          title="Click lines on the model to pick several - again to unpick (a plain click near a line picks it alone). Esc stops." />
         {names.length > 0 && (
-          <div className="v3d-edgenames" role="group" aria-label="Pick edges by name">
+          <div className="v3d-edgenames" role="group" aria-label="Pick lines by name">
             {names.map(([key, name]) => (
               <button key={key} type="button" className={`btn small${has(key) ? " on" : ""}`} aria-pressed={has(key)}
                 onClick={() => onName(key)} title={has(key) ? `Unpick ${where(key)}` : `Pick ${where(key)}`}>
@@ -1723,32 +1887,37 @@ function EdgesBand({ part, many, picked, pickedOn, size, picking, onPicking, onN
           </div>
         )}
       </Grp>
-      <Grp label={picked ? `${picked} edge${picked > 1 ? "s" : ""} picked` : "Nothing picked"}>
+      <Grp id="resize" short="Resize" label={length ? `${length.what}: ${fmt(length.length)} mm` : "One line"} fold={4} icon={<Ruler size={20} />}>
+        <Big icon={<Ruler size={20} />} label="Resize" disabled={!length} onClick={onResize}
+          title={length ? `Make it another ${length.what.toLowerCase()} - type it in the box by the line, Enter sets it`
+            : picked > 1 ? "Pick one line to resize it" : "Pick a line to resize it"} />
+      </Grp>
+      <Grp id="treat" short="Fillet" label={picked ? `${picked} line${picked > 1 ? "s" : ""} picked` : "Nothing picked"} fold={3} icon={<SquareRoundCorner size={20} />}>
         <Big icon={<SquareRoundCorner size={20} />} label="Fillet" disabled={!picked} onClick={() => onTreat("fillet")}
-          title={`The picked edges rounded: radius ${fmt(size)} mm`} />
+          title={`The picked lines rounded: radius ${fmt(size)} mm`} />
         <Big icon={<ChamferIcon />} label="Chamfer" disabled={!picked} onClick={() => onTreat("chamfer")}
-          title={`The picked edges cut off: ${fmt(size)} mm along each face`} />
+          title={`The picked lines cut off: ${fmt(size)} mm along each face`} />
         <Big icon={<Eraser size={20} />} label="Take off" disabled={!picked} onClick={() => onTreat(null)}
-          title="The picked edges sharp again" />
+          title="The picked lines sharp again" />
         <div className="v3d-stack">
-          <label className="v3d-inline" title="The fillet's radius or the chamfer's reach. Changed: the picked edges that have one get it">
+          <label className="v3d-inline" title="The fillet's radius or the chamfer's reach. Changed: the picked lines that have one get it">
             <span>Size</span><NumInput value={size} min={0.1} step={0.5} onSet={onSize} label="Size" /><span>mm</span>
           </label>
-          <button type="button" className="btn small quiet" disabled={!picked} onClick={onClear} title="No edge picked (Esc)">
+          <button type="button" className="btn small quiet" disabled={!picked} onClick={onClear} title="No line picked (Esc)">
             <X size={14} /> Unpick all</button>
         </div>
       </Grp>
       {why && <p className="v3d-tip">{why}</p>}
-      {!part && !many && <p className="v3d-tip">Pick edges, then click them on the model - or pick a part and its edges by name.</p>}
-      {many && <p className="v3d-tip">Pick one part to pick its edges by name - or Pick edges and click them on the model.</p>}
+      {!part && !many && <p className="v3d-tip">Click a line on the model to pick it - or pick a part and its lines by name.</p>}
+      {many && <p className="v3d-tip">Pick one part to pick its lines by name - or click lines on the model.</p>}
       {part && !why && (
-        <Grp label="Now - click to pick">
+        <Grp label="Now - click to pick" short="Now" fold={1} icon={<SquareRoundCorner size={20} />}>
           <div className="v3d-edgelist">
             {now.length ? now.map(({ k, key, v }) => (
               <button key={k + key} type="button" className={`btn small v3d-chip${has(key) ? " on" : ""}`} aria-pressed={has(key)}
-                title={has(key) ? "Unpick these edges" : "Pick these edges - then change the size, or Take off"}
+                title={has(key) ? "Unpick these lines" : "Pick these lines - then change the size, or Take off"}
                 onClick={() => onChip(key, v)}>{key} · {k} {fmt(v)}</button>
-            )) : <span className="faint">No edge rounded or cut</span>}
+            )) : <span className="faint">No line rounded or cut</span>}
           </div>
         </Grp>
       )}
@@ -1783,38 +1952,47 @@ function EdgeIcon({ which, size = 20 }: { which: string; size?: number }) {
 }
 
 /** Copies of the part or group (0.88.0): turned round a point - a snowflake's arms, a star's points - or in a row. */
-function PatternGroup({ part, change }: { part: Part; change: (fn: (p: Part) => Part) => void }) {
+/** Pattern (0.88.0): copies of the part round a point or in a row - one button (0.94.0), its settings in its menu. */
+function PatternButton({ part, change }: { part: Part; change: (fn: (p: Part) => Part) => void }) {
   const r = part.repeat;
   const set = (fn: (x: Repeat) => Repeat) => change((p) => (p.repeat ? { ...p, repeat: fn({ ...p.repeat }) } : p));
-  if (!r) {
-    const b = extent(part);
-    const w = b ? b[1][0] - b[0][0] : 20;
-    return (
-      <Grp label="Pattern">
-        <Big icon={<Repeat2 size={20} />} label="Around" onClick={() => change((p) => ({ ...p, repeat: { count: 6 } }))}
-          title={part.shape === "group" ? "Six copies turned round the plate's middle - set Around for another point"
-            : "Six copies turned round its own position - set Around for another point"} />
-        <Big icon={<Columns3 size={20} />} label="In a row" title="Three copies in a row"
-          onClick={() => change((p) => ({ ...p, repeat: { count: 3, step: [r3(w + 5), 0, 0] } }))} />
-      </Grp>
-    );
-  }
+  const b = extent(part);
+  const w = b ? b[1][0] - b[0][0] : 20;
   const around = repeatAround(part);
   return (
-    <Grp label={r.step ? "Pattern: in a row" : r.around ? "Pattern: turned round a point" : part.shape === "group"
-      ? "Pattern: round the plate's middle" : "Pattern: round its own position"}>
-      <Num label="Copies" unit="in all" value={r.count} min={2}
-        onSet={(v) => set((x) => ({ ...x, count: Math.max(2, Math.min(MAX_COPIES, Math.round(v))) }))} />
-      {r.step ? ["X", "Y", "Z"].map((ax, i) => <Num key={ax} label={`Step ${ax}`} value={r.step![i]}
-        onSet={(v) => set((x) => { const st = [...(x.step ?? [0, 0, 0])] as Vec3; st[i] = v; return { ...x, step: st }; })} />) : (
-        <>
-          <Num label="Angle" unit="° from the first to the last (360: all round)" step={15} value={r.angle ?? 360}
-            onSet={(v) => set((x) => ({ ...x, angle: Math.max(-360, Math.min(360, v)) }))} />
-          {["X", "Y"].map((ax, i) => <Num key={ax} label={`Around ${ax}`} value={around[i]}
-            onSet={(v) => set((x) => { const a = [...around] as [number, number]; a[i] = v; return { ...x, around: a }; })} />)}
-        </>
+    <MenuButton fixed className={`btn v3d-big${r ? " on" : ""}`} menuClassName="v3d-foldmenu"
+      title={r ? `${r.count} of it, ${r.step ? "in a row" : "turned round a point"} - change it` : "Copies of it round a point or in a row"}
+      label={<><Repeat2 size={20} /><span>{r ? `Pattern ×${r.count}` : "Pattern"} <ChevronDown size={11} /></span></>}>
+      {(close) => (
+        <div className="v3d-foldbody">
+          {!r ? (
+            <>
+              <Big icon={<Repeat2 size={20} />} label="Around" onClick={() => { close(); change((p) => ({ ...p, repeat: { count: 6 } })); }}
+                title={part.shape === "group" ? "Six copies turned round the plate's middle - set Around for another point"
+                  : "Six copies turned round its own position - set Around for another point"} />
+              <Big icon={<Columns3 size={20} />} label="In a row" title="Three copies in a row"
+                onClick={() => { close(); change((p) => ({ ...p, repeat: { count: 3, step: [r3(w + 5), 0, 0] } })); }} />
+            </>
+          ) : (
+            <>
+              <span className="v3d-foldhead">{r.step ? "In a row" : r.around ? "Turned round a point" : part.shape === "group"
+                ? "Round the plate's middle" : "Round its own position"}</span>
+              <Num label="Copies" unit="in all" value={r.count} min={2}
+                onSet={(v) => set((x) => ({ ...x, count: Math.max(2, Math.min(MAX_COPIES, Math.round(v))) }))} />
+              {r.step ? ["X", "Y", "Z"].map((ax, i) => <Num key={ax} label={`Step ${ax}`} value={r.step![i]}
+                onSet={(v) => set((x) => { const st = [...(x.step ?? [0, 0, 0])] as Vec3; st[i] = v; return { ...x, step: st }; })} />) : (
+                <>
+                  <Num label="Angle" unit="° from the first to the last (360: all round)" step={15} value={r.angle ?? 360}
+                    onSet={(v) => set((x) => ({ ...x, angle: Math.max(-360, Math.min(360, v)) }))} />
+                  {["X", "Y"].map((ax, i) => <Num key={ax} label={`Around ${ax}`} value={around[i]}
+                    onSet={(v) => set((x) => { const a = [...around] as [number, number]; a[i] = v; return { ...x, around: a }; })} />)}
+                </>
+              )}
+              <Big icon={<X size={20} />} label="Remove" title="No copies" onClick={() => { close(); change((p) => ({ ...p, repeat: undefined })); }} />
+            </>
+          )}
+        </div>
       )}
-      <Big icon={<X size={20} />} label="Remove" title="No copies" onClick={() => change((p) => ({ ...p, repeat: undefined }))} />
-    </Grp>
+    </MenuButton>
   );
 }

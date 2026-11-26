@@ -337,6 +337,20 @@ export class Viewport {
     return null;
   }
 
+  /** How many mm a pixel spans at a point of the design (0.94.0: a click a few pixels from an edge picks it). */
+  mmPerPx(v: Vec3): number {
+    const d = this.camera.position.distanceTo(new THREE.Vector3(v[0], v[1], v[2]));
+    return (2 * d * Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2))) / Math.max(1, this.host.clientHeight);
+  }
+
+  /** Where a point of the design is on the view, in px from its top left - null behind the camera. */
+  toScreen(v: Vec3): [number, number] | null {
+    this.camera.updateMatrixWorld();
+    const p = new THREE.Vector3(v[0], v[1], v[2]).project(this.camera);
+    if (p.z > 1) return null;
+    return [((p.x + 1) / 2) * this.host.clientWidth, ((1 - p.y) / 2) * this.host.clientHeight];
+  }
+
   /** Where the pointer meets the level plane at height z. */
   onPlane(clientX: number, clientY: number, z: number): Vec3 | null {
     this.ray(clientX, clientY);

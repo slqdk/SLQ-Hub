@@ -935,37 +935,82 @@ export function treatEdges(p: Part, edges: string[], spec: EdgeSpec | null): Par
   return { ...p, fillet, chamfer };
 }
 
-/** The part's own edge nearest a point on it (the editor's "Pick edges"), with how far it is (mm) - null for a
- *  shape without named edges. A repeated part: the copy the point is on. */
+/** The part's own edge nearest a point (the editor's lines), with how far it is (mm) - null for a shape without
+ *  named edges. Measured to the lines `edgeLines` draws - a rim round, an outline's corners, every copy - so a click
+ *  on a cylinder's top far from its rim is far from the edge (0.94.0: a click near a line picks it). */
 export function nearestEdge(p: Part, v: Vec3): { edge: string; distance: number } | null {
-  const [sx, sy, sz] = p.size;
-  const x = sx / 2, y = sy / 2, z = sz / 2;
-  const lines = edgeSegments(p);
-  if (!lines.length && p.shape !== "cylinder" && p.shape !== "cone") return null;
-  const copies = p.repeat && p.repeat.count > 1 ? p.repeat.count : 1;
+  const names = EDGES[p.shape];
+  if (!names) return null;
   let best: { edge: string; distance: number } | null = null;
-  for (let i = 0; i < copies; i++) {
-    const l = toPart(p, v, i);
-    const outside = Math.hypot(Math.max(0, Math.abs(l[0]) - x), Math.max(0, Math.abs(l[1]) - y), Math.max(0, Math.abs(l[2]) - z));
-    if (outside > 0.5 && i < copies - 1) continue;                  // not this copy
-    let got: { edge: string; distance: number };
-    if (p.shape === "cylinder" || p.shape === "cone") {
-      got = Math.abs(l[2] - z) <= Math.abs(l[2] + z) ? { edge: "top", distance: Math.abs(l[2] - z) }
-        : { edge: "bottom", distance: Math.abs(l[2] + z) };
-    } else {
-      got = { edge: "", distance: Infinity };
-      for (const [name, a, b] of lines) {
+  for (const name of names) {
+    for (const line of edgeLines(p, [name])) {
+      for (let i = 1; i < line.length; i++) {
+        const a = line[i - 1], b = line[i];
         const ab: Vec3 = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
         const len2 = ab[0] * ab[0] + ab[1] * ab[1] + ab[2] * ab[2];
-        const t = Math.max(0, Math.min(1, ((l[0] - a[0]) * ab[0] + (l[1] - a[1]) * ab[1] + (l[2] - a[2]) * ab[2]) / len2));
-        const d = Math.hypot(l[0] - a[0] - t * ab[0], l[1] - a[1] - t * ab[1], l[2] - a[2] - t * ab[2]);
-        if (d < got.distance) got = { edge: name, distance: d };
+        const t = len2 > 0 ? Math.max(0, Math.min(1, ((v[0] - a[0]) * ab[0] + (v[1] - a[1]) * ab[1] + (v[2] - a[2]) * ab[2]) / len2)) : 0;
+        const d = Math.hypot(v[0] - a[0] - t * ab[0], v[1] - a[1] - t * ab[1], v[2] - a[2] - t * ab[2]);
+        if (!best || d < best.distance) best = { edge: name, distance: d };
       }
     }
-    if (!best || outside + got.distance < best.distance) best = { edge: got.edge, distance: outside + got.distance };
   }
   return best;
 }
+
+/** How long a part's edge is (0.94.0, the Lines tab's Resize): a box's or wedge's straight edge, its length; a
+ *  cylinder's or cone's rim, its diameter (across X); an outline's corners, its thickness. Null: nothing to size. */
+export function edgeLength(p: Part, edge: string): { length: number; what: "Length" | "Diameter" } | null {
+  const [sx, , sz] = p.size;
+  if (p.shape === "box" || p.shape === "wedge") {
+    const seg = edgeSegments(p).find(([name]) => name === edge);
+    if (!seg) return null;
+    const [, a, b] = seg;
+    return { length: Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]), what: "Length" };
+  }
+  if (p.shape === "cylinder" || p.shape === "cone") {
+    const k = edge === "bottom" ? 1 : edge === "top" ? (p.shape === "cone" ? p.top ?? 0 : 1) : 0;
+    return k > 0 ? { length: sx * k, what: "Diameter" } : null;
+  }
+  if (p.shape === "outline" && edge === "vertical") return { length: sz, what: "Length" };
+  return null;
+}
+
+/** The part with one edge made `length` long (0.94.0): the size along it - a slope keeps its angle, a rim its round
+ *  (a cone's other rim keeps its own diameter), an outline's corners are its thickness - its bottom staying where it
+ *  was, its middle too across. A string: why not. */
+export function withEdgeLength(p: Part, edge: string, length: number): Part | string {
+  const now = edgeLength(p, edge);
+  if (!now) return `${edge} has no length to set.`;
+  if (!(length >= MIN_SIZE)) return `${fmtMm(length)} mm is too short.`;
+  const size = [...p.size] as Vec3;
+  let top = p.top;
+  if (p.shape === "box" || p.shape === "wedge") {
+    const [, a, b] = edgeSegments(p).find(([name]) => name === edge)!;
+    const d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]].map(Math.abs);
+    const along = d.filter((x) => x > 1e-9).length;
+    if (along === 1) size[d.findIndex((x) => x > 1e-9)] = length;        // straight along X, Y or Z
+    else {                                                                // a slope: its run and rise alike
+      const f = length / now.length;
+      for (let i = 0; i < 3; i++) if (d[i] > 1e-9) size[i] = p.size[i] * f;
+    }
+  } else if (p.shape === "cylinder" || p.shape === "cone") {
+    if (p.shape === "cone" && edge === "top") {
+      if (length > p.size[0] + 1e-9) return `The top cannot be wider than the bottom (${fmtMm(p.size[0])} mm) - turn the cone over.`;
+      top = Math.min(1, length / p.size[0]);
+    } else {
+      const f = length / p.size[0];
+      if (p.shape === "cone") top = p.top ? Math.min(1, (p.top * p.size[0]) / length) : p.top;   // the top's own diameter
+      size[0] = length;
+      size[1] = p.size[1] * f;
+    }
+  } else size[2] = length;                                                // an outline's corners: its thickness
+  const next: Part = { ...p, size, top };
+  const was = extent(p), then = extent(next);
+  if (was && then) next.at = [p.at[0], p.at[1], p.at[2] + was[0][2] - then[0][2]];   // its bottom stays
+  return next;
+}
+
+const fmtMm = (v: number) => String(Math.round(v * 100) / 100);
 
 function readEdgeSizes(v: unknown, part: Part, kind: EdgeKind, problems: string[]): EdgeSizes | undefined {
   if (v === undefined) return undefined;

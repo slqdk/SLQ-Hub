@@ -3272,6 +3272,37 @@ into the Hub, Tinkercad's level, his printer a Bambu Lab P2S but chosen per desi
     the warnings, and "2 problems" (a menu with what the file's reader and the build said). The head: Undo, Redo,
     Export, Full width / Show the chat, Close - all with their words. With nothing picked, Part, Size and place and
     Arrange say how to pick. On a narrow panel the ribbon scrolls sideways; on a phone the tabs wrap.
+  - **Three tabs since 0.94.0** (below): Insert, Part (with Size and place and Arrange in it), Lines.
+- **Insert, Part, Lines (0.94.0).** Søren, with the editor beside the chat: "Shapes skal hedde 'Insert'. Når man klikker
+  på en Part, så skal parts menuen komme frem. Parts menuen skal også inkludere Size, place, arrange. (alle på en tab).
+  Hvis man klikker på en streg, så skal menuen Lines komme frem, (edges i dag). Under lines, skal jeg have mulighed for
+  at trykke 'Resize' på en linie, og så skal der komme en input box op, hvor jeg kan taste den længde ind jeg vil have.
+  Enter laver det om." So "resize" (0.92.0, read then as a fillet's size) means a line's length.
+  - **A click picks what it is on**: right by one of a part's own lines - within 7 pixels, measured in the design
+    (`nearestEdge` now to the lines `edgeLines` draws: a rim round, an outline's corners, every copy; `mmPerPx` at the
+    spot) - the line, alone (Shift or Pick several: one more), and the Lines tab opens; elsewhere the part, the Part
+    tab opens (the Text tab stays for a text). The line a click would pick is drawn amber as the pointer moves (not over
+    the handles); picked lines are drawn green on any tab. A click on a part, or on nothing, unpicks the lines.
+  - **Insert** is Shapes renamed. **Part** holds all a part has: name, solid or hole, colour; size, centre and turn as
+    one small table (X, Y, Z across, keep ratio, its bottom's z); what its shape has of its own; Arrange - Onto the
+    plate, Lay flat, Mirror (a menu: left-right, front-back, up-down), Pattern (a menu: Around, In a row, then its
+    numbers); Duplicate, Hide, Delete. Several parts: Duplicate, Delete; Onto the plate; Group, Mirror; Align.
+    **Lines** is Edges renamed, with Resize.
+  - **The band folds** (`Band`, `Grp fold`): when a tab's groups do not fit, the ones marked to go first become one
+    button each (a short name, an arrow), the group in its menu - Office's adaptive ribbon. Measured before paint: all
+    open, then folded by their widths (a folded group counted 66 px, and one more folded while it still does not fit),
+    again when the band's width or what it shows changes. Part at the editor's width beside the chat (834 px at 1440,
+    741 at 1280) keeps its name and the table open and folds its shape's group, Arrange and Part.
+  - **Menus in the ribbon are placed on the screen** (`MenuButton fixed`): the band scrolls sideways, so a menu in it
+    was cut off at its bottom - Import's since 0.90.0 - and its place is shifted by left/right, not a transform, so a
+    menu in a menu (Pattern in a folded Arrange) is placed by the screen too. They close when anything scrolls. Esc
+    with a menu open closes the menu only (it unpicked the part too).
+  - **Resize** (one line picked): a box over the view by the line's middle (a rim: its front), its length in it,
+    selected - Enter sets it, Esc or a click away leaves it. `withEdgeLength`: a box's or wedge's straight line sets the
+    part's size along it; a wedge's slope its run and rise alike (its angle kept); a cylinder's rim its diameter (an
+    ellipse scaled alike), a cone's bottom rim its base keeping the top's own diameter, its top rim the top (not wider
+    than the base); an outline's corners its thickness. The part keeps its bottom's z (it stays on the plate) and its
+    middle across; X, Y and Z are its own, so a part lying on its side grows the way its line runs.
 - **Fillets and chamfers (0.91.0).** Søren: "Er det muligt at lave en funktion hvor man efterfølgende kan lave fillet
   på et kant/side?" - asked, he chose all three: the parts' own edges, also where parts meet, also on imported STLs.
   0.91.0 is the first: a part's own edges.
@@ -3300,7 +3331,7 @@ into the Hub, Tinkercad's level, his printer a Bambu Lab P2S but chosen per desi
     unmirrored; a repeated part's copy found) and the nearest named edge gets the treatment, or loses it when it has
     that one; and the part's names now, each a button that takes it off. A box with All rounded (its radius, in Part)
     says to set that to 0; setting it clears the fillets. Holes' and meshes' edges say they cannot be rounded yet.
-  - **Not yet - 0.94.0**: edges where parts meet (a hole's rim, a wall on a base: on the built solid, a fillet's
+  - **Not yet - 0.95.0**: edges where parts meet (a hole's rim, a wall on a base: on the built solid, a fillet's
     cutter or filler swept along the picked crease) and straight sharp edges of imported meshes.
 - **Picking first (0.92.0).** Søren, 07:23: "Er det ikke muligt at vælge et enkelt bogstav og ændre på det ? altså ved
   at klikke på bogstavet ? Og hvis jeg så vil ændre på flere, så kan jeg vælge en mode for at vælge flere" - one letter

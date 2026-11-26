@@ -737,20 +737,24 @@ export const SECTIONS: HelpSection[] = [
         how: ["Make 3D model on a new chat opens a new design beside it; 3D at the top of a chat opens a new one or "
           + "one of the chat's. An STL, 3MF or OBJ opens there too, as a design with the mesh in it - to put a hole in "
           + "it or text on it.",
-          "The tools are in tabs at the top: Shapes adds parts and holes, Part names the picked part and makes it "
-          + "solid or a hole, Size and place sets its size, centre and turn, Arrange groups, mirrors, aligns and "
-          + "repeats parts, and Text appears when a text is picked. Parts lists every part, to pick or hide one.",
-          "Click a part to pick it, Shift-click to pick more - or turn on Pick several over the view, and each click "
-          + "picks one more - double-click a part inside a group, and drag a picked part to move it on the plate. "
-          + "Ctrl+A picks them all. The bar over the view switches the handles between Move, Turn and Size (or G, R "
-          + "and S), sets the snap and turns the camera; the arrow keys move what is picked a step.",
+          "The tools are in tabs at the top: Insert adds parts and holes; Part has everything for the picked part - "
+          + "its name, solid or hole, its size, centre and turn by the numbers, onto the plate, mirror, pattern, "
+          + "duplicate and delete; Lines rounds, cuts and resizes its lines; Text appears when a text is picked. A "
+          + "narrow editor folds a tab's groups into buttons, each opening its group. Parts lists every part, to pick "
+          + "or hide one.",
+          "Click a part to pick it - the Part tab opens - or click right by one of its lines to pick the line (it "
+          + "lights up as you point at it), and the Lines tab opens. Shift-click picks more - or turn on Pick "
+          + "several over the view - double-click a part inside a group, and drag a picked part to move it on the "
+          + "plate. Ctrl+A picks them all. The bar over the view switches the handles between Move, Turn and Size "
+          + "(or G, R and S), sets the snap and turns the camera; the arrow keys move what is picked a step.",
           "A hole cuts the solids beside it. Group parts (Ctrl+G) to keep a hole to them.",
           "Pattern repeats a part or a group round a point or in a row: one arm of a snowflake becomes six, one hole "
           + "a ring of holes. The assistant can also draw flat outlines of its own - stars, leaves, letters' shapes.",
-          "Edges rounds or cuts a part's own edges, picked first: Pick edges and click them on the model (the one "
-          + "under the pointer lights up; again to unpick), or Top, Bottom, Vertical or All. Then Fillet, Chamfer or "
-          + "Take off, the size beside them. A picked edge that has one shows its size: change it, and it is resized. "
-          + "A cylinder's rims, a wedge's slope and an outline's corners too.",
+          "Lines works on a part's own lines, picked first: click one on the model - Pick lines to pick several - or "
+          + "Top, Bottom, Vertical or All. Then Fillet, Chamfer or Take off, the size beside them; a picked line that "
+          + "has one shows its size, and a new size resizes it. Resize, with one line picked, opens a box by the line: "
+          + "type how long it should be - a rim: how wide - and Enter makes it so (its part keeps its bottom where it "
+          + "was). A cylinder's rims, a wedge's slope and an outline's corners too.",
           "Text comes in six fonts - sans, serif, rounded, script, stencil and mono - bold or italic, its lines "
           + "centred, left or right. Letters sets how tall its capitals are; Spacing and Lines move letters and lines "
           + "apart. Cut through a plate, the stencil font keeps the middles of its letters.",

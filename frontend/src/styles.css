@@ -1214,8 +1214,29 @@ div.tests-result-head { cursor: default; }
 .v3d-heads .v3d-letter { width: 15px; font-size: 14px; line-height: 15px; }
 .v3d-tool.on, .v3d-seg .btn.on, .v3d-edgenames .btn.on, .v3d-band .v3d-chip.on { color: var(--act); border-color: var(--act);
   background: var(--act-wash); }
-.v3d-band { display: flex; align-items: stretch; min-height: 92px; padding: 7px 4px 4px; overflow-x: auto;
+.v3d-band { display: flex; align-items: stretch; min-height: 108px; padding: 7px 4px 4px; overflow-x: auto;
   background: var(--sheet); border-top: 1px solid var(--rule-2); }
+/* 0.94.0: a group short of room is one button, the group in its menu; size, centre and turn as one small table */
+.v3d-group.folded { padding: 0 5px; }
+.v3d-group.folded .v3d-big span { display: inline-flex; align-items: center; gap: 2px; }
+.menu.v3d-foldmenu { min-width: 0; max-width: min(620px, calc(100vw - 16px)); padding: 8px; }
+.v3d-foldbody { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.v3d-foldhead { flex-basis: 100%; font-size: 12px; color: var(--ink-3); }
+.v3d-band .v3d-name { width: 150px; }
+.v3d-place { display: grid; grid-template-columns: auto repeat(3, auto) auto; gap: 3px 5px; align-items: center; }
+.v3d-place-name { font-size: 12px; color: var(--ink-3); text-align: right; white-space: nowrap; }
+.v3d-axis { display: flex; align-items: center; gap: 3px; }
+.v3d-ax { width: 8px; font-size: 10.5px; font-weight: 600; text-align: center; }
+.v3d-ax.ax0 { color: #d13b3b; }
+.v3d-ax.ax1 { color: #2e9a3e; }
+.v3d-ax.ax2 { color: #2f6fd1; }
+.v3d-band .v3d-axis .input { width: 50px; height: 23px; padding: 1px 5px; font-size: 12.5px; }
+.v3d-place .v3d-check, .v3d-place small { font-size: 11.5px; white-space: nowrap; }
+.v3d-resize { position: absolute; z-index: 6; display: flex; flex-direction: column; gap: 3px; padding: 8px 10px;
+  border: 1px solid var(--act); border-radius: 8px; background: var(--sheet); box-shadow: var(--pop); }
+.v3d-resize label { display: flex; align-items: center; gap: 7px; font-size: 13px; color: var(--ink-2); }
+.v3d-resize .input { width: 86px; height: 28px; font-size: 14px; color: var(--ink); }
+.v3d-resize small { font-size: 11.5px; color: var(--ink-3); }
 .v3d-group { flex: none; display: flex; flex-direction: column; padding: 0 9px; border-right: 1px solid var(--rule-2); }
 .v3d-group:last-of-type { border-right: 0; }
 .v3d-group-body { flex: 1; display: flex; align-items: center; gap: 6px; }
