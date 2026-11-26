@@ -24,7 +24,7 @@ export const MAX_COPIES = 100;
 /** The keys a part may have; others are said once (a model guessing the format: "type", "radius", "position"). */
 export const PART_KEYS = ["id", "name", "shape", "size", "at", "rotate", "mirror", "hole", "hidden", "color", "sides",
   "radius", "top", "text", "font", "bold", "italic", "align", "letter_spacing", "line_spacing", "points", "holes",
-  "file", "repeat", "fillet", "chamfer", "on", "parts"];
+  "file", "repeat", "fillet", "chamfer", "on", "mates", "parts"];
 
 /** A text's fonts (0.89.0; ten more 0.99.0), as fonts/index.json names them (tools/make_3d_font.py makes both): the
  *  first is the default. Other names a model may write for them, and the words in a name that ask for bold or
@@ -107,6 +107,7 @@ export interface Part {
   fillet?: EdgeSizes;         // its own edges rounded (0.91.0): box, wedge, cylinder, cone, an outline's corners
   chamfer?: EdgeSizes;        // ... or cut off: the same names, the size along each face
   on?: Anchor;                // kept on a face of a box (0.98.0): its at, rotate and size z follow from it - settle()
+  mates?: Mate[];             // placed against other parts (0.101.0): its at and rotate follow from them - settle()
   parts?: Part[];             // group
 }
 
@@ -287,6 +288,14 @@ function readPart(p: Record<string, unknown>, seen: Set<string>, problems: strin
       if (on) part.on = on;
     }
   }
+  if (p.mates !== undefined) {
+    if (shape === "group") problems.push(`${id}: a group cannot have "mates" (its parts can) - left out.`);
+    else if (part.on) problems.push(`${id}: "on" places it already - its "mates" were left out.`);
+    else {
+      const mates = readMates(p.mates, part, problems);
+      if (mates) part.mates = mates;
+    }
+  }
   return part;
 }
 
@@ -429,6 +438,16 @@ function cleanPart(p: Part): Record<string, unknown> {
     if (p.on.angle) a.angle = r3(p.on.angle);
     o.on = a;
   }
+  if (p.mates?.length) {                             // after at and rotate too (0.101.0)
+    o.mates = p.mates.map((m) => {
+      const w: Record<string, unknown> = { type: m.type };
+      if (m.face) w.face = m.face;
+      w.to = m.to.face ? { part: m.to.part, face: m.to.face } : { part: m.to.part };
+      if (m.type === "distance") w.mm = r3(m.mm ?? 0);
+      if (m.flip) w.flip = true;
+      return w;
+    });
+  }
   if (p.mirror) o.mirror = true;
   if (p.hole) o.hole = true;
   if (p.hidden) o.hidden = true;
@@ -478,9 +497,13 @@ export function writeDesign(d: Design): string {
     // an outline's points on one line
     .replace(new RegExp(`\\[\\s+(\\[${n}, ${n}\\](?:,\\s+\\[${n}, ${n}\\])*)\\s+\\]`, "g"),
       (_m, inner: string) => `[${inner.replace(/,\s+/g, ", ")}]`)
-    // a part's "on" on one line too (0.98.0)
-    .replace(/"on": \{[^{}]*(?:\{[^{}]*\}[^{}]*)?\}/g, (m) => m.replace(/\s*\n\s*/g, " ").replace(/\{ /g, "{")
-      .replace(/ \}/g, "}")) + "\n";
+    // a part's "on" on one line too (0.98.0), and each of its mates (0.101.0)
+    .replace(/"on": \{[^{}]*(?:\{[^{}]*\}[^{}]*)?\}/g, oneLine)
+    .replace(/\{\s*"type": "(?:coincident|distance|concentric)"[^{}]*\{[^{}]*\}[^{}]*\}/g, oneLine) + "\n";
+}
+
+function oneLine(m: string): string {
+  return m.replace(/\s*\n\s*/g, " ").replace(/\{ /g, "{").replace(/ \}/g, "}");
 }
 
 export function newDesign(printer?: string, bed?: Vec3): Design {
@@ -910,8 +933,10 @@ function edited(p: Part, was: Part | undefined, box: Part): Part {
 
 /** The parts, each one with "on" where its anchor puts it - after the box it is on, which may be on a face too. One
  *  whose box is not there, is not a box or leads round in a circle is left where it is, free (said in `problems`).
- *  `before` (the editor's): the parts as they were before an edit - one moved, turned or sized by it gets its anchor
- *  for what was done (edited, above) before it is placed. */
+ *  One with mates (0.101.0) where they put it, after the parts they are to - a mate to a part that is not there, to
+ *  a group or round in a circle left out (said). `before` (the editor's): the parts as they were before an edit - one
+ *  moved, turned or sized by it gets its anchor for what was done (edited, above) before it is placed; one it did not
+ *  touch goes with the part of its first mate, moved or turned, before it is mated (followed, below). */
 export function settle(parts: Part[], problems?: string[], before?: Part[]): Part[] {
   const index = (list: Part[], into: Map<string, Part>) => {
     for (const p of list) {
@@ -921,7 +946,7 @@ export function settle(parts: Part[], problems?: string[], before?: Part[]): Par
     return into;
   };
   const all = index(parts, new Map());
-  if (![...all.values()].some((p) => p.on)) return parts;
+  if (![...all.values()].some((p) => p.on || p.mates)) return parts;
   const was = before ? index(before, new Map()) : null;
   const done = new Map<string, Part>(), busy = new Set<string>();
   const free = (p: Part, why: string): Part => {
@@ -949,9 +974,46 @@ export function settle(parts: Part[], problems?: string[], before?: Part[]): Par
         const q = was ? edited(p, was.get(p.id), box) : p;
         out = q.on ? placeOn(q, box) : q;
       }
-    }
+    } else if (p.mates) out = mated(p);
     done.set(p.id, out);
     return out;
+  };
+  // Whether a part is placed by another - on it, mated to it, or to one that is: those placed already as they are
+  // now (what was left out of them left out), the others as they are given.
+  const leads = (from: Part, to: string, seen = new Set<string>()): boolean => {
+    if (from.id === to) return true;
+    if (seen.has(from.id)) return false;
+    seen.add(from.id);
+    const f = done.get(from.id) ?? from;
+    return [f.on?.part, ...(f.mates ?? []).map((m) => m.to.part)].some((id) => {
+      const q = id === undefined ? undefined : all.get(id);
+      return !!q && leads(q, to, seen);
+    });
+  };
+  const mated = (p: Part): Part => {
+    const kept: [Mate, number][] = [], to = new Map<string, Part>();
+    p.mates!.forEach((m, i) => {
+      const q = all.get(m.to.part);
+      const why = !q ? `names "${m.to.part}", which the design does not have`
+        : q.id === p.id ? "is to the part itself"
+          : q.shape === "group" ? `is to a group, ${q.id} (mate one of its parts)`
+            : leads(q, p.id) ? `leads round in a circle: ${q.id} is placed by ${p.id}`
+              : m.to.face && lettersSide(q, m.to.face) ? `is to the ${m.to.face} of ${q.id}, a text whose size there `
+                + "follows its letters (mate another face)" : "";
+      if (why) {
+        problems?.push(`${p.id}: mate ${i + 1} ${why} - left out.`);
+        return;
+      }
+      to.set(q!.id, resolve(q!));
+      kept.push([m, i]);
+    });
+    let q: Part = { ...p, mates: kept.map(([m]) => m) };
+    if (!kept.length) {
+      delete q.mates;
+      return q;
+    }
+    if (was) q = followed(q, was.get(p.id), was.get(kept[0][0].to.part), to.get(kept[0][0].to.part)!);
+    return solveMates(q, kept, to, problems);
   };
   const walk = (list: Part[]): Part[] => list.map((p) => (p.shape === "group" ? { ...p, parts: walk(p.parts ?? []) }
     : resolve(p)));
@@ -1017,6 +1079,389 @@ export function faceMarks(box: Part, face: FaceName, from: Record<string, number
   if (f[lo1] !== undefined) dims.push({ line: [F.at(x, -h), F.at(x, y)], mm: f[lo1] });
   else if (f[hi1] !== undefined) dims.push({ line: [F.at(x, y), F.at(x, h)], mm: f[hi1] });
   return { outline: [F.at(-w, -h), F.at(w, -h), F.at(w, h), F.at(-w, h), F.at(-w, -h)], shape, dims };
+}
+
+// ---------------------------------------------------------------- mates (0.101.0)
+//
+// Søren: "Og så skal man også kunne mate i 3D". As in SolidWorks' assemblies: a face of a part against a face of
+// another (coincident - or flush, the two looking the same way, with flip), so many mm out from it (distance), or its
+// axis on the other's (concentric). The part the mates are on is the one that moves: whenever the design is read or
+// changed it is turned and moved, as little as they need, to where they put it - after the parts they are to - and in
+// the editor it goes with the part of its first mate when that one is moved. A part's faces are its own box's, before
+// it is turned (as a box's are for "on"), whatever its shape - a cylinder's top, a sphere's front; its axis is its own
+// Z through its middle - a cylinder's, a cone's, a round hole's.
+
+export type MateType = "coincident" | "distance" | "concentric";
+export const MATE_TYPES: readonly MateType[] = ["coincident", "distance", "concentric"];
+const MATE_KEYS = ["type", "face", "to", "mm", "flip"];
+/** How far a coincident face of a solid goes into the solid it is on, mm: nothing to see - not in the file, which keeps
+ *  a thousandth - but the two are one piece (measured: exactly flat on each other, turned askew, half are two). */
+export const JOIN = 1e-5;
+
+/** One of a part's mates. */
+export interface Mate {
+  type: MateType;
+  face?: FaceName;                        // coincident, distance: the part's own face
+  to: { part: string; face?: FaceName };  // the part it is mated to - and, face to face, that part's face
+  mm?: number;                            // distance: how far out of the other's face this one is (less than 0: into it)
+  flip?: boolean;                         // faces flush - looking the same way - not against each other; axes pointing
+                                          // opposite ways
+}
+
+/** Which axis of a part's own box a face is across: 0 X, 1 Y, 2 Z. */
+export const faceAxis = (face: FaceName): number => FACE_FRAMES[face].n.findIndex((x) => x !== 0);
+
+/** Whether a face of a part is a text's side whose place follows its letters (its size there 0): unknown until its
+ *  font is - not one to mate. */
+export const lettersSide = (p: Part, face: FaceName): boolean => p.shape === "text" && p.size[faceAxis(face)] <= 0;
+
+function faceIn(v: unknown): FaceName | null {
+  const f = typeof v === "string" ? v.trim().toLowerCase() : "";
+  return FACES.includes(f as FaceName) ? f as FaceName : null;
+}
+
+/** A part's "mates": each a type, its face and the part (and face) it is to - those that make no sense left out, said. */
+function readMates(v: unknown, part: Part, problems: string[]): Mate[] | undefined {
+  const id = part.id;
+  if (!Array.isArray(v)) {
+    problems.push(`${id}: "mates" is a list - [{"type": "coincident", "face": "bottom", "to": {"part": id, "face": "top"}}];`
+      + " left out.");
+    return undefined;
+  }
+  const out: Mate[] = [];
+  v.forEach((raw, i) => {
+    const n = `${id}: mate ${i + 1}`;
+    const m = raw as Record<string, unknown>;
+    if (!m || typeof m !== "object" || Array.isArray(m)) {
+      problems.push(`${n} is not an object - left out.`);
+      return;
+    }
+    const odd = Object.keys(m).filter((k) => !MATE_KEYS.includes(k));
+    if (odd.length) problems.push(`${n} has no ${odd.map((k) => `"${k}"`).join(", ")} - its keys: ${MATE_KEYS.join(", ")}.`);
+    const t = m.to as Record<string, unknown> | string | undefined;
+    const to = typeof t === "string" ? { part: t.trim(), face: undefined as unknown }
+      : t && typeof t === "object" && !Array.isArray(t) && typeof t.part === "string" ? { part: t.part.trim(), face: t.face }
+        : null;
+    if (!to || !to.part) {
+      problems.push(`${n} names the part it is mated to: "to": {"part": id, "face": "top"} - left out.`);
+      return;
+    }
+    if (t && typeof t === "object") {
+      const oddTo = Object.keys(t).filter((k) => k !== "part" && k !== "face");
+      if (oddTo.length) problems.push(`${n}: "to" has no ${oddTo.map((k) => `"${k}"`).join(", ")} - its keys: part, face.`);
+    }
+    const type = (m.type !== undefined ? (typeof m.type === "string" ? m.type.trim().toLowerCase() : "")
+      : m.face !== undefined || to.face !== undefined ? (num(m.mm) && m.mm !== 0 ? "distance" : "coincident")
+        : "concentric") as MateType;
+    if (!MATE_TYPES.includes(type)) {
+      problems.push(`${n}: no type${typeof m.type === "string" ? ` "${m.type}"` : ""} - the types: ${MATE_TYPES.join(", ")};`
+        + " left out.");
+      return;
+    }
+    const mate: Mate = { type, to: { part: to.part } };
+    if (type === "concentric") {
+      if (m.face !== undefined || to.face !== undefined) problems.push(`${n}: concentric is axis on axis - its faces were left out.`);
+      if (m.mm !== undefined) problems.push(`${n}: concentric has no "mm" - left out.`);
+    } else {
+      const face = faceIn(m.face), toFace = faceIn(to.face);
+      if (!face || !toFace) {
+        problems.push(`${n}: ${type} is face to face - "face" and the "to" part's "face" are each one of ${FACES.join(", ")};`
+          + " left out.");
+        return;
+      }
+      if (lettersSide(part, face)) {
+        problems.push(`${n}: its ${face} follows its letters (a text, its size there 0) - mate another face; left out.`);
+        return;
+      }
+      mate.face = face;
+      mate.to.face = toFace;
+      if (type === "distance") {
+        mate.mm = num(m.mm) ? m.mm : 0;
+        if (!num(m.mm)) problems.push(`${n}: distance needs "mm" - made 0.`);
+      } else if (m.mm !== undefined && !(num(m.mm) && m.mm === 0)) {
+        problems.push(`${n}: coincident has no "mm" (distance has) - left out.`);
+      }
+    }
+    if (m.flip === true) mate.flip = true;
+    out.push(mate);
+  });
+  return out.length ? out : undefined;
+}
+
+/** A part's own frame in the design: A, its turn and mirror (own -> design), its own box's middle and half sizes in
+ *  its own frame, and that middle in the design. */
+function partFrame(p: Part): { A: Mat3; mid: Vec3; half: Vec3; c: Vec3 } {
+  const [lo, hi] = ownBox(p);
+  const R = rotation(p.rotate);
+  const A: Mat3 = p.mirror ? [-R[0], R[1], R[2], -R[3], R[4], R[5], -R[6], R[7], R[8]] : R;   // R times mirror X
+  const mid: Vec3 = [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2];
+  const half: Vec3 = [(hi[0] - lo[0]) / 2, (hi[1] - lo[1]) / 2, (hi[2] - lo[2]) / 2];
+  const w = apply(A, mid);
+  return { A, mid, half, c: [w[0] + p.at[0], w[1] + p.at[1], w[2] + p.at[2]] };
+}
+
+/** A face of a part's own box in the design: its middle, and which way it looks. */
+export function matePlane(p: Part, face: FaceName): { point: Vec3; normal: Vec3 } {
+  const { A, mid, half } = partFrame(p), n = FACE_FRAMES[face].n;
+  const w = apply(A, [mid[0] + n[0] * half[0], mid[1] + n[1] * half[1], mid[2] + n[2] * half[2]]);
+  return { point: [w[0] + p.at[0], w[1] + p.at[1], w[2] + p.at[2]], normal: apply(A, n) };
+}
+
+/** A part's axis in the design: its own Z, through its middle. */
+export function mateAxis(p: Part): { point: Vec3; dir: Vec3 } {
+  const { A, c } = partFrame(p);
+  return { point: c, dir: [A[2], A[5], A[8]] };
+}
+
+/** The turn by `angle` radians about the unit axis k. */
+function turnAbout(k: Vec3, angle: number): Mat3 {
+  const c = Math.cos(angle), s = Math.sin(angle), t = 1 - c, [x, y, z] = k;
+  return [t * x * x + c, t * x * y - s * z, t * x * z + s * y,
+    t * x * y + s * z, t * y * y + c, t * y * z - s * x,
+    t * x * z - s * y, t * y * z + s * x, t * z * z + c];
+}
+
+/** The least turn that takes the unit v onto the unit d - null when it is there; the other way round, half a turn
+ *  about the part's own axis (A's columns) most across v. */
+function turnOnto(v: Vec3, d: Vec3, A: Mat3): Mat3 | null {
+  const k = cross3(v, d), s = Math.hypot(k[0], k[1], k[2]), c = dot3(v, d);
+  if (s < 1e-9) {
+    if (c > 0) return null;
+    let e: Vec3 = [A[0], A[3], A[6]], least = Math.abs(dot3(e, v));
+    for (const j of [1, 2]) {
+      const f: Vec3 = [A[j], A[3 + j], A[6 + j]], g = Math.abs(dot3(f, v));
+      if (g < least - 1e-12) {
+        e = f;
+        least = g;
+      }
+    }
+    const x = dot3(e, v);
+    return turnAbout(unit([e[0] - x * v[0], e[1] - x * v[1], e[2] - x * v[2]]), Math.PI);
+  }
+  const angle = Math.atan2(s, c);
+  return angle < 1e-7 ? null : turnAbout([k[0] / s, k[1] / s, k[2] / s], angle);
+}
+
+/** Two unit directions across the unit d, square to it and to each other. */
+function across(d: Vec3): [Vec3, Vec3] {
+  const a = Math.abs(d[0]), b = Math.abs(d[1]), c = Math.abs(d[2]);
+  const e: Vec3 = a <= b && a <= c ? [1, 0, 0] : b <= c ? [0, 1, 0] : [0, 0, 1];
+  const u = unit(cross3(d, e));
+  return [u, cross3(d, u)];
+}
+
+/** A part turned by `turn` about `centre` and moved by `move` (transformPart's sums, for one part): its at, rotate,
+ *  and where its copies go - as hub3d's _moved. */
+function moved(p: Part, centre: Vec3, move: Vec3, turn: Mat3 | null): Part {
+  const rel: Vec3 = [p.at[0] - centre[0], p.at[1] - centre[1], p.at[2] - centre[2]];
+  const r = turn ? apply(turn, rel) : rel;
+  const out: Part = { ...p, at: [centre[0] + r[0] + move[0], centre[1] + r[1] + move[1], centre[2] + r[2] + move[2]] };
+  if (turn) out.rotate = angles(mul(turn, rotation(p.rotate)));
+  if (p.repeat) {
+    const rp: Repeat = { ...p.repeat };
+    if (rp.step) rp.step = turn ? apply(turn, rp.step) : rp.step;
+    else if (rp.around) {
+      const a: Vec3 = [rp.around[0] - centre[0], rp.around[1] - centre[1], 0];
+      const w = turn ? apply(turn, a) : a;
+      rp.around = [centre[0] + w[0] + move[0], centre[1] + w[1] + move[1]];
+    }
+    out.repeat = rp;
+  }
+  return out;
+}
+
+/** Where a part's mates put it, the parts they are to (`to`) placed already. Turned first - each mate's directions in
+ *  turn: its face to look against the other's (or the same way), its axis along the other's - as little as the turns
+ *  the mates before it leave allow, about its middle; then moved as little as puts each face on the other's plane (so
+ *  many mm out) and its axis on the other's line. In what they leave free it stays. A mate the ones before it leave no
+ *  room for is said in `problems` and skipped, kept: it may be met again when they change. `mates` carry their
+ *  numbers in the part's list. */
+function solveMates(p: Part, mates: [Mate, number][], to: Map<string, Part>, problems?: string[]): Part {
+  const f0 = partFrame(p), { mid, half } = f0;
+  let A = f0.A, R = rotation(p.rotate), turn: Mat3 | null = null;
+  let free: Vec3 | "all" | "none" = "all";              // the turns left: all, about one axis, none
+  const skipped = new Set<number>();
+  const say = (m: Mate, i: number, why: string) => {
+    skipped.add(i);
+    problems?.push(`${p.id}: mate ${i + 1} (${m.type} to ${m.to.part}) cannot be met as well as the ones before it - ${why};`
+      + " skipped.");
+  };
+  for (const [m, i] of mates) {
+    const q = to.get(m.to.part)!;
+    let v: Vec3, d: Vec3;
+    if (m.type === "concentric") {
+      const z = mateAxis(q).dir;
+      v = [A[2], A[5], A[8]];
+      d = m.flip ? [-z[0], -z[1], -z[2]] : z;
+    } else {
+      const n = matePlane(q, m.to.face!).normal;
+      v = apply(A, FACE_FRAMES[m.face!].n);
+      d = m.flip ? n : [-n[0], -n[1], -n[2]];
+    }
+    let t: Mat3 | null = null;
+    if (free === "all") {
+      t = turnOnto(v, d, A);
+      free = d;
+    } else if (free !== "none") {
+      const a = free, cv = dot3(v, a), cd = dot3(d, a);
+      if (Math.abs(Math.acos(Math.max(-1, Math.min(1, cv))) - Math.acos(Math.max(-1, Math.min(1, cd)))) > 1e-6) {
+        say(m, i, "it would have to turn");
+        continue;
+      }
+      const pv: Vec3 = [v[0] - cv * a[0], v[1] - cv * a[1], v[2] - cv * a[2]];
+      const pd: Vec3 = [d[0] - cd * a[0], d[1] - cd * a[1], d[2] - cd * a[2]];
+      if (Math.hypot(pv[0], pv[1], pv[2]) > 1e-6) {    // across the axis: turned about it, and then no turn is left
+        const angle = Math.atan2(dot3(a, cross3(pv, pd)), dot3(pv, pd));
+        if (Math.abs(angle) > 1e-7) t = turnAbout(a, angle);
+        free = "none";
+      }
+    } else {
+      const k = cross3(v, d);
+      if (Math.atan2(Math.hypot(k[0], k[1], k[2]), dot3(v, d)) > 1e-6) {
+        say(m, i, "it would have to turn");
+        continue;
+      }
+    }
+    if (t) {
+      A = mul(t, A);
+      R = mul(t, R);
+      turn = turn ? mul(t, turn) : t;
+    }
+  }
+  // Its middle stays while it turns: there, at is ...
+  const c = f0.c, w0 = apply(A, mid);
+  let at: Vec3 = turn ? [c[0] - w0[0], c[1] - w0[1], c[2] - w0[2]] : [...p.at];
+  let basis: Vec3[] = [[1, 0, 0], [0, 1, 0], [0, 0, 1]], shift = false;
+  // ... then each move: along `j` by `r` - in what is still free, as little as does it; what it fixes is not free after.
+  const push = (m: Mate, i: number, j: Vec3, r: number): boolean => {
+    const w: Vec3 = [0, 0, 0];
+    for (const b of basis) {
+      const x = dot3(j, b);
+      w[0] += x * b[0];
+      w[1] += x * b[1];
+      w[2] += x * b[2];
+    }
+    const ww = dot3(w, w);
+    if (ww < 1e-12) {
+      if (Math.abs(r) <= 2e-3) return true;
+      say(m, i, `${fmtMm(Math.abs(r))} mm off`);
+      return false;
+    }
+    if (Math.abs(r) > 1e-9) {
+      at = [at[0] + (r * w[0]) / ww, at[1] + (r * w[1]) / ww, at[2] + (r * w[2]) / ww];
+      shift = true;
+    }
+    const u = unit(w), next: Vec3[] = [];
+    for (const b of basis) {
+      let x: Vec3 = [b[0] - dot3(b, u) * u[0], b[1] - dot3(b, u) * u[1], b[2] - dot3(b, u) * u[2]];
+      for (const o of next) x = [x[0] - dot3(x, o) * o[0], x[1] - dot3(x, o) * o[1], x[2] - dot3(x, o) * o[2]];
+      const l = Math.hypot(x[0], x[1], x[2]);
+      if (l > 1e-6) next.push([x[0] / l, x[1] / l, x[2] / l]);
+    }
+    basis = next;
+    return true;
+  };
+  const place = (l: Vec3): Vec3 => {
+    const w = apply(A, l);
+    return [w[0] + at[0], w[1] + at[1], w[2] + at[2]];
+  };
+  for (const [m, i] of mates) {
+    if (skipped.has(i)) continue;
+    const q = to.get(m.to.part)!;
+    if (m.type === "concentric") {
+      const L = mateAxis(q);
+      for (const u of across(L.dir)) {
+        const e = place(mid);
+        if (!push(m, i, u, -dot3([e[0] - L.point[0], e[1] - L.point[1], e[2] - L.point[2]], u))) break;
+      }
+    } else {
+      const P = matePlane(q, m.to.face!), n = FACE_FRAMES[m.face!].n;
+      const e = place([mid[0] + n[0] * half[0], mid[1] + n[1] * half[1], mid[2] + n[2] * half[2]]);
+      // A solid's face on another solid's - or flush with a hole's, where the solid round the hole is - a hair into
+      // it: built as one piece however the two are turned (only touching, a face apart by a rounding, they are two).
+      const want = m.type === "distance" ? m.mm ?? 0 : p.hole ? 0 : q.hole ? (m.flip ? JOIN : 0) : m.flip ? 0 : -JOIN;
+      push(m, i, P.normal, want - dot3([e[0] - P.point[0], e[1] - P.point[1], e[2] - P.point[2]], P.normal));
+    }
+  }
+  if (!turn && !shift) return p;
+  const w1 = apply(A, mid), c1: Vec3 = [w1[0] + at[0], w1[1] + at[1], w1[2] + at[2]];
+  const out = moved(p, c, [c1[0] - c[0], c1[1] - c[1], c1[2] - c[2]], turn);
+  if (turn) out.rotate = angles(R);
+  // Not rounded: faces put together on parts turned askew then meet exactly and are built as one piece - to a
+  // thousandth of a mm, half of them are a hair apart, two (measured). The file keeps a thousandth; read, it is
+  // put back here.
+  out.at = at;
+  return out;
+}
+
+/** In an edit (the editor's `before`): a part the edit did not touch - as it was - whose first mate's part it moved or
+ *  turned (not sized or mirrored), goes with that part as one first: as a part on a face goes with its box. */
+function followed(p: Part, was: Part | undefined, q0: Part | undefined, q1: Part): Part {
+  const same = (a: Part, b: Part) => !!a.mirror === !!b.mirror && [0, 1, 2].every((i) => Math.abs(a.at[i] - b.at[i]) < 1e-9
+    && Math.abs(a.rotate[i] - b.rotate[i]) < 1e-9 && Math.abs(a.size[i] - b.size[i]) < 1e-9);
+  if (!was || !q0 || !same(p, was) || same(q0, q1) || !!q0.mirror !== !!q1.mirror
+    || q0.size.some((v, i) => Math.abs(v - q1.size[i]) > 1e-9)) return p;
+  const r0 = rotation(q0.rotate);
+  const t = mul(rotation(q1.rotate), [r0[0], r0[3], r0[6], r0[1], r0[4], r0[7], r0[2], r0[5], r0[8]]);
+  return moved(p, q0.at, [q1.at[0] - q0.at[0], q1.at[1] - q0.at[1], q1.at[2] - q0.at[2]],
+    Math.abs(t[0] + t[4] + t[8] - 3) < 1e-12 ? null : t);
+}
+
+/** What of a part a click picks to mate (0.101.0): the face of its own box the spot is on, where the model is flat and
+ *  square to it there - a box's side, a cylinder's top, a text's top - or, on a round part's side (a cylinder's, a
+ *  cone's, a sphere), its axis ({}). null elsewhere: a wedge's slope, a rounded edge, a letter's side. */
+export function mateAt(p: Part, point: Vec3, normal: Vec3): { face?: FaceName } | null {
+  if (p.shape === "group") return null;
+  const m = rotation(p.rotate);
+  const ln: Vec3 = [m[0] * normal[0] + m[3] * normal[1] + m[6] * normal[2], m[1] * normal[0] + m[4] * normal[1]
+    + m[7] * normal[2], m[2] * normal[0] + m[5] * normal[1] + m[8] * normal[2]];
+  const n = unit(p.mirror ? [-ln[0], ln[1], ln[2]] : ln), l = toPart(p, point), [lo, hi] = ownBox(p);
+  const round = ROUND.includes(p.shape);
+  for (const face of FACES) {
+    const i = faceAxis(face);
+    if (p.shape === "sphere" || (round && i < 2) || lettersSide(p, face)) continue;
+    const at = FACE_FRAMES[face].n[i] > 0 ? hi[i] : lo[i];
+    if (Math.abs(n[i]) > 0.999 && Math.abs(l[i] - at) < 0.05) return { face };
+  }
+  return round ? {} : null;
+}
+
+/** What shows a part's face for a mate in the editor: the outline of its box's face - or, no face, its axis, a little
+ *  longer than the part. */
+export function mateMark(p: Part, face?: FaceName): Vec3[] {
+  const { A, mid, half } = partFrame(p);
+  const w = (x: number, y: number, z: number): Vec3 => {
+    const v = apply(A, [mid[0] + x, mid[1] + y, mid[2] + z]);
+    return [v[0] + p.at[0], v[1] + p.at[1], v[2] + p.at[2]];
+  };
+  if (!face) {
+    const h = half[2] * 1.25 + 3;
+    return [w(0, 0, -h), w(0, 0, h)];
+  }
+  const f = FACE_FRAMES[face], o = f.n.map((x, i) => x * half[i]), u = f.u.map((x, i) => x * half[i]);
+  const v = f.v.map((x, i) => x * half[i]);
+  const at = (a: number, b: number) => w(o[0] + a * u[0] + b * v[0], o[1] + a * u[1] + b * v[1], o[2] + a * u[2] + b * v[2]);
+  return [at(-1, -1), at(1, -1), at(1, 1), at(-1, 1), at(-1, -1)];
+}
+
+/** Whether `from` is placed by the part `to` - on it, mated to it, or to one that is (the editor: not a mate the
+ *  other way round). */
+export function placedBy(parts: Part[], from: string, to: string): boolean {
+  const all = new Map<string, Part>();
+  const index = (list: Part[]) => list.forEach((p) => {
+    all.set(p.id, p);
+    if (p.parts) index(p.parts);
+  });
+  index(parts);
+  const seen = new Set<string>();
+  const walk = (id: string): boolean => {
+    if (id === to) return true;
+    if (seen.has(id)) return false;
+    seen.add(id);
+    const p = all.get(id);
+    return !!p && [p.on?.part, ...(p.mates ?? []).map((m) => m.to.part)].some((x) => x !== undefined && walk(x));
+  };
+  return walk(from);
 }
 
 // ---------------------------------------------------------------- edges: fillets and chamfers (0.91.0)
@@ -1239,6 +1684,12 @@ export function toPart(p: Part, v: Vec3, copy = 0): Vec3 {
   const d: Vec3 = [w[0] - p.at[0], w[1] - p.at[1], w[2] - p.at[2]];
   const l: Vec3 = [m[0] * d[0] + m[3] * d[1] + m[6] * d[2], m[1] * d[0] + m[4] * d[1] + m[7] * d[2], m[2] * d[0] + m[5] * d[1] + m[8] * d[2]];
   return p.mirror ? [-l[0], l[1], l[2]] : l;
+}
+
+/** Where a point of a part's own frame is in the design - toPart's other way (0.101.0). */
+export function fromPart(p: Part, l: Vec3): Vec3 {
+  const w = apply(rotation(p.rotate), p.mirror ? [-l[0], l[1], l[2]] : l);
+  return [w[0] + p.at[0], w[1] + p.at[1], w[2] + p.at[2]];
 }
 
 /** A box's or wedge's edges as straight lines in its own frame. */

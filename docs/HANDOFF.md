@@ -4,7 +4,26 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## Next session - start here (written 2026-11-26, at 0.100.0)
+## Next session - start here (written 2026-11-26, at 0.101.0)
+
+**0.101.0 (2026-11-26): mates - pushed, not yet installed.** Søren, 22:34: "... Og så skal man også kunne mate i 3D";
+asked kept or once, he wrote "Ok. Lav næste" and "Men ja til mates" - built kept, as in SolidWorks (DESIGN §8 "Mates
+(0.101.0)"): a part's `mates` - coincident (face on face, Flip: flush), distance (mm apart), concentric (axis on axis)
+- in both readers, placed by one solver (turns first, then the least move within what is free), each mate that
+cannot be met said and kept; in the editor a mated part goes with the part of its first mate when that one is moved
+or turned. Mate is in the Part tab (Mates) and in a box face's Face tab (that face first): click a face of the part
+that moves - a round side for its axis - then the face it goes against; the first mate lands it where you clicked.
+The Mates menu lists them: its face and the other's (all six, the hidden ones too), Apart, Flip, Delete; Free it.
+A coincident face of a solid goes 0.00001 mm into the other and a mated part's position is kept exact, so faces
+mated on parts turned askew are one piece (measured: rounded, half came out as two). Seen in the dev server (light,
+dark, narrow): a lid's top clicked (Face tab, Mate) then the box's top - flush, at the spot clicked; in the menu its
+face made bottom and Flip off - on the box; its front and its right made flush with the box's - fully placed; the box
+moved 10 mm and turned 90° - the lid with it; Undo; a pin lying down mated to a round hole's ghost - standing in it;
+the picked part's mates drawn green and amber - no console errors. Tests: both readers place and build the same (a
+lid, a hole on the box's axis, a pin in it 3 mm up, a plate, a text - on a box plain and turned askew), every face on
+its plane and axis on its line, the editor's follow, slide, spin and tip, a mate that cannot be met, wrong mates said
+the same in both. Not seen: his mouse; a thin face in Select picks its line first (Mate in the Part tab picks faces
+only); printed.
 
 **0.100.0 (2026-11-26): the sketch - pushed, not yet installed.** Søren, 22:34: "Vi skal ha lavet en sketch sektion,
 ligesom i solid works, hvor man kan tegne en 2D tegning, og så boss extrude den. Kan det lade sig gøre? Så kan man
@@ -2567,13 +2586,21 @@ flow, see "Next session". |
       converter's cases are ComfyUI 0.42.3's own templates; files from other sites (Civitai, OpenArt) are
       untried - an export is the way to see what went wrong. When COMFYUI_REF changes, the editor's format may
       too: tools/workflow_oracle/ (convert.js, compare.py) is how the converter was checked - run it again.
+120. **Mates (0.101.0)** - in the tests and the dev server's headless Chromium:
+    - **His hand**: does two clicks - a face of the part that moves, then the one it goes against - feel like
+      SolidWorks' Mate? Is it right that the first mate lands the part where he clicked (SolidWorks leaves it beside),
+      and that Mate stays on for the next pair? A thin face (a lid's side) in Select picks its line, not the face - is
+      Mate from the Part tab (faces only) found, or should a face click win over a line when Mate is wanted?
+    - **Which moves**: the part with the mates always moves, the other stays; does he expect to drag the base and have
+      the mated parts follow (they do: first mate), and to be refused dragging a fully mated part (it snaps back on
+      release instead)?
+    - **Printed**: a lid mated on a box is one piece (0.00001 mm into it) - in Bambu Studio one object, no seam?
+    - **The assistant**: does a model write `mates` from `hub3d format`, and move the mated parts along when it moves
+      their base (the file does not follow; the guide says so)?
 119. **The sketch (0.100.0)** - in the tests and the dev server's headless Chromium:
     - **His hand**: drawing with his mouse - is snapping to whole mm and to corners within 10 px right, is the typed
       length (SketchUp's way) found without being told, does Esc/Enter end a line as he expects?
-    - **Mates** - his answer decides 0.101.0: kept (SolidWorks: the part follows when the other moves, listed and
-      editable; a solver for coincident, concentric, distance) or once (the part snapped into place, like Tinkercad's
-      Align - its face onto a face, its axis onto an axis - then free). On a box's face a coincident mate can be kept
-      with 0.98.0's `on` either way.
+    - **Mates** - decided ("Men ja til mates"): kept, as in SolidWorks - built in 0.101.0 (item 120).
     - **Edit sketch**: does he need a sketch back after Extrude (the outline's points as lines, circles as many corners)?
 118. **Ten more fonts (0.99.0)** - in the tests and the dev server's headless Chromium: printed at 6-10 mm capitals -
     which of the sixteen hold up on the P2S (Caveat's and Grenze Gotisch's thin strokes, Knewave's spatters)? The Font

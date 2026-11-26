@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.101.0 - 2026-11-26
+
+- Mates, as in SolidWorks: put a part against another and it stays there.
+  Coincident puts a face on a face (Flip: flush, level with it), Distance
+  keeps the faces so many mm apart, and Concentric puts an axis on an axis
+  (a pin in a round hole).
+- Mate is in the Part tab and in a box face's Face tab: click a face of the
+  part that moves (a cylinder's round side for its axis), then the face it
+  goes against. Add more mates to fix it further - a lid on a box, flush
+  with its sides.
+- A mated part moves with the part it is mated to when that one is moved or
+  turned. The Mates menu lists its mates - any of the six faces, the
+  distance, Flip, Delete - and Free it takes them all off. A mate that
+  cannot be met together with the others is refused, and says why.
+- Faces mated on each other are joined into one piece for printing, however
+  the parts are turned.
+- The assistant can write mates in a design too (`hub3d format`).
+- Fixed: a size or position a hair below zero showed as "-0".
+
 ## 0.100.0 - 2026-11-26
 
 - Sketch, as in SolidWorks: draw lines, rectangles and circles on the plate,

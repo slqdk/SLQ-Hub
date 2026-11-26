@@ -10,7 +10,7 @@ import Module from "manifold-3d/manifold";
 import wasmUrl from "manifold-3d/manifold.wasm?url";
 import { AlignCenter, AlignLeft, AlignRight, ArrowDownToLine, ArrowDownUp, Bold, Box, ChevronDown, CircleDashed, CircleDot,
   Columns3, Cone, Copy, Crosshair, Cylinder, Download, Eraser, Eye, EyeOff, FlipHorizontal2, FlipVertical2, Group, Italic,
-  ListTree, Maximize2, PencilRuler, PenLine, RectangleHorizontal, Circle, ArrowUpFromLine,
+  ListTree, Magnet, Maximize2, PencilRuler, PenLine, RectangleHorizontal, Circle, ArrowUpFromLine,
   MessageSquareShare, Minimize2, MousePointer2, MousePointerClick, Move3d, PanelBottom, Printer as PrinterIcon,
   Redo2, Repeat2, Rotate3d, RotateCcw, RotateCw, Ruler, Scaling, Shapes, Split, SquareDashed, SquareMousePointer,
   SquareRoundCorner, Stamp, Trash2,
@@ -20,12 +20,14 @@ import { useApp } from "../state";
 import { ConfirmButton, MenuButton } from "../components/ui";
 import type { DesignFolder } from "./folder";
 import { allIds, build, buildPart, COLORS, edgeLength, edgeLines, edgePlan, EDGES, edgesOf, extent, extentOf, FACE_FRAMES,
-  faceAngle, faceAt, faceFrame, faceMarks, FONT_FAMILIES, fontFile, follows, freshId, holeEdges, joined, lettersApart,
-  MAX_COPIES, MIN_SIZE, mirrorPart, nearestEdge, nearestToRay, newDesign, onFace, partSize, placeOn, readDesign, repeatAround, respot,
-  retext, settle, SPACING, spotAt, stl, textGlyphs, textMeasure, threeMf, transformPart, treatEdges, turned90, withCapitals,
-  withEdgeLength, writeDesign, type Align, type Anchor, type Box3, type Built, type Design, type EdgeKind, type FaceName,
-  type FontData, type FontIndex, type Fonts, type Kit, type Mat3, type MeshData, type Part, type Point2, type Repeat,
-  type Shape, type Vec3, type Wasm } from "./geometry";
+  faceAngle, faceAt, faceFrame, FACES, faceMarks, FONT_FAMILIES, fontFile, follows, freshId, holeEdges, joined, lettersApart,
+  lettersSide, mateAt, mateAxis, mateMark, matePlane, MAX_COPIES, MIN_SIZE, mirrorPart, nearestEdge, nearestToRay, newDesign,
+  onFace, partSize, placedBy, placeOn, readDesign, repeatAround, respot, retext, settle, SPACING, spotAt, spotXY, stl, textGlyphs,
+  textMeasure, threeMf, toPart, fromPart, transformPart, treatEdges, turned90, withCapitals, withEdgeLength, writeDesign,
+  type Align,
+  type Anchor, type Box3, type Built, type Design, type EdgeKind, type FaceName, type FontData, type FontIndex, type Fonts,
+  type Kit, type Mat3, type Mate, type MeshData, type Part, type Point2, type Repeat, type Shape, type Vec3,
+  type Wasm } from "./geometry";
 import { baseName, dirOf, fmt, joinPath, MESH_FILE, pointMark, relativePath } from "./files";
 import { parseMesh } from "./meshio";
 import { lastPrinter, PRINTERS, printerOf, rememberPrinter, type Printer } from "./printers";
@@ -108,6 +110,15 @@ function quatTurn(q: THREE.Quaternion): Mat3 {
   const e = new THREE.Matrix4().makeRotationFromQuaternion(q).elements;
   return [e[0], e[4], e[8], e[1], e[5], e[9], e[2], e[6], e[10]];
 }
+
+/** What placing a design's parts says (0.101.0) - a mate that cannot be met - as it is: placed already, nothing moves. */
+function placing(d: Design): string[] {
+  const said: string[] = [];
+  settle(d.parts, said);
+  return said;
+}
+/** What reading a file said of a mate that cannot be met: shown as it is now instead (placing). */
+const UNMET = /: mate \d+ \(.+\) cannot be met as well as /;
 
 /** A part's size, with a text's width or height worked out when it follows its letters, an outline's from its points. */
 const sized = (p: Part, fonts: Fonts): Vec3 => partSize(p, fonts);
@@ -239,7 +250,9 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
   const [status, setStatus] = useState<Status>("loading");
   const [problems, setProblems] = useState<string[]>([]);
   const [outside, setOutside] = useState<string | null>(null);
-  const [tool, setTool] = useState<null | "point" | "flat" | "edge" | "face">(null);
+  const [tool, setTool] = useState<null | "point" | "flat" | "edge" | "face" | "mate">(null);
+  // Mate (0.101.0): the face (none: the axis) of the part that moves, clicked first - and where.
+  const [mating, setMating] = useState<{ part: string; face?: FaceName; point: Vec3 } | null>(null);
   const [edgeSize, setEdgeSize] = useState(2);
   const [edgeSel, setEdgeSel] = useState<Record<string, string[]>>({});       // picked edges, by part (0.92.0)
   const [hoverEdge, setHoverEdge] = useState<{ part: string; edge: string } | null>(null);
@@ -347,7 +360,8 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
   }, []);
 
   /** A change made here: kept for Undo, shown, and saved a moment later. Parts on faces (0.98.0) go where their boxes
-   *  are now - and one moved, turned or sized itself keeps what was done to it on its face. */
+   *  are now - and one moved, turned or sized itself keeps what was done to it on its face; mated parts (0.101.0) where
+   *  their mates put them, one the change did not touch going with the part of its first mate. */
   const commit = useCallback((next: Design) => {
     const cur = designRef.current;
     if (cur) {
@@ -634,7 +648,7 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
   useEffect(() => {
     const v = vp.current;
     if (!v || !ready) return;
-    const list: { lines: Vec3[][]; hover?: boolean; face?: number }[] = [];
+    const list: { lines: Vec3[][]; hover?: boolean; face?: number; tone?: "run" | "wait"; width?: number }[] = [];
     const words: { at: Vec3; text: string; kind?: "dot" | "snap" | "typed" }[] = [];
     const at = sketch ? sketchFrame(sketch) : null;
     if (sketch && at) {                                // a sketch (0.100.0): its shapes in blue, an open line amber
@@ -704,10 +718,26 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
         dimension(box, on.face, on.from, kept.shape === "cylinder" ? true : kept.shape === "box" ? false : null,
           kept.shape === "cylinder" || kept.shape === "box" ? kept.size[0] : 0);
       }
+      // Mates (0.101.0): the face (or axis) Mate's first click picked, green as a picked line; the picked part's
+      // mates - its faces green, the other parts' amber.
+      const first = tool === "mate" && mating ? find(design.parts, mating.part)?.part : null;
+      if (first && mating) list.push({ lines: [mateMark(first, mating.face)], tone: "run", width: 5 });
+      const mated = !facing && tab === "part" && selected.length === 1 ? find(design.parts, selected[0])?.part : null;
+      if (mated?.mates && !first) {
+        const mine: Vec3[][] = [], theirs: Vec3[][] = [];
+        for (const m of mated.mates) {
+          const q = find(design.parts, m.to.part)?.part;
+          if (!q) continue;
+          mine.push(mateMark(mated, m.face));
+          theirs.push(mateMark(q, m.to.face));
+        }
+        list.push({ lines: mine, tone: "run", width: 3 }, { lines: theirs, tone: "wait", width: 3 });
+      }
     }
     v.setMarks(list);
     v.setLabels(words);
-  }, [design, edgeSel, hoverEdge, ready, facing, faceBox, faceSel, feature.round, feature.size, tab, selected, sketch, hoverPt]);
+  }, [design, edgeSel, hoverEdge, ready, facing, faceBox, faceSel, feature.round, feature.size, tab, selected, sketch, hoverPt,
+    tool, mating]);
 
   // What Extrude would make of the sketch (0.100.0), shown as it would stand - the rest faded while there is any.
   useEffect(() => {
@@ -728,6 +758,7 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
   useEffect(() => {                                   // Pick lines belongs to the Lines tab
     if (tab !== "lines" && tool === "edge") setTool(null);
     if (tool && tool !== "edge") setHoverEdge(null);
+    if (tool !== "mate") setMating(null);             // Mate's first click goes with it (0.101.0)
   }, [tab, tool]);
 
   // ---------------------------------------------------------------- dragging: the gizmo, or the part itself
@@ -859,8 +890,10 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
     const h = solid ?? front;
     if (!h) return;                                    // nothing there: click a face
     const box = solidBox(h.part), face = box && f.part.shape !== "group" ? faceAt(box, h.point, h.normal) : null;
+    if (f.part.mates) toast(`${label(f.part)} is not mated any more: it is where you put it.`, "run");
     if (box && face) {                                 // a box's face: kept on it where it was clicked (0.98.0)
-      const p = f.part;
+      const p: Part = { ...f.part };
+      delete p.mates;                                  // put here, not mated (0.101.0)
       const on: Anchor = { part: box.id, face, from: spotAt(box, face, h.point), depth: Math.max(MIN_SIZE, r3(p.size[2] - 0.2)) };
       const angle = p.shape === "text" ? faceAngle(box, face, v.cameraRight()) : 0;
       if (angle) on.angle = angle;
@@ -869,9 +902,94 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
     } else {
       const next = onFace(f.part, h.point, h.normal, v.cameraRight(), buildPart(f.part, k).box);
       delete next.on;                                  // on another shape's face: free
+      delete next.mates;
       commit({ ...d, parts: update(d.parts, f.part.id, () => tidy(next)) });
     }
     setTool(null);
+  };
+
+  /** Mate from the Face tab (0.101.0): the face picked is the first click - the box moves - the next is the other's. */
+  const faceMate = () => {
+    const d = designRef.current;
+    const box = faceSel && d ? find(d.parts, faceSel.part)?.part : null;
+    if (!box || !faceSel) return;
+    const F = faceFrame(box, faceSel.face), [x, y] = spotXY({ part: box.id, face: faceSel.face, from: faceSel.from }, F.W, F.H);
+    setTool("mate");
+    setMating({ part: box.id, face: faceSel.face, point: F.at(x, y) });
+    setSelected([box.id]);
+    setFaceSel(null);
+    setTab("part");
+    host.current?.focus({ preventScroll: true });
+  };
+
+  /** Mate (0.101.0), a click: first a face of the part that moves - a round part's side, its axis - then one of the
+   *  part it goes against. Faces go against each other, or flush as they look now; axes the way they point. Its first
+   *  mate puts it where the second click was, too - on that face, at that spot (in what the mate leaves free). Another
+   *  face of the same part, clicked second, is the first instead. */
+  const mateClick = (x: number, y: number) => {
+    const d = designRef.current, v = vp.current;
+    if (!d || !v) return;
+    const hit = v.picks(x, y).front;
+    const p = hit ? find(d.parts, hit.part)?.part : null;
+    if (!hit || !p) return;                            // nothing there: click a part
+    const ref = mateAt(p, hit.point, hit.normal);
+    if (!ref) {
+      toast(`That is not a flat face of ${label(p)}'s box, nor a round side: click one of its six sides - a cylinder's top `
+        + "or bottom, its round side for its axis.", "fault");
+      return;
+    }
+    const first = mating ? find(d.parts, mating.part)?.part : null;
+    if (!mating || !first || first.id === p.id) {      // the part that moves
+      setMating({ part: p.id, face: ref.face, point: hit.point });
+      setSelected([p.id]);
+      setEdgeSel({});
+      setFaceSel(null);
+      setTab("part");
+      return;
+    }
+    if (!!mating.face !== !!ref.face) {
+      toast(mating.face ? `A face goes against a face: click a flat side of ${label(p)} - or Esc and start with a round side.`
+        : `An axis goes on an axis: click the round side of ${label(p)} (a cylinder, a cone, a round hole).`, "fault");
+      return;
+    }
+    if (placedBy(d.parts, p.id, first.id)) {
+      toast(`${label(p)} is placed by ${label(first)} already (mated to it, or on it) - mate ${label(p)} to it instead.`, "fault");
+      return;
+    }
+    const mate: Mate = mating.face ? { type: "coincident", face: mating.face, to: { part: p.id, face: ref.face } }
+      : { type: "concentric", to: { part: p.id } };
+    const a = mating.face ? matePlane(first, mating.face).normal : mateAxis(first).dir;
+    const b = ref.face ? matePlane(p, ref.face).normal : mateAxis(p).dir;
+    const along = a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    if (mating.face ? along > 0 : along < 0) mate.flip = true;          // flush as they look now; an axis as it points
+    let q: Part = { ...first, mates: [...(first.mates ?? []), mate] };
+    delete q.on;
+    const trial: string[] = [];                        // one its other mates leave no room for: not made
+    const placed = find(settle(update(d.parts, first.id, () => q), trial, d.parts), first.id)?.part;
+    const head = `${first.id}: mate ${q.mates!.length} `, mark = " before it - ";
+    const said = trial.find((s) => s.startsWith(head) && s.includes(mark));
+    const why = said ? said.slice(said.indexOf(mark) + mark.length).replace(/; skipped\.$/, "") : null;
+    if (why) {
+      toast(`Not mated: ${label(first)}'s other mates leave no room for that one (${why}). Free them in Part, Mates, `
+        + "to mate it this way.", "fault");
+      setMating(null);
+      return;
+    }
+    if (first.on) toast(`${label(first)} is mated now, not kept on its face.`, "run");
+    if (!first.mates?.length) {                        // the first: where the second click was, too
+      if (placed) {
+        const spot = fromPart(placed, toPart(first, mating.point));        // the first click's spot, gone with it
+        const gap: Vec3 = [hit.point[0] - spot[0], hit.point[1] - spot[1], hit.point[2] - spot[2]];
+        const g = gap[0] * b[0] + gap[1] * b[1] + gap[2] * b[2];
+        // across a face: all but how far out of it; along an axis: only that
+        const move: Vec3 = mating.face ? [gap[0] - g * b[0], gap[1] - g * b[1], gap[2] - g * b[2]] : [g * b[0], g * b[1], g * b[2]];
+        q = transformPart(placed, [0, 0, 0], move, null);
+      }
+    }
+    commit({ ...d, parts: update(d.parts, first.id, () => q) });
+    setMating(null);
+    setSelected([first.id]);
+    setTab("part");
   };
 
   /** The solid box a click is on (0.98.0) - one a face can be picked on: not a hole, nor in a hole group, nor repeated. */
@@ -1429,6 +1547,10 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
       placeOnFace(e.clientX, e.clientY);
       return;
     }
+    if (tool === "mate") {
+      mateClick(e.clientX, e.clientY);
+      return;
+    }
     if (tool === "edge") {
       if (hit) pickEdge(e.clientX, e.clientY);
       return;
@@ -1779,6 +1901,9 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
   const texts = items.length && items.every((p) => p.shape === "text") ? items : null;
   const shownTab: Tab = sketch ? "sketch" : (tab === "text" && !texts) || (tab === "face" && !faceBox) || tab === "sketch"
     ? "part" : tab;
+  // What placing the parts says as they are now (0.101.0): the mates that cannot be met - the picked part's in Part.
+  const placed = useMemo(() => (design ? placing(design) : []), [design]);
+  const mateNotes = one ? placed.filter((s) => s.startsWith(`${one.id}: mate `)) : [];
   const pickedEdges = Object.entries(edgeSel).reduce((n, [id, es]) => n + (find(parts, id) ? es.length : 0), 0);
   const oneLine = (() => {                             // the one line picked: how long it is (Resize)
     const all = Object.entries(edgeSel).flatMap(([id, es]) => es.map((e) => [id, e] as const));
@@ -1787,10 +1912,12 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
   })();
   // What the band shows: a change folds its groups afresh to the room there is (0.94.0).
   const fitKey = [shownTab, faceSel?.face, feature.round, feature.through, one?.on ? `${one.on.face}${one.on.through ? "t" : ""}` : "",
+    one?.mates?.length ?? 0, mateNotes.length,
     sketch ? `${sketch.picked !== null ? sketch.shapes[sketch.picked]?.kind : "-"}${sketchMake.through}${sketch.shapes.length > 0}` : "",
     selected.join(","), items.map((x) => `${x.shape}${x.radius ? "r" : ""}${x.repeat ? (x.repeat.step ? "s" : "a")
     : ""}${x.hole ? "h" : ""}`).join(","), pickedEdges, one ? (edgeSel[one.id] ?? []).length : 0, oneLine ? 1 : 0].join("|");
-  const allProblems = [...problems, ...(built?.problems ?? [])];
+  // A mate that cannot be met (0.101.0) as it is now - not as it was when the file was read.
+  const allProblems = [...problems.filter((s) => !UNMET.test(s)), ...placed, ...(built?.problems ?? [])];
   const hide = (id: string) => change(id, (p) => ({ ...p, hidden: !p.hidden || undefined }));
   const pickFirst = <p className="v3d-tip">Click a part on the model to change it - a box's face, to put a hole, a boss or
     a text on it - or a line, to round, cut or resize that line. Shift-click (or Select multiple) picks more, a double
@@ -1936,7 +2063,9 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
                 onDuplicate={duplicate} onDelete={del} onApart={() => splitLetters(one.id)} onDrop={drop}
                 onFlat={() => setTool(tool === "flat" ? null : "flat")} flat={tool === "flat"} onUngroup={doUngroup} onMirror={mirror}
                 onFace={() => setTool(tool === "face" ? null : "face")} face={tool === "face"} onTurn={turn90}
-                box={one.on ? find(parts, one.on.part)?.part ?? null : null} depth={feature.depth} />}
+                box={one.on ? find(parts, one.on.part)?.part ?? null : null} depth={feature.depth} parts={parts}
+                onMate={() => setTool(tool === "mate" ? null : "mate")} mate={tool === "mate"}
+                notes={mateNotes} />}
             </>
           )}
           {shownTab === "text" && texts && k && <TextBand parts={texts} fonts={k.fonts} onApart={() => splitLetters(texts[0].id)}
@@ -1945,7 +2074,7 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
           {shownTab === "face" && faceBox && faceSel && (
             <FaceBand box={faceBox} spot={faceSel} feature={feature} onFeature={(f) => setFeature((cur) => ({ ...cur, ...f }))}
               onFrom={(from) => setFaceSel({ ...faceSel, from })} onMake={onTheFace}
-              onSketch={() => startSketch({ kind: "face", part: faceBox.id, face: faceSel.face })} />
+              onSketch={() => startSketch({ kind: "face", part: faceBox.id, face: faceSel.face })} onMate={faceMate} />
           )}
           {shownTab === "lines" && (
             <LinesBand part={one} many={items.length > 1} picked={pickedEdges} pickedOn={one ? edgeSel[one.id] ?? [] : []}
@@ -2035,6 +2164,7 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
           </div>
           {sketch && <div className="v3d-hint">{sketchHint(sketch, planeName(sketch.plane, sketchFrame(sketch)?.box))}</div>}
           {tool && <div className="v3d-hint">{tool === "face" ? "Click the face it should lie on - a text's letters on it, upright on a wall. Esc leaves it where it is."
+            : tool === "mate" ? mateHint(mating, parts)
             : tool === "point" ? "Click the spot on the model to send it to the chat. Esc stops."
             : tool === "edge" ? "Click lines to pick them - again to unpick - then Fillet, Chamfer, Take off or Resize above. Esc stops."
               : "Click the face that should lie on the plate. Esc stops."}</div>}
@@ -2407,10 +2537,11 @@ const kindOf = (p: Part) => (p.shape === "group" ? "Group" : p.shape === "mesh" 
 /** The Part tab for one part (0.94.0: with what Size and place and Arrange had): its name, solid or hole and colour;
  *  its size, centre and turn; what its shape has of its own; the plate; mirror and pattern; duplicate, hide, delete. */
 function PartBand({ part, fonts, lock, setLock, change, onDuplicate, onDelete, onApart, onDrop, onFlat, flat, onUngroup,
-  onMirror, onFace, face, onTurn, box: onBox, depth }: { part: Part; fonts: Fonts; lock: boolean; setLock: (v: boolean) => void;
-  change: (fn: (p: Part) => Part) => void; onDuplicate: () => void; onDelete: () => void; onApart: () => void;
-  onDrop: () => void; onFlat: () => void; flat: boolean; onUngroup: () => void; onMirror: (axis: 0 | 1 | 2) => void;
-  onFace: () => void; face: boolean; onTurn: (axis: 0 | 1 | 2, sign: 1 | -1) => void; box: Part | null; depth: number }) {
+  onMirror, onFace, face, onTurn, box: onBox, depth, parts, onMate, mate, notes }: { part: Part; fonts: Fonts; lock: boolean;
+  setLock: (v: boolean) => void; change: (fn: (p: Part) => Part) => void; onDuplicate: () => void; onDelete: () => void;
+  onApart: () => void; onDrop: () => void; onFlat: () => void; flat: boolean; onUngroup: () => void;
+  onMirror: (axis: 0 | 1 | 2) => void; onFace: () => void; face: boolean; onTurn: (axis: 0 | 1 | 2, sign: 1 | -1) => void;
+  box: Part | null; depth: number; parts: Part[]; onMate: () => void; mate: boolean; notes: string[] }) {
   const g = part.shape === "group";
   const box = extent(part);
   return (
@@ -2440,12 +2571,13 @@ function PartBand({ part, fonts, lock, setLock, change, onDuplicate, onDelete, o
       </Grp>
       {!g && (
         <Grp id="place" short="Size" label={part.shape === "outline" ? "Size, its points' 0,0 and turn" : "Size, centre and turn"}
-          fold={part.on ? 2 : 6}
+          fold={part.on || part.mates ? 2 : 6}
           icon={<Scaling size={20} />}>
           <PlaceTable part={part} fonts={fonts} lock={lock} setLock={setLock} change={change} bottom={box?.[0][2] ?? 0} />
         </Grp>
       )}
       {part.on && onBox && <OnFaceGroup part={part} box={onBox} change={change} depth={depth} />}
+      {!g && <MatesGroup part={part} parts={parts} change={change} onMate={onMate} mating={mate} notes={notes} />}
       {g && (
         <Grp label="Group" fold={3} icon={<Group size={20} />}>
           <p className="v3d-note num">{box ? `${fmt(box[1][0] - box[0][0])} x ${fmt(box[1][1] - box[0][1])} x ${fmt(box[1][2] - box[0][2])} mm, ` : ""}
@@ -2675,9 +2807,9 @@ function FromRow({ face, axis, size, from, onSet }: { face: FaceName; axis: 0 | 
 /** The Face tab (0.98.0): the face picked on a box and the spot on it - so many mm from two of its edges, as a sketch
  *  on a face is dimensioned in SolidWorks - and what goes there: a round or a square hole through all of the box or
  *  so deep (an extruded cut), a boss so high (a boss extrude), or a text. Each is kept there: it goes with the box. */
-function FaceBand({ box, spot, feature, onFeature, onFrom, onMake, onSketch }: { box: Part; spot: FacePick; feature: Feature;
-  onFeature: (f: Partial<Feature>) => void; onFrom: (from: Record<string, number> | undefined) => void;
-  onMake: (kind: "hole" | "boss" | "text") => void; onSketch: () => void }) {
+function FaceBand({ box, spot, feature, onFeature, onFrom, onMake, onSketch, onMate }: { box: Part; spot: FacePick;
+  feature: Feature; onFeature: (f: Partial<Feature>) => void; onFrom: (from: Record<string, number> | undefined) => void;
+  onMake: (kind: "hole" | "boss" | "text") => void; onSketch: () => void; onMate: () => void }) {
   const F = faceFrame(box, spot.face);
   const name = spot.face[0].toUpperCase() + spot.face.slice(1);
   const across = feature.round ? `round, ${fmt(feature.size)} mm across` : `square, ${fmt(feature.size)} mm wide`;
@@ -2727,6 +2859,10 @@ function FaceBand({ box, spot, feature, onFeature, onFrom, onMake, onSketch }: {
           <Field label="Height" unit="mm" value={feature.height} min={0.1} step={1} width={44}
             title="How far the boss stands out of the face, mm" onSet={(v) => onFeature({ height: Math.max(0.1, v) })} />
         </Stack>
+      </Grp>
+      <Grp label="Mate">
+        <Big icon={<Magnet size={20} />} label="Mate" onClick={onMate}
+          title={`Mate ${label(box)} by this face, as in SolidWorks: then click the face of the part it goes against - ${label(box)} moves there`} />
       </Grp>
     </>
   );
@@ -2888,6 +3024,99 @@ function OnFaceGroup({ part, box, change, depth }: { part: Part; box: Part; chan
           title="Not kept on the face any more: it stays where it is now, and stays there when the box moves" />
       </Stack>
     </Grp>
+  );
+}
+
+/** What Mate says over the view (0.101.0): which click is next. */
+function mateHint(mating: { part: string; face?: FaceName } | null, parts: Part[]): string {
+  if (!mating) {
+    return "Click a face of the part that moves - a round part's side, for its axis - then the face of the part it goes"
+      + " against. Esc stops.";
+  }
+  const p = find(parts, mating.part)?.part;
+  const name = p ? label(p) : mating.part;
+  return mating.face ? `The ${mating.face} of ${name}: now click the face it goes against - on another part. Esc stops.`
+    : `The axis of ${name}: now click the round side (a cylinder, a cone, a round hole) whose axis it goes on. Esc stops.`;
+}
+
+/** Mates (0.101.0, SolidWorks' Mate): Mate - two clicks - and the part's mates in a menu, each with its faces, how far
+ *  apart, Flip and Delete; Free it takes them all off. */
+function MatesGroup({ part, parts, change, onMate, mating, notes }: { part: Part; parts: Part[];
+  change: (fn: (p: Part) => Part) => void; onMate: () => void; mating: boolean; notes: string[] }) {
+  const mates = part.mates ?? [];
+  const setMates = (list: Mate[]) => change((p) => {
+    const q: Part = { ...p, mates: list };
+    if (!list.length) delete q.mates;
+    return q;
+  });
+  const unmet = (n: number) => notes.find((s) => s.startsWith(`${part.id}: mate ${n} `));
+  return (
+    <Grp id="mates" short="Mates" label="Mates" fold={7} icon={<Magnet size={20} />}>
+      <Big icon={<Magnet size={20} />} label="Mate" active={mating} onClick={onMate}
+        title="Mate it to another part, as in SolidWorks: click a face of it - a round part's side, for its axis - then the face (or round side) of the part it goes against. It moves as little as that needs, and goes with that part when that one moves" />
+      {mates.length > 0 && (
+        <Stack>
+          <MenuButton fixed className="v3d-small" title="Its mates: their faces, how far apart, Flip, Delete" menuClassName="v3d-matemenu"
+            label={<><Magnet size={16} /><span>{mates.length} mate{mates.length > 1 ? "s" : ""} <ChevronDown size={11} /></span></>}>
+            {() => (
+              <div className="v3d-mates">
+                {mates.map((m, i) => (
+                  <MateRow key={i} n={i + 1} mate={m} part={part} to={find(parts, m.to.part)?.part ?? null} unmet={unmet(i + 1)}
+                    onSet={(x) => setMates(mates.map((y, j) => (j === i ? x : y)))}
+                    onDelete={() => setMates(mates.filter((_, j) => j !== i))} />
+                ))}
+              </div>
+            )}
+          </MenuButton>
+          <Small icon={<Unlink size={16} />} label="Free it" onClick={() => setMates([])}
+            title="No mates any more: it stays where it is now - and stays there when the others move" />
+          {notes.length > 0 && <small className="v3d-col-note v3d-warn" title={notes.join("\n")}>
+            {notes.length} not met</small>}
+        </Stack>
+      )}
+    </Grp>
+  );
+}
+
+/** One mate in the Mates menu (0.101.0): what it is; its face and the other part's - any of the six, the hidden ones
+ *  too; how far apart (0: on each other, coincident - more, a distance); Flip; Delete - and, not met, why. */
+function MateRow({ n, mate: m, part, to, unmet, onSet, onDelete }: { n: number; mate: Mate; part: Part; to: Part | null;
+  unmet?: string; onSet: (m: Mate) => void; onDelete: () => void }) {
+  const faceSelect = (value: FaceName, of: Part | null, set: (f: FaceName) => void, name: string) => (
+    <select className="select v3d-mateface" value={value} aria-label={name} title={name}
+      onChange={(e) => set(e.target.value as FaceName)}>
+      {FACES.map((f) => <option key={f} value={f} disabled={!!of && lettersSide(of, f)}>{f}</option>)}
+    </select>
+  );
+  const apart = (v: number) => {
+    const next: Mate = { ...m, type: v ? "distance" : "coincident" };
+    if (v) next.mm = v;
+    else delete next.mm;
+    onSet(next);
+  };
+  const plane = m.type !== "concentric";
+  const other = to ? label(to) : m.to.part;
+  return (
+    <div className={`v3d-mate${unmet ? " unmet" : ""}`} title={unmet}>
+      <span className="v3d-mate-n num">{n}</span>
+      <span className="v3d-mate-kind">{m.type === "concentric" ? "Concentric" : m.type === "distance" ? "Distance" : "Coincident"}</span>
+      {plane ? (
+        <>
+          <span>its</span>
+          {faceSelect(m.face!, part, (f) => onSet({ ...m, face: f }), "Its face")}
+          <span className="v3d-clip" title={other}>{m.flip ? "flush with" : "on"} {other}'s</span>
+          {faceSelect(m.to.face!, to, (f) => onSet({ ...m, to: { ...m.to, face: f } }), `${other}'s face`)}
+          <Field label="Apart" unit="mm" value={m.mm ?? 0} step={1} width={52} onSet={apart}
+            title="How far apart the two faces are, mm - 0: on each other (coincident); less than 0: into it" />
+        </>
+      ) : <span className="v3d-clip" title={other}>its axis on {other}'s</span>}
+      <Small icon={<FlipVertical2 size={16} />} label="Flip" active={!!m.flip}
+        onClick={() => { const next: Mate = { ...m }; if (m.flip) delete next.flip; else next.flip = true; onSet(next); }}
+        title={plane ? "Flip: flush - the two faces looking the same way - or against each other" : "Flip: its axis pointing the other way"} />
+      <Small icon={<Trash2 size={16} />} label="Delete" tone="red" onClick={onDelete}
+        title="Take this mate off: the part stays where it is" />
+      {unmet && <small className="v3d-warn">not met</small>}
+    </div>
   );
 }
 

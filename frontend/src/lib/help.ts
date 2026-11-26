@@ -767,6 +767,14 @@ export const SECTIONS: HelpSection[] = [
           + "its letters lie on it, upright on a wall, a little into it so the two print as one; a hole text sinks in "
           + "and is cut. On a box's face it stays there, as a part from the Face tab does. Turn (Arrange) turns what "
           + "is picked 90° - stand a flat text up with Tip forward.",
+          "Mate (Part, Mates) puts a part against another, as SolidWorks' mates do: click a face of the part that moves "
+          + "- a cylinder's or a round hole's round side, for its axis - then the face of the part it goes against. "
+          + "Face to face it lands there, the faces on each other (Coincident) - or flush, when they look the same "
+          + "way; axis to axis, on the other's axis (Concentric). Add more to fix it further: a lid's bottom on a box's "
+          + "top, then its left side flush with the box's, then its front. It moves as little as its mates need, and "
+          + "goes with the part of its first mate when that one is moved or turned. The mates menu lists them: any of "
+          + "the six faces (the hidden ones too), Apart - so many mm, a Distance - Flip, and Delete; Free it takes "
+          + "them all off. One its others leave no room for is not made, and says why.",
           "Pattern repeats a part or a group round a point or in a row: one arm of a snowflake becomes six, one hole "
           + "a ring of holes. The assistant can also draw flat outlines of its own - stars, leaves, letters' shapes.",
           "Lines works on a part's own lines, picked first: click one on the model - Pick lines to pick several - or "

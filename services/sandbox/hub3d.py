@@ -813,7 +813,7 @@ DESIGN_FORMAT = "slq-hub-3d"
 DESIGN_SHAPES = ("box", "cylinder", "cone", "sphere", "wedge", "text", "outline", "mesh", "group")
 PART_KEYS = ("id", "name", "shape", "size", "at", "rotate", "mirror", "hole", "hidden", "color", "sides", "radius",
              "top", "text", "font", "bold", "italic", "align", "letter_spacing", "line_spacing", "points", "holes",
-             "file", "repeat", "fillet", "chamfer", "on", "parts")
+             "file", "repeat", "fillet", "chamfer", "on", "mates", "parts")
 MAX_COPIES = 100
 ROUND_SHAPES = ("cylinder", "cone", "sphere")
 DEFAULT_SIDES = 64
@@ -869,7 +869,7 @@ DESIGN_EXAMPLE = """\
     {"id": "ring", "name": "Key ring hole", "shape": "cylinder", "size": [5, 5, 3.4], "at": [-19, 0, 1.5],
      "on": {"part": "tag", "face": "top", "from": {"left": 6}, "through": true}, "hole": true},
     {"id": "word", "name": "Name", "shape": "text", "text": "SLQ", "size": [0, 8, 1], "at": [-1, 0, 3.5],
-     "color": "#d9822b"},
+     "mates": [{"type": "coincident", "face": "bottom", "to": {"part": "tag", "face": "top"}}], "color": "#d9822b"},
     {"id": "clip", "name": "Clip", "shape": "group", "parts": [
       {"id": "arm", "shape": "wedge", "size": [12, 6, 6], "at": [19, 0, 6], "rotate": [0, 0, 180]},
       {"id": "slot", "name": "Slot in the clip only", "shape": "box", "size": [8, 2, 8], "at": [19, 0, 7],
@@ -983,6 +983,16 @@ A part:
             goes in or a solid stands out (left out: its size z); angle: degrees it is turned on the face. Its at,
             rotate and size z then follow from the box: it moves, turns and grows with it. To move it, change from;
             to place it yourself, leave on out
+  mates     placed against other parts, as in SolidWorks' assemblies - a list, each one of: {{"type": "coincident",
+            "face": "bottom", "to": {{"part": "tag", "face": "top"}}}} puts its bottom on the tag's top, the two
+            faces against each other ("flip": true: flush instead, both looking the same way - two tops level);
+            "distance" with "mm": 5 the same 5 mm apart (less than 0: into it); {{"type": "concentric", "to":
+            {{"part": "hole"}}}} puts its axis - its own Z through its middle: a cylinder's, a round hole's - on the
+            other's ("flip": pointing the other way). face: its own box's top, bottom, front, back, left or right
+            before it is turned, whatever its shape (not a text's side whose size follows its letters). When the
+            design is read it is turned and moved as little as its mates need, each in turn; what they leave free -
+            sliding along a face, turning about an axis - stays as its at and rotate put it. So moving the part it
+            is mated to does not take it along in the file (the editor does): move it too. Not with on
 
   box       radius: every edge and corner rounded (mm), sides: how round (default 64) - or fillet some edges
   cylinder  along Z; sides (default 64) - sides 6 makes a hexagon (a nut trap), 3 a triangle
@@ -1014,7 +1024,8 @@ A part:
 How it is built: in each list - the design's parts, or a group's - the solids are joined and then that list's holes
 cut them; a group is built that way first and then counts as one solid (or one hole, with hole: true). So a hole at
 the top cuts everything it meets; to keep a hole to some parts, put it in a group with them. Let parts that should
-be one piece overlap a little (0.2 mm or more) - only touching at a face, they may print as two.
+be one piece overlap a little (0.2 mm or more) - only touching at a face, they may print as two; a face mated
+coincident on another is joined to it.
 
 Flat things - ornaments, signs, snowflakes, stars, coasters - are outlines and boxes lying flat on the plate, a few
 mm thick. Not cylinders lying down: they touch the plate in a line, come loose and print rough below (hub3d design
@@ -1272,6 +1283,15 @@ def _read_part(p: dict, seen: set, problems: list, odd: dict) -> dict:
             on = _read_on(p["on"], part, problems)
             if on:
                 part["on"] = on
+    if "mates" in p:
+        if shape == "group":
+            problems.append(f'{pid}: a group cannot have "mates" (its parts can) - left out')
+        elif part.get("on"):
+            problems.append(f'{pid}: "on" places it already - its "mates" were left out')
+        else:
+            mates = _read_mates(p["mates"], part, problems)
+            if mates:
+                part["mates"] = mates
     return part
 
 
@@ -1440,8 +1460,9 @@ def _place_on(p: dict, box: dict) -> dict:
 
 def _settle(parts: list, problems: list | None = None) -> list:
     """The parts, each one with "on" where its anchor puts it - after the box it is on, which may be on a face too;
-    one whose box is not there, is not a box or leads round in a circle left where it is, free (said). The editor's
-    settle()."""
+    one whose box is not there, is not a box or leads round in a circle left where it is, free (said). One with mates
+    (0.101.0) where they put it, after the parts they are to; a mate to a part that is not there, to a group or round
+    in a circle left out (said). The editor's settle(), without its edits."""
     every: dict = {}
 
     def index(items: list) -> None:
@@ -1449,7 +1470,7 @@ def _settle(parts: list, problems: list | None = None) -> list:
             every[q["id"]] = q
             index(q.get("parts") or [])
     index(parts)
-    if not any(q.get("on") for q in every.values()):
+    if not any(q.get("on") or q.get("mates") for q in every.values()):
         return parts
     done: dict = {}
     busy: set = set()
@@ -1481,12 +1502,400 @@ def _settle(parts: list, problems: list | None = None) -> list:
                 if q["id"] in done:                  # freed on the way round a circle
                     return done[q["id"]]
                 out = _place_on(q, box)
+        elif q.get("mates"):
+            out = mated(q)
         done[q["id"]] = out
         return out
+
+    def leads(frm: dict, to: str, seen: set) -> bool:
+        """Whether a part is placed by another - on it, mated to it, or to one that is: those placed already as they
+        are now (what was left out of them left out), the others as they are given."""
+        if frm["id"] == to:
+            return True
+        if frm["id"] in seen:
+            return False
+        seen.add(frm["id"])
+        f = done.get(frm["id"], frm)
+        ids = [(f.get("on") or {}).get("part")] + [m["to"]["part"] for m in f.get("mates") or []]
+        return any(i is not None and i in every and leads(every[i], to, seen) for i in ids)
+
+    def mated(p: dict) -> dict:
+        kept: list = []
+        to: dict = {}
+        for i, m in enumerate(p["mates"]):
+            q = every.get(m["to"]["part"])
+            face = m["to"].get("face")
+            if q is None:
+                why = f'names "{m["to"]["part"]}", which the design does not have'
+            elif q["id"] == p["id"]:
+                why = "is to the part itself"
+            elif q["shape"] == "group":
+                why = f"is to a group, {q['id']} (mate one of its parts)"
+            elif leads(q, p["id"], set()):
+                why = f"leads round in a circle: {q['id']} is placed by {p['id']}"
+            elif face and _letters_side(q, face):
+                why = f"is to the {face} of {q['id']}, a text whose size there follows its letters (mate another face)"
+            else:
+                why = ""
+            if why:
+                if problems is not None:
+                    problems.append(f"{p['id']}: mate {i + 1} {why} - left out")
+                continue
+            to[q["id"]] = resolve(q)
+            kept.append((m, i))
+        out = dict(p, mates=[m for m, _ in kept])
+        if not kept:
+            out.pop("mates")
+            return out
+        return _solve_mates(out, kept, to, problems)
 
     def walk(items: list) -> list:
         return [dict(q, parts=walk(q.get("parts") or [])) if q["shape"] == "group" else resolve(q) for q in items]
     return walk(parts)
+
+
+# ---------------------------------------------------------------- mates (0.101.0)
+# Placed against other parts, as in SolidWorks' assemblies - the editor's mates (geometry.ts): a face of the part
+# against a face of another (coincident - flush, looking the same way, with flip), so many mm out from it (distance),
+# or its axis on the other's (concentric). The part the mates are on moves - as little as they need, after the parts
+# they are to. A part's faces are its own box's, before it is turned; its axis is its own Z through its middle.
+
+MATE_TYPES = ("coincident", "distance", "concentric")
+_MATE_KEYS = ("type", "face", "to", "mm", "flip")
+MATE_JOIN = 1e-5       # a coincident face of a solid this far into the solid it is on (mm): one piece - the editor's JOIN
+
+
+def _face_axis(face: str) -> int:
+    return next(i for i, x in enumerate(FACE_FRAMES[face][0]) if x != 0)
+
+
+def _letters_side(p: dict, face: str) -> bool:
+    """A text's side whose place follows its letters (its size there 0) - unknown until its font is: not to mate."""
+    return p["shape"] == "text" and p["size"][_face_axis(face)] <= 0
+
+
+def _face_in(v) -> str | None:
+    f = v.strip().lower() if isinstance(v, str) else ""
+    return f if f in FACES else None
+
+
+def _read_mates(v, part: dict, problems: list) -> list | None:
+    """A part's "mates" - the editor's readMates: each a type, its face and the part (and face) it is to; those that
+    make no sense left out, said."""
+    pid = part["id"]
+    if not isinstance(v, list):
+        problems.append(f'{pid}: "mates" is a list - [{{"type": "coincident", "face": "bottom", "to": {{"part": id, '
+                        f'"face": "top"}}}}]; left out')
+        return None
+    out: list = []
+    for i, m in enumerate(v):
+        n = f"{pid}: mate {i + 1}"
+        if not isinstance(m, dict):
+            problems.append(f"{n} is not an object - left out")
+            continue
+        odd = [k for k in m if k not in _MATE_KEYS]
+        if odd:
+            problems.append(f'{n} has no {", ".join(chr(34) + k + chr(34) for k in odd)} - its keys: '
+                            f'{", ".join(_MATE_KEYS)}')
+        t = m.get("to")
+        if isinstance(t, str):
+            to = {"part": t.strip(), "face": None}
+        elif isinstance(t, dict) and isinstance(t.get("part"), str):
+            to = {"part": t["part"].strip(), "face": t.get("face")}
+        else:
+            to = None
+        if not to or not to["part"]:
+            problems.append(f'{n} names the part it is mated to: "to": {{"part": id, "face": "top"}} - left out')
+            continue
+        if isinstance(t, dict):
+            odd_to = [k for k in t if k not in ("part", "face")]
+            if odd_to:
+                problems.append(f'{n}: "to" has no {", ".join(chr(34) + k + chr(34) for k in odd_to)} - its keys: '
+                                f'part, face')
+        given_face = "face" in m
+        given_to_face = isinstance(t, dict) and "face" in t
+        if "type" in m:
+            kind = m["type"].strip().lower() if isinstance(m["type"], str) else ""
+        elif given_face or given_to_face:
+            kind = "distance" if _num(m.get("mm")) and m["mm"] != 0 else "coincident"
+        else:
+            kind = "concentric"
+        if kind not in MATE_TYPES:
+            said = f' "{m["type"]}"' if isinstance(m.get("type"), str) else ""
+            problems.append(f"{n}: no type{said} - the types: {', '.join(MATE_TYPES)}; left out")
+            continue
+        mate: dict = {"type": kind, "to": {"part": to["part"]}}
+        if kind == "concentric":
+            if given_face or given_to_face:
+                problems.append(f"{n}: concentric is axis on axis - its faces were left out")
+            if "mm" in m:
+                problems.append(f'{n}: concentric has no "mm" - left out')
+        else:
+            face, to_face = _face_in(m.get("face")), _face_in(to["face"])
+            if not face or not to_face:
+                problems.append(f'{n}: {kind} is face to face - "face" and the "to" part\'s "face" are each one of '
+                                f'{", ".join(FACES)}; left out')
+                continue
+            if _letters_side(part, face):
+                problems.append(f"{n}: its {face} follows its letters (a text, its size there 0) - mate another face; "
+                                f"left out")
+                continue
+            mate["face"] = face
+            mate["to"]["face"] = to_face
+            if kind == "distance":
+                mate["mm"] = float(m["mm"]) if _num(m.get("mm")) else 0.0
+                if not _num(m.get("mm")):
+                    problems.append(f'{n}: distance needs "mm" - made 0')
+            elif "mm" in m and not (_num(m["mm"]) and m["mm"] == 0):
+                problems.append(f'{n}: coincident has no "mm" (distance has) - left out')
+        if m.get("flip") is True:
+            mate["flip"] = True
+        out.append(mate)
+    return out or None
+
+
+def _own_box(p: dict):
+    """A part's own box before it is mirrored, turned and moved - the editor's ownBox: centred on its 0,0,0, an
+    outline's where its points are drawn."""
+    sx, sy, sz = p["size"]
+    polys = _outline_polygons(p) if p["shape"] == "outline" else None
+    if polys is not None:
+        outer = polys[0]
+        return ((float(outer[:, 0].min()), float(outer[:, 1].min()), -sz / 2),
+                (float(outer[:, 0].max()), float(outer[:, 1].max()), sz / 2))
+    return (-sx / 2, -sy / 2, -sz / 2), (sx / 2, sy / 2, sz / 2)
+
+
+def _mul(a: list, b: list) -> list:
+    return [sum(a[i * 3 + k] * b[k * 3 + j] for k in range(3)) for i in range(3) for j in range(3)]
+
+
+def _dot(a, b) -> float:
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+
+
+def _cross(a, b) -> tuple:
+    return (a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0])
+
+
+def _unit3(v) -> tuple:
+    n = math.hypot(v[0], v[1], v[2])
+    return (v[0] / n, v[1] / n, v[2] / n) if n > 1e-12 else (0.0, 0.0, 0.0)
+
+
+def _part_frame(p: dict):
+    """A part's own frame in the design - the editor's partFrame: A (its turn and mirror), its box's middle and half
+    sizes in its own frame, and that middle in the design."""
+    lo, hi = _own_box(p)
+    r = _rotation_rows(p["rotate"])
+    a = [-r[0], r[1], r[2], -r[3], r[4], r[5], -r[6], r[7], r[8]] if p.get("mirror") else r
+    mid = tuple((lo[i] + hi[i]) / 2 for i in range(3))
+    half = tuple((hi[i] - lo[i]) / 2 for i in range(3))
+    w = _apply(a, mid)
+    return a, mid, half, (w[0] + p["at"][0], w[1] + p["at"][1], w[2] + p["at"][2])
+
+
+def _mate_plane(p: dict, face: str):
+    """A face of a part's own box in the design: its middle and which way it looks."""
+    a, mid, half, _ = _part_frame(p)
+    n = FACE_FRAMES[face][0]
+    w = _apply(a, (mid[0] + n[0] * half[0], mid[1] + n[1] * half[1], mid[2] + n[2] * half[2]))
+    return (w[0] + p["at"][0], w[1] + p["at"][1], w[2] + p["at"][2]), _apply(a, n)
+
+
+def _mate_axis(p: dict):
+    """A part's axis in the design: its own Z through its middle."""
+    a, _, _, c = _part_frame(p)
+    return c, (a[2], a[5], a[8])
+
+
+def _turn_about(k, angle: float) -> list:
+    c, s = math.cos(angle), math.sin(angle)
+    t = 1 - c
+    x, y, z = k
+    return [t * x * x + c, t * x * y - s * z, t * x * z + s * y,
+            t * x * y + s * z, t * y * y + c, t * y * z - s * x,
+            t * x * z - s * y, t * y * z + s * x, t * z * z + c]
+
+
+def _turn_onto(v, d, a: list) -> list | None:
+    """The least turn taking the unit v onto the unit d - None when it is there; the other way round, half a turn
+    about the part's own axis (a's columns) most across v. The editor's turnOnto."""
+    k = _cross(v, d)
+    s, c = math.hypot(k[0], k[1], k[2]), _dot(v, d)
+    if s < 1e-9:
+        if c > 0:
+            return None
+        e = (a[0], a[3], a[6])
+        least = abs(_dot(e, v))
+        for j in (1, 2):
+            f = (a[j], a[3 + j], a[6 + j])
+            g = abs(_dot(f, v))
+            if g < least - 1e-12:
+                e, least = f, g
+        x = _dot(e, v)
+        return _turn_about(_unit3((e[0] - x * v[0], e[1] - x * v[1], e[2] - x * v[2])), math.pi)
+    angle = math.atan2(s, c)
+    return None if angle < 1e-7 else _turn_about((k[0] / s, k[1] / s, k[2] / s), angle)
+
+
+def _across(d) -> tuple:
+    """Two unit directions square to the unit d and to each other - the editor's across."""
+    a, b, c = abs(d[0]), abs(d[1]), abs(d[2])
+    e = (1, 0, 0) if a <= b and a <= c else (0, 1, 0) if b <= c else (0, 0, 1)
+    u = _unit3(_cross(d, e))
+    return u, _cross(d, u)
+
+
+def _moved(p: dict, centre, move, turn: list | None) -> dict:
+    """A part turned by turn about centre and moved by move: its at, rotate and where its copies go - the editor's
+    moved (transformPart's sums for one part)."""
+    rel = (p["at"][0] - centre[0], p["at"][1] - centre[1], p["at"][2] - centre[2])
+    r = _apply(turn, rel) if turn else rel
+    out = dict(p, at=[centre[i] + r[i] + move[i] for i in range(3)])
+    if turn:
+        out["rotate"] = _angles(_mul(turn, _rotation_rows(p["rotate"])))
+    if p.get("repeat"):
+        rp = dict(p["repeat"])
+        if rp.get("step"):
+            rp["step"] = list(_apply(turn, rp["step"])) if turn else rp["step"]
+        elif rp.get("around"):
+            a = (rp["around"][0] - centre[0], rp["around"][1] - centre[1], 0.0)
+            w = _apply(turn, a) if turn else a
+            rp["around"] = [centre[0] + w[0] + move[0], centre[1] + w[1] + move[1]]
+        out["repeat"] = rp
+    return out
+
+
+def _mm(v: float) -> str:
+    """mm as the editor writes them in what it says (fmtMm): to a hundredth, no .0."""
+    r = _round(v * 100) / 100
+    return str(int(r)) if r == int(r) else repr(r)
+
+
+def _solve_mates(p: dict, mates: list, to: dict, problems: list | None) -> dict:
+    """Where a part's mates put it, the parts they are to placed already - the editor's solveMates, step for step:
+    turned first, each mate's directions in turn, as little as the turns left allow, about its middle; then moved as
+    little as puts each face on the other's plane and its axis on the other's line. A mate the ones before it leave no
+    room for is said and skipped (kept). mates: (mate, its number in the part's list)."""
+    a, mid, half, c = _part_frame(p)
+    r = _rotation_rows(p["rotate"])
+    turn = None
+    free = "all"                                     # the turns left: "all", an axis, "none"
+    skipped: set = set()
+
+    def say(m: dict, i: int, why: str) -> None:
+        skipped.add(i)
+        if problems is not None:
+            problems.append(f"{p['id']}: mate {i + 1} ({m['type']} to {m['to']['part']}) cannot be met as well as the "
+                            f"ones before it - {why}; skipped")
+
+    for m, i in mates:
+        q = to[m["to"]["part"]]
+        if m["type"] == "concentric":
+            z = _mate_axis(q)[1]
+            v = (a[2], a[5], a[8])
+            d = (-z[0], -z[1], -z[2]) if m.get("flip") else z
+        else:
+            nq = _mate_plane(q, m["to"]["face"])[1]
+            v = _apply(a, FACE_FRAMES[m["face"]][0])
+            d = nq if m.get("flip") else (-nq[0], -nq[1], -nq[2])
+        t = None
+        if free == "all":
+            t = _turn_onto(v, d, a)
+            free = d
+        elif free != "none":
+            ax = free
+            cv, cd = _dot(v, ax), _dot(d, ax)
+            if abs(math.acos(max(-1.0, min(1.0, cv))) - math.acos(max(-1.0, min(1.0, cd)))) > 1e-6:
+                say(m, i, "it would have to turn")
+                continue
+            pv = (v[0] - cv * ax[0], v[1] - cv * ax[1], v[2] - cv * ax[2])
+            pd = (d[0] - cd * ax[0], d[1] - cd * ax[1], d[2] - cd * ax[2])
+            if math.hypot(pv[0], pv[1], pv[2]) > 1e-6:       # across the axis: turned about it, no turn left after
+                angle = math.atan2(_dot(ax, _cross(pv, pd)), _dot(pv, pd))
+                if abs(angle) > 1e-7:
+                    t = _turn_about(ax, angle)
+                free = "none"
+        else:
+            k = _cross(v, d)
+            if math.atan2(math.hypot(k[0], k[1], k[2]), _dot(v, d)) > 1e-6:
+                say(m, i, "it would have to turn")
+                continue
+        if t:
+            a, r = _mul(t, a), _mul(t, r)
+            turn = _mul(t, turn) if turn else t
+    w0 = _apply(a, mid)
+    at = [c[0] - w0[0], c[1] - w0[1], c[2] - w0[2]] if turn else list(p["at"])
+    basis = [(1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)]
+    shift = False
+
+    def push(m: dict, i: int, j, rr: float) -> bool:
+        nonlocal at, basis, shift
+        w = [0.0, 0.0, 0.0]
+        for b in basis:
+            x = _dot(j, b)
+            w[0] += x * b[0]
+            w[1] += x * b[1]
+            w[2] += x * b[2]
+        ww = _dot(w, w)
+        if ww < 1e-12:
+            if abs(rr) <= 2e-3:
+                return True
+            say(m, i, f"{_mm(abs(rr))} mm off")
+            return False
+        if abs(rr) > 1e-9:
+            at = [at[0] + rr * w[0] / ww, at[1] + rr * w[1] / ww, at[2] + rr * w[2] / ww]
+            shift = True
+        u = _unit3(w)
+        nxt: list = []
+        for b in basis:
+            x = (b[0] - _dot(b, u) * u[0], b[1] - _dot(b, u) * u[1], b[2] - _dot(b, u) * u[2])
+            for o in nxt:
+                x = (x[0] - _dot(x, o) * o[0], x[1] - _dot(x, o) * o[1], x[2] - _dot(x, o) * o[2])
+            ln = math.hypot(x[0], x[1], x[2])
+            if ln > 1e-6:
+                nxt.append((x[0] / ln, x[1] / ln, x[2] / ln))
+        basis = nxt
+        return True
+
+    def place(lp):
+        w = _apply(a, lp)
+        return (w[0] + at[0], w[1] + at[1], w[2] + at[2])
+
+    for m, i in mates:
+        if i in skipped:
+            continue
+        q = to[m["to"]["part"]]
+        if m["type"] == "concentric":
+            pt, dr = _mate_axis(q)
+            for u in _across(dr):
+                e = place(mid)
+                if not push(m, i, u, -_dot((e[0] - pt[0], e[1] - pt[1], e[2] - pt[2]), u)):
+                    break
+        else:
+            pt, nq = _mate_plane(q, m["to"]["face"])
+            n = FACE_FRAMES[m["face"]][0]
+            e = place((mid[0] + n[0] * half[0], mid[1] + n[1] * half[1], mid[2] + n[2] * half[2]))
+            # a solid's face on another solid's (or flush with a hole's) a hair into it: one piece, however turned
+            if m["type"] == "distance":
+                want = m.get("mm", 0.0)
+            elif p.get("hole"):
+                want = 0.0
+            elif q.get("hole"):
+                want = MATE_JOIN if m.get("flip") else 0.0
+            else:
+                want = 0.0 if m.get("flip") else -MATE_JOIN
+            push(m, i, nq, want - _dot((e[0] - pt[0], e[1] - pt[1], e[2] - pt[2]), nq))
+    if not turn and not shift:
+        return p
+    w1 = _apply(a, mid)
+    c1 = (w1[0] + at[0], w1[1] + at[1], w1[2] + at[2])
+    out = _moved(p, c, (c1[0] - c[0], c1[1] - c[1], c1[2] - c[2]), turn)
+    if turn:
+        out["rotate"] = _angles(r)
+    out["at"] = list(at)                 # not rounded: faces on parts turned askew meet exactly, built as one piece
+    return out
 
 
 # ---------------------------------------------------------------- edges: fillets and chamfers (0.91.0)

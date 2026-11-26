@@ -271,8 +271,9 @@ export class Viewport {
 
   /** Lines over the model (0.92.0): the edges picked for a fillet or chamfer, thick and green - not the picked part's
    *  blue - and the one under the pointer thinner, amber: drawn over everything, so an edge behind shows too. `face`
-   *  (0.98.0): the picked face, what goes on it and its distances - in the picked part's blue, that many px wide. */
-  setMarks(list: { lines: Vec3[][]; hover?: boolean; face?: number }[]): void {
+   *  (0.98.0): the picked face, what goes on it and its distances - in the picked part's blue, that many px wide.
+   *  `tone` and `width` (0.101.0, a mate's faces): green or amber whatever the part's colour, that many px wide. */
+  setMarks(list: { lines: Vec3[][]; hover?: boolean; face?: number; tone?: "run" | "wait"; width?: number }[]): void {
     disposeGroup(this.marks);
     this.lineMats = [];
     const w = Math.max(1, this.host.clientWidth), h = Math.max(1, this.host.clientHeight);
@@ -282,8 +283,10 @@ export class Viewport {
       if (!pos.length) continue;
       const g = new LineSegmentsGeometry();
       g.setPositions(pos);
-      const color = m.face ? css("--act", "#1c64b4") : m.hover ? css("--wait", "#d99a00") : css("--run", "#2f9e44");
-      const mat = new LineMaterial({ color: color.getHex(), linewidth: m.face ?? (m.hover ? 3 : 6), depthTest: false,
+      // tone (0.101.0, a mate's faces): green as a picked line is, or amber as one pointed at - so wide
+      const color = m.tone === "run" ? css("--run", "#2f9e44") : m.tone === "wait" ? css("--wait", "#d99a00")
+        : m.face ? css("--act", "#1c64b4") : m.hover ? css("--wait", "#d99a00") : css("--run", "#2f9e44");
+      const mat = new LineMaterial({ color: color.getHex(), linewidth: m.width ?? m.face ?? (m.hover ? 3 : 6), depthTest: false,
         transparent: true, opacity: m.hover ? 0.85 : 0.95 });
       mat.resolution.set(w, h);
       const seg = new LineSegments2(g, mat);

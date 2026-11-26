@@ -3351,9 +3351,69 @@ into the Hub, Tinkercad's level, his printer a Bambu Lab P2S but chosen per desi
     amber; a click picks it as a click on the model does - Shift or Select multiple: one more - and opens its tab (a
     text's: Text) unless Lines is open, where a part is picked for its lines by name; Hide or Show on the row (Show
     always shown on a hidden one, which is grey and slanted). The menu at the right of the tabs is gone.
+- **Mates (0.101.0).** Søren, 22:34 (with the sketch): "Og så skal man også kunne mate i 3D"; asked whether a mate
+  should be kept (SolidWorks) or done once (Tinkercad's Align), he wrote "Ok. Lav næste" and "Men ja til mates" -
+  kept, as in SolidWorks, so the assistant can use them too.
+  - **The format: `mates`**, a list on a part (not a group, not with `on` - `on` wins, said): `{"type":
+    "coincident", "face": "bottom", "to": {"part": "box", "face": "top"}}` - the part's face against the other's
+    (normals opposite), `"flip": true` flush instead (looking the same way); `"distance"` the same with `"mm"` between
+    the planes, measured out along the other face's normal (less than 0: into it); `{"type": "concentric", "to":
+    {"part": "hole"}}` - its axis on the other's, the same way (`flip`: the opposite way). `to` may be the part's id
+    alone. A part's faces are its own box's before it is turned (`ownBox`, as `FACE_FRAMES` names them for `on`)
+    whatever its shape - a cylinder's top, a sphere's front; its axis is its own Z through its box's middle - a
+    cylinder's, a cone's, a round hole's. A text's side whose size follows its letters (size 0) is refused: settle()
+    has no fonts. The type left out: concentric without faces, else coincident (distance with a non-zero mm). The
+    writer puts each mate on one line, after at and rotate (which follow from them).
+  - **The solver** (`solveMates`; hub3d `_solve_mates`, step for step): the part the mates are on moves - the parts
+    they are to stay, placed first (a part mated, or on a face, is resolved before what is mated to it). Directions
+    first, each mate in turn, about the part's middle: the first turns it the least way that puts its face's normal
+    against the other's (or its axis along it) - half a turn about its own axis most across, when it points the
+    other way - and leaves it free only to turn about that direction; a next one turns it about that axis if it can
+    (the angle between its direction and the axis must be the target's: else "it would have to turn", skipped), and
+    then it is fixed; a third only checks. Then where: each plane mate is one equation (the face's middle so far out
+    along the other's normal), each concentric two (across the axis); taken in turn, each moves it the least within
+    what the ones before left free (an orthonormal basis of free directions, the equation's direction projected on
+    it; what it fixes leaves the basis) - so in what the mates leave free it stays where its at put it, and the order
+    of mates does not change where it ends (the least move that meets all). An equation in no free direction is
+    checked: more than 0.002 mm off, "so many mm off", skipped. A skipped mate is kept and said each time the design
+    is placed - it may be met again when the others change. Turns under 1e-7 rad are not made, so a placed part placed
+    again does not move (the stored angles are to a millionth of a degree).
+  - **One piece.** A coincident face of a solid goes 0.00001 mm (`JOIN`) into the solid it is on - flush with a
+    hole's face, into the solid round the hole - and a mated part's `at` is not rounded where it is placed: measured,
+    a lid mated on a box turned askew came out as two pieces in half the turns when its `at` was rounded to a
+    thousandth (a face 0.0003 mm off), and in half again with exact, perfectly parallel faces (manifold works in
+    doubles: a 1e-15 offset decides); with the hair into it all of 40 turns are one piece, in hub3d's count too. The
+    file keeps a thousandth; read, the part is placed again from there.
+  - **Wrong**: a mate to a part not there, to itself, to a group, or round in a circle - through mates or `on`, the
+    parts placed already as they are now - is left out, said (in a circle the first one placed loses it).
+  - **In the editor** (`settle` with `before`): a part the edit did not touch whose first mate's part it moved or
+    turned - not sized, not mirrored - goes with that part as one first (`followed`), as a part on a face goes with
+    its box; then it is mated. Moved, turned or sized itself, it is mated from where it was put: dragged along a face
+    it slides on it, turned about the face it keeps the turn, tipped it turns back. The drag shows parts mated to what
+    is dragged going with it (`riders`, first mates too). Duplicated together, a copy's mate names the copy
+    (`onCopies`). The file does not follow: an assistant that moves a part moves what is mated to it too (the guide
+    says so) - reading it, the mated part only moves as its mates need.
+  - **Mate** - in the Part tab's Mates group, and in a box face's Face tab (that face the first click): click a face
+    of the part that moves - a round part's side picks its axis (`mateAt`: the face of its box the spot is on where
+    the model is flat and square there, or a cylinder's, a cone's, a sphere's side; null on a slope or a rounded
+    edge) - then the face of the part it goes against. Face to face makes coincident, flipped when they look the same
+    way now (SolidWorks' nearest alignment); axis to axis concentric, flipped when they point opposite ways. A face
+    and an axis, or a part placed by the moving one already (`placedBy`), is refused, said. One its other mates leave
+    no room for is not made - a trial settle - and says why. The first mate of a part also puts it where the second
+    click was: the first click's spot moved, after mating, onto the second's - across the face (along the axis) - in
+    what the mate leaves free. Mate stays on for the next pair; Esc stops. "On a face" on a mated part takes its mates
+    off, said; Mate on a part kept on a face frees it, said.
+  - **Shown**: the first click's face (or axis) green; a picked part's mates - its faces green, the other parts' amber
+    (`mateMark`: the box face's outline, or the axis a little longer than the part; `setMarks` tones). The Mates group:
+    Mate, "N mates" - a menu, a row each: Coincident/Distance/Concentric, its face and the other's (any of the six, the
+    hidden ones too), Apart (0: coincident, else a distance), Flip, Delete - Free it, and "N not met". The problems
+    list shows the mates not met as the design is now (placed again in a memo), not as when the file was read.
+  - **Not yet**: parallel, perpendicular, angle, tangent (a cylinder lying on a face), width, a mate to the plate or
+    the origin planes, limits; dragging a mated part along what is free while it is dragged (it snaps on release);
+    a mated part fixed, others moving to it (the one with the mates always moves).
 - **The sketch (0.100.0).** Søren, 22:34: "Vi skal ha lavet en sketch sektion, ligesom i solid works, hvor man kan
   tegne en 2D tegning, og så boss extrude den. Kan det lade sig gøre? Så kan man tegne lidt i frihånd med streger og
-  cirkler før man extruder... Og så skal man også kunne mate i 3D" (mates: next, his choice asked).
+  cirkler før man extruder... Og så skal man også kunne mate i 3D" (mates: 0.101.0, above).
   - **Planes** (`sketch.ts` planeFrame): the plate (Top: z = 0), the Front plane (y = 0, out toward the viewer: -Y),
     the Right plane (x = 0, out: +X) - Insert's Sketch menu - and a box's face, from Sketch in its Face tab (0.98.0's
     frame: its middle, across U, up V, out N). The view turns straight at it (`Viewport.lookFrom`: any direction,

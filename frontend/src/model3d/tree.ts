@@ -53,15 +53,20 @@ export function copy(p: Part, seen: Set<string>, ids?: Map<string, string>): Par
   return { ...p, id, parts: p.parts?.map((c) => copy(c, seen, ids)) };
 }
 
-/** Copies on faces of copies (0.98.0): each "on" that names a part copied with them names its copy. */
+/** Copies on faces of copies (0.98.0): each "on" that names a part copied with them names its copy - and each mate
+ *  (0.101.0). */
 export function onCopies(parts: Part[], ids: Map<string, string>): Part[] {
   return parts.map((p) => {
-    const q = p.on && ids.has(p.on.part) ? { ...p, on: { ...p.on, part: ids.get(p.on.part)! } } : p;
+    let q = p.on && ids.has(p.on.part) ? { ...p, on: { ...p.on, part: ids.get(p.on.part)! } } : p;
+    if (q.mates?.some((m) => ids.has(m.to.part))) {
+      q = { ...q, mates: q.mates.map((m) => (ids.has(m.to.part) ? { ...m, to: { ...m.to, part: ids.get(m.to.part)! } } : m)) };
+    }
     return q.parts ? { ...q, parts: onCopies(q.parts, ids) } : q;
   });
 }
 
-/** The parts on faces of these (0.98.0) - and on theirs - that are not among them: they go where a box goes. */
+/** The parts on faces of these (0.98.0) - and on theirs - that are not among them: they go where a box goes. And
+ *  those mated to them first (0.101.0), which go with them as well. */
 export function riders(parts: Part[], ids: string[]): Part[] {
   const moving = new Set<string>();
   for (const id of ids) {
@@ -75,7 +80,8 @@ export function riders(parts: Part[], ids: string[]): Part[] {
   for (let grew = true; grew;) {
     grew = false;
     for (const p of leaves) {
-      if (p.on && moving.has(p.on.part) && !moving.has(p.id)) {
+      const by = p.on?.part ?? p.mates?.[0]?.to.part;
+      if (by !== undefined && moving.has(by) && !moving.has(p.id)) {
         moving.add(p.id);
         out.push(p);
         grew = true;

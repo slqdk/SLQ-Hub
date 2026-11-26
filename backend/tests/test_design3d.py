@@ -1440,3 +1440,244 @@ def test_a_sketch_makes_parts(h3, tmp_path):
         assert a.get("on") == b.get("on") and a["at"] == pytest.approx(b["at"], abs=1e-9)
         assert a["rotate"] == pytest.approx(b["rotate"], abs=1e-9)
     assert out["volume"] == pytest.approx(h3.build_design(py).solid.volume(), rel=1e-9)
+
+
+# ---------------------------------------------------------------- mates (0.101.0)
+
+def mated_design(box_rotate) -> dict:
+    """A lid mated on a box (on its top, flush at its left and front), a round hole on the box's axis through it, a
+    pin in the hole 3 mm up from the box's bottom, an outline (copied in a row) against the box's front and a text on
+    the lid - the box as turned as `box_rotate`."""
+    return {"parts": [
+        {"id": "box", "shape": "box", "size": [60, 40, 30], "at": [3, -2, 25], "rotate": box_rotate},
+        {"id": "lid", "shape": "box", "size": [60, 40, 4], "at": [80, 10, 2], "mates": [
+            {"type": "coincident", "face": "bottom", "to": {"part": "box", "face": "top"}},
+            {"type": "coincident", "face": "left", "to": {"part": "box", "face": "left"}, "flip": True},
+            {"type": "coincident", "face": "front", "to": {"part": "box", "face": "front"}, "flip": True}]},
+        {"id": "hole", "shape": "cylinder", "size": [10, 10, 34], "hole": True, "sides": 48, "mates": [
+            {"type": "concentric", "to": "box"},
+            {"type": "distance", "face": "top", "to": {"part": "box", "face": "top"}, "flip": True, "mm": 2}]},
+        {"id": "pin", "shape": "cylinder", "size": [9, 9, 50], "at": [-60, -30, 4.5], "rotate": [90, 0, 0], "sides": 48,
+         "mates": [{"type": "concentric", "to": {"part": "hole"}},
+                   {"type": "distance", "face": "bottom", "to": {"part": "box", "face": "bottom"}, "mm": -3,
+                    "flip": True}]},
+        {"id": "tag", "shape": "outline", "size": [0, 0, 3], "at": [0, -60, 1.5], "repeat": {"count": 2, "step": [0, 0, 5]},
+         "points": [[0, 0], [20, 0], [20, 8], [0, 12]],
+         "mates": [{"type": "coincident", "face": "back", "to": {"part": "box", "face": "front"}}]},
+        {"id": "word", "shape": "text", "text": "SLQ", "size": [0, 8, 1], "mates": [
+            {"type": "coincident", "face": "bottom", "to": {"part": "lid", "face": "top"}}]},
+    ]}
+
+
+MATED_JS = """
+const out = input.designs.map((d) => {
+  const r = G.readDesign(JSON.stringify(d));
+  const b = G.build(r.design, { wasm, fonts, meshes: new Map() });
+  const text = G.writeDesign(r.design);
+  return { parts: r.design.parts, problems: r.problems, volume: b.volume, triangles: b.triangles.length / 3, text,
+           again: G.writeDesign(G.readDesign(text).design), join: G.JOIN };
+});
+process.stdout.write(JSON.stringify(out));
+"""
+
+
+def test_mated_parts_are_placed_and_built_the_same_in_both(h3):
+    """Mates (0.101.0): the editor and hub3d put each mated part in the same place - face on face, flush, so many mm
+    apart, axis on axis, after a part that is mated itself, on a box turned askew or not - and build the same solid.
+    Each face is on its plane (a solid's a hair into the solid it is on), each axis on its line; the file keeps each
+    mate on a line and reads back the same; parts mated face on face, turned askew, are one piece."""
+    pytest.importorskip("manifold3d")
+    designs = [mated_design([0, 0, 0]), mated_design([10, 20, 33])]
+    js = run_js(MATED_JS, {"designs": designs})
+    assert js[0]["join"] == h3.MATE_JOIN
+    for d, j in zip(designs, js):
+        py, problems = h3.read_design(json.dumps(d))
+        assert problems == [] and j["problems"] == []
+        for a, b in zip(py["parts"], j["parts"]):
+            assert a.get("mates") == b.get("mates")
+            for key in ("at", "rotate", "size"):
+                assert a[key] == pytest.approx(b[key], abs=1e-9), (a["id"], key, a[key], b[key])
+        solid = h3.build_design(py).solid
+        assert j["volume"] == pytest.approx(solid.volume(), rel=1e-9)
+        if d["parts"][0]["rotate"] == [0, 0, 0]:       # askew, the lid's sides flush with the box's - in one plane - may
+            assert j["triangles"] == len(solid.to_mesh().tri_verts)    # be cut into more triangles in one (measured)
+        assert j["again"] == j["text"]
+        assert ('{"type": "coincident", "face": "left", "to": {"part": "box", "face": "left"}, "flip": true}'
+                in j["text"])
+        assert '{"type": "concentric", "to": {"part": "hole"}}' in j["text"]
+        by = {p["id"]: p for p in py["parts"]}
+        for p in py["parts"]:
+            for m in p.get("mates", []):
+                q = by[m["to"]["part"]]
+                if m["type"] == "concentric":
+                    c, z = h3._mate_axis(p)
+                    qc, qz = h3._mate_axis(q)
+                    assert abs(np.dot(z, qz)) == pytest.approx(1, abs=1e-12)
+                    off = np.subtract(c, qc)                 # to the angles' millionth of a degree
+                    assert np.linalg.norm(off - np.dot(off, qz) * np.asarray(qz)) < 1e-6
+                    continue
+                pt, n = h3._mate_plane(p, m["face"])
+                qt, qn = h3._mate_plane(q, m["to"]["face"])
+                assert np.dot(n, qn) == pytest.approx(1 if m.get("flip") else -1, abs=1e-12), (p["id"], m)
+                want = m.get("mm", 0 if m.get("flip") or p.get("hole") or q.get("hole") else -h3.MATE_JOIN)
+                assert np.dot(np.subtract(pt, qt), qn) == pytest.approx(want, abs=1e-6), (p["id"], m)
+        assert by["lid"]["rotate"] == pytest.approx(d["parts"][0]["rotate"], abs=1e-6)     # turned as the box is
+        c, z = h3._mate_axis(by["pin"])
+        assert np.dot(np.subtract(h3._mate_plane(by["pin"], "bottom")[0], h3._mate_plane(by["box"], "bottom")[0]),
+                      h3._mate_plane(by["box"], "bottom")[1]) == pytest.approx(-3)        # 3 mm up from the bottom
+    plain = {p["id"]: p for p in js[0]["parts"]}
+    assert plain["lid"]["at"] == pytest.approx([3, -2, 42 - h3.MATE_JOIN]) and plain["lid"]["rotate"] == [0, 0, 0]
+    assert plain["hole"]["at"] == pytest.approx([3, -2, 25]) and plain["pin"]["at"] == pytest.approx([3, -2, 38])
+    assert plain["pin"]["rotate"] == pytest.approx([0, 0, 0], abs=1e-9)                  # stood up: its axis the hole's
+    assert plain["word"]["at"] == pytest.approx([0, 0, 44.5 - 2 * h3.MATE_JOIN])         # on the lid, where it was
+    # One piece: the lid on a box turned askew - not two, a face's rounding apart (the text and the plate are mated one
+    # way only: on the turned box they stay in the air where their at leaves them)
+    for rot in ([10, 20, 33], [37, -12, 81], [3, 2, 1]):
+        d = mated_design(rot)
+        d["parts"] = [p for p in d["parts"] if p["id"] in ("box", "lid")]
+        py, _ = h3.read_design(json.dumps(d))
+        m = h3.build_design(py).solid.to_mesh()
+        r = h3._analyse(np.asarray(m.vert_properties)[:, :3].astype(np.float64), np.asarray(m.tri_verts), "x",
+                        rests=False)
+        assert r.ok and r.parts == 1, (rot, r.parts)
+    assert "  mates     placed against other parts" in h3.DESIGN_GUIDE
+
+
+MATE_EDITS_JS = """
+const box = { id: "b", shape: "box", size: [60, 40, 30], at: [0, 0, 15], rotate: [0, 0, 0] };
+const lid = { id: "l", shape: "box", size: [60, 40, 4], at: [70, 0, 2], rotate: [0, 0, 0],
+  mates: [{ type: "coincident", face: "bottom", to: { part: "b", face: "top" } }] };
+const pin = { id: "p", shape: "cylinder", size: [4, 4, 10], at: [70, 30, 5], rotate: [0, 0, 0], sides: 32,
+  mates: [{ type: "coincident", face: "bottom", to: { part: "l", face: "top" } }] };
+const get = (ps, id) => { for (const p of ps) { if (p.id === id) return p; const q = p.parts && get(p.parts, id); if (q) return q; } };
+const edit = (ps, id, fn) => ps.map((p) => (p.id === id ? fn(p) : p.parts ? { ...p, parts: edit(p.parts, id, fn) } : p));
+const step = (ps, id, fn, said) => G.settle(edit(ps, id, fn), said, ps);
+const out = {};
+const cur = G.settle([box, lid, pin]);
+out.placed = [get(cur, "l"), get(cur, "p")];
+out.again = G.settle(cur) === cur || JSON.stringify(G.settle(cur)) === JSON.stringify(cur);
+const moved = step(cur, "b", (p) => G.transformPart(p, [0, 0, 0], [10, 5, 0], null));
+out.boxMoved = [get(moved, "l"), get(moved, "p")];
+const turned = step(cur, "b", (p) => G.transformPart(p, p.at, [0, 0, 0], G.rotation([0, 0, 90])));
+out.boxTurned = [get(turned, "l"), get(turned, "p")];
+out.boxGrown = get(step(cur, "b", (p) => ({ ...p, size: [80, 40, 40], at: [0, 0, 20] })), "l");
+out.lidMoved = get(step(cur, "l", (p) => G.transformPart(p, [0, 0, 0], [-5, 3, 10], null)), "l");
+out.lidSpun = get(step(cur, "l", (p) => G.transformPart(p, p.at, [0, 0, 0], G.rotation([0, 0, 30]))), "l");
+out.lidTipped = get(step(cur, "l", (p) => G.transformPart(p, p.at, [0, 0, 0], G.rotation([20, 0, 0]))), "l");
+out.both = get(G.settle(cur.map((p) => G.transformPart(p, [0, 0, 0], [7, 7, 7], null)), undefined, cur), "l");
+const said = [];
+out.gone = get(G.settle(cur.filter((p) => p.id !== "b"), said, cur), "l");
+out.said = said;
+// a mate the others leave no room for: said, kept, the part where the others put it
+const over = [];
+out.over = get(step(cur, "l", (p) => ({ ...p, mates: [...p.mates, { type: "coincident", face: "top", to: { part: "b", face: "bottom" } }] }), over), "l");
+out.overSaid = over;
+// what goes with what: riders, copies, which way round
+const tree = [{ id: "g", shape: "group", size: [0, 0, 0], at: [0, 0, 0], rotate: [0, 0, 0], parts: [box] }, lid, pin];
+out.riders = T.riders(tree, ["g"]).map((p) => p.id);
+out.copies = T.onCopies([{ ...lid, id: "l2" }, { ...pin, id: "p2" }], new Map([["l", "l2"]])).map((p) => p.mates[0].to.part);
+out.placedBy = [G.placedBy(cur, "p", "b"), G.placedBy(cur, "b", "p"), G.placedBy(cur, "l", "p")];
+// what a click picks to mate
+const cyl = { id: "c", shape: "cylinder", size: [10, 10, 20], at: [0, 0, 10], rotate: [90, 0, 30], sides: 64 };
+const tb = { ...box, rotate: [0, 0, 30], mirror: true };
+const f = G.matePlane(tb, "left");
+const txt = { id: "t", shape: "text", text: "A", size: [0, 10, 2], at: [0, 0, 1], rotate: [0, 0, 0] };
+const wedge = { id: "w", shape: "wedge", size: [20, 10, 10], at: [0, 0, 5], rotate: [0, 0, 0] };
+const s2 = Math.SQRT1_2;
+out.clicks = [G.mateAt(tb, f.point, f.normal), G.mateAt(tb, f.point, [0, 0, 1]),
+  G.mateAt(cyl, G.matePlane(cyl, "top").point, G.matePlane(cyl, "top").normal),
+  G.mateAt(cyl, G.fromPart(cyl, [5, 0, 3]), G.matePlane(cyl, "right").normal),
+  G.mateAt(txt, [0, 0, 2], [0, 0, 1]), G.mateAt(txt, [0, 0, 1], [1, 0, 0]),
+  G.mateAt(wedge, [0, 0, 5], [s2, 0, s2]), G.mateAt({ ...cyl, shape: "sphere" }, [0, 0, 0], [0, 0, 1]),
+  G.mateAt({ ...cyl, hole: true }, G.fromPart(cyl, [0, 5, -2]), [0, 0, -1])];
+out.marks = [G.mateMark(box, "top"), G.mateMark(cyl)];
+const r = G.readDesign(JSON.stringify({ parts: [box, lid, pin] }));
+out.text = G.writeDesign(r.design);
+process.stdout.write(JSON.stringify(out));
+"""
+
+
+def test_a_mated_part_goes_with_what_it_is_mated_to(tmp_path):
+    """In the editor (0.101.0): a box moved or turned takes the parts mated to it along - and theirs; grown, they only
+    move as their mates need; a mated part moved slides along its face, turned keeps its turn about it and nothing
+    else; moved together nothing moves twice; the box gone, its mates are left out. A mate the others leave no room
+    for is said and kept. Riders, copies and Mate's clicks know mates."""
+    out = run_js(f"import * as T from {node_module(tmp_path, 'tree.ts')};\n" + MATE_EDITS_JS, {})
+    j = 1e-5
+    lid, pin = out["placed"]
+    assert lid["at"] == pytest.approx([70, 0, 32 - j]) and pin["at"] == pytest.approx([70, 30, 39 - 2 * j])
+    assert out["again"]
+    lid, pin = out["boxMoved"]
+    assert lid["at"] == pytest.approx([80, 5, 32 - j]) and pin["at"] == pytest.approx([80, 35, 39 - 2 * j])
+    lid, pin = out["boxTurned"]
+    assert lid["at"] == pytest.approx([0, 70, 32 - j]) and lid["rotate"] == pytest.approx([0, 0, 90])
+    assert pin["at"] == pytest.approx([-30, 70, 39 - 2 * j]) and pin["rotate"] == pytest.approx([0, 0, 90])
+    assert out["boxGrown"]["at"] == pytest.approx([70, 0, 42 - j])                    # not taken along: only mated
+    assert out["lidMoved"]["at"] == pytest.approx([65, 3, 32 - j])                    # slid on the top
+    assert out["lidSpun"]["rotate"] == pytest.approx([0, 0, 30]) and out["lidSpun"]["at"] == pytest.approx([70, 0, 32 - j])
+    assert out["lidTipped"]["rotate"] == pytest.approx([0, 0, 0], abs=1e-6)          # back flat on the top
+    assert out["lidTipped"]["at"][2] == pytest.approx(32 - j)
+    assert out["both"]["at"] == pytest.approx([77, 7, 39 - j])
+    assert "mates" not in out["gone"] and out["gone"]["at"] == pytest.approx([70, 0, 32 - j])
+    assert out["said"] == ['l: mate 1 names "b", which the design does not have - left out.']
+    assert len(out["over"]["mates"]) == 2 and out["over"]["at"] == pytest.approx([70, 0, 32 - j])
+    assert out["overSaid"] == ["l: mate 2 (coincident to b) cannot be met as well as the ones before it - 34 mm off; "
+                               "skipped."]
+    assert out["riders"] == ["l", "p"] and out["copies"] == ["b", "l2"]
+    assert out["placedBy"] == [True, False, False]
+    face, wrong, top, side, text_top, text_side, slope, ball, hole_side = out["clicks"]
+    assert face == {"face": "left"} and wrong is None and top == {"face": "top"} and side == {}
+    assert text_top == {"face": "top"} and text_side is None and slope is None and ball == {} and hole_side == {}
+    outline, axis = out["marks"]
+    assert outline == [[-30, -20, 30], [30, -20, 30], [30, 20, 30], [-30, 20, 30], [-30, -20, 30]] and len(axis) == 2
+    assert '"mates": [\n        {"type": "coincident", "face": "bottom", "to": {"part": "b", "face": "top"}}\n      ]' in out["text"]
+
+
+ODD_MATES = {"parts": [
+    {"id": "b", "shape": "box", "size": [40, 20, 10], "at": [0, 0, 5]},
+    {"id": "g", "shape": "group", "parts": [{"id": "gi", "shape": "box", "at": [50, 0, 10]}], "mates": []},
+    {"id": "m1", "shape": "box", "mates": {"type": "coincident"}},
+    {"id": "m2", "shape": "box", "mates": [5, {"type": "parallel", "to": "b"}, {"type": 3, "to": "b"}, {"to": 7},
+                                           {"face": "top"}]},
+    {"id": "m3", "shape": "box", "mates": [
+        {"type": "coincident", "face": "side", "to": {"part": "b", "face": "top"}},
+        {"type": "concentric", "face": "top", "to": {"part": "b", "face": "top", "x": 1}, "mm": 3},
+        {"type": "coincident", "face": "bottom", "to": {"part": "b", "face": "top"}, "mm": 2, "flip": "yes", "extra": 1},
+        {"type": "distance", "face": "bottom", "to": {"part": "b", "face": "top"}, "mm": False}]},
+    {"id": "m4", "shape": "box", "mates": [{"type": "concentric", "to": "nope"}, {"type": "concentric", "to": "m4"},
+                                           {"type": "concentric", "to": "g"}, {"type": "concentric", "to": "m5"}]},
+    {"id": "m5", "shape": "box", "at": [0, 0, 40], "mates": [{"type": "concentric", "to": "m4"}]},
+    {"id": "m6", "shape": "box", "on": {"part": "b", "face": "top"}, "mates": [{"type": "concentric", "to": "b"}]},
+    {"id": "tt", "shape": "text", "text": "A", "size": [0, 8, 1],
+     "mates": [{"type": "coincident", "face": "left", "to": {"part": "b", "face": "top"}}]},
+    {"id": "m7", "shape": "box", "mates": [{"type": "coincident", "face": "top", "to": {"part": "tt", "face": "right"}},
+                                           {"type": "coincident", "face": "Top", "to": {"part": "tt", "face": "TOP"}}]},
+    {"id": "m8", "shape": "box", "size": [4, 4, 4], "at": [30, 30, 2],
+     "mates": [{"face": "front", "to": {"part": "b", "face": "back"}, "mm": 3}]},
+]}
+
+
+def test_both_read_mates_the_same_and_say_the_same(h3):
+    """What makes no sense in "mates" is left out, said the same in the editor and hub3d: not a list, not an object,
+    no such type, no part, faces missing, keys that are not a mate's, a mate to a part not there, to itself, to a
+    group, round in a circle (the first one left out), to a text's side that follows its letters; with "on" too."""
+    js = run_js("const r = G.readDesign(JSON.stringify(input)); "
+                "process.stdout.write(JSON.stringify({parts: r.design.parts, problems: r.problems}));", ODD_MATES)
+    py, problems = h3.read_design(json.dumps(ODD_MATES))
+    assert [x.rstrip(".") for x in js["problems"]] == problems, (js["problems"], problems)
+    assert [x.split(":")[0] for x in problems] == (["g", "m1"] + ["m2"] * 5 + ["m3"] * 7 + ["m6", "tt"] + ["m4"] * 4
+                                                   + ["m7"])
+    assert 'm2: mate 2: no type "parallel" - the types: coincident, distance, concentric; left out' in problems
+    assert "m4: mate 4 leads round in a circle: m5 is placed by m4 - left out" in problems
+    assert ("m7: mate 1 is to the right of tt, a text whose size there follows its letters (mate another face) - left "
+            "out") in problems
+    for a, b in zip(flat(py["parts"]), flat(js["parts"])):
+        assert a.get("mates") == b.get("mates") and a["at"] == pytest.approx(b["at"]) and a["rotate"] == pytest.approx(b["rotate"])
+    by = {p["id"]: p for p in py["parts"]}
+    assert by["m3"]["mates"] == [{"type": "concentric", "to": {"part": "b"}},
+                                 {"type": "coincident", "face": "bottom", "to": {"part": "b", "face": "top"}},
+                                 {"type": "distance", "face": "bottom", "to": {"part": "b", "face": "top"}, "mm": 0}]
+    assert by["m5"]["mates"] == [{"type": "concentric", "to": {"part": "m4"}}] and "mates" not in by["m4"]
+    assert "mates" not in by["m6"] and "mates" not in by["tt"] and "mates" not in by["g"]
+    assert by["m8"]["mates"][0]["type"] == "distance" and by["m8"]["at"] == [30, 15, 2]      # its type: from mm
+    assert by["m7"]["at"] == pytest.approx([0, 0, 11 - h3.MATE_JOIN]) and by["m7"]["rotate"] == [180, 0, 0]   # on its top

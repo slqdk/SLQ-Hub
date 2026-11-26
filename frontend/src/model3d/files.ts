@@ -42,7 +42,8 @@ export function inFolder(path: string, folder: { kind: "chat" | "project"; id: n
 }
 
 /** A length as the editor shows it: at most two decimals (one from 100 mm), no trailing zeros. */
-export const fmt = (v: number): string => (Math.abs(v) >= 100 ? v.toFixed(1) : v.toFixed(2)).replace(/\.?0+$/, "") || "0";
+export const fmt = (v: number): string => (Math.abs(v) >= 100 ? v.toFixed(1) : v.toFixed(2)).replace(/\.?0+$/, "")
+  .replace(/^-0$/, "0") || "0";                          // a hair below 0 is 0, not -0
 
 /** Which way a face looks, in words. */
 export function facing(n: [number, number, number]): string {
