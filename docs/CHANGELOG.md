@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.92.1 - 2026-11-26
+
+- The model menus under the message box show only the models' names: the
+  grey line under each (loaded or not, a picture model's description) is
+  gone. The default picture model is named on its line ("The default:
+  FLUX.2 [klein] 9B (U)").
+
 ## 0.92.0 - 2026-11-26
 
 - Letters apart, in the 3D editor's Text tab: a text becomes one part per

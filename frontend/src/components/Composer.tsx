@@ -452,15 +452,14 @@ export function Composer({ running, onSend, onStop, settings, onSettings, models
                 <button key={m.id} className="menu-item" role="menuitemradio" aria-checked={m.id === model?.id}
                   onClick={() => { onSettings({ model: m.id }); close(); }}>
                   {m.id === model?.id ? <Check size={15} /> : m.kind === "cloud" ? <Cloud size={15} /> : <Cpu size={15} />}
-                  <span>{m.name}<small>{m.kind === "cloud" ? "In the cloud: your card stays free, no review"
-                    : m.loaded ? "Loaded now" : "Switching to it takes a moment"}</small></span>
+                  <span>{m.name}</span>
                 </button>
               ))}
             </>
           )}
         </MenuButton>}
         {!simple && (pictureModels.length > 1 || loras.length > 0) && (
-          <MenuButton up label={<><ImageIcon size={15} /> <span className="ellipsis chip-picture hide-narrow">{picture?.name ?? "Pictures"}
+          <MenuButton up menuClassName="wide" label={<><ImageIcon size={15} /> <span className="ellipsis chip-picture hide-narrow">{picture?.name ?? "Pictures"}
             {lorasOn.length ? ` + ${lorasOn.length} LoRA${lorasOn.length > 1 ? "s" : ""}` : ""}</span></>}
             title={`Model for pictures: ${picture?.name ?? "none"}${lorasOn.length ? `, with ${lorasOn.map((l) => `${l.name} (${strengthOf(l)})`).join(", ")}` : ""}${unfitOn.length ? `; not used with it: ${unfitOn.map((l) => l.name).join(", ")}` : ""}`}>
             {(close) => (
@@ -469,12 +468,12 @@ export function Composer({ running, onSend, onStop, settings, onSettings, models
                 <button className="menu-item" role="menuitemradio" aria-checked={settings.image_model == null}
                   onClick={() => { onSettings({ image_model: null }); close(); }}>
                   {settings.image_model == null ? <Check size={15} /> : <span style={{ width: 15 }} />}
-                  <span>The default<small>{pictureDefaultName}</small></span></button>
+                  <span>The default: {pictureDefaultName}</span></button>
                 {pictureModels.map((m) => (
                   <button key={m.id} className="menu-item" role="menuitemradio" aria-checked={settings.image_model === m.id}
                     onClick={() => { onSettings({ image_model: m.id }); close(); }}>
                     {settings.image_model === m.id ? <Check size={15} /> : <ImageIcon size={15} />}
-                    <span>{m.name}<small>{m.description?.split(". ")[0]}</small></span>
+                    <span>{m.name}</span>
                   </button>
                 ))}
                 {loras.length > 0 && <>

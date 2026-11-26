@@ -4,7 +4,14 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## Next session - start here (written 2026-11-26, at 0.92.0)
+## Next session - start here (written 2026-11-26, at 0.92.1)
+
+**0.92.1 (2026-11-26): the model menus without their grey lines - pushed, not yet installed.** Søren, 08:12, with
+screenshots of the picture and chat model menus: "Fjern den grå text under hver model navn. Den forvirre bare." The
+chat model menu (Composer) shows only the names (no "Loaded now" / "Switching to it takes a moment" / the cloud note),
+the picture menu only the names (no description's first sentence), its first line "The default: <name>", the menu
+wide enough (320 px) to keep that on one line. The LoRAs' lines (trigger word, strength, slider) are left as they were.
+Seen in the dev server at 1280 px; not on his screens.
 
 **0.92.0 (2026-11-26): pick first, then change - single letters, several parts, edges - pushed, not yet installed.**
 Søren, 07:23, on the Part tab of the name plate: "Er det ikke muligt at vælge et enkelt bogstav og ændre på det ? altså
