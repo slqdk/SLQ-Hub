@@ -4,7 +4,14 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## Next session - start here (written 2026-11-27, at 0.102.0)
+## Next session - start here (written 2026-11-27, at 0.102.1)
+
+**0.102.1 (2026-11-27): you see a distance being made - pushed, not yet installed.** Søren, 08:05, with 0.102.0 on
+the card (a Ø20.59 circle at 40 and 70 from his shape's sides): "Vis gerne en streg når man klikker første målepunkt i
+smart dimention ... så man kan se at man er i gang med at måle". Built: after Dimension's first click a red line runs
+from the shape to the pointer; over a side it can go to, the distance it would make shows with its mm and the side
+lights amber (marks now drawn in the order given - the amber was under the shape's blue). Seen in the dev server:
+the line on the way, then "22" over the top side, the side amber, the click making it - no console errors.
 
 **0.102.0 (2026-11-27): distances in a sketch - pushed, not yet installed.** Søren, 06:52, a circle in a freehand
 shape with two red lines to its sides: "i need to be able to set distances in mm (the red lines)". Built (DESIGN §8

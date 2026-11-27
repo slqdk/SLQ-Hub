@@ -290,7 +290,7 @@ export class Viewport {
     disposeGroup(this.marks);
     this.lineMats = [];
     const w = Math.max(1, this.host.clientWidth), h = Math.max(1, this.host.clientHeight);
-    for (const m of list) {
+    for (const [n, m] of list.entries()) {
       const pos: number[] = [];
       for (const line of m.lines) for (let i = 0; i + 1 < line.length; i++) pos.push(...line[i], ...line[i + 1]);
       if (!pos.length) continue;
@@ -304,8 +304,8 @@ export class Viewport {
         transparent: true, opacity: m.hover ? 0.85 : 0.95 });
       mat.resolution.set(w, h);
       const seg = new LineSegments2(g, mat);
-      seg.renderOrder = 7;
-      this.marks.add(seg);
+      seg.renderOrder = 7 + n / 1000;                  // a later one over an earlier (0.102.1: a side pointed at over
+      this.marks.add(seg);                             // its shape's line - not left to the see-through sort)
       this.lineMats.push(mat);
     }
     this.render();

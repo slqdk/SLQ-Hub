@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.102.1 - 2026-11-27
+
+- Sketch, Dimension: after the first click a red line follows the pointer,
+  so you can see a distance is being made; over a side it can be measured
+  to, the distance it would make is shown with its mm and the side lights
+  up.
+
 ## 0.102.0 - 2026-11-27
 
 - Sketch: set distances in mm, as SolidWorks' Smart Dimension. Pick

@@ -33,7 +33,7 @@ import { parseMesh } from "./meshio";
 import { lastPrinter, PRINTERS, printerOf, rememberPrinter, type Printer } from "./printers";
 import { centre, copy, cuts, cutters, find, group, insertAfter, label, onCopies, pick, remove, replaceWith, riders, ungroup,
   update } from "./tree";
-import { dimAt, dimsWithout, distanceTo, loopOf, measure, planeFrame, planeName, rayOnPlane, setDim, sideAt, sketchParts,
+import { dimAt, dimsWithout, distanceTo, loopOf, measure, middleOf, planeFrame, planeName, rayOnPlane, setDim, sideAt, sketchParts,
   sketchRegions, snapPoints, strokesOf, to3d, type PlaneFrame, type SketchDim, type SketchPlane,
   type SketchShape } from "./sketch";
 import { Viewport, type Hit, type ViewName } from "./Viewport";
@@ -267,8 +267,8 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
   const [sketch, setSketch] = useState<SketchState | null>(null);
   const sketchRef = useRef<SketchState | null>(null);
   sketchRef.current = sketch;
-  const [hoverPt, setHoverPt] = useState<{ p: Point2; snapped: boolean } | null>(null);
-  const hoverRef = useRef<{ p: Point2; snapped: boolean } | null>(null);
+  const [hoverPt, setHoverPt] = useState<{ p: Point2; snapped: boolean; raw?: Point2 } | null>(null);
+  const hoverRef = useRef<{ p: Point2; snapped: boolean; raw?: Point2 } | null>(null);
   hoverRef.current = hoverPt;
   const [sketchMake, setSketchMake] = useState<SketchMake>({ height: 5, through: true, depth: 5 });
   // The parts' tree over the view (0.96.1): open or folded, kept for next time - folded at first on a phone.
@@ -690,7 +690,7 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
       const sh = sketch.picked !== null ? sketch.shapes[sketch.picked] : null;
       if (sh?.kind === "rect") words.push({ at: mid(sh.a, sh.b), text: `${fmt(Math.abs(sh.b[0] - sh.a[0]))} x ${fmt(Math.abs(sh.b[1] - sh.a[1]))}` });
       if (sh?.kind === "circle") words.push({ at: to3d(f, sh.c), text: `Ø${fmt(2 * sh.r)}` });
-      if (to) words.push({ at: to3d(f, to), text: "", kind: hoverPt?.snapped ? "snap" : "dot" });
+      if (to && sketch.tool !== "dim") words.push({ at: to3d(f, to), text: "", kind: hoverPt?.snapped ? "snap" : "dot" });
       // Distances (0.102.0): red, square to their lines - an extension along the line when it ends short of the foot -
       // their mm at the middle; the picked one wider, what is typed beside it.
       const dimLines: Vec3[][] = [], dimPicked: Vec3[][] = [];
@@ -709,6 +709,30 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
       });
       if (dimLines.length) list.push({ lines: dimLines, tone: "fault", width: 1.5 });
       if (dimPicked.length) list.push({ lines: dimPicked, tone: "fault", width: 3 });
+      // Being made (0.102.1 - Søren: "Vis gerne en streg når man klikker første målepunkt ... så man kan se at man er i
+      // gang med at måle"): over a side it can go to, the distance it would make and that side; else a line from the
+      // shape - a circle's edge toward the pointer, another's middle - to the pointer.
+      const first = d?.kind === "dim" ? sketch.shapes[d.shape] : null;
+      if (d?.kind === "dim" && first && hoverPt) {
+        const raw = hoverPt.raw ?? hoverPt.p;
+        const side = sideAt(sketch.shapes, f, raw, 8 * v.mmPerPx(to3d(f, raw)), d.shape);
+        const m = side ? measure(sketch.shapes, f, { shape: d.shape, to: side }) : null;
+        if (m) {
+          const lines = [w3([m.from, m.foot])];
+          const t = (m.foot[0] - m.a[0]) * (m.b[0] - m.a[0]) + (m.foot[1] - m.a[1]) * (m.b[1] - m.a[1]);
+          if (t < 0) lines.push(w3([m.a, m.foot]));
+          else if (t > (m.b[0] - m.a[0]) ** 2 + (m.b[1] - m.a[1]) ** 2) lines.push(w3([m.b, m.foot]));
+          list.push({ lines, tone: "fault", width: 2 }, { lines: [w3([m.a, m.b])], hover: true });
+          words.push({ at: mid(m.from, m.foot), text: fmt(m.value), kind: "dim" });
+        } else {
+          let start = middleOf(first);
+          if (first.kind === "circle") {
+            const gx = raw[0] - first.c[0], gy = raw[1] - first.c[1], gl = Math.hypot(gx, gy);
+            if (gl > first.r) start = [first.c[0] + (gx / gl) * first.r, first.c[1] + (gy / gl) * first.r];
+          }
+          list.push({ lines: [w3([start, raw])], tone: "fault", width: 1.5 });
+        }
+      }
       if (sketch.typed && to && sketch.dim === null) words.push({ at: to3d(f, to), text: `${sketch.typed}|`, kind: "typed" });
     } else if (design) {
       for (const [id, edges] of Object.entries(edgeSel)) {
@@ -1357,8 +1381,9 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
       const x = e.clientX, y = e.clientY;
       cancelAnimationFrame(hoverFrame.current);
       hoverFrame.current = requestAnimationFrame(() => {
-        const at = sketchAt(x, y);
-        setHoverPt((cur) => (at && cur && cur.snapped === at.snapped && cur.p[0] === at.p[0] && cur.p[1] === at.p[1] ? cur : at));
+        const at = sketchAt(x, y), measuring = sketchRef.current?.draft?.kind === "dim";   // a distance being made
+        setHoverPt((cur) => (at && cur && cur.snapped === at.snapped && cur.p[0] === at.p[0] && cur.p[1] === at.p[1]
+          && !(measuring && (cur.raw?.[0] !== at.raw[0] || cur.raw?.[1] !== at.raw[1])) ? cur : at));
       });
       return;
     }

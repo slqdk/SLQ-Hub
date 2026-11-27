@@ -3464,7 +3464,12 @@ into the Hub, Tinkercad's level, his printer a Bambu Lab P2S but chosen per desi
     to shapes and distances); Pick picks one by its line or its mm (before the shapes), Delete takes it away (the
     shape stays). A distance is what the shapes are when it is set, not a constraint: a shape changed afterwards
     leaves the shape it was set for where it is (its mm shown as they are). The left button draws with Dimension,
-    so a drag from the shape to the line makes one too. Found with it: the editor's fallback for keys with nothing
+    so a drag from the shape to the line makes one too. Being made (0.102.1 - Søren, 08:05: "Vis gerne en streg når
+    man klikker første målepunkt i smart dimention, så man kan se at man er i gang med at måle"): after the first
+    click a red line runs from the shape (a circle's edge toward the pointer, another shape's middle) to the pointer;
+    over a side it can go to, the distance it would make is drawn instead, with its mm, and the side lights amber.
+    Marks are drawn in the order given, a later one over an earlier (`setMarks` renderOrder) - before, the
+    see-through sort put a side's amber under its shape's blue. Found with it: the editor's fallback for keys with nothing
     focused (0.97.0) handled a key again when the editor's own handling took the focused button away - a Delete on a
     picked distance deleted its shape too; it now leaves keys the editor took (`defaultPrevented`).
   - **Not yet**: arcs, splines, relations (horizontal, parallel...), distances kept as constraints, between two
