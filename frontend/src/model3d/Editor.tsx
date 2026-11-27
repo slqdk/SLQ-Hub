@@ -2371,11 +2371,6 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
               <Tool icon={<ViewIcon face="right" />} title="From the right" onClick={() => view("right")}><span>Right</span></Tool>
             </div>
           </div>
-          {tool && <div className="v3d-hint">{tool === "face" ? "Click the face it should lie on - a text's letters on it, upright on a wall. Esc leaves it where it is."
-            : tool === "mate" ? mateHint(mating, parts)
-            : tool === "point" ? "Click the spot on the model to send it to the chat. Esc stops."
-            : tool === "edge" ? "Click lines to pick them - again to unpick - then Fillet, Chamfer, Take off or Resize above. Esc stops."
-              : "Click the face that should lie on the plate. Esc stops."}</div>}
         </div>
         {(failed || !ready || status === "loading") && <div className="v3d-overlay">{failed ?? "Loading the 3D editor"}</div>}
         <div className="v3d-status num">
@@ -3255,18 +3250,6 @@ function OnFaceGroup({ part, box, change, depth }: { part: Part; box: Part; chan
       </Stack>
     </Grp>
   );
-}
-
-/** What Mate says over the view (0.101.0): which click is next. */
-function mateHint(mating: { part: string; face?: FaceName } | null, parts: Part[]): string {
-  if (!mating) {
-    return "Click a face of the part that moves - a round part's side, for its axis - then the face of the part it goes"
-      + " against. Esc stops.";
-  }
-  const p = find(parts, mating.part)?.part;
-  const name = p ? label(p) : mating.part;
-  return mating.face ? `The ${mating.face} of ${name}: now click the face it goes against - on another part. Esc stops.`
-    : `The axis of ${name}: now click the round side (a cylinder, a cone, a round hole) whose axis it goes on. Esc stops.`;
 }
 
 /** Mates (0.101.0, SolidWorks' Mate): Mate - two clicks - and the part's mates in a menu, each with its faces, how far

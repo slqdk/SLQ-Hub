@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.105.1 - 2026-11-27
+
+- 3D editor: the blue bars with instructions over the view are gone in
+  every tool - Mate, Pick edges, Lay flat, On a face and Point at - as in
+  the sketch. Esc still stops each tool.
+
 ## 0.105.0 - 2026-11-27
 
 - The assistant is told when a check gives back exactly the same result

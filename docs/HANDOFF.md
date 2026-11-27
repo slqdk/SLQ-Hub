@@ -4,7 +4,12 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## Next session - start here (written 2026-11-27, at 0.105.0)
+## Next session - start here (written 2026-11-27, at 0.105.1)
+
+**0.105.1 (2026-11-27): no blue bars in the 3D editor - pushed, not yet installed.** Søren, 11:20, asked whether the
+tools' bars should go as the sketch's did: "alle blå bjælker skal fjernes". Built: the bar over the view is gone for
+Mate, Pick edges, Lay flat, On a face and Point at (`mateHint` and `.v3d-hint` with it); the ribbon's own tips and
+the status line stay. Checks: tsc, vite build, pytest, shellcheck. Not seen in a browser (removed elements only).
 
 **0.105.0 (2026-11-27): the same after a change; hub3d format whole; no hand-over to a smaller model; no blue bar in
 the sketch - pushed, not yet installed.** Søren, 11:03, to the rest of chat 335's findings: "ja gør det.." - and 11:09,
@@ -16,10 +21,10 @@ turn is stuck. `hub3d format`/`hub3d recipe` come through whole up to 24,000 cha
 turn is not handed to a smaller model (`Catalog.strength`: a mixture counts as the geometric mean of all and active
 parameters, so Qwen3.6 35B-A3B still hands over to Qwen3.8 27B); Settings shows sizes beside the names - his
 escalate_to (Qwen3.5 Special, 9B) is now ignored under gemma 4 31B: he should pick another there. The sketch's
-instruction bar is gone (the keys and typing are in Help); the tools' bars (Mate, Pick edges, Lay flat, Point at) stay
-- asked him. Tests: test_agent_guards.py (the reference whole and another command shortened, the note twice and the
-third time an answer, a smaller target not offered, the sizes). Not seen: a real model getting the note; the editor
-without the bar in a browser (a removed element; tsc, build).
+instruction bar is gone (the keys and typing are in Help); the tools' bars went in 0.105.1. Tests:
+test_agent_guards.py (the reference whole and another command shortened, the note twice and the third time an answer,
+a smaller target not offered, the sizes). Not seen: a real model getting the note; the editor without the bar in a
+browser (a removed element; tsc, build).
 
 Next he asked for: statistics over the Hub's users - chats started, minutes, cost in kr.
 

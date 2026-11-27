@@ -1504,8 +1504,6 @@ div.tests-result-head { cursor: default; }
   padding: 10px 14px; border-radius: 8px; background: var(--sheet); box-shadow: var(--shadow); color: var(--ink-2);
   font-size: 14px; text-align: center; pointer-events: none; }
 .panel-3d > .v3d-overlay { top: 40%; }
-.v3d-hint { max-width: 90%; padding: 6px 12px;
-  border-radius: 6px; background: var(--act); color: var(--act-ink); font-size: 13.5px; pointer-events: none; }
 .v3d-status { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 14px; padding: 3px 10px; border-top: 1px solid var(--rule-2);
   font-size: 13px; color: var(--ink-2); }
 .v3d-status .btn.small { height: 24px; padding: 0 6px; font-family: var(--font); font-weight: 400; font-size: 13px; }

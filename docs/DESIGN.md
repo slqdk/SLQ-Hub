@@ -3460,7 +3460,8 @@ into the Hub, Tinkercad's level, his printer a Bambu Lab P2S but chosen per desi
     (`Viewport.setLeft`). The empty design's "Add a shape from Insert above..." over the plate is gone (Søren: "remove
     the text on the plate.. it is in the way") - the status line says "Nothing to print yet". So is the blue bar of
     what to do next under the pill (0.105.0, Søren, 11:09: "fjern den blå bjælke med instruktioner"): the keys and
-    typing are in Help. The pointer's ray meets the plane
+    typing are in Help - and in 0.105.1 the tools' bars too, Mate's, Pick edges', Lay flat's, On a face's and Point
+    at's (Søren, 11:20: "alle blå bjælker skal fjernes"); Esc still stops each. The pointer's ray meets the plane
     (`rayOnPlane`); the point snaps to a corner, end or middle within 10 px (a face's corners, edge middles and middle
     too), else to the whole millimetre - on a face from its lower left corner, so distances from its edges come out
     whole. Typed while drawing, as SketchUp's Measurements box: a line's next length toward the pointer (a whole 15°
