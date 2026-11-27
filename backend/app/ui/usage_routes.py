@@ -1,5 +1,5 @@
-"""Settings -> Usage (0.24.0): who used how much of the card - answers, tokens, energy, cost - and the card's
-power now. The owner's only."""
+"""Settings -> Usage (0.24.0): who used how much of the card - chats started (0.106.0), answers, tokens, time on the
+card, energy, cost - and the card's power now. The owner's only."""
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request
@@ -31,5 +31,6 @@ async def get_usage(request: Request, period: str = "month"):
     power = None
     if meter is not None and meter.power is not None:
         power = {"now_w": meter.power, "cap_w": meter.cap, "source": meter.source}
-    return {"period": period, "since": usage.first_day(period), "price_per_kwh": usage.price(hub),
+    since, until = usage.bounds(period)
+    return {"period": period, "since": since, "until": until, "price_per_kwh": usage.price(hub),
             "other_watts": float(hub.settings.get("costs", "other_watts") or 0), "power": power, "rows": rows}

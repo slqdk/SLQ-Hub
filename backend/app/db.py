@@ -334,6 +334,18 @@ _M008_USAGE = """
 """
 
 
+# Chats started (0.106.0, Søren: "statistik over brugere i hubben (antal chats started, antal minutter, og kosten i
+# kr)"): counted per day and who with the rest of the usage. once_done: one-time jobs the Hub has done (the chats
+# started before 0.106.0, counted from their first answers).
+_M009_CHATS = """
+        ALTER TABLE usage_daily ADD COLUMN chats INTEGER NOT NULL DEFAULT 0;
+        CREATE TABLE once_done (
+            name    TEXT PRIMARY KEY,
+            done_at TEXT NOT NULL
+        );
+"""
+
+
 MIGRATIONS = [
     (1, _M001_CORE),
     (2, _M002_LIBRARIES),
@@ -343,6 +355,7 @@ MIGRATIONS = [
     (6, _M006_CHAT_PERMISSIONS),
     (7, _M007_TESTS),
     (8, _M008_USAGE),
+    (9, _M009_CHATS),
 ]
 
 

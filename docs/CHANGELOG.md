@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.106.0 - 2026-11-27
+
+- Settings, Usage: how many chats each one started - you and each
+  person - beside their answers, minutes on the card and cost in kr. Your
+  chats from before are counted from the ones still in the Hub.
+- Usage shows the time on the card in minutes, and has a Last month period
+  beside Today, This month and All time.
+
 ## 0.105.1 - 2026-11-27
 
 - 3D editor: the blue bars with instructions over the view are gone in

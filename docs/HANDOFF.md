@@ -4,7 +4,19 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## Next session - start here (written 2026-11-27, at 0.105.1)
+## Next session - start here (written 2026-11-27, at 0.106.0)
+
+**0.106.0 (2026-11-27): chats started in Settings -> Usage; minutes; last month - pushed, not yet installed.** Søren,
+11:03: "Bagefter skal vi lave noget statistik over brugere i hubben. (antal chats started, antal minutter, og kosten i
+kr)". Settings -> Usage had the owner and every person as rows already, with their time on the card and cost; built
+(DESIGN §3 Chats started): `usage_daily.chats` (migration 9), counted at a chat's first answer - the owner's by its
+run count, a person's when the conversation from her device has no answer yet; a moved chat takes it along; the
+owner's chats from before counted once at start from those still here (`count_old_chats`, `once_done`). The page:
+a Chats column, the time on the card in minutes (`worked`), and a Last month period. Tests: the owner's two chats
+(one with two answers) and her first answer counted, not her second; last month apart from this month; the page's
+period; the old chats counted once. Not seen: the page in a browser; the count from his real database at start.
+Open to him: whether "minutter" should be the card's time (shown) or the time the turns took.
+
 
 **0.105.1 (2026-11-27): no blue bars in the 3D editor - pushed, not yet installed.** Søren, 11:20, asked whether the
 tools' bars should go as the sketch's did: "alle blå bjælker skal fjernes". Built: the bar over the view is gone for
@@ -26,7 +38,6 @@ test_agent_guards.py (the reference whole and another command shortened, the not
 a smaller target not offered, the sizes). Not seen: a real model getting the note; the editor without the bar in a
 browser (a removed element; tsc, build).
 
-Next he asked for: statistics over the Hub's users - chats started, minutes, cost in kr.
 
 **0.104.0 (2026-11-27): a mesh keeps its own size; hub3d design says meshes and wrong cuts - pushed, not yet
 installed.** Søren, 10:18, chat 335's export (gemma 4 31B (U), "lav et hul i bunden, så der er plads til et

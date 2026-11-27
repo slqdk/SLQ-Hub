@@ -505,7 +505,8 @@ async def run_turn(hub, turn: DeviceTurn, body: dict, rows: list[dict], wd: proj
         usage_now = engine.usage if engine else {}
         try:                                                     # the card's energy and its cost (0.24.0)
             from .. import usage
-            usage.finish_turn(hub, run.id, usage_now, f"user:{turn.user['id']}")
+            first = not any(r.get("role") == "assistant" for r in rows)   # her chat's first answer: started (0.106.0)
+            usage.finish_turn(hub, run.id, usage_now, f"user:{turn.user['id']}", first=first)
         except Exception:  # noqa: BLE001
             log.exception("could not count the turn's usage")
         turn.result = {

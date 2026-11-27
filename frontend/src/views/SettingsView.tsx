@@ -6,7 +6,7 @@ import { api, type ApiKey, type Person, type HFLookup, type HFSearchHit, type Im
   type McpServerConfig, type McpStatus,
   type MemoryFile, type ModelEntry, type Sampling, type SdxlChoices, type SdxlSettings, type Settings, type UsageData,
   type UsageRow } from "../lib/api";
-import { ago, bytes, energy, money, residencyName, seconds, tokens } from "../lib/format";
+import { ago, bytes, energy, money, residencyName, tokens, worked } from "../lib/format";
 import { navigate } from "../lib/router";
 import { useApp, type Theme } from "../state";
 import { QueueModal, plateState } from "../components/Queue";
@@ -1091,7 +1091,11 @@ function NewPassword({ person, onClose, onSave }: { person: Person; onClose: () 
 
 // ------------------------------------------------------------ usage (0.24.0)
 
-const PERIODS = [{ id: "today", label: "Today" }, { id: "month", label: "This month" }, { id: "all", label: "All time" }] as const;
+const PERIODS = [{ id: "today", label: "Today" }, { id: "month", label: "This month" },
+  { id: "last_month", label: "Last month" }, { id: "all", label: "All time" }] as const;
+
+/** Who starts chats (0.106.0): the owner, each person, Settings -> Tests - not apps, indexing or the card itself. */
+const CHATTERS = new Set<UsageRow["kind"]>(["owner", "person", "tests"]);
 
 function work(r: UsageRow): string {
   const parts: string[] = [];
@@ -1119,8 +1123,9 @@ function UsageTab({ s }: { s: S }) {
   const sum = (k: keyof UsageRow) => rows.reduce((a, r) => a + (Number(r[k]) || 0), 0);
   return (
     <div>
-      <p className="lead">What each one used of the card: answers, tokens, time on the card, its energy and what that
-        cost. Each answer shows its own share under it, a chat its total in its ⋯ menu, a project on its page.</p>
+      <p className="lead">What each one used of the card: chats started, answers, tokens, minutes on the card, its energy
+        and what that cost. Each answer shows its own share under it, a chat its total in its ⋯ menu, a project on its
+        page.</p>
       <div className="callout row wrap" style={{ marginBottom: 18 }}>
         <Lamp state={data?.power ? "run" : "off"} />
         <span className="grow">{data?.power
@@ -1137,25 +1142,28 @@ function UsageTab({ s }: { s: S }) {
       </div>
       <div className="table-scroll">
         <table className="table usage-table">
-          <thead><tr><th>Who</th><th>Work</th><th className="r">Tokens read</th><th className="r">Written</th>
-            <th className="r">On the card</th><th className="r">Energy</th><th className="r">Cost</th></tr></thead>
+          <thead><tr><th>Who</th><th className="r">Chats</th><th>Work</th><th className="r">Tokens read</th>
+            <th className="r">Written</th><th className="r">On the card</th><th className="r">Energy</th>
+            <th className="r">Cost</th></tr></thead>
           <tbody>
-            {data === null ? <tr><td colSpan={7} className="faint">Loading</td></tr> : rows.map((r) => (
+            {data === null ? <tr><td colSpan={8} className="faint">Loading</td></tr> : rows.map((r) => (
               <tr key={r.who} className={r.kind === "idle" ? "faint" : undefined}>
                 <td><b>{r.label}</b>{r.kind === "owner" ? <span className="muted"> (you)</span> : null}
                   {r.kind === "app" ? <span className="muted"> (app key)</span> : null}</td>
+                <td className="r num" data-label="Chats">{CHATTERS.has(r.kind) ? r.chats ?? 0 : ""}</td>
                 <td data-label="Work">{work(r)}</td>
                 <td className="r num" data-label="Tokens read">{r.kind === "idle" ? "" : tokens(r.tokens_in)}</td>
                 <td className="r num" data-label="Written">{r.kind === "idle" ? "" : tokens(r.tokens_out)}</td>
-                <td className="r num" data-label="On the card">{r.seconds ? seconds(r.seconds) : ""}</td>
+                <td className="r num" data-label="On the card">{r.seconds ? worked(r.seconds) : ""}</td>
                 <td className="r num" data-label="Energy">{energy(r.energy_wh)}</td>
                 <td className="r num" data-label="Cost">{money(r.cost)}</td>
               </tr>
             ))}
-            {rows.length > 0 && <tr className="usage-total"><td><b>All</b></td><td />
+            {rows.length > 0 && <tr className="usage-total"><td><b>All</b></td>
+              <td className="r num" data-label="Chats">{sum("chats")}</td><td />
               <td className="r num" data-label="Tokens read">{tokens(sum("tokens_in"))}</td>
               <td className="r num" data-label="Written">{tokens(sum("tokens_out"))}</td>
-              <td className="r num" data-label="On the card">{seconds(sum("seconds"))}</td>
+              <td className="r num" data-label="On the card">{worked(sum("seconds"))}</td>
               <td className="r num" data-label="Energy">{energy(sum("energy_wh"))}</td>
               <td className="r num" data-label="Cost"><b>{money(sum("cost"))}</b></td></tr>}
           </tbody>
@@ -1164,7 +1172,8 @@ function UsageTab({ s }: { s: S }) {
       <p className="muted small" style={{ maxWidth: "70ch" }}>Energy is the card's own power reading (amdgpu's PPT,
         read every two seconds while it works), shared between the jobs on it at the time, plus the rest of the PC as set
         below - not the whole PC measured at the socket. Tokens read leave out the part of the prompt the model had kept
-        from before. "The card, idle" is what it drew while nobody used it. Counted since 0.24.0.</p>
+        from before. "The card, idle" is what it drew while nobody used it. Counted since 0.24.0; chats - each counted
+        at its first answer - since 0.106.0, the owner's earlier ones from the chats still here.</p>
       <SectionForm s={s} section="costs" title="Price" intro={<>Each answer keeps the cost at the price of its day.</>} fields={[
         { key: "price_per_kwh", label: "Electricity price (kr per kWh)", type: "number", min: 0, max: 100, step: 0.01,
           help: "A fixed price for all hours." },

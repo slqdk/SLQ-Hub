@@ -5,20 +5,22 @@ share (the run's usage). Limits for a person (planned) can read the same rows.
 who: "owner" (the owner's chats), "user:<id>" (a person's), "key:<name>" (an app's key on the model API),
 "tests" (Settings -> Tests), "library" (indexing), "system" (loading models) and "idle" (the card while nobody
 uses it). An agent turn is counted once, when it ends (finish_turn); any other job when it finishes (job_finished).
-Rows stay when chats go, so a project's and a person's totals stay too.
+Rows stay when chats go, so a project's and a person's totals stay too. Since 0.106.0 also the chats started: a
+chat's first answer counts it (Søren: "statistik over brugere i hubben (antal chats started, antal minutter, og
+kosten i kr)").
 """
 from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from . import auth, db
 
 log = logging.getLogger("hub.usage")
 
-FIELDS = ("turns", "jobs", "tokens_in", "tokens_out", "tokens_cached", "energy_wh", "cost", "seconds")
-PERIODS = ("today", "month", "all")
+FIELDS = ("turns", "jobs", "tokens_in", "tokens_out", "tokens_cached", "energy_wh", "cost", "seconds", "chats")
+PERIODS = ("today", "month", "last_month", "all")
 
 
 def _tz():
@@ -30,14 +32,36 @@ def today() -> str:
     return datetime.now(_tz()).date().isoformat()
 
 
-def first_day(period: str) -> str | None:
-    """The first day a period counts ("today", "month"; None for all time)."""
+def bounds(period: str) -> tuple[str | None, str | None]:
+    """The first day a period counts and the first it no longer does ("today", "month", "last_month"; None: open -
+    all time has neither)."""
     d = datetime.now(_tz()).date()
     if period == "today":
-        return d.isoformat()
+        return d.isoformat(), None
     if period == "month":
-        return d.replace(day=1).isoformat()
-    return None
+        return d.replace(day=1).isoformat(), None
+    if period == "last_month":
+        first = d.replace(day=1)
+        return (first - timedelta(days=1)).replace(day=1).isoformat(), first.isoformat()
+    return None, None
+
+
+def first_day(period: str) -> str | None:
+    """The first day a period counts (None for all time)."""
+    return bounds(period)[0]
+
+
+def _within(period: str) -> tuple[str, tuple]:
+    """SQL for the days a period counts, and its values."""
+    start, end = bounds(period)
+    parts, vals = [], []
+    if start:
+        parts.append("day >= ?")
+        vals.append(start)
+    if end:
+        parts.append("day < ?")
+        vals.append(end)
+    return " AND ".join(parts), tuple(vals)
 
 
 def price(hub) -> float:
@@ -94,18 +118,42 @@ def job_finished(hub, job) -> None:
            **_tokens(int(t.get("prompt") or 0), int(t.get("cached") or 0), int(t.get("out") or 0)))
 
 
-def finish_turn(hub, run_id: str, usage: dict, who: str, project_id: int | None = None) -> None:
+def finish_turn(hub, run_id: str, usage: dict, who: str, project_id: int | None = None, first: bool = False) -> None:
     """When an agent turn ends: the card's energy for it into its usage (Wh, kr, seconds on the card) - shown under
-    the answer - and the turn into the day's usage."""
+    the answer - and the turn into the day's usage; `first`: the chat's first answer, so a chat started (0.106.0)."""
     meter = hub.extras.get("energy")
     wh, secs = meter.take_run(run_id) if meter is not None else (0.0, 0.0)
     cost = cost_of(hub, wh)
     usage["energy_wh"] = round(wh, 4)
     usage["cost"] = cost
     usage["gpu_seconds"] = round(secs, 1)
-    record(who, project_id=project_id, turns=1, energy_wh=wh, cost=cost, seconds=secs,
+    record(who, project_id=project_id, turns=1, energy_wh=wh, cost=cost, seconds=secs, chats=int(bool(first)),
            **_tokens(int(usage.get("prompt_tokens") or 0), int(usage.get("cached_tokens") or 0),
                      int(usage.get("completion_tokens") or 0)))
+
+
+def count_old_chats() -> int:
+    """The chats started before 0.106.0 counted it, once: each chat still here by the day of its first answer, for
+    the owner (Settings -> Tests' chats for tests) and its project. Chats deleted before and a person's chats (kept on
+    her device) cannot be counted. -> how many were counted."""
+    n = 0
+    try:
+        with db.transaction() as con:
+            if con.execute("SELECT 1 FROM once_done WHERE name='chats_counted'").fetchone():
+                return 0
+            for r in con.execute("SELECT c.id, c.project_id, c.test_run, MIN(r.started_at) first_run FROM chats c "
+                                 "JOIN runs r ON r.chat_id = c.id GROUP BY c.id").fetchall():
+                day = _local_day(r["first_run"])
+                if day is None:
+                    continue
+                con.execute("INSERT INTO usage_daily (day, who, project_id, chats) VALUES (?, ?, ?, 1) "
+                            "ON CONFLICT(day, who, project_id) DO UPDATE SET chats=chats+1",
+                            (day, "tests" if r["test_run"] else "owner", int(r["project_id"] or 0)))
+                n += 1
+            con.execute("INSERT INTO once_done (name, done_at) VALUES ('chats_counted', ?)", (db.utcnow(),))
+    except Exception:  # never let statistics stop the Hub
+        log.exception("could not count the chats started before")
+    return n
 
 
 def _local_day(iso: str | None) -> str | None:
@@ -122,7 +170,9 @@ def move_chat(con, chat_id: int, project_id: int, before: str | None = None) -> 
     at `before` or later are left: they counted for the project already. Settings -> Usage's totals per who stay the
     same. In the caller's transaction. -> how many turns moved."""
     n = 0
-    for r in con.execute("SELECT started_at, ended_at, usage FROM runs WHERE chat_id=?", (int(chat_id),)).fetchall():
+    runs = con.execute("SELECT started_at, ended_at, usage FROM runs WHERE chat_id=? ORDER BY started_at",
+                       (int(chat_id),)).fetchall()
+    for i, r in enumerate(runs):
         when = r["ended_at"] or r["started_at"]
         try:
             u = json.loads(r["usage"] or "{}")
@@ -132,7 +182,7 @@ def move_chat(con, chat_id: int, project_id: int, before: str | None = None) -> 
         if not isinstance(u, dict) or "cost" not in u or day is None or (before and when >= before):
             continue                       # never counted (still running, or before 0.24.0), or counted there already
         vals = {"turns": 1, "energy_wh": float(u.get("energy_wh") or 0), "cost": float(u.get("cost") or 0),
-                "seconds": float(u.get("gpu_seconds") or 0),
+                "seconds": float(u.get("gpu_seconds") or 0), "chats": int(i == 0),     # its first: the chat (0.106.0)
                 **_tokens(int(u.get("prompt_tokens") or 0), int(u.get("cached_tokens") or 0),
                           int(u.get("completion_tokens") or 0))}
         take = ", ".join(f"{f}=MAX(0, {f} - ?)" for f in vals)       # (the stored figures are rounded a little)
@@ -199,11 +249,11 @@ def _sum_sql(where: str) -> str:
 
 def totals(period: str = "month") -> list[dict]:
     """Per who, for a period: the sums and the first day counted."""
-    start = first_day(period)
+    where, vals = _within(period)
     sql = (f"SELECT who, {', '.join(f'SUM({f}) {f}' for f in FIELDS)}, MIN(day) since FROM usage_daily"
-           f"{' WHERE day >= ?' if start else ''} GROUP BY who")
+           f"{' WHERE ' + where if where else ''} GROUP BY who")
     with db.connect() as con:
-        return [dict(r) for r in con.execute(sql, (start,) if start else ()).fetchall()]
+        return [dict(r) for r in con.execute(sql, vals).fetchall()]
 
 
 def project_totals(project_id: int) -> dict:
@@ -214,10 +264,9 @@ def project_totals(project_id: int) -> dict:
 
 def who_total(who: str, period: str = "today") -> dict:
     """One who's sums for a period (for a limit on a person's use, later)."""
-    start = first_day(period)
+    where, vals = _within(period)
     with db.connect() as con:
-        r = con.execute(_sum_sql("who=?" + (" AND day >= ?" if start else "")),
-                        (who, start) if start else (who,)).fetchone()
+        r = con.execute(_sum_sql("who=?" + (" AND " + where if where else "")), (who, *vals)).fetchone()
     return dict(r) if r else {f: 0 for f in FIELDS}
 
 

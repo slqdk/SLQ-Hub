@@ -50,6 +50,7 @@ def create_app(env: Env | None = None, transports: Transports | None = None, sta
     auth.ensure_admin(env.admin_user, env.admin_password_hash)
     from . import usage
     usage.settle_moved_chats()                   # chats moved into a project before 0.33.1 bring their usage along
+    usage.count_old_chats()                      # the chats started before 0.106.0, counted once
     hub.extras["downloads"] = Downloads(hub.catalog, transport=hub.transports.web)
     hub.extras["uploads"] = Uploads(env.models_dir)          # 0.62.0: model files from the owner's computer
     hub.extras["uploads"].cleanup()

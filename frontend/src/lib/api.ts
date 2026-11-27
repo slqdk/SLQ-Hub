@@ -247,10 +247,13 @@ export interface Project { id: number; name: string; instructions: string; setti
 /** What was used of the card (0.24.0): answers, other jobs, tokens read / written / from the cache, energy (Wh), cost
  *  (kr), seconds on the card; since: the first day counted. */
 export interface UsageTotals { turns: number; jobs: number; tokens_in: number; tokens_out: number; tokens_cached: number;
-  energy_wh: number; cost: number; seconds: number; since: string | null }
+  energy_wh: number; cost: number; seconds: number; since: string | null;
+  /** Chats started (0.106.0): a chat's first answer counts it. */
+  chats?: number }
 export interface UsageRow extends UsageTotals { who: string; label: string;
   kind: "owner" | "person" | "app" | "tests" | "library" | "system" | "idle" | "other" }
-export interface UsageData { period: "today" | "month" | "all"; since: string | null; price_per_kwh: number;
+export interface UsageData { period: "today" | "month" | "last_month" | "all"; since: string | null; until?: string | null;
+  price_per_kwh: number;
   other_watts: number; power: { now_w: number; cap_w: number | null; source: string | null } | null; rows: UsageRow[] }
 
 export interface RunEvent { seq: number; type: string; t: number; data: Record<string, any> }

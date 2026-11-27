@@ -292,10 +292,24 @@ written, and how its last turn ended when that needs a look (not finished at
 the step limit, stopped, failed) and the last review's verdict; "No answers
 yet" for an empty chat (`store.runs_overview`, from the runs' steps with
 SQLite's JSON functions). Settings → Usage: the card's
-draw now and its limit, then per who for today, this month or all time -
-answers and jobs, tokens read and written, time on the card, energy, cost - with
-a total; the price and the rest of the PC's watts. `usage.who_total(who,
+draw now and its limit, then per who for today, this month, last month (0.106.0)
+or all time - chats started (0.106.0), answers and jobs, tokens read and
+written, time on the card (in minutes since 0.106.0), energy, cost - with a
+total; the price and the rest of the PC's watts. `usage.who_total(who,
 period)` is what a limit for a person can read.
+
+**Chats started (0.106.0).** Søren: "statistik over brugere i hubben (antal
+chats started, antal minutter, og kosten i kr)" - the owner and every person
+were rows already, with their minutes on the card and cost; the count of chats
+was missing. `usage_daily.chats` (migration 9): a chat counts at its first
+answer (`finish_turn(first=True)`) - the owner's when its run is the chat's
+first (`count_runs`), a person's when the conversation her device sent has no
+answer in it yet (her chats live on her device; the Hub never sees them
+otherwise). A chat moved into a project takes its count along with its first
+turn (`move_chat`). The owner's chats from before were counted once at start
+(`count_old_chats`, marked in `once_done`): each chat still here, by its first
+run's local day - chats deleted earlier and a person's earlier chats cannot be.
+Last month is `bounds("last_month")`: its first day up to this month's.
 
 ---
 

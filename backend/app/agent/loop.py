@@ -1745,8 +1745,9 @@ class Agent:
             usage_now = engine.usage if engine else {}
             try:                                          # the card's energy and its cost (0.24.0)
                 from .. import usage
+                first = run.chat_id is not None and chats.count_runs(run.chat_id) == 1    # a chat started (0.106.0)
                 usage.finish_turn(self.hub, run.id, usage_now, "tests" if options.get("test") else "owner",
-                                  project["id"] if project else None)
+                                  project["id"] if project else None, first=first)
             except Exception:  # noqa: BLE001
                 log.exception("could not count the turn's usage")
             try:

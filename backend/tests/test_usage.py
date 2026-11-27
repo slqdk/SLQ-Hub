@@ -380,3 +380,65 @@ async def test_the_card_idle_and_loading_have_rows_of_their_own(signed_in, app, 
 def test_who_a_job_counts_for(who, owner, kind, meta):
     j = Job(id=1, owner=owner, kind=kind, need="comfy", priority=0, label="", lease=False, enqueued_at=0.0, meta=meta)
     assert usage.who_of_job(j) == who
+
+
+# ---------------------------------------------------------------- chats started (0.106.0)
+
+async def test_chats_started_count_for_whoever_started_them(signed_in, app, fakes):
+    """Søren: "statistik over brugere i hubben (antal chats started, antal minutter, og kosten i kr)". A chat counts
+    at its first answer - the owner's in the Hub, a person's on her device (no answer before in what it sent)."""
+    ticking(app)
+    fakes.llama["replies"] = [{"content": "Hej."}, {"content": "Hilsen"}, {"content": "Igen."},
+                              {"content": "Andet."}, {"content": "To"}]
+    c = await new_chat(signed_in)
+    await finish(app, await say(signed_in, c["id"], "hej"))
+    await finish(app, await say(signed_in, c["id"], "igen"))                     # the same chat: not another
+    d = await new_chat(signed_in)
+    await finish(app, await say(signed_in, d["id"], "noget andet"))
+    maria = await add_person(signed_in)
+    fakes.llama["replies"] = [{"content": "Hej Maria."}, {"content": "Hilsen"}, {"content": "Ja."}]
+    async with client_from(app) as phone:
+        await sign_in(phone)
+        await turn(app, phone, {"title": "New chat", "messages": [user_msg("hej")]})
+        await turn(app, phone, {"title": "Hilsen", "messages": [
+            user_msg("hej"), {"role": "assistant", "content": [{"type": "text", "text": "Hej Maria."}]},
+            user_msg("og så?")]})
+    r = (await signed_in.get("/hub/api/usage", params={"period": "month"})).json()
+    rows = {x["who"]: x for x in r["rows"]}
+    assert (rows["owner"]["chats"], rows["owner"]["turns"]) == (2, 3)
+    her = rows[f"user:{maria['id']}"]
+    assert (her["chats"], her["turns"]) == (1, 2) and her["seconds"] > 0 and her["cost"] > 0
+
+
+def test_last_month_is_a_period_of_its_own(app):
+    """Statistics per month: last month from its first day to this month's, apart from this month."""
+    this, end = usage.bounds("month")[0], None
+    start, until = usage.bounds("last_month")
+    assert until == this and start < this and start.endswith("-01") and end is None
+    usage.record("user:7", day=start, chats=2, turns=5, cost=1.5, seconds=600)
+    usage.record("user:7", day=this, chats=1, turns=1, cost=0.25, seconds=60)
+    last = {r["who"]: r for r in usage.totals("last_month")}["user:7"]
+    now = {r["who"]: r for r in usage.totals("month")}["user:7"]
+    assert (last["chats"], last["turns"], last["cost"], last["seconds"]) == (2, 5, 1.5, 600)
+    assert (now["chats"], now["cost"]) == (1, 0.25)
+    assert usage.who_total("user:7", "last_month")["chats"] == 2 and usage.who_total("user:7", "all")["chats"] == 3
+
+
+async def test_last_month_on_the_usage_page(signed_in, app):
+    r = (await signed_in.get("/hub/api/usage", params={"period": "last_month"})).json()
+    assert r["period"] == "last_month" and r["until"] == usage.bounds("month")[0] and r["since"] < r["until"]
+
+
+async def test_the_chats_from_before_are_counted_once(signed_in, app, fakes):
+    """The owner's chats started before 0.106.0 - those still here, by their first answer's day - counted once."""
+    ticking(app)
+    fakes.llama["replies"] = [{"content": "Hej."}, {"content": "Hilsen"}, {"content": "Igen."}]
+    c = await new_chat(signed_in)
+    await finish(app, await say(signed_in, c["id"], "hej"))
+    await finish(app, await say(signed_in, c["id"], "igen"))
+    await new_chat(signed_in)                                                       # never answered: not started
+    with db.connect() as con:                                                       # as before 0.106.0
+        con.execute("UPDATE usage_daily SET chats=0")
+        con.execute("DELETE FROM once_done")
+    assert usage.count_old_chats() == 1 and usage.count_old_chats() == 0
+    assert usage.who_total("owner", "all")["chats"] == 1
