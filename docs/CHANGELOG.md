@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.104.0 - 2026-11-27
+
+- 3D designs: a mesh part written without a size now keeps the size of
+  its file - before, it was squeezed into 20 x 20 x 20 mm. A size such as
+  [0, 0, 150] makes it 150 mm tall and keeps its proportions. The editor
+  and `hub3d design` read it the same way.
+- `hub3d design` says each mesh's size compared with its file's own, and
+  warns when a mesh is stretched, when a hole is wider than the part it
+  cuts, and when holes cut a part into pieces.
+- A 3D model made from a picture comes with a ready line for putting it
+  into a design.
+
 ## 0.103.1 - 2026-11-27
 
 - Fixed: Sketch, Dimension - after clicking a side, a red line no longer

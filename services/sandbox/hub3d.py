@@ -1017,8 +1017,10 @@ A part:
             is where the points' 0,0 goes, not the middle (left out: [0, 0, thickness / 2] - the points where they
             are drawn, on the plate). size [0, 0, 3]: as drawn, 3 mm thick; a size x or y scales the points to that
             width. holes: [[[x, y], ...], ...] cut out of it
-  mesh      file: an STL, 3MF or OBJ, its path from the design's folder; scaled to fill size, centred on at. One that
-            is not a closed solid is shown and exported as it is, but nothing joins it or cuts it
+  mesh      file: an STL, 3MF or OBJ, its path from the design's folder, centred on at. size left out: the file's own
+            size; a 0 follows the others - [0, 0, 150] is 150 mm tall, its proportions kept; three sizes fill that box
+            (stretched if they are not its proportions - hub3d design says each mesh's size). One that is not a
+            closed solid is shown and exported as it is, but nothing joins it or cuts it
   group     parts: [...]; no size, at, rotate or color of its own
 
 How it is built: in each list - the design's parts, or a group's - the solids are joined and then that list's holes
@@ -1061,10 +1063,14 @@ def _vec(v, fallback) -> list[float]:
     return [float(x) for x in v]
 
 
-def read_design(text: str) -> tuple[dict, list[str]]:
+def read_design(text: str, folder=None, *, own=None) -> tuple[dict, list[str]]:
     """A design from its file's text, every part complete - the editor's readDesign: missing or wrong values get
-    the same defaults, said in the list it returns."""
+    the same defaults, said in the list it returns. With `folder` (the design file's) or `own` (file -> its own size,
+    _own_sizes), a mesh part's 0s in size - all three when it has none - are worked out from its file (0.104.0), as
+    the editor does once the file is loaded; without, they stay 0 and the build works them out."""
     import json
+    if own is None and folder is not None:
+        own = _own_sizes(folder)
     try:
         data = json.loads(text)
     except ValueError as exc:
@@ -1077,7 +1083,7 @@ def read_design(text: str) -> tuple[dict, list[str]]:
     if not isinstance(data.get("parts"), list):
         problems.append('it has no "parts" list')
     odd = {"parts": 0, "keys": set(), "shapes": []}
-    design = {"parts": _settle(_read_parts(parts, seen, problems, odd), problems)}    # parts on faces placed (0.98.0)
+    design = {"parts": _settle(_read_parts(parts, seen, problems, odd, own), problems)}   # parts on faces placed (0.98.0)
     first = []                    # a model that guessed the format: what it did not know first, once - not per part
     if odd["parts"]:
         n = odd["parts"]
@@ -1097,13 +1103,13 @@ def read_design(text: str) -> tuple[dict, list[str]]:
     return design, problems
 
 
-def _read_parts(items: list, seen: set, problems: list, odd: dict) -> list[dict]:
+def _read_parts(items: list, seen: set, problems: list, odd: dict, own=None) -> list[dict]:
     out = []
     for item in items:
         if not isinstance(item, dict):
             problems.append("a part that is not an object was left out")
             continue
-        out.append(_read_part(item, seen, problems, odd))
+        out.append(_read_part(item, seen, problems, odd, own))
     return out
 
 
@@ -1147,8 +1153,41 @@ def _round(v: float) -> int:
 
 def _follows(shape: str, i: int, v: float) -> bool:
     """Whether a 0 in a part's size follows what it draws: a text's width or height (from its letters - one of the
-    two is given), an outline's width and depth (from its points)."""
-    return v <= 0 and i < 2 and shape in ("text", "outline")
+    two is given), an outline's width and depth (from its points), any of a mesh's three (from its file, 0.104.0)."""
+    return v <= 0 and (shape == "mesh" or (i < 2 and shape in ("text", "outline")))
+
+
+def mesh_scale(size, own) -> list[float]:
+    """A mesh part's scale along X, Y and Z (0.104.0): a size given fills the file's own size there; a 0 follows the
+    given ones - their scale, the mean when they differ - and with none given it is the file's own size. Chat 335: a
+    mesh written without a size was squeezed into the 20 x 20 x 20 mm every other shape gets, and nothing said so."""
+    given = [size[i] / own[i] for i in range(3) if size[i] > 0 and own[i] > 1e-9]
+    k = sum(given) / len(given) if given else 1.0
+    return [(size[i] / own[i] if size[i] > 0 else k) if own[i] > 1e-9 else 1.0 for i in range(3)]
+
+
+def _fit_mesh(size, own) -> list[float]:
+    """A mesh part's size with its 0s worked out from the file's own size."""
+    k = mesh_scale(size, own)
+    return [size[i] if size[i] > 0 else own[i] * k[i] for i in range(3)]
+
+
+def _own_sizes(folder):
+    """file -> the file's own size (mm along X, Y and Z, from its corners as 32-bit floats - as the build reads
+    them), None when it cannot be read: a mesh part's 0s from its file (0.104.0). Each file read once."""
+    base, sizes = Path(folder), {}
+
+    def own(file: str):
+        if file not in sizes:
+            try:
+                v, _, _ = _load(base / file)
+                v32 = np.ascontiguousarray(v, dtype=np.float32)
+                sizes[file] = ([float(x) for x in v32.max(0).astype(np.float64) - v32.min(0).astype(np.float64)]
+                               if len(v32) else None)
+            except (OSError, ValueError):
+                sizes[file] = None
+        return sizes[file]
+    return own
 
 
 def _font_name(raw: str) -> tuple[str, bool, bool]:
@@ -1199,7 +1238,7 @@ def _read_text_style(p: dict, part: dict, problems: list) -> None:
             part[key] = c
 
 
-def _read_part(p: dict, seen: set, problems: list, odd: dict) -> dict:
+def _read_part(p: dict, seen: set, problems: list, odd: dict, own=None) -> dict:
     pid = p["id"].strip() if isinstance(p.get("id"), str) and p["id"].strip() else ""
     if not pid or pid in seen:
         n = len(seen) + 1
@@ -1218,14 +1257,20 @@ def _read_part(p: dict, seen: set, problems: list, odd: dict) -> dict:
     part: dict = {"id": pid, "shape": shape, "size": [20.0, 20.0, 20.0], "at": [0.0, 0.0, 10.0],
                   "rotate": [0.0, 0.0, 0.0]}
     if shape == "group":
-        part["parts"] = _read_parts(p.get("parts") if isinstance(p.get("parts"), list) else [], seen, problems, odd)
+        part["parts"] = _read_parts(p.get("parts") if isinstance(p.get("parts"), list) else [], seen, problems, odd,
+                                    own)
         part["size"], part["at"] = [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]
     else:
-        size = _vec(p.get("size"), [0, 0, 2] if shape == "outline" else [0, 10, 2] if shape == "text" else [20, 20, 20])
+        size = _vec(p.get("size"), [0, 0, 2] if shape == "outline" else [0, 10, 2] if shape == "text"
+                    else [0, 0, 0] if shape == "mesh" else [20, 20, 20])     # a mesh: its file's own size (0.104.0)
         part["size"] = [0.0 if _follows(shape, i, v) else max(MIN_SIZE, abs(v)) for i, v in enumerate(size)]
         if shape == "text" and part["size"][0] == 0 and part["size"][1] == 0:
             part["size"][1] = 10.0
             problems.append(f"{pid}: a text needs a width or a height (size x or y) - made 10 mm tall")
+        if shape == "mesh" and own and 0 in part["size"] and isinstance(p.get("file"), str) and p["file"]:
+            mine = own(p["file"])
+            if mine:
+                part["size"] = _fit_mesh(part["size"], mine)
         part["at"] = _vec(p.get("at"), [0, 0, part["size"][2] / 2])
         part["rotate"] = _vec(p.get("rotate"), [0, 0, 0])
     for flag in ("mirror", "hole", "hidden"):
@@ -2243,8 +2288,7 @@ def _rotation_matrix(r) -> np.ndarray:
 def _place_mesh(v: np.ndarray, f: np.ndarray, part: dict) -> tuple[np.ndarray, np.ndarray]:
     lo, hi = v.min(0), v.max(0)
     c = (lo + hi) / 2
-    ext = hi - lo
-    k = np.where(ext > 1e-9, np.array(part["size"]) / np.where(ext > 1e-9, ext, 1), 1.0)
+    k = np.array(mesh_scale(part["size"], [float(hi[i] - lo[i]) for i in range(3)]))
     w = (v - c) * k
     if part.get("mirror"):
         w[:, 0] = -w[:, 0]
@@ -2419,10 +2463,78 @@ def _hole_lips(parts: list, solid, under: bool = False, mesh: list | None = None
 
 class DesignBuild:
     """What a design makes: `solid` (a Manifold, or None), `loose` meshes that are not closed solids [(part id,
-    vertices, faces)], `problems`, and the design itself (`design`, with its `bed`)."""
+    vertices, faces)], `problems`, and the design itself (`design`, with its `bed`). `cuts`: each list's solids and
+    holes [(id, Manifold)] and what the holes left of them, for cut_warnings (0.104.0)."""
 
-    def __init__(self, design: dict, solid, loose: list, problems: list[str]):
+    def __init__(self, design: dict, solid, loose: list, problems: list[str], cuts: list | None = None):
         self.design, self.solid, self.loose, self.problems = design, solid, loose, problems
+        self.cuts = cuts or []
+
+
+CUTS_SAID = 3            # cut_warnings says at most this many
+
+
+def _mm1(v: float) -> str:
+    r = _round(v * 10) / 10
+    return str(int(r)) if r == int(r) else repr(r)
+
+
+def _box_of(m):
+    return np.asarray(m.bounding_box(), dtype=np.float64).reshape(2, 3)
+
+
+def cut_warnings(b: DesignBuild) -> list[str]:
+    """Holes that cut a solid of their list wrongly (0.104.0): one that covers a solid right across - in two of X, Y
+    and Z, or all three - and holes that leave a solid in more pieces than it was. Chat 335: a 40 mm hole on a mesh
+    squeezed to 20 mm cut it right across, seven times, while the model moved the hole up and down - and at the
+    mesh's real size, the same hole would have cut its wall through: two pieces."""
+    out: list[str] = []
+    axes = "XYZ"
+    for solids, holes, cut in b.cuts:
+        boxes = {sid: _box_of(s) for sid, s in solids}
+        hit: dict[str, list[str]] = {}
+        for hid, h in holes:
+            hb = _box_of(h)
+            for sid, s in solids:
+                sb = boxes[sid]
+                if np.any(hb[0] >= sb[1]) or np.any(hb[1] <= sb[0]):
+                    continue                                    # their boxes do not meet
+                hit.setdefault(sid, []).append(hid)
+                covered = [i for i in range(3) if hb[0][i] <= sb[0][i] + 1e-3 and hb[1][i] >= sb[1][i] - 1e-3]
+                if len(covered) < 2 or (h ^ s).volume() < 1e-6:
+                    continue
+                hs, ss = hb[1] - hb[0], sb[1] - sb[0]
+                if len(covered) == 3:
+                    out.append(f"hole {hid} is bigger than {sid} every way ({' x '.join(_mm1(x) for x in hs)} mm over "
+                               f"its {' x '.join(_mm1(x) for x in ss)}): it cuts all of {sid} away - is one of their "
+                               "sizes wrong?")
+                    continue
+                i = ({0, 1, 2} - set(covered)).pop()
+                a, z = max(hb[0][i], sb[0][i]), min(hb[1][i], sb[1][i])
+                out.append(f"hole {hid} is wider than {sid} in {' and '.join(axes[j] for j in covered)} "
+                           f"({' x '.join(_mm1(hs[j]) for j in covered)} mm over its "
+                           f"{' x '.join(_mm1(ss[j]) for j in covered)}): it cuts all of {sid} from "
+                           f"{axes[i].lower()} {_mm1(a)} to {_mm1(z)} - right to cut it flat, but for a hole in it one "
+                           "of their sizes is wrong")
+        for sid, s in solids:                                   # one piece before, more after
+            if sid not in hit:
+                continue
+            if len(solids) == 1:
+                rest = cut                                      # the list's own cut: what its holes left of it
+            else:
+                rest = s
+                for hid, h in holes:
+                    if hid in hit[sid]:
+                        rest = rest - h
+            before, after = len(s.decompose()), rest.decompose()
+            if len(after) > before:
+                spans = sorted((_box_of(m)[:, 2] for m in after), key=lambda zz: zz[0])
+                where = ", ".join(f"z {_mm1(lo)} to {_mm1(hi)}" for lo, hi in spans[:4]) + (" ..." if len(spans) > 4
+                                                                                             else "")
+                out.append(f"{' and '.join(f'hole {h}' for h in hit[sid])} cut{'s' if len(hit[sid]) == 1 else ''} "
+                           f"{sid} into {len(after)} pieces ({where}) - if it should stay one piece, a hole goes too "
+                           "far or is too wide")
+    return out[:CUTS_SAID] + ([f"... and {len(out) - CUTS_SAID} more like it"] if len(out) > CUTS_SAID else [])
 
 
 def build_design(design: dict, folder=".") -> DesignBuild:
@@ -2548,7 +2660,7 @@ def build_design(design: dict, folder=".") -> DesignBuild:
                 return None
             lo, hi = vw.min(0), vw.max(0)
             c = (lo + hi) / 2
-            k = [float(p["size"][i] / (hi[i] - lo[i])) if hi[i] - lo[i] > 1e-9 else 1.0 for i in range(3)]
+            k = mesh_scale(p["size"], [float(hi[i] - lo[i]) for i in range(3)])     # its 0s from the file (0.104.0)
             return m.translate(tuple(float(x) for x in -c)).scale(tuple(k))
         return None
 
@@ -2578,8 +2690,10 @@ def build_design(design: dict, folder=".") -> DesignBuild:
                 copies.append(m.translate((-ax, -ay, 0)).rotate((0, 0, _repeat_step(r) * i)).translate((ax, ay, 0)))
         return done(M.batch_boolean(copies, m3d.OpType.Add))
 
+    cuts: list = []
+
     def level(parts: list):
-        solids, holes = [], []
+        solids, holes, solid_ids, hole_ids = [], [], [], []
         for p in parts:
             if p.get("hidden"):
                 continue
@@ -2592,11 +2706,13 @@ def build_design(design: dict, folder=".") -> DesignBuild:
                 m = repeated(p, m)
             if m is not None:
                 (holes if p.get("hole") else solids).append(m)
+                (hole_ids if p.get("hole") else solid_ids).append(p["id"])
         if not solids:
             return None
         out = solids[0] if len(solids) == 1 else done(M.batch_boolean(solids, m3d.OpType.Add))
         if holes:
             out = done(out - (holes[0] if len(holes) == 1 else done(M.batch_boolean(holes, m3d.OpType.Add))))
+            cuts.append((list(zip(solid_ids, solids)), list(zip(hole_ids, holes)), out))   # looked at by cut_warnings
         return out
 
     solid = level(design["parts"])
@@ -2604,14 +2720,14 @@ def build_design(design: dict, folder=".") -> DesignBuild:
         status = str(solid.status()).split(".")[-1]
         if status != "NoError":
             problems.append(f"manifold3d: {status}")
-    return DesignBuild(design, solid, loose, problems)
+    return DesignBuild(design, solid, loose, problems, cuts)
 
 
 def design(path, quiet: bool = False):
     """The solid a design from the Hub's 3D editor (a .3d.json file) makes, as the editor shows and exports it. Mesh
     parts that are not closed solids are left out of it (said); save it, check it or draw it like any solid."""
     p = Path(path)
-    d, problems = read_design(p.read_text(encoding="utf-8"))
+    d, problems = read_design(p.read_text(encoding="utf-8"), p.parent)
     b = build_design(d, p.parent)
     for msg in problems + b.problems:
         if not quiet:
@@ -2653,10 +2769,42 @@ def _text_lines(parts: list) -> list[str]:
     return out
 
 
+def _mesh_lines(parts: list, own) -> tuple[list[str], list[str]]:
+    """What each shown mesh part comes out as against its file's own size, and a warning for one stretched (0.104.0,
+    chat 335: a mesh without a size came out 20 x 20 x 20 mm and nothing said so)."""
+    lines, warnings = [], []
+    for p in parts:
+        if p.get("hidden"):
+            continue
+        if p["shape"] == "group":
+            more, warned = _mesh_lines(p.get("parts", []), own)
+            lines += more
+            warnings += warned
+            continue
+        mine = own(p["file"]) if p["shape"] == "mesh" and p.get("file") else None
+        if not mine:
+            continue
+        k = mesh_scale(p["size"], mine)
+        size = [mine[i] * k[i] for i in range(3)]
+        said = f"mesh {p['id']}: {p['file']}, {size[0]:.1f} x {size[1]:.1f} x {size[2]:.1f} mm"
+        own_box = " x ".join(_mm1(x) for x in mine)
+        if max(k) > min(k) * 1.01:
+            lines.append(f"{said} - stretched: {k[0]:.2f} x {k[1]:.2f} x {k[2]:.2f} of its own {own_box}")
+            warnings.append(f"mesh {p['id']} is stretched to {k[0]:.2f} x {k[1]:.2f} x {k[2]:.2f} of {p['file']}'s own "
+                            f"{own_box} mm - to keep its proportions give one size and 0s ([0, 0, {_mm1(size[2])}]), "
+                            "or leave size out for its own size")
+        elif abs(max(k) - 1) <= 1e-3 and abs(min(k) - 1) <= 1e-3:
+            lines.append(f"{said} - its own size")
+        else:
+            lines.append(f"{said} - {sum(k) / 3:.3g} x its own size")
+    return lines, warnings
+
+
 def design_report(path, bed=None, stl=None, three_mf=None, png=None) -> int:
     """`hub3d design`: what a design makes, checked against its printer's bed; writes a picture, an STL or a 3MF."""
     p = Path(path)
-    d, problems = read_design(p.read_text(encoding="utf-8"))
+    own = _own_sizes(p.parent)
+    d, problems = read_design(p.read_text(encoding="utf-8"), own=own)
     b = build_design(d, p.parent)
     bed = bed or d.get("bed")
     counts = _count_shapes(d["parts"], {})
@@ -2665,18 +2813,24 @@ def design_report(path, bed=None, stl=None, three_mf=None, png=None) -> int:
     if d.get("printer") or bed:
         where = "; laid out for " + (d.get("printer") or "a bed") + (f" ({_dims(_bed(bed))} mm)" if bed else "")
     print(f"{p.name}: {said}{where}")
-    for line in _text_lines(d["parts"]):
+    meshes, stretched = _mesh_lines(d["parts"], own)
+    for line in _text_lines(d["parts"]) + meshes:
         print(line)
     for msg in problems + b.problems:
         print(f"- {msg}")
+    cut = cut_warnings(b)
     models = ([b.solid] if b.solid is not None and not b.solid.is_empty() else []) + [(v, f) for _, v, f in b.loose]
     if not models:
+        for w in stretched + cut:                       # a hole bigger than all it cuts leaves nothing: say why
+            print(f"! {w}")
         print("It makes nothing to print.")
         return 1
     model = models[0] if len(models) == 1 else models
     report = check(model, bed)
+    report.warnings += stretched
     if b.solid is not None and not b.solid.is_empty():
         report.warnings += _hole_lips(d["parts"], b.solid)
+    report.warnings += cut
     low = report.lowest[2]
     if low < -0.01:              # a design is placed on its plate: the slicer moves it, so what lies there changes
         report.warnings.append(f"its lowest point is at z {low:.2f} mm, below the plate - the slicer lifts it, so "

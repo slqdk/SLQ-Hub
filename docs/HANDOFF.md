@@ -4,7 +4,26 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## Next session - start here (written 2026-11-27, at 0.103.1)
+## Next session - start here (written 2026-11-27, at 0.104.0)
+
+**0.104.0 (2026-11-27): a mesh keeps its own size; hub3d design says meshes and wrong cuts - pushed, not yet
+installed.** Søren, 10:18, chat 335's export (gemma 4 31B (U), "lav et hul i bunden, så der er plads til et
+fyrfadslys" on a cone from model3d_generate): the model wrote the mesh part without `size`, both readers gave it 20 x 20
+x 20, the 43 x 43 x 100 mm cone came out a 20 mm cube-shaped cone, every 38-40 mm hole cut it right across, and it
+moved the hole for 28 steps until he stopped it (reproduced: all seven of its builds, the same sizes and triangle
+counts). Four changes proposed, his answer at 10:37: "JA..". Built (DESIGN §8 "The 3D editor", A mesh's own size):
+a mesh without `size` is its file's own size, a 0 follows the sizes given ([0, 0, 150]: 150 tall, proportions kept),
+in both readers and both builds (`mesh_scale`/`meshScale`; worked out at reading when the file can be read - the
+editor once it is loaded, `fitLoaded`); `hub3d design` says each mesh's size against its own, warns of a stretched one,
+of a hole wider than a solid in two axes (or all three - said even when nothing is left) and of holes that cut a solid
+into pieces (`cut_warnings`); model3d_generate's result has a ready part line. On chat 335's files: its v2 design now
+says its own 43.2 x 43.3 x 100 and "hole candle_hole cuts cone into 2 pieces"; with an explicit [20, 20, 20], the
+stretch and "wider than cone in X and Y"; the right design (size [0, 0, 150], a D42 x 7 hole) READY with no ! line.
+Tests: both readers and builds on no size, [0, 0, H], one size, a mean of two, three; the report's lines; the part line
+in model3d_generate's result. Not seen: the editor in a browser opening an assistant-written design whose mesh has no
+size (`fitLoaded` re-reading it once the STL is loaded) - only its pieces, in node. `hub3d format` is now ~13.8k
+characters: the Hub's 12,000-character tool output cuts ~2.4k from its middle (Flat things, Things that stand, the key
+tag) - told him, not changed.
 
 **0.103.1 (2026-11-27): no line to the pointer in Dimension - pushed, not yet installed.** Søren, 10:22, with 0.103.0
 on the card - a four-cornered shape, its top side clicked, "114 mm" in the box, and a red line from the shape's middle
@@ -13,12 +32,6 @@ streg fra midten af skal ikke være der". It was 0.102.1's line to the pointer, 
 leaves the shape. Built: that line is gone (`Editor.tsx`, the marks' "Being made"); the side's size and its box show
 the measuring; over another shape's side the distance it would make is still drawn, amber side and mm. Checks: tsc,
 vite build, pytest, shellcheck. Not seen in the dev server - a branch of the drawing taken out, nothing added.
-
-Also from him the same morning, not built: chat 335's export (gemma 4 31B, a tea-light hole in a generated cone)
-looped 28 steps because its design's mesh part had no `size` - both readers (`hub3d.py` `_read_part`, `geometry.ts`)
-give a part without one 20 x 20 x 20, silently, so the 43 x 43 x 100 mm STL became a 20 mm cone and every 38-40 mm
-hole cut it right across. Proposed to him: a mesh without `size` keeps the file's own size (or a ! line), `size`
-[0, 0, H] keeping proportions, model3d_generate printing a ready part line. Waiting for his answer.
 
 **0.103.0 (2026-11-27): a line's length in a box beside it; Fit after Extrude; a flat preview - pushed, not yet
 installed.** Søren, 09:35-09:38, three screenshots of 0.102.1: "Jeg burde kunne trykke på en linie, og så definere

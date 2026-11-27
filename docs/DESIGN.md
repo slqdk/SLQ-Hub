@@ -3665,6 +3665,32 @@ into the Hub, Tinkercad's level, his printer a Bambu Lab P2S but chosen per desi
     the part's names afresh (`compactEdges`): per kind and size the fewest names - "all", "vertical", a face, then
     single edges - none of two treatments meaning one edge, so the plan reads back the same whichever wins (tested on
     800 random plans, and by hub3d). Unpick all, or Esc twice, unpicks.
+- **A mesh's own size, and cuts that go wrong (0.104.0).** Søren, 10:18, chat 335's export: "lav et hul i bunden, så
+  der er plads til et fyrfadslys" - gemma 4 31B wrote the generated cone (43 x 43 x 100 mm) as a mesh part without
+  `size`, both readers gave it every shape's 20 x 20 x 20, the cone was squeezed into a 20 mm cube, and every 38-40 mm
+  hole cut it right across; it moved the hole up and down for 28 steps. "JA" to four changes:
+  - **Its own size.** A mesh's `size` left out is [0, 0, 0], and a 0 there follows (`follows`: any of a mesh's three):
+    `meshScale` / `mesh_scale` - a size given fills the file's own size there, a 0 takes the given ones' scale (their
+    mean when they differ), none given: the file's own size. Three given fill that box as before, stretched if they
+    are not its proportions. Read with the design's folder (`read_design(text, folder)`, `hub3d design` and
+    `design`) or, in the editor, once the file is loaded (`readDesign(text, own)`; `ownSize` from the loaded meshes,
+    `meshExtent`), the 0s are worked out into numbers before anything else uses the size - mates, faces, a left-out
+    `at` (on the plate: z = its height / 2). Read without (the editor before its file has loaded, the tests), they
+    stay 0 and both builds work them out the same. The editor reads the design's text again once its files are loaded
+    (`fitLoaded`) when nothing has changed since, else fits just the sizes (`fitMeshes`); it writes them as numbers at
+    its next save. A part's size from the file is its corners as 32-bit floats, as both builds read them.
+  - **hub3d design says each mesh** (`_mesh_lines`): "mesh cone: cone_holes.stl, 43.2 x 43.3 x 100.0 mm - its own
+    size" (or "1.5 x its own size"); stretched more than 1 % between axes, the line says by how much and a `!` line
+    says how to keep its proportions ([0, 0, H], or no size).
+  - **model3d_generate's result** has the design's part for what it made: `{"id": ..., "shape": "mesh", "file": ...,
+    "size": [0, 0, H], "at": [0, 0, H / 2]}` - its height, proportions kept.
+  - **Cuts that go wrong** (`cut_warnings`, from what `build_design` keeps of each list's solids and holes): a hole
+    whose box covers a solid of its list in two of X, Y and Z ("hole candle_hole is wider than cone in X and Y (40 x
+    40 mm over its 20 x 20): it cuts all of cone from z 0 to 10 - right to cut it flat, but for a hole in it one of
+    their sizes is wrong"), or in all three (it cuts all of it away - said even when nothing is left to print); and
+    holes that leave a solid in more pieces than it was ("hole candle_hole cuts cone into 2 pieces (z 0 to 8.6, z 15
+    to 100)" - the same hole on the cone at its real size, through its tapering wall). At most three said. Only in
+    `hub3d design` - in the editor a stretched part or a cut is the user's own doing.
 
 ### Workflows (0.67.0)
 

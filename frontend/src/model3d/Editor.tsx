@@ -20,14 +20,15 @@ import { useApp } from "../state";
 import { ConfirmButton, MenuButton } from "../components/ui";
 import type { DesignFolder } from "./folder";
 import { allIds, build, buildPart, COLORS, edgeLength, edgeLines, edgePlan, EDGES, edgesOf, extent, extentOf, FACE_FRAMES,
-  faceAngle, faceAt, faceFrame, FACES, faceMarks, FONT_FAMILIES, fontFile, follows, freshId, holeEdges, joined, lettersApart,
-  lettersSide, mateAt, mateAxis, mateMark, matePlane, MAX_COPIES, MIN_SIZE, mirrorPart, nearestEdge, nearestToRay, newDesign,
+  faceAngle, faceAt, faceFrame, FACES, faceMarks, fitMeshes, FONT_FAMILIES, fontFile, follows, freshId, holeEdges, joined,
+  lettersApart, lettersSide, mateAt, mateAxis, mateMark, matePlane, MAX_COPIES, meshExtent, MIN_SIZE, mirrorPart,
+  nearestEdge, nearestToRay, newDesign,
   onFace, partSize, placedBy, placeOn, readDesign, repeatAround, respot, retext, settle, SPACING, spotAt, spotXY, stl, textGlyphs,
   textMeasure, threeMf, toPart, fromPart, transformPart, treatEdges, turned90, withCapitals, withEdgeLength, writeDesign,
   type Align,
   type Anchor, type Box3, type Built, type Design, type EdgeKind, type FaceName, type FontData, type FontIndex, type Fonts,
-  type Kit, type Mat3, type Mate, type MeshData, type Part, type Point2, type Repeat, type Shape, type Vec3,
-  type Wasm } from "./geometry";
+  type Kit, type Mat3, type Mate, type MeshData, type OwnSize, type Part, type Point2, type Repeat, type Shape,
+  type Vec3, type Wasm } from "./geometry";
 import { baseName, dirOf, fmt, joinPath, MESH_FILE, pointMark, relativePath } from "./files";
 import { parseMesh } from "./meshio";
 import { lastPrinter, PRINTERS, printerOf, rememberPrinter, type Printer } from "./printers";
@@ -413,6 +414,28 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
 
   const fetchMesh = useCallback(async (full: string) => parseMesh(full, await folder.current.readBytes(full)), []);
 
+  // A mesh file's own size once it is loaded: what a mesh part's 0s in size - or no size - come from (0.104.0).
+  const ownSize: OwnSize = useCallback((file: string) => {
+    const m = meshes.current.get(file);
+    return m && typeof m !== "string" && m.triangles.length ? meshExtent(m) : null;
+  }, []);
+
+  /** A mesh part read before its file was loaded still has 0s in its size (0.104.0): worked out once it is - the
+   *  design read again from its text when nothing has changed since (a left-out at then stands it on the plate, as
+   *  hub3d reads it), else just those sizes. */
+  const fitLoaded = useCallback(() => {
+    const d = designRef.current;
+    if (!d || !fitMeshes(d.parts, ownSize)) return;
+    if (!dirty.current && saved.current) {
+      const { design: again, problems: p } = readDesign(saved.current, ownSize);
+      setProblems(p);
+      setDesign(again);
+      return;
+    }
+    const parts = fitMeshes(d.parts, ownSize);
+    if (parts) setDesign({ ...d, parts });
+  }, [ownSize, setDesign]);
+
   const ensureMeshes = useCallback((d: Design) => {
     const want: string[] = [];
     const walk = (ps: Part[]) => ps.forEach((p) => {
@@ -426,13 +449,14 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
         .then((m) => meshes.current.set(file, m), (e) => meshes.current.set(file, (e as Error).message))
         .finally(() => {
           loading.current.delete(file);
+          fitLoaded();
           setMeshTick((t) => t + 1);
         });
     }
-  }, [fetchMesh]);
+  }, [fetchMesh, fitLoaded]);
 
   const adopt = useCallback((text: string, fromOutside: boolean) => {
-    const { design: d, problems: p } = readDesign(text);
+    const { design: d, problems: p } = readDesign(text, ownSize);
     if (fromOutside && designRef.current) {            // what the assistant wrote can be undone here
       past.current.push(designRef.current);
       future.current = [];
@@ -446,7 +470,7 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
     const ids = allIds(d.parts);
     setSelected(selectedRef.current.filter((id) => ids.has(id)));
     ensureMeshes(d);
-  }, [ensureMeshes, setDesign, setSelected]);
+  }, [ensureMeshes, ownSize, setDesign, setSelected]);
 
   useEffect(() => {
     let on = true;

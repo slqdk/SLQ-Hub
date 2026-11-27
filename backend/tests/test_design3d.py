@@ -330,6 +330,91 @@ def test_the_design_command(h3, tmp_path, capsys, monkeypatch):
         h3.design(tmp_path / "empty.3d.json", quiet=True)
 
 
+# 0.104.0, chat 335: a mesh part written without a size was squeezed into the 20 x 20 x 20 mm every other shape gets.
+# cube.stl (meshes()) is 4 x 6 x 2 mm. (part, its size, where it is)
+MESH_SIZES = [
+    ({"id": "m", "shape": "mesh", "file": "cube.stl"}, [4, 6, 2], [0, 0, 1]),            # its own size, on the plate
+    ({"id": "m", "shape": "mesh", "file": "cube.stl", "size": [0, 0, 10]}, [20, 30, 10], [0, 0, 5]),   # proportions
+    ({"id": "m", "shape": "mesh", "file": "cube.stl", "size": [8, 0, 0], "at": [1, 2, 3]}, [8, 12, 4], [1, 2, 3]),
+    ({"id": "m", "shape": "mesh", "file": "cube.stl", "size": [8, 0, 1]}, [8, 7.5, 1], [0, 0, 0.5]),   # their mean
+    ({"id": "m", "shape": "mesh", "file": "cube.stl", "size": [10, 10, 5]}, [10, 10, 5], [0, 0, 2.5]),  # stretched
+]
+
+MESH_SIZES_JS = """
+const files = new Map();
+for (const [name, b64] of Object.entries(input.files)) files.set(name, G.readStl(Buffer.from(b64, "base64")));
+const own = (f) => files.has(f) ? G.meshExtent(files.get(f)) : null;
+const out = input.designs.map((d) => {
+  const text = JSON.stringify(d), read = G.readDesign(text, own).design.parts[0], bare = G.readDesign(text).design;
+  const fitted = G.fitMeshes(bare.parts, own), b = G.build(bare, { wasm, fonts, meshes: files });
+  return { size: read.size, at: read.at, bare: bare.parts[0].size, fitted: fitted && fitted[0].size, box: b.box };
+});
+process.stdout.write(JSON.stringify(out));
+"""
+
+
+def test_a_mesh_keeps_its_own_size_or_its_proportions(h3, tmp_path):
+    """Read with its folder (the editor: once the file is loaded) a mesh part's 0s come from its file - no size is its
+    own, a 0 follows the sizes given; read without, they stay 0 and both builds work them out the same."""
+    pytest.importorskip("manifold3d")
+    import base64
+    meshes(tmp_path)
+    designs = [{"parts": [p]} for p, _, _ in MESH_SIZES]
+    js = run_js(MESH_SIZES_JS, {"files": {"cube.stl": base64.b64encode((tmp_path / "cube.stl").read_bytes()).decode()},
+                                "designs": designs})
+    for (part, size, at), d, j in zip(MESH_SIZES, designs, js):
+        got = h3.read_design(json.dumps(d), tmp_path)[0]["parts"][0]
+        assert got["size"] == pytest.approx(size) and got["at"] == pytest.approx(at), part
+        assert j["size"] == pytest.approx(size) and j["at"] == pytest.approx(at), part
+        bare, _ = h3.read_design(json.dumps(d))
+        assert bare["parts"][0]["size"] == j["bare"] and (j["fitted"] is None) == (0 not in j["bare"])
+        if j["fitted"]:
+            assert j["fitted"] == pytest.approx(size)
+        b = h3.build_design(bare, tmp_path)
+        v = np.asarray(b.solid.to_mesh().vert_properties)[:, :3]
+        assert (v.max(0) - v.min(0)) == pytest.approx(size, abs=1e-5), part
+        assert np.allclose(j["box"], [v.min(0), v.max(0)], atol=1e-4), part
+
+
+def test_the_design_command_says_meshes_and_wrong_cuts(h3, tmp_path, capsys, monkeypatch):
+    """0.104.0: each mesh's size against its file's own; a stretched mesh, a hole wider than what it cuts and holes
+    that cut a part into pieces are ! lines - chat 335 moved a 40 mm hole up and down a 20 mm mesh seven times."""
+    pytest.importorskip("manifold3d")
+    monkeypatch.setenv("MPLCONFIGDIR", str(tmp_path / "mpl"))
+    meshes(tmp_path)
+
+    def said(parts: list) -> str:
+        f = tmp_path / "t.3d.json"
+        f.write_text(json.dumps({"parts": parts}))
+        h3.main(["design", str(f)])
+        return capsys.readouterr().out
+
+    out = said([{"id": "m", "shape": "mesh", "file": "cube.stl"}])
+    assert "\nmesh m: cube.stl, 4.0 x 6.0 x 2.0 mm - its own size\n" in out and "READY for the slicer." in out
+    out = said([{"id": "m", "shape": "mesh", "file": "cube.stl", "size": [0, 0, 3], "at": [0, 0, 1.5]}])
+    assert "mesh m: cube.stl, 6.0 x 9.0 x 3.0 mm - 1.5 x its own size" in out and "\n!" not in out
+    out = said([{"id": "m", "shape": "mesh", "file": "cube.stl", "size": [20, 20, 20], "at": [0, 0, 10]}])
+    assert "mesh m: cube.stl, 20.0 x 20.0 x 20.0 mm - stretched: 5.00 x 3.33 x 10.00 of its own 4 x 6 x 2" in out
+    assert ("! mesh m is stretched to 5.00 x 3.33 x 10.00 of cube.stl's own 4 x 6 x 2 mm - to keep its proportions "
+            "give one size and 0s ([0, 0, 20]), or leave size out for its own size") in out
+    out = said([{"id": "m", "shape": "mesh", "file": "cube.stl", "at": [0, 0, 1]},
+                {"id": "h", "shape": "cylinder", "size": [10, 10, 2], "at": [0, 0, 2], "hole": True}])
+    assert ("! hole h is wider than m in X and Y (10 x 10 mm over its 4 x 6): it cuts all of m from z 1 to 2 - right "
+            "to cut it flat, but for a hole in it one of their sizes is wrong") in out and "pieces" not in out
+    out = said([{"id": "m", "shape": "mesh", "file": "cube.stl", "at": [0, 0, 1]},
+                {"id": "h", "shape": "box", "size": [9, 9, 9], "at": [0, 0, 1], "hole": True}])
+    assert "! hole h is bigger than m every way (9 x 9 x 9 mm over its 4 x 6 x 2): it cuts all of m away" in out
+    assert out.rstrip().endswith("It makes nothing to print.")
+    shell = {"id": "shell", "shape": "group", "parts": [         # a hollow cone, open below, and a hole for a candle
+        {"id": "outer", "shape": "cone", "size": [40, 40, 60], "at": [0, 0, 30]},
+        {"id": "inner", "shape": "cone", "size": [36, 36, 56], "at": [0, 0, 28], "hole": True}]}
+    out = said([shell, {"id": "candle", "shape": "cylinder", "size": [36, 36, 10], "at": [0, 0, 15], "hole": True}])
+    assert ("! hole candle cuts shell into 2 pieces (z 0 to 10, z 20 to 60) - if it should stay one piece, a hole goes "
+            "too far or is too wide") in out and "wider" not in out
+    out = said([shell, {"id": "candle", "shape": "cylinder", "size": [30, 30, 3], "at": [0, 0, 1], "hole": True}])
+    assert not any(w in out for w in ("pieces", "wider", "bigger"))     # one inside it, cutting nothing: no word
+
+
 POINT_JS = """
 process.stdout.write(JSON.stringify({
   lid: F.pointMark("Lid", "p3", false, [12, -4, 20], [0, 0, 1]),

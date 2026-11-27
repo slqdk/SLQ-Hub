@@ -131,7 +131,13 @@ function vec(v: unknown, fallback: Vec3): Vec3 {
 }
 
 /** A design from its file's text, every part complete: missing or wrong values get defaults, said in `problems`. */
-export function readDesign(text: string): { design: Design; problems: string[] } {
+/** A file's own size (mm along X, Y and Z) when it is loaded: what a mesh part's 0s in size come from (0.104.0). */
+export type OwnSize = (file: string) => Vec3 | null;
+
+/** A design from its file's text, every part complete: missing or wrong values get defaults, said in `problems`.
+ *  With `own`, a mesh part's 0s in size - all three when it has none - are worked out from its file (0.104.0, as
+ *  hub3d's read_design with the design's folder); without, they stay 0 and the build works them out. */
+export function readDesign(text: string, own?: OwnSize): { design: Design; problems: string[] } {
   let data: unknown;
   try {
     data = JSON.parse(text);
@@ -145,7 +151,7 @@ export function readDesign(text: string): { design: Design; problems: string[] }
   const parts = Array.isArray(d.parts) ? d.parts : [];
   if (!Array.isArray(d.parts)) problems.push('It has no "parts" list.');
   const odd: Odd = { parts: 0, keys: new Set<string>(), shapes: [] };
-  const design: Design = { format: FORMAT, version: VERSION, parts: readParts(parts, seen, problems, odd) };
+  const design: Design = { format: FORMAT, version: VERSION, parts: readParts(parts, seen, problems, odd, own) };
   design.parts = settle(design.parts, problems);         // parts on faces where their anchors put them (0.98.0)
   // A model that guessed the format: what it did not know first, once - not a line for each of its parts.
   const first: string[] = [];
@@ -165,14 +171,14 @@ export function readDesign(text: string): { design: Design; problems: string[] }
 
 type Odd = { parts: number; keys: Set<string>; shapes: [string, unknown][] };
 
-function readParts(list: unknown[], seen: Set<string>, problems: string[], odd: Odd): Part[] {
+function readParts(list: unknown[], seen: Set<string>, problems: string[], odd: Odd, own?: OwnSize): Part[] {
   const out: Part[] = [];
   for (const item of list) {
     if (!item || typeof item !== "object" || Array.isArray(item)) {
       problems.push("A part that is not an object was left out.");
       continue;
     }
-    out.push(readPart(item as Record<string, unknown>, seen, problems, out.length, odd));
+    out.push(readPart(item as Record<string, unknown>, seen, problems, out.length, odd, own));
   }
   return out;
 }
@@ -207,7 +213,8 @@ function readRepeat(v: unknown, id: string, problems: string[]): Repeat | undefi
   return out;
 }
 
-function readPart(p: Record<string, unknown>, seen: Set<string>, problems: string[], index: number, odd: Odd): Part {
+function readPart(p: Record<string, unknown>, seen: Set<string>, problems: string[], index: number, odd: Odd,
+  own?: OwnSize): Part {
   let id = typeof p.id === "string" && p.id.trim() ? p.id.trim() : "";
   if (!id || seen.has(id)) id = freshId(seen);
   seen.add(id);
@@ -224,13 +231,18 @@ function readPart(p: Record<string, unknown>, seen: Set<string>, problems: strin
   const part: Part = { id, shape, size: [20, 20, 20], at: [0, 0, 10], rotate: [0, 0, 0] };
   if (typeof p.name === "string" && p.name) part.name = p.name;
   if (shape === "group") {
-    part.parts = readParts(Array.isArray(p.parts) ? p.parts : [], seen, problems, odd);
+    part.parts = readParts(Array.isArray(p.parts) ? p.parts : [], seen, problems, odd, own);
   } else {
-    const size = vec(p.size, shape === "outline" ? [0, 0, 2] : shape === "text" ? [0, 10, 2] : [20, 20, 20]);
+    const size = vec(p.size, shape === "outline" ? [0, 0, 2] : shape === "text" ? [0, 10, 2]
+      : shape === "mesh" ? [0, 0, 0] : [20, 20, 20]);                     // a mesh: its file's own size (0.104.0)
     part.size = size.map((v, i) => (follows(shape, i, v) ? 0 : Math.max(MIN_SIZE, Math.abs(v)))) as Vec3;
     if (shape === "text" && part.size[0] === 0 && part.size[1] === 0) {
       part.size[1] = 10;
       problems.push(`${id}: a text needs a width or a height (size x or y) - made 10 mm tall.`);
+    }
+    if (shape === "mesh" && own && part.size.includes(0) && typeof p.file === "string" && p.file) {
+      const mine = own(p.file);
+      if (mine) part.size = fitMesh(part.size, mine);
     }
     part.at = vec(p.at, [0, 0, part.size[2] / 2]);
   }
@@ -352,9 +364,50 @@ function readOn(v: unknown, part: Part, problems: string[]): Anchor | undefined 
 }
 
 /** Whether a 0 in a part's size follows what it draws: a text's width or height (from its letters - one of the two
- *  is given), an outline's width and depth (from its points). */
+ *  is given), an outline's width and depth (from its points), any of a mesh's three (from its file, 0.104.0). */
 export function follows(shape: Shape, i: number, v: number): boolean {
-  return v <= 0 && i < 2 && (shape === "text" || shape === "outline");
+  return v <= 0 && (shape === "mesh" || (i < 2 && (shape === "text" || shape === "outline")));
+}
+
+/** A mesh part's scale along X, Y and Z (0.104.0, hub3d's mesh_scale): a size given fills the file's own size there;
+ *  a 0 follows the given ones - their scale, the mean when they differ - and with none given it is the file's own
+ *  size. Chat 335: a mesh written without a size was squeezed into the 20 x 20 x 20 mm every other shape gets. */
+export function meshScale(size: Vec3, own: Vec3): Vec3 {
+  const given: number[] = [];
+  for (let i = 0; i < 3; i++) if (size[i] > 0 && own[i] > 1e-9) given.push(size[i] / own[i]);
+  const k = given.length ? given.reduce((a, b) => a + b, 0) / given.length : 1;
+  return [0, 1, 2].map((i) => (own[i] > 1e-9 ? (size[i] > 0 ? size[i] / own[i] : k) : 1)) as Vec3;
+}
+
+/** A mesh part's size with its 0s worked out from the file's own size. */
+export function fitMesh(size: Vec3, own: Vec3): Vec3 {
+  const k = meshScale(size, own);
+  return [0, 1, 2].map((i) => (size[i] > 0 ? size[i] : own[i] * k[i])) as Vec3;
+}
+
+/** A mesh file's own size: mm along X, Y and Z from its corners (as the build places it). */
+export function meshExtent(m: MeshData): Vec3 {
+  const [lo, hi] = meshBox(m);
+  return [0, 1, 2].map((i) => (hi[i] >= lo[i] ? hi[i] - lo[i] : 0)) as Vec3;
+}
+
+/** The mesh parts whose sizes still have 0s that `own` can now work out, worked out - the rest as they were; null when
+ *  there are none (0.104.0: the editor, once a file is loaded, for a design changed since it was read). */
+export function fitMeshes(parts: Part[], own: (file: string) => Vec3 | null): Part[] | null {
+  let changed = false;
+  const walk = (list: Part[]): Part[] => list.map((p) => {
+    if (p.parts) {
+      const inner = walk(p.parts);
+      return inner === p.parts ? p : { ...p, parts: inner };
+    }
+    if (p.shape !== "mesh" || !p.file || !p.size.includes(0)) return p;
+    const mine = own(p.file);
+    if (!mine) return p;
+    changed = true;
+    return { ...p, size: fitMesh(p.size, mine) };
+  });
+  const out = walk(parts);
+  return changed ? out : null;
 }
 
 /** A font as a design may name it - "serif", "Pacifico", "Arial Bold", OpenSCAD's "Liberation Sans:style=Bold
@@ -2280,7 +2333,7 @@ function meshBox(m: MeshData): Box3 {
 function placeMesh(m: MeshData, p: Part): MeshData {
   const [lo, hi] = meshBox(m);
   const c = [0, 1, 2].map((i) => (lo[i] + hi[i]) / 2);
-  const k = [0, 1, 2].map((i) => (hi[i] - lo[i] > 1e-9 ? p.size[i] / (hi[i] - lo[i]) : 1));
+  const k = meshScale(p.size, [hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]]);
   const rot = rotation(p.rotate);
   const out = new Float32Array(m.positions.length);
   for (let i = 0; i < m.positions.length; i += 3) {
@@ -2439,7 +2492,7 @@ export function build(design: Design, kit: Kit): Built {
         }
         const [lo, hi] = meshBox(w);
         const c: Vec3 = [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2];
-        const k = [0, 1, 2].map((i) => (hi[i] - lo[i] > 1e-9 ? p.size[i] / (hi[i] - lo[i]) : 1));
+        const k = meshScale(p.size, [hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]]);   // its 0s from the file (0.104.0)
         return keep(keep(m.translate([-c[0], -c[1], -c[2]])).scale(k));
       }
       default:

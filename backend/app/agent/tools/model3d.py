@@ -91,12 +91,16 @@ async def model3d_generate(ctx: ToolContext, args: dict) -> ToolResult:
     volume = f", {facts['volume_cm3']:g} cm3" if facts.get("volume_cm3") is not None else ""
     given = "" if args.get("size_mm") not in (None, "") else (" No size was given, so it is 100 mm on its longest "
                                                                "side - ask the user for the real size.")
+    # A design's part for it, ready (0.104.0, chat 335: a mesh part written without its size came out 20 mm).
+    part = (f' As a part of a design in the working folder (hole in it, text on it): {{"id": "{Path(base).name}", '
+            f'"shape": "mesh", "file": "{base}.stl", "size": [0, 0, {h:g}], "at": [0, 0, {h / 2:g}]}} - its height '
+            "with its proportions kept; another height scales it, standing on the plate at z = height / 2.")
     return ToolResult(
         f"Made a 3D model of {ref} with {out['model']['name']} ({out['detail']} detail, seed {out['seed']}, "
         f"{out['compute']:.0f} s on the GPU): {base}.stl - {w:g} x {d:g} x {h:g} mm (width x depth x height), Z up, "
         f"standing on the bed; {facts['triangles']:,} triangles, {', '.join(checks)}{volume}. {base}.glb is the model "
         f"as made (glTF, Y up) for 3D viewers; {base}-views.png shows it from the front, the side and above - look "
-        f"at it before you say how it turned out.{given}",
+        f"at it before you say how it turned out.{part}{given}",
         images=[{"sha": up["sha"], "mime": "image/png"}],
         display={"generated": [{"sha": up["sha"], "path": f"{base}-views.png"}],
                  "made_with": {"model": out["model"]["name"], "loras": [], "left_out": []}})

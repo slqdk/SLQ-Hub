@@ -330,6 +330,8 @@ async def test_a_3d_model_from_a_picture(signed_in, app, fakes):
     ok = next(e["data"] for e in run.events if e["type"] == "tool_result")
     assert ok["ok"], ok["text"]
     assert "vase-photo.stl - 30 x 40 x 80 mm (width x depth x height)" in ok["text"]
+    assert ('{"id": "vase-photo", "shape": "mesh", "file": "vase-photo.stl", "size": [0, 0, 80], "at": [0, 0, 40]}'
+            in ok["text"])                                          # a design's part for it, ready (0.104.0)
     assert "closed (watertight)" in ok["text"] and "seed 3" in ok["text"]
     for name in ("vase-photo.stl", "vase-photo.glb", "vase-photo-views.png"):
         assert (folder / name).is_file(), name
