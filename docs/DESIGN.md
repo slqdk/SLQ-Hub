@@ -3420,7 +3420,13 @@ into the Hub, Tinkercad's level, his printer a Bambu Lab P2S but chosen per desi
     `view` now calls it); "Look at it" turns it back.
   - **Drawing** (a mode: the Sketch tab alone in the bar, the Pick/Line/Rectangle/Circle pill over the view instead
     of Select/Move, no parts tree): Line - click each corner, the first again closes it, the last again or Esc ends it
-    open; Rectangle - two corners across; Circle - the middle, then the edge. The pointer's ray meets the plane
+    open; Rectangle - two corners across; Circle - the middle, then the edge. Or drag (0.101.1, SolidWorks'
+    click-drag): the press puts the point down, the release the next - a press on a line's end goes on from it, so a
+    chain of drags is one line. The left button never turns the view in a sketch (Søren, 06:51: "if i hold in the
+    mouse button, i then start to move turn the place... That is not efficient in 2D"): a drawing tool has it, Pick
+    moves the view with it, the middle button turns it (as in SolidWorks), the right moves it, the wheel zooms
+    (`Viewport.setLeft`). The empty design's "Add a shape from Insert above..." over the plate is gone (Søren: "remove
+    the text on the plate.. it is in the way") - the status line says "Nothing to print yet". The pointer's ray meets the plane
     (`rayOnPlane`); the point snaps to a corner, end or middle within 10 px (a face's corners, edge middles and middle
     too), else to the whole millimetre - on a face from its lower left corner, so distances from its edges come out
     whole. Typed while drawing, as SketchUp's Measurements box: a line's next length toward the pointer (a whole 15°

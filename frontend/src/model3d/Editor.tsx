@@ -755,6 +755,10 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
       color: at.box?.color ?? "#e8a33d" })));
   }, [sketch?.shapes, sketch?.plane, sketchMake.height, design, ready]);
 
+  useEffect(() => {                                   // a sketch is 2D (0.101.1): the left button draws or moves it
+    vp.current?.setLeft(!sketch ? "turn" : sketch.tool ? "draw" : "pan");
+  }, [ready, !!sketch, sketch?.tool]);                 // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {                                   // Pick lines belongs to the Lines tab
     if (tab !== "lines" && tool === "edge") setTool(null);
     if (tool && tool !== "edge") setHoverEdge(null);
@@ -848,7 +852,9 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
 
   // ---------------------------------------------------------------- the pointer on the model
 
-  const pointer = useRef<{ x: number; y: number; hit: Hit | null; body: boolean } | null>(null);
+  // A press on the view - in a sketch (0.101.1), `press`: on a line's end, put down only when it is a click (a drag
+  // goes on from there).
+  const pointer = useRef<{ x: number; y: number; hit: Hit | null; body: boolean; press?: Point2 } | null>(null);
 
   const topOf = (id: string) => {
     const d = designRef.current;
@@ -1267,8 +1273,20 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
     host.current?.focus({ preventScroll: true });
     const v = vp.current;
     if (!v || e.button !== 0 || v.overGizmo) return;
-    if (sketchRef.current) {                           // sketching: a click draws, a drag turns the view
-      pointer.current = { x: e.clientX, y: e.clientY, hit: null, body: false };
+    const s = sketchRef.current;
+    if (s) {                                           // sketching (0.101.1): the press puts the tool's point down - a
+      let press: Point2 | undefined;                   // drag's end is the next - and turns nothing (Pick: moves the view)
+      if (s.tool) {
+        const at = sketchAt(e.clientX, e.clientY), d = s.draft;
+        const end = d?.kind === "line" ? d.pts[d.pts.length - 1] : null;
+        if (at && end && Math.abs(at.p[0] - end[0]) < 1e-6 && Math.abs(at.p[1] - end[1]) < 1e-6) press = at.p;
+        else if (at) {
+          setHoverPt(at);
+          sketchClick(at.p);
+        }
+        (e.target as Element).setPointerCapture?.(e.pointerId);
+      }
+      pointer.current = { x: e.clientX, y: e.clientY, hit: null, body: false, press };
       return;
     }
     const hit = v.pick(e.clientX, e.clientY);
@@ -1283,8 +1301,8 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
 
   const onPointerMove = (e: React.PointerEvent) => {
     const v = vp.current, p = pointer.current;
-    if (sketchRef.current) {                           // sketching: where a click would put its point
-      if (p) return;
+    if (sketchRef.current) {                           // sketching: where a click - or a drag's end - would put its point
+      if (p && !sketchRef.current.tool) return;      // Pick: the view moves
       const x = e.clientX, y = e.clientY;
       cancelAnimationFrame(hoverFrame.current);
       hoverFrame.current = requestAnimationFrame(() => {
@@ -1524,15 +1542,20 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
       finishDrag();
       return;
     }
-    if (Math.hypot(e.clientX - p.x, e.clientY - p.y) > 4) return;          // the view was turned: not a click
-    if (sketchRef.current) {
-      const at = sketchAt(e.clientX, e.clientY);
+    const moved = Math.hypot(e.clientX - p.x, e.clientY - p.y) > 4;
+    const s = sketchRef.current;
+    if (s) {
+      // Sketching (0.101.1): a drawing tool's drag ends at its next point; its click was put down when pressed - on a
+      // line's end, now (it ends the line). Pick: a click picks; a drag moved the view.
+      if (s.tool ? !moved && !p.press : moved) return;
+      const at = s.tool && !moved && p.press ? { p: p.press, snapped: true } : sketchAt(e.clientX, e.clientY);
       if (at) {
         setHoverPt(at);
         sketchClick(at.p);
       }
       return;
     }
+    if (moved) return;                                 // the view was turned: not a click
     const hit = p.hit;
     if (tool === "point") {
       if (hit) insertPoint(hit);
@@ -2118,13 +2141,13 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
             <div className="v3d-left">
             {sketch && (
               <div className="v3d-heads" role="toolbar" aria-label="Sketch">
-                <Tool icon={<MousePointer2 size={16} />} title="Pick a shape: Delete takes it away, its size in the Sketch tab (Esc)"
+                <Tool icon={<MousePointer2 size={16} />} title="Pick a shape: Delete takes it away, its size in the Sketch tab - a drag moves the view (Esc)"
                   active={!sketch.tool} onClick={() => setSketch({ ...sketch, tool: null, draft: null, typed: "" })}><span>Pick</span></Tool>
-                <Tool icon={<PenLine size={16} />} title="Line: click each corner (L)" active={sketch.tool === "line"}
+                <Tool icon={<PenLine size={16} />} title="Line: click each corner - or drag from one to the next (L)" active={sketch.tool === "line"}
                   onClick={() => setSketch({ ...sketch, tool: "line", draft: null, typed: "", picked: null })}><span>Line</span></Tool>
-                <Tool icon={<RectangleHorizontal size={16} />} title="Rectangle: two corners across (R)" active={sketch.tool === "rect"}
+                <Tool icon={<RectangleHorizontal size={16} />} title="Rectangle: two corners across - clicked or dragged (R)" active={sketch.tool === "rect"}
                   onClick={() => setSketch({ ...sketch, tool: "rect", draft: null, typed: "", picked: null })}><span>Rectangle</span></Tool>
-                <Tool icon={<Circle size={16} />} title="Circle: its middle, then its edge (C)" active={sketch.tool === "circle"}
+                <Tool icon={<Circle size={16} />} title="Circle: its middle, then its edge - clicked or dragged (C)" active={sketch.tool === "circle"}
                   onClick={() => setSketch({ ...sketch, tool: "circle", draft: null, typed: "", picked: null })}><span>Circle</span></Tool>
                 <span className="v3d-sep" />
                 <Tool icon={<Crosshair size={16} />} title="Look straight at the sketch again" onClick={() => {
@@ -2170,8 +2193,6 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
               : "Click the face that should lie on the plate. Esc stops."}</div>}
         </div>
         {(failed || !ready || status === "loading") && <div className="v3d-overlay">{failed ?? "Loading the 3D editor"}</div>}
-        {ready && !failed && design && !parts.length && (
-          <div className="v3d-empty">Add a shape from Insert above, import an STL - or tell the assistant what to make.</div>)}
         <div className="v3d-status num">
           {size ? <span>{fmt(size[0])} x {fmt(size[1])} x {fmt(size[2])} mm</span> : <span>Nothing to print yet</span>}
           {built?.volume ? <span>{(built.volume / 1000).toFixed(1)} cm³</span> : null}
@@ -2893,13 +2914,14 @@ function SketchButton({ onPick }: { onPick: (plane: SketchPlane) => void }) {
 function sketchHint(s: SketchState, where: string): string {
   const typed = s.typed ? ` Typed: ${s.typed} - Enter puts it down.` : "";
   if (s.tool === "line") {
-    return s.draft ? `Line: click the next corner - the first one again closes it, the last one again (or Esc) ends it. `
-      + `Type a length and Enter for an exact one.${typed}` : `Line on ${where}: click its first corner. Points snap to whole `
-      + "millimetres, and to the corners and middles near the pointer.";
+    return s.draft ? `Line: click the next corner (or drag to it) - the first one again closes it, the last one again (or `
+      + `Esc) ends it. Type a length and Enter for an exact one.${typed}` : `Line on ${where}: click its first corner - or `
+      + "drag a line. Points snap to whole millimetres, and to the corners and middles near the pointer.";
   }
-  if (s.tool === "rect") return s.draft ? `Rectangle: click the corner across - or type width;height and Enter.${typed}` : `Rectangle on ${where}: click a corner.`;
-  if (s.tool === "circle") return s.draft ? `Circle: click its edge - or type its diameter and Enter.${typed}` : `Circle on ${where}: click its middle.`;
-  return "Click a shape to pick it - Delete takes it away; L, R and C draw. Extrude or Cut makes the closed shapes into parts.";
+  if (s.tool === "rect") return s.draft ? `Rectangle: click the corner across - or type width;height and Enter.${typed}` : `Rectangle on ${where}: click a corner - or drag from corner to corner.`;
+  if (s.tool === "circle") return s.draft ? `Circle: click its edge - or type its diameter and Enter.${typed}` : `Circle on ${where}: click its middle - or drag from its middle to its edge.`;
+  return "Click a shape to pick it - Delete takes it away; L, R and C draw. Drag to move the view (the middle button turns "
+    + "it). Extrude or Cut makes the closed shapes into parts.";
 }
 
 /** The Sketch tab (0.100.0): what draws - Line, Rectangle, Circle; Pick, Delete, Undo; the picked shape's size; and
@@ -2918,11 +2940,11 @@ function SketchBand({ sketch, where, make, onMake, closed, onTool, onDelete, onU
     <>
       <Grp label="Draw">
         <Big icon={<PenLine size={20} />} label="Line" active={sketch.tool === "line"} onClick={() => onTool("line")}
-          title="Line: click each corner - the first again closes it (L)" />
+          title="Line: click each corner - or drag from one to the next; the first again closes it (L)" />
         <Big icon={<RectangleHorizontal size={20} />} label="Rectangle" active={sketch.tool === "rect"} onClick={() => onTool("rect")}
-          title="Rectangle: two corners across (R)" />
+          title="Rectangle: two corners across - clicked or dragged (R)" />
         <Big icon={<Circle size={20} />} label="Circle" active={sketch.tool === "circle"} onClick={() => onTool("circle")}
-          title="Circle: its middle, then its edge (C)" />
+          title="Circle: its middle, then its edge - clicked or dragged (C)" />
       </Grp>
       <Grp label="Change" fold={1} icon={<Undo2 size={20} />}>
         <Stack>

@@ -4,7 +4,17 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## Next session - start here (written 2026-11-26, at 0.101.0)
+## Next session - start here (written 2026-11-27, at 0.101.1)
+
+**0.101.1 (2026-11-27): a sketch stays flat - pushed, not yet installed.** Søren, trying the sketch on the card
+(06:50-06:52): "remove the text on the plate.. it is in the way" (the empty design's hint, over his drawing); "if i
+hold in the mouse button, i then start to move turn the place... That is not efficient in 2D"; and "i need to be able
+to set distances in mm (the red lines)" - his red lines from a circle to the edges of the shape around it: next,
+0.102.0, SolidWorks' Smart Dimension. Built: the hint is gone; in a sketch the left button never turns the view -
+Line, Rectangle and Circle draw with a drag too (press: a point, release: the next; a chain of drags is one line),
+Pick moves the view, the middle button turns it (DESIGN §8 "The sketch", Drawing). Seen in the dev server: a square
+dragged side by side and closed, a rectangle and a circle dragged, a clicked line still ended on its last corner,
+Pick's drag moving the view square to the sketch, the middle button turning it - no console errors.
 
 **0.101.0 (2026-11-26): mates - pushed, not yet installed.** Søren, 22:34: "... Og så skal man også kunne mate i 3D";
 asked kept or once, he wrote "Ok. Lav næste" and "Men ja til mates" - built kept, as in SolidWorks (DESIGN §8 "Mates

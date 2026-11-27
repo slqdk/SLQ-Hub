@@ -1487,7 +1487,7 @@ div.tests-result-head { cursor: default; }
 .v3d-mate-n { min-width: 16px; color: var(--ink-3); text-align: right; }
 .v3d-mate-kind { min-width: 78px; font-weight: 600; }
 .v3d-mate .select.v3d-mateface { width: 84px; height: 24px; padding: 0 18px 0 6px; font-size: 13px; }
-.v3d-overlay, .v3d-empty { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); max-width: 80%;
+.v3d-overlay { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); max-width: 80%;
   padding: 10px 14px; border-radius: 8px; background: var(--sheet); box-shadow: var(--shadow); color: var(--ink-2);
   font-size: 14px; text-align: center; pointer-events: none; }
 .panel-3d > .v3d-overlay { top: 40%; }

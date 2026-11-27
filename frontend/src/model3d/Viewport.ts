@@ -80,6 +80,19 @@ export class Viewport {
   private labelBox = document.createElement("div");
   onChange: (() => void) | null = null;
 
+  /** What the left button (one finger) does to the view (0.101.1): turns it - or, in a sketch, which is 2D, nothing (a
+   *  drawing tool draws with it) or moves it (Pick); there the middle button turns it, as in SolidWorks. */
+  setLeft(left: "turn" | "draw" | "pan"): void {
+    const c = this.controls;
+    if (left === "turn") {
+      c.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
+      c.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };
+    } else {
+      c.mouseButtons = { LEFT: left === "pan" ? THREE.MOUSE.PAN : null, MIDDLE: THREE.MOUSE.ROTATE, RIGHT: THREE.MOUSE.PAN };
+      c.touches = { ONE: left === "pan" ? THREE.TOUCH.PAN : null, TWO: THREE.TOUCH.DOLLY_PAN };
+    }
+  }
+
   constructor(private host: HTMLElement) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));

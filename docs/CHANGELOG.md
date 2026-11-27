@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.101.1 - 2026-11-27
+
+- Sketch: the view no longer turns when the mouse button is held. Line,
+  Rectangle and Circle can be drawn by dragging (press at the first point,
+  release at the next); with Pick a drag moves the view, and the middle
+  button turns it, as in SolidWorks.
+- The "Add a shape from Insert above..." text no longer sits on the plate
+  of an empty design.
+
 ## 0.101.0 - 2026-11-26
 
 - Mates, as in SolidWorks: put a part against another and it stays there.
