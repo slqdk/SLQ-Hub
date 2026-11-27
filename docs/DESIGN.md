@@ -3825,6 +3825,33 @@ into the Hub, Tinkercad's level, his printer a Bambu Lab P2S but chosen per desi
     them (a box face's from its lower left corner); on a slanted one square to it. Extrude's box takes a thickness below
     0 on the plate and the planes (`backOk`): `sketchParts` stands the part behind the plane (`back`); on a face it would
     only go into the part, so the box says Extrude stands out of a face and Cut goes in.
+- **Mates to the plate and edge to edge; mates in the parts list (0.110.0).** Søren, 17:16, a part mated under another,
+  floating: "Man skal kunne mate til pladen så den ikke hænger oppe i luften"; 17:20: "Man skal kunne mate streger ...
+  streger på 2 forskellige parter"; 17:21: "Man skal kunne se i parts listen hvordan de er mated".
+  - *The format* (both readers, `readMates`/`_read_mates`; the writer keeps them): `"to": {"plane": "plate"}` - or
+    "front" (y 0, looking -Y, as a sketch on it) or "right" (x 0, looking +X) - with a face, coincident or a distance;
+    no concentric or edge to a plane. `"edge": "top-front", "to": {"part": id, "edge": "bottom-front"}` - an edge of
+    its own box (named by its two faces, either first, any case - `edgeIn`, BOX_EDGES' order kept), coincident only,
+    no mm; flip: running the other way. A part and a plane in one "to": the part. Not a text's edge on a side that
+    follows its letters. Said as the other mistakes are, the same in both.
+  - *Placed* (`solveMates`/`_solve_mates`): a plane is a fixed normal and point (MATE_PLANES) in the turn and the move,
+    with no JOIN (nothing to be one piece with); an edge is an axis that is not the middle - turned like concentric
+    (its direction onto the other's, or the other way with flip), then its middle moved onto the other's line along
+    the two directions square to it (`across`); along the line it stays. A plane mate as the first does not make the
+    part follow anything (`followed` needs a part); planes are never "not there".
+  - *The editor*: Mate's first click right by one of a part's own box edges - the click's spot within 8 px of it, so
+    the model reaches its box there - picks the edge (`mateEdgeAt`, `mateEdges`), before a face; the second must be an
+    edge too. With a face picked first, a click on the plate (no part there; the ray onto z 0) mates it to the plate -
+    flush when the face looks up - without moving it across (a plate has no spot to put it on). Mates has On the plate:
+    the face of its box looking most down onto the plate (`mateOnPlate`; off when it is on it already). The menu's
+    rows read edge and plane mates (twelve edges, the three planes). The parts list shows each part's mates under it,
+    in words (`mateWords`: "bottom on the plate", "bottom-front on Blue's top-front", "top 2 mm from Lid's bottom"),
+    amber when not met (with why), a Delete on the line - a click picks the part. Seen in the headless Chrome: a box
+    at z 25 On the plate, then another's bottom-front edge clicked onto its top-front edge - on its line, z and y
+    exact, along it where the click was; both lines in the list.
+  - *Not done*: the front and right planes cannot be clicked in the editor (no plane shown) - the menu's plane select
+    and the assistant reach them; an edge of a part's real shape that is not its box's (a sketch's slanted side) is not
+    an edge to mate.
 
 ### Workflows (0.67.0)
 

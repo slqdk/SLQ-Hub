@@ -656,7 +656,9 @@ function cleanPart(p: Part): Record<string, unknown> {
     o.mates = p.mates.map((m) => {
       const w: Record<string, unknown> = { type: m.type };
       if (m.face) w.face = m.face;
-      w.to = m.to.face ? { part: m.to.part, face: m.to.face } : { part: m.to.part };
+      if (m.edge) w.edge = m.edge;                     // an edge, a plane (0.110.0)
+      w.to = m.to.plane ? { plane: m.to.plane } : m.to.edge ? { part: m.to.part, edge: m.to.edge }
+        : m.to.face ? { part: m.to.part, face: m.to.face } : { part: m.to.part };
       if (m.type === "distance") w.mm = r3(m.mm ?? 0);
       if (m.flip) w.flip = true;
       return w;
@@ -1208,13 +1210,19 @@ export function settle(parts: Part[], problems?: string[], before?: Part[]): Par
   const mated = (p: Part): Part => {
     const kept: [Mate, number][] = [], to = new Map<string, Part>();
     p.mates!.forEach((m, i) => {
-      const q = all.get(m.to.part);
+      if (m.to.plane) {                                // a plane of the design (0.110.0): always there, never moved
+        kept.push([m, i]);
+        return;
+      }
+      const q = all.get(m.to.part ?? "");
       const why = !q ? `names "${m.to.part}", which the design does not have`
         : q.id === p.id ? "is to the part itself"
           : q.shape === "group" ? `is to a group, ${q.id} (mate one of its parts)`
             : leads(q, p.id) ? `leads round in a circle: ${q.id} is placed by ${p.id}`
               : m.to.face && lettersSide(q, m.to.face) ? `is to the ${m.to.face} of ${q.id}, a text whose size there `
-                + "follows its letters (mate another face)" : "";
+                + "follows its letters (mate another face)"
+                : m.to.edge && m.to.edge.split("-").some((f) => lettersSide(q, f as FaceName)) ? `is to the ${m.to.edge}`
+                  + ` of ${q.id}, on a side of a text whose size there follows its letters (mate another edge)` : "";
       if (why) {
         problems?.push(`${p.id}: mate ${i + 1} ${why} - left out.`);
         return;
@@ -1227,7 +1235,8 @@ export function settle(parts: Part[], problems?: string[], before?: Part[]): Par
       delete q.mates;
       return q;
     }
-    if (was) q = followed(q, was.get(p.id), was.get(kept[0][0].to.part), to.get(kept[0][0].to.part)!);
+    const lead = kept[0][0].to.part;                  // its first mate's part - not a plane - it goes with
+    if (was && lead) q = followed(q, was.get(p.id), was.get(lead), to.get(lead)!);
     return solveMates(q, kept, to, problems);
   };
   const walk = (list: Part[]): Part[] => list.map((p) => (p.shape === "group" ? { ...p, parts: walk(p.parts ?? []) }
@@ -1305,10 +1314,27 @@ export function faceMarks(box: Part, face: FaceName, from: Record<string, number
 // the editor it goes with the part of its first mate when that one is moved. A part's faces are its own box's, before
 // it is turned (as a box's are for "on"), whatever its shape - a cylinder's top, a sphere's front; its axis is its own
 // Z through its middle - a cylinder's, a cone's, a round hole's.
+//
+// 0.110.0 - Søren: "Man skal kunne mate til pladen så den ikke hænger oppe i luften" and "Man skal kunne mate streger
+// ... streger på 2 forskellige parter": a face against the plate - or the front or right plane, as SolidWorks mates to
+// its planes - ("to": {"plane": "plate"}); and an edge of its own box on another part's ("edge": "top-front", "to":
+// {"part": id, "edge": "bottom-front"}): coincident, the two on one line - turned as little as lays them along each
+// other (flip: running opposite ways), moved as little as puts the one on the other's line; along it, it stays.
 
 export type MateType = "coincident" | "distance" | "concentric";
 export const MATE_TYPES: readonly MateType[] = ["coincident", "distance", "concentric"];
-const MATE_KEYS = ["type", "face", "to", "mm", "flip"];
+const MATE_KEYS = ["type", "face", "edge", "to", "mm", "flip"];
+/** The design's own planes a face can be mated to (0.110.0): the plate (z 0, looking up), the front plane (y 0, looking
+ *  to the front, -Y, as a sketch on it does) and the right plane (x 0, looking right). */
+export type MatePlaneName = "plate" | "front" | "right";
+export const MATE_PLANES: Record<MatePlaneName, { point: Vec3; normal: Vec3 }> = {
+  plate: { point: [0, 0, 0], normal: [0, 0, 1] },
+  front: { point: [0, 0, 0], normal: [0, -1, 0] },
+  right: { point: [0, 0, 0], normal: [1, 0, 0] },
+};
+/** A box's twelve edges by the two faces they lie between - the edge mates' names (0.110.0), as EDGES.box. */
+export const BOX_EDGES = ["top-front", "top-back", "top-left", "top-right", "bottom-front", "bottom-back", "bottom-left",
+  "bottom-right", "front-left", "front-right", "back-left", "back-right"] as const;
 /** How far a coincident face of a solid goes into the solid it is on, mm: nothing to see - not in the file, which keeps
  *  a thousandth - but the two are one piece (measured: exactly flat on each other, turned askew, half are two). */
 export const JOIN = 1e-5;
@@ -1317,10 +1343,34 @@ export const JOIN = 1e-5;
 export interface Mate {
   type: MateType;
   face?: FaceName;                        // coincident, distance: the part's own face
-  to: { part: string; face?: FaceName };  // the part it is mated to - and, face to face, that part's face
+  edge?: string;                          // coincident, edge on edge (0.110.0): its own box's edge, "top-front"
+  /** The part it is mated to - and, face to face, that part's face; edge on edge, its edge - or (0.110.0) a plane of
+   *  the design instead of a part. */
+  to: { part?: string; face?: FaceName; edge?: string; plane?: MatePlaneName };
   mm?: number;                            // distance: how far out of the other's face this one is (less than 0: into it)
-  flip?: boolean;                         // faces flush - looking the same way - not against each other; axes pointing
-                                          // opposite ways
+  flip?: boolean;                         // faces flush - looking the same way - not against each other; axes and
+                                          // edges running opposite ways
+}
+
+/** What a mate is to, in words: a part's id, or "the plate", "the front plane", "the right plane". */
+export const mateTarget = (m: Mate): string => (m.to.plane ? (m.to.plane === "plate" ? "the plate" : `the ${m.to.plane} plane`)
+  : m.to.part ?? "");
+
+/** An edge's name as BOX_EDGES has it - either face first, any case - or null. */
+export function edgeIn(v: unknown): string | null {
+  const [a, b, more] = typeof v === "string" ? v.trim().toLowerCase().split("-") : [];
+  if (more !== undefined || !a || !b) return null;
+  return BOX_EDGES.find((e) => e === `${a}-${b}` || e === `${b}-${a}`) ?? null;
+}
+
+/** An edge of a part's own box in its own frame (0.110.0): a point on it - its middle - and which way it runs, the
+ *  axis neither of its faces is across (+). */
+function edgeOwn(edge: string, mid: Vec3, half: Vec3): { l: Vec3; e: Vec3 } {
+  const [fa, fb] = edge.split("-") as FaceName[];
+  const na = FACE_FRAMES[fa].n, nb = FACE_FRAMES[fb].n;
+  const l: Vec3 = [0, 1, 2].map((i) => mid[i] + (na[i] + nb[i]) * half[i]) as Vec3;
+  const e: Vec3 = [0, 1, 2].map((i) => (na[i] === 0 && nb[i] === 0 ? 1 : 0)) as Vec3;
+  return { l, e };
 }
 
 /** Which axis of a part's own box a face is across: 0 X, 1 Y, 2 Z. */
@@ -1354,32 +1404,66 @@ function readMates(v: unknown, part: Part, problems: string[]): Mate[] | undefin
     const odd = Object.keys(m).filter((k) => !MATE_KEYS.includes(k));
     if (odd.length) problems.push(`${n} has no ${odd.map((k) => `"${k}"`).join(", ")} - its keys: ${MATE_KEYS.join(", ")}.`);
     const t = m.to as Record<string, unknown> | string | undefined;
-    const to = typeof t === "string" ? { part: t.trim(), face: undefined as unknown }
-      : t && typeof t === "object" && !Array.isArray(t) && typeof t.part === "string" ? { part: t.part.trim(), face: t.face }
-        : null;
-    if (!to || !to.part) {
-      problems.push(`${n} names the part it is mated to: "to": {"part": id, "face": "top"} - left out.`);
+    const obj = t && typeof t === "object" && !Array.isArray(t) ? t : null;
+    const planeName = obj && typeof obj.plane === "string" ? obj.plane.trim().toLowerCase() : null;
+    const to = typeof t === "string" ? { part: t.trim(), face: undefined as unknown, edge: undefined as unknown }
+      : obj && typeof obj.part === "string" ? { part: obj.part.trim(), face: obj.face, edge: obj.edge }
+        : obj && planeName !== null ? { part: "", face: obj.face, edge: obj.edge } : null;
+    if (!to || (!to.part && planeName === null)) {
+      problems.push(`${n} names the part it is mated to: "to": {"part": id, "face": "top"} - or a plane: {"plane": "plate"}`
+        + " - left out.");
       return;
     }
-    if (t && typeof t === "object") {
-      const oddTo = Object.keys(t).filter((k) => k !== "part" && k !== "face");
-      if (oddTo.length) problems.push(`${n}: "to" has no ${oddTo.map((k) => `"${k}"`).join(", ")} - its keys: part, face.`);
+    if (obj) {
+      const oddTo = Object.keys(obj).filter((k) => !["part", "face", "edge", "plane"].includes(k));
+      if (oddTo.length) problems.push(`${n}: "to" has no ${oddTo.map((k) => `"${k}"`).join(", ")} - its keys: part, face, edge`
+        + " - or plane.");
     }
+    const plane = planeName === null || to.part ? null                 // a part named: the part
+      : (Object.keys(MATE_PLANES) as MatePlaneName[]).find((x) => x === planeName) ?? null;
+    if (planeName !== null && !to.part) {
+      if (!plane) {
+        problems.push(`${n}: no plane "${planeName}" - the planes: plate, front, right; left out.`);
+        return;
+      }
+      if (m.edge !== undefined || to.edge !== undefined || m.type === "concentric") {
+        problems.push(`${n}: a plane takes a face - its "face" on it, coincident or so many mm from it (distance); left out.`);
+        return;
+      }
+      if (to.face !== undefined) problems.push(`${n}: a plane has no "face" - left out of "to".`);
+    } else if (planeName !== null) problems.push(`${n}: "to" names a part and a plane - the part kept, the plane left out.`);
+    const edged = m.edge !== undefined || to.edge !== undefined;
     const type = (m.type !== undefined ? (typeof m.type === "string" ? m.type.trim().toLowerCase() : "")
-      : m.face !== undefined || to.face !== undefined ? (num(m.mm) && m.mm !== 0 ? "distance" : "coincident")
-        : "concentric") as MateType;
+      : edged ? "coincident" : m.face !== undefined || to.face !== undefined || plane ? (num(m.mm) && m.mm !== 0 ? "distance"
+        : "coincident") : "concentric") as MateType;
     if (!MATE_TYPES.includes(type)) {
       problems.push(`${n}: no type${typeof m.type === "string" ? ` "${m.type}"` : ""} - the types: ${MATE_TYPES.join(", ")};`
         + " left out.");
       return;
     }
-    const mate: Mate = { type, to: { part: to.part } };
-    if (type === "concentric") {
+    const mate: Mate = { type, to: to.part ? { part: to.part } : { plane: plane! } };
+    if (edged) {                                       // edge on edge (0.110.0)
+      const edge = edgeIn(m.edge), toEdge = edgeIn(to.edge);
+      if (type !== "coincident" || !edge || !toEdge) {
+        problems.push(`${n}: edge on edge is coincident - "edge" and the "to" part's "edge" are each one of its own box's`
+          + ` edges, as ${BOX_EDGES.slice(0, 3).join(", ")} ...; left out.`);
+        return;
+      }
+      if (edge.split("-").some((f) => lettersSide(part, f as FaceName))) {
+        problems.push(`${n}: its ${edge} is on a side that follows its letters (a text, its size there 0) - mate another`
+          + " edge; left out.");
+        return;
+      }
+      if (m.face !== undefined || to.face !== undefined) problems.push(`${n}: edge on edge has no faces - left out.`);
+      if (m.mm !== undefined && !(num(m.mm) && m.mm === 0)) problems.push(`${n}: edge on edge has no "mm" - left out.`);
+      mate.edge = edge;
+      mate.to.edge = toEdge;
+    } else if (type === "concentric") {
       if (m.face !== undefined || to.face !== undefined) problems.push(`${n}: concentric is axis on axis - its faces were left out.`);
       if (m.mm !== undefined) problems.push(`${n}: concentric has no "mm" - left out.`);
     } else {
-      const face = faceIn(m.face), toFace = faceIn(to.face);
-      if (!face || !toFace) {
+      const face = faceIn(m.face), toFace = plane ? null : faceIn(to.face);
+      if (!face || (!plane && !toFace)) {
         problems.push(`${n}: ${type} is face to face - "face" and the "to" part's "face" are each one of ${FACES.join(", ")};`
           + " left out.");
         return;
@@ -1389,7 +1473,7 @@ function readMates(v: unknown, part: Part, problems: string[]): Mate[] | undefin
         return;
       }
       mate.face = face;
-      mate.to.face = toFace;
+      if (toFace) mate.to.face = toFace;
       if (type === "distance") {
         mate.mm = num(m.mm) ? m.mm : 0;
         if (!num(m.mm)) problems.push(`${n}: distance needs "mm" - made 0.`);
@@ -1420,6 +1504,27 @@ export function matePlane(p: Part, face: FaceName): { point: Vec3; normal: Vec3 
   const { A, mid, half } = partFrame(p), n = FACE_FRAMES[face].n;
   const w = apply(A, [mid[0] + n[0] * half[0], mid[1] + n[1] * half[1], mid[2] + n[2] * half[2]]);
   return { point: [w[0] + p.at[0], w[1] + p.at[1], w[2] + p.at[2]], normal: apply(A, n) };
+}
+
+/** An edge of a part's own box in the design (0.110.0): its middle, and which way it runs. */
+export function mateEdge(p: Part, edge: string): { point: Vec3; dir: Vec3 } {
+  const { A, mid, half } = partFrame(p), { l, e } = edgeOwn(edge, mid, half), w = apply(A, l);
+  return { point: [w[0] + p.at[0], w[1] + p.at[1], w[2] + p.at[2]], dir: apply(A, e) };
+}
+
+/** A part's own box's twelve edges in the design (0.110.0, Mate's clicks): each its two ends. */
+export function mateEdges(p: Part): { edge: string; a: Vec3; b: Vec3 }[] {
+  const { A, mid, half } = partFrame(p);
+  return BOX_EDGES.map((edge) => {
+    const { l, e } = edgeOwn(edge, mid, half), k = e.findIndex((x) => x !== 0);
+    const end = (s: number): Vec3 => {
+      const q: Vec3 = [...l];
+      q[k] += s * half[k];
+      const w = apply(A, q);
+      return [w[0] + p.at[0], w[1] + p.at[1], w[2] + p.at[2]];
+    };
+    return { edge, a: end(-1), b: end(1) };
+  });
 }
 
 /** A part's axis in the design: its own Z, through its middle. */
@@ -1498,18 +1603,22 @@ function solveMates(p: Part, mates: [Mate, number][], to: Map<string, Part>, pro
   const skipped = new Set<number>();
   const say = (m: Mate, i: number, why: string) => {
     skipped.add(i);
-    problems?.push(`${p.id}: mate ${i + 1} (${m.type} to ${m.to.part}) cannot be met as well as the ones before it - ${why};`
-      + " skipped.");
+    problems?.push(`${p.id}: mate ${i + 1} (${m.type} to ${mateTarget(m)}) cannot be met as well as the ones before it - `
+      + `${why}; skipped.`);
   };
   for (const [m, i] of mates) {
-    const q = to.get(m.to.part)!;
+    const q = m.to.part ? to.get(m.to.part)! : null;
     let v: Vec3, d: Vec3;
     if (m.type === "concentric") {
-      const z = mateAxis(q).dir;
+      const z = mateAxis(q!).dir;
       v = [A[2], A[5], A[8]];
       d = m.flip ? [-z[0], -z[1], -z[2]] : z;
+    } else if (m.edge) {                               // along the other's edge (0.110.0)
+      const z = mateEdge(q!, m.to.edge!).dir;
+      v = apply(A, edgeOwn(m.edge, mid, half).e);
+      d = m.flip ? [-z[0], -z[1], -z[2]] : z;
     } else {
-      const n = matePlane(q, m.to.face!).normal;
+      const n = m.to.plane ? MATE_PLANES[m.to.plane].normal : matePlane(q!, m.to.face!).normal;
       v = apply(A, FACE_FRAMES[m.face!].n);
       d = m.flip ? n : [-n[0], -n[1], -n[2]];
     }
@@ -1582,19 +1691,20 @@ function solveMates(p: Part, mates: [Mate, number][], to: Map<string, Part>, pro
   };
   for (const [m, i] of mates) {
     if (skipped.has(i)) continue;
-    const q = to.get(m.to.part)!;
-    if (m.type === "concentric") {
-      const L = mateAxis(q);
+    const q = m.to.part ? to.get(m.to.part)! : null;
+    if (m.type === "concentric" || m.edge) {           // its axis - or its edge (0.110.0) - on the other's line
+      const L = m.edge ? mateEdge(q!, m.to.edge!) : mateAxis(q!), own = m.edge ? edgeOwn(m.edge, mid, half).l : mid;
       for (const u of across(L.dir)) {
-        const e = place(mid);
+        const e = place(own);
         if (!push(m, i, u, -dot3([e[0] - L.point[0], e[1] - L.point[1], e[2] - L.point[2]], u))) break;
       }
     } else {
-      const P = matePlane(q, m.to.face!), n = FACE_FRAMES[m.face!].n;
+      const P = m.to.plane ? MATE_PLANES[m.to.plane] : matePlane(q!, m.to.face!), n = FACE_FRAMES[m.face!].n;
       const e = place([mid[0] + n[0] * half[0], mid[1] + n[1] * half[1], mid[2] + n[2] * half[2]]);
       // A solid's face on another solid's - or flush with a hole's, where the solid round the hole is - a hair into
       // it: built as one piece however the two are turned (only touching, a face apart by a rounding, they are two).
-      const want = m.type === "distance" ? m.mm ?? 0 : p.hole ? 0 : q.hole ? (m.flip ? JOIN : 0) : m.flip ? 0 : -JOIN;
+      // On a plane of the design: on it (nothing there to be one piece with).
+      const want = m.type === "distance" ? m.mm ?? 0 : !q || p.hole ? 0 : q.hole ? (m.flip ? JOIN : 0) : m.flip ? 0 : -JOIN;
       push(m, i, P.normal, want - dot3([e[0] - P.point[0], e[1] - P.point[1], e[2] - P.point[2]], P.normal));
     }
   }
@@ -1642,13 +1752,18 @@ export function mateAt(p: Part, point: Vec3, normal: Vec3): { face?: FaceName } 
 }
 
 /** What shows a part's face for a mate in the editor: the outline of its box's face - or, no face, its axis, a little
- *  longer than the part. */
-export function mateMark(p: Part, face?: FaceName): Vec3[] {
+ *  longer than the part; an edge (0.110.0): the edge, a little longer. */
+export function mateMark(p: Part, face?: FaceName, edge?: string): Vec3[] {
   const { A, mid, half } = partFrame(p);
   const w = (x: number, y: number, z: number): Vec3 => {
     const v = apply(A, [mid[0] + x, mid[1] + y, mid[2] + z]);
     return [v[0] + p.at[0], v[1] + p.at[1], v[2] + p.at[2]];
   };
+  if (edge) {
+    const { l, e } = edgeOwn(edge, mid, half), k = e.findIndex((x) => x !== 0), h = half[k] * 1.1 + 2;
+    const at = (s: number) => w(l[0] - mid[0] + e[0] * s * h, l[1] - mid[1] + e[1] * s * h, l[2] - mid[2] + e[2] * s * h);
+    return [at(-1), at(1)];
+  }
   if (!face) {
     const h = half[2] * 1.25 + 3;
     return [w(0, 0, -h), w(0, 0, h)];

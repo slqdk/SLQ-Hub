@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.110.0 - 2026-11-27
+
+- 3D editor mates: a face can be mated to the plate - click it, then the
+  plate, or On the plate in Mates - so a part stands on it and stays there.
+- Edge to edge: click right by an edge of one part, then by an edge of
+  another, and the two go on one line.
+- The parts list shows each part's mates under it, in words, with Delete.
+- The assistant's design format has the same: "to": {"plane": "plate"}
+  and "edge" mates.
+
 ## 0.109.0 - 2026-11-27
 
 - 3D editor sketch: Extrude and Cut ask how far. A box over the sketch

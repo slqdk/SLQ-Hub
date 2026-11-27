@@ -1891,6 +1891,100 @@ def test_both_read_mates_the_same_and_say_the_same(h3):
     assert by["m7"]["at"] == pytest.approx([0, 0, 11 - h3.MATE_JOIN]) and by["m7"]["rotate"] == [180, 0, 0]   # on its top
 
 
+# 0.110.0 - Søren: "Man skal kunne mate til pladen så den ikke hænger oppe i luften" and "Man skal kunne mate streger
+# ... streger på 2 forskellige parter". A face on the plate, the front or the right plane - or so many mm from it - and
+# an edge of its own box on another part's: placed and built the same in both, on a part turned askew or not.
+def plane_edge_design(turn) -> dict:
+    return {"parts": [
+        {"id": "foot", "shape": "box", "size": [20, 20, 10], "at": [5, 7, 33], "rotate": turn,
+         "mates": [{"type": "coincident", "face": "bottom", "to": {"plane": "plate"}}]},
+        {"id": "wall", "shape": "box", "size": [10, 4, 10], "at": [50, 50, 50],
+         "mates": [{"face": "back", "to": {"plane": "front"}}, {"face": "bottom", "to": {"plane": "plate"}}]},
+        {"id": "high", "shape": "box", "size": [6, 6, 6], "at": [-40, 0, 3],
+         "mates": [{"type": "distance", "face": "bottom", "to": {"plane": "plate"}, "mm": 12},
+                   {"face": "left", "to": {"plane": "right"}}]},
+        {"id": "rail", "shape": "box", "size": [30, 6, 4], "at": [11, 40, 80],
+         "mates": [{"edge": "bottom-front", "to": {"part": "foot", "edge": "top-front"}}]},
+        {"id": "slab", "shape": "outline", "size": [0, 0, 3], "at": [-20, -30, 60], "points": [[0, 0], [12, 0], [12, 5], [0, 5]],
+         "mates": [{"type": "coincident", "edge": "Back-Top", "to": {"part": "rail", "edge": "front-top"}, "flip": True}]},
+    ]}
+
+
+def test_plane_and_edge_mates_are_placed_and_built_the_same(h3):
+    pytest.importorskip("manifold3d")
+    designs = [plane_edge_design([0, 0, 0]), plane_edge_design([0, 0, 30])]
+    js = run_js(MATED_JS, {"designs": designs})
+    for d, j in zip(designs, js):
+        py, problems = h3.read_design(json.dumps(d))
+        assert problems == [x.rstrip(".") for x in j["problems"]] == []
+        for a, b in zip(py["parts"], j["parts"]):
+            assert a["mates"] == b["mates"] and a["at"] == pytest.approx(b["at"], abs=1e-9)
+            assert a["rotate"] == pytest.approx(b["rotate"], abs=1e-9)
+        built = h3.build_design(py)
+        assert built.solid.volume() == pytest.approx(j["volume"], rel=1e-9)
+        written, said = h3.read_design(j["text"])                                  # written, read back: the same
+        assert said == [] and [q.get("mates") for q in written["parts"]] == [q.get("mates") for q in j["parts"]]
+        assert written["parts"] == h3.read_design(j["again"])[0]["parts"]
+    straight = {p["id"]: p for p in js[0]["parts"]}
+    assert straight["foot"]["at"] == pytest.approx([5, 7, 5])                     # its bottom on the plate
+    assert straight["wall"]["at"] == pytest.approx([50, -2, 5])                   # its back on the front plane, in front
+    assert straight["high"]["at"] == pytest.approx([3, 0, 15])                    # 12 mm up; its left on x 0
+    assert straight["rail"]["at"] == pytest.approx([11, 0, 12])                   # on the foot's top-front edge, x kept
+    assert straight["rail"]["mates"] == [{"type": "coincident", "edge": "bottom-front",
+                                          "to": {"part": "foot", "edge": "top-front"}}]
+    slab = straight["slab"]
+    assert slab["mates"][0]["edge"] == "top-back" and slab["mates"][0]["to"]["edge"] == "top-front"   # names tidied
+    # flipped, its edge runs the other way: half a turn about its own Y, about its middle - its top-back edge (y 5, z 1.5
+    # of its own, its points' 0,0 at a corner) then at y -3, z 14: on the rail's top-front edge
+    assert slab["at"] == pytest.approx([-8, -8, 15.5]) and slab["rotate"] == pytest.approx([180, 0, 180])
+    turned = {p["id"]: p for p in js[1]["parts"]}
+    assert turned["foot"]["at"][2] == pytest.approx(5) and turned["rail"]["rotate"] == pytest.approx([0, 0, 30])
+    foot, rail = turned["foot"], turned["rail"]
+    c, s_ = math.cos(math.radians(30)), math.sin(math.radians(30))
+    edge_mid = [foot["at"][0] + 10 * s_, foot["at"][1] - 10 * c, 10]               # the foot's top-front edge, middle
+    away = [rail["at"][0] + 3 * s_ - edge_mid[0], rail["at"][1] - 3 * c - edge_mid[1]]       # from it to the rail's
+    assert abs(away[0] * s_ - away[1] * c) == pytest.approx(0, abs=1e-9) and rail["at"][2] == pytest.approx(12)
+
+
+ODD_PLANE_EDGE = {"parts": [
+    {"id": "b", "shape": "box", "size": [10, 10, 10], "at": [0, 0, 5]},
+    {"id": "tt", "shape": "text", "text": "A", "size": [0, 8, 2]},
+    {"id": "e1", "shape": "box", "mates": [{"face": "bottom", "to": {"plane": "floor"}}]},
+    {"id": "e2", "shape": "box", "mates": [{"edge": "top-front", "to": {"plane": "plate"}}]},
+    {"id": "e3", "shape": "box", "mates": [{"edge": "top-front", "to": {"part": "b", "edge": "top-bottom"}}]},
+    {"id": "e4", "shape": "box", "mates": [{"edge": "top-front", "to": {"part": "b", "edge": "top-back"}, "mm": 3}]},
+    {"id": "e5", "shape": "box", "mates": [{"type": "distance", "edge": "top-front", "to": {"part": "b", "edge": "top-back"}}]},
+    {"id": "e6", "shape": "box", "mates": [{"face": "bottom", "to": {"plane": "plate", "face": "top"}}]},
+    {"id": "e7", "shape": "box", "mates": [{"face": "bottom", "to": {"part": "b", "face": "top", "plane": "plate"}}]},
+    {"id": "e8", "shape": "box", "mates": [{"edge": "top-left", "to": {"part": "tt", "edge": "front-left"}}]},
+    {"id": "e9", "shape": "box", "mates": [{"type": "concentric", "to": {"plane": "right"}}]},
+]}
+
+
+def test_both_read_plane_and_edge_mates_the_same_and_say_the_same(h3):
+    js = run_js("const r = G.readDesign(JSON.stringify(input)); "
+                "process.stdout.write(JSON.stringify({parts: r.design.parts, problems: r.problems}));", ODD_PLANE_EDGE)
+    py, problems = h3.read_design(json.dumps(ODD_PLANE_EDGE))
+    assert [x.rstrip(".") for x in js["problems"]] == problems, (js["problems"], problems)
+    assert 'e1: mate 1: no plane "floor" - the planes: plate, front, right; left out' in problems
+    assert any(x.startswith("e2: mate 1: a plane takes a face") for x in problems)
+    assert any(x.startswith("e3: mate 1: edge on edge is coincident") for x in problems)
+    assert 'e4: mate 1: edge on edge has no "mm" - left out' in problems
+    assert any(x.startswith("e5: mate 1: edge on edge is coincident") for x in problems)
+    assert 'e6: mate 1: a plane has no "face" - left out of "to"' in problems
+    assert 'e7: mate 1: "to" names a part and a plane - the part kept, the plane left out' in problems
+    assert any(x.startswith("e8: mate 1 is to the front-left of tt, on a side of a text") for x in problems)
+    assert any(x.startswith("e9: mate 1: a plane takes a face") for x in problems)
+    by = {p["id"]: p for p in py["parts"]}
+    assert by["e4"]["mates"] == [{"type": "coincident", "edge": "top-front", "to": {"part": "b", "edge": "top-back"}}]
+    assert by["e6"]["mates"] == [{"type": "coincident", "face": "bottom", "to": {"plane": "plate"}}]
+    assert by["e7"]["mates"] == [{"type": "coincident", "face": "bottom", "to": {"part": "b", "face": "top"}}]
+    for i in ("e1", "e2", "e3", "e5", "e8", "e9"):
+        assert "mates" not in by[i]
+    for a, b in zip(py["parts"], js["parts"]):
+        assert a.get("mates") == b.get("mates") and a["at"] == pytest.approx(b["at"])
+
+
 # 0.107.0 - Søren: "det skal være muligt at ændre en importeret stl fil til en part, så jeg kan redigere den" - and his
 # answer: a sketch on its faces. A flat face of a mesh on the built solid, its frame and edges, and the parts a sketch
 # on it makes: cut into the mesh, extruded out of it.

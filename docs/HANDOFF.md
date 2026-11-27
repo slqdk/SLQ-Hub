@@ -4,7 +4,21 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## Next session - start here (written 2026-11-27, at 0.109.0)
+## Next session - start here (written 2026-11-27, at 0.110.0)
+
+**0.110.0 (2026-11-27): mates to the plate, edge to edge, and in the parts list - pushed, not yet installed.** Søren,
+17:16-17:21: "Man skal kunne mate til pladen så den ikke hænger oppe i luften"; "Man skal kunne mate streger ... streger
+på 2 forskellige parter"; "Man skal kunne se i parts listen hvordan de er mated". Built (DESIGN §8 "The 3D editor",
+Mates to the plate and edge to edge): `to: {plane}` (plate, front, right) and `edge`/`to.edge` mates in both readers
+and the writer, placed alike (`MATE_PLANES`, `mateEdge`, `edgeOwn`/`_edge_own`); Mate picks an edge near the click and
+the plate as the second click; Mates' On the plate; each part's mates under it in the list (`mateWords`, Delete).
+Tests: five parts - on the plate, on the front plane and the plate, 12 mm up and on the right plane, an edge on
+another's (straight and with the other turned 30 degrees), an outline's edge flipped onto that one's - placed and built
+the same in both, written and read back the same; the mistakes said the same. Seen in the headless Chrome: On the plate
+for a floating box; another box's bottom-front edge clicked onto its top-front edge - exact; both mates in the list. Not
+seen: the plate clicked as Mate's second click (only On the plate), the list's Delete, the menu's new rows. Told him in
+the help: mate the lowest part to the plate and the others onto it (a part mated under another and to the plate is one
+mate too many - the second is "N mm off").
 
 **0.109.0 (2026-11-27): Extrude and Cut ask how far; on a face, one part; groups folded in the parts list - pushed, not
 yet installed.** Søren, 17:32: "Når man vælger Extrude, eller cut, så skal den spørge hvor meget den skal extrude ...

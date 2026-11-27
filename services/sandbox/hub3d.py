@@ -989,7 +989,11 @@ A part:
             "distance" with "mm": 5 the same 5 mm apart (less than 0: into it); {{"type": "concentric", "to":
             {{"part": "hole"}}}} puts its axis - its own Z through its middle: a cylinder's, a round hole's - on the
             other's ("flip": pointing the other way). face: its own box's top, bottom, front, back, left or right
-            before it is turned, whatever its shape (not a text's side whose size follows its letters). When the
+            before it is turned, whatever its shape (not a text's side whose size follows its letters). {{"face":
+            "bottom", "to": {{"plane": "plate"}}}} stands it on the plate (or "front", "right": the planes y 0, x 0 -
+            "distance" too). {{"edge": "bottom-front", "to": {{"part": "tag", "edge": "top-front"}}}} lays an edge
+            of its own box on one of the tag's, on one line ("flip": running the other way) - edges are named by
+            their two faces. When the
             design is read it is turned and moved as little as its mates need, each in turn; what they leave free -
             sliding along a face, turning about an axis - stays as its at and rotate put it. So moving the part it
             is mated to does not take it along in the file (the editor does): move it too. Not with on
@@ -1561,15 +1565,19 @@ def _settle(parts: list, problems: list | None = None) -> list:
             return False
         seen.add(frm["id"])
         f = done.get(frm["id"], frm)
-        ids = [(f.get("on") or {}).get("part")] + [m["to"]["part"] for m in f.get("mates") or []]
+        ids = [(f.get("on") or {}).get("part")] + [m["to"].get("part") for m in f.get("mates") or []]
         return any(i is not None and i in every and leads(every[i], to, seen) for i in ids)
 
     def mated(p: dict) -> dict:
         kept: list = []
         to: dict = {}
         for i, m in enumerate(p["mates"]):
+            if m["to"].get("plane"):                # a plane of the design (0.110.0): always there
+                kept.append((m, i))
+                continue
             q = every.get(m["to"]["part"])
             face = m["to"].get("face")
+            edge = m["to"].get("edge")
             if q is None:
                 why = f'names "{m["to"]["part"]}", which the design does not have'
             elif q["id"] == p["id"]:
@@ -1580,6 +1588,9 @@ def _settle(parts: list, problems: list | None = None) -> list:
                 why = f"leads round in a circle: {q['id']} is placed by {p['id']}"
             elif face and _letters_side(q, face):
                 why = f"is to the {face} of {q['id']}, a text whose size there follows its letters (mate another face)"
+            elif edge and any(_letters_side(q, f) for f in edge.split("-")):
+                why = (f"is to the {edge} of {q['id']}, on a side of a text whose size there follows its letters "
+                       f"(mate another edge)")
             else:
                 why = ""
             if why:
@@ -1604,9 +1615,44 @@ def _settle(parts: list, problems: list | None = None) -> list:
 # against a face of another (coincident - flush, looking the same way, with flip), so many mm out from it (distance),
 # or its axis on the other's (concentric). The part the mates are on moves - as little as they need, after the parts
 # they are to. A part's faces are its own box's, before it is turned; its axis is its own Z through its middle.
+# 0.110.0: a face on the plate, the front or the right plane ("to": {"plane": "plate"}), and an edge of its own box on
+# another part's ("edge": "top-front", "to": {"part": id, "edge": "bottom-front"}) - the editor's, step for step.
 
 MATE_TYPES = ("coincident", "distance", "concentric")
-_MATE_KEYS = ("type", "face", "to", "mm", "flip")
+_MATE_KEYS = ("type", "face", "edge", "to", "mm", "flip")
+# the design's own planes: a point on each and which way it looks - the editor's MATE_PLANES
+MATE_PLANES = {"plate": ((0.0, 0.0, 0.0), (0.0, 0.0, 1.0)), "front": ((0.0, 0.0, 0.0), (0.0, -1.0, 0.0)),
+               "right": ((0.0, 0.0, 0.0), (1.0, 0.0, 0.0))}
+BOX_EDGES = ("top-front", "top-back", "top-left", "top-right", "bottom-front", "bottom-back", "bottom-left",
+             "bottom-right", "front-left", "front-right", "back-left", "back-right")
+
+
+def _mate_target(m: dict) -> str:
+    """What a mate is to, in words - the editor's mateTarget."""
+    pl = m["to"].get("plane")
+    if pl:
+        return "the plate" if pl == "plate" else f"the {pl} plane"
+    return m["to"].get("part", "")
+
+
+def _edge_in(v) -> str | None:
+    """An edge's name as BOX_EDGES has it - either face first, any case - or None (the editor's edgeIn)."""
+    if not isinstance(v, str):
+        return None
+    bits = v.strip().lower().split("-")
+    if len(bits) != 2 or not bits[0] or not bits[1]:
+        return None
+    a, b = bits
+    return next((e for e in BOX_EDGES if e in (f"{a}-{b}", f"{b}-{a}")), None)
+
+
+def _edge_own(edge: str, mid, half):
+    """An edge of a part's own box in its own frame: its middle, and which way it runs (+) - the editor's edgeOwn."""
+    fa, fb = edge.split("-")
+    na, nb = FACE_FRAMES[fa][0], FACE_FRAMES[fb][0]
+    lp = tuple(mid[i] + (na[i] + nb[i]) * half[i] for i in range(3))
+    e = tuple(1.0 if na[i] == 0 and nb[i] == 0 else 0.0 for i in range(3))
+    return lp, e
 MATE_JOIN = 1e-5       # a coincident face of a solid this far into the solid it is on (mm): one piece - the editor's JOIN
 
 
@@ -1643,25 +1689,47 @@ def _read_mates(v, part: dict, problems: list) -> list | None:
             problems.append(f'{n} has no {", ".join(chr(34) + k + chr(34) for k in odd)} - its keys: '
                             f'{", ".join(_MATE_KEYS)}')
         t = m.get("to")
+        obj = t if isinstance(t, dict) else None
+        plane_name = obj["plane"].strip().lower() if obj is not None and isinstance(obj.get("plane"), str) else None
         if isinstance(t, str):
-            to = {"part": t.strip(), "face": None}
-        elif isinstance(t, dict) and isinstance(t.get("part"), str):
-            to = {"part": t["part"].strip(), "face": t.get("face")}
+            to = {"part": t.strip(), "face": None, "edge": None}
+        elif obj is not None and isinstance(obj.get("part"), str):
+            to = {"part": obj["part"].strip(), "face": obj.get("face"), "edge": obj.get("edge")}
+        elif obj is not None and plane_name is not None:
+            to = {"part": "", "face": obj.get("face"), "edge": obj.get("edge")}
         else:
             to = None
-        if not to or not to["part"]:
-            problems.append(f'{n} names the part it is mated to: "to": {{"part": id, "face": "top"}} - left out')
+        if not to or (not to["part"] and plane_name is None):
+            problems.append(f'{n} names the part it is mated to: "to": {{"part": id, "face": "top"}} - or a plane: '
+                            f'{{"plane": "plate"}} - left out')
             continue
-        if isinstance(t, dict):
-            odd_to = [k for k in t if k not in ("part", "face")]
+        if obj is not None:
+            odd_to = [k for k in obj if k not in ("part", "face", "edge", "plane")]
             if odd_to:
                 problems.append(f'{n}: "to" has no {", ".join(chr(34) + k + chr(34) for k in odd_to)} - its keys: '
-                                f'part, face')
+                                f'part, face, edge - or plane')
+        plane = plane_name if plane_name in MATE_PLANES else None
+        if plane_name is not None and not to["part"]:
+            if not plane:
+                problems.append(f'{n}: no plane "{plane_name}" - the planes: plate, front, right; left out')
+                continue
+            if "edge" in m or (obj is not None and "edge" in obj) or m.get("type") == "concentric":
+                problems.append(f'{n}: a plane takes a face - its "face" on it, coincident or so many mm from it '
+                                f'(distance); left out')
+                continue
+            if obj is not None and "face" in obj:
+                problems.append(f'{n}: a plane has no "face" - left out of "to"')
+        elif plane_name is not None:
+            problems.append(f'{n}: "to" names a part and a plane - the part kept, the plane left out')
+            plane = None
+        edged = "edge" in m or (obj is not None and "edge" in obj)
         given_face = "face" in m
-        given_to_face = isinstance(t, dict) and "face" in t
+        given_to_face = obj is not None and "face" in obj
         if "type" in m:
             kind = m["type"].strip().lower() if isinstance(m["type"], str) else ""
-        elif given_face or given_to_face:
+        elif edged:
+            kind = "coincident"
+        elif given_face or given_to_face or plane:
             kind = "distance" if _num(m.get("mm")) and m["mm"] != 0 else "coincident"
         else:
             kind = "concentric"
@@ -1669,15 +1737,31 @@ def _read_mates(v, part: dict, problems: list) -> list | None:
             said = f' "{m["type"]}"' if isinstance(m.get("type"), str) else ""
             problems.append(f"{n}: no type{said} - the types: {', '.join(MATE_TYPES)}; left out")
             continue
-        mate: dict = {"type": kind, "to": {"part": to["part"]}}
-        if kind == "concentric":
+        mate: dict = {"type": kind, "to": {"part": to["part"]} if to["part"] else {"plane": plane}}
+        if edged:                                    # edge on edge (0.110.0)
+            edge, to_edge = _edge_in(m.get("edge")), _edge_in(to["edge"])
+            if kind != "coincident" or not edge or not to_edge:
+                problems.append(f'{n}: edge on edge is coincident - "edge" and the "to" part\'s "edge" are each one of '
+                                f'its own box\'s edges, as {", ".join(BOX_EDGES[:3])} ...; left out')
+                continue
+            if any(_letters_side(part, f) for f in edge.split("-")):
+                problems.append(f"{n}: its {edge} is on a side that follows its letters (a text, its size there 0) - "
+                                f"mate another edge; left out")
+                continue
+            if given_face or given_to_face:
+                problems.append(f"{n}: edge on edge has no faces - left out")
+            if "mm" in m and not (_num(m["mm"]) and m["mm"] == 0):
+                problems.append(f'{n}: edge on edge has no "mm" - left out')
+            mate["edge"] = edge
+            mate["to"]["edge"] = to_edge
+        elif kind == "concentric":
             if given_face or given_to_face:
                 problems.append(f"{n}: concentric is axis on axis - its faces were left out")
             if "mm" in m:
                 problems.append(f'{n}: concentric has no "mm" - left out')
         else:
-            face, to_face = _face_in(m.get("face")), _face_in(to["face"])
-            if not face or not to_face:
+            face, to_face = _face_in(m.get("face")), (None if plane else _face_in(to["face"]))
+            if not face or (not plane and not to_face):
                 problems.append(f'{n}: {kind} is face to face - "face" and the "to" part\'s "face" are each one of '
                                 f'{", ".join(FACES)}; left out')
                 continue
@@ -1686,7 +1770,8 @@ def _read_mates(v, part: dict, problems: list) -> list | None:
                                 f"left out")
                 continue
             mate["face"] = face
-            mate["to"]["face"] = to_face
+            if to_face:
+                mate["to"]["face"] = to_face
             if kind == "distance":
                 mate["mm"] = float(m["mm"]) if _num(m.get("mm")) else 0.0
                 if not _num(m.get("mm")):
@@ -1746,6 +1831,14 @@ def _mate_plane(p: dict, face: str):
     n = FACE_FRAMES[face][0]
     w = _apply(a, (mid[0] + n[0] * half[0], mid[1] + n[1] * half[1], mid[2] + n[2] * half[2]))
     return (w[0] + p["at"][0], w[1] + p["at"][1], w[2] + p["at"][2]), _apply(a, n)
+
+
+def _mate_edge(p: dict, edge: str):
+    """An edge of a part's own box in the design: its middle and which way it runs (the editor's mateEdge)."""
+    a, mid, half, _ = _part_frame(p)
+    lp, e = _edge_own(edge, mid, half)
+    w = _apply(a, lp)
+    return (w[0] + p["at"][0], w[1] + p["at"][1], w[2] + p["at"][2]), _apply(a, e)
 
 
 def _mate_axis(p: dict):
@@ -1832,17 +1925,21 @@ def _solve_mates(p: dict, mates: list, to: dict, problems: list | None) -> dict:
     def say(m: dict, i: int, why: str) -> None:
         skipped.add(i)
         if problems is not None:
-            problems.append(f"{p['id']}: mate {i + 1} ({m['type']} to {m['to']['part']}) cannot be met as well as the "
+            problems.append(f"{p['id']}: mate {i + 1} ({m['type']} to {_mate_target(m)}) cannot be met as well as the "
                             f"ones before it - {why}; skipped")
 
     for m, i in mates:
-        q = to[m["to"]["part"]]
+        q = to[m["to"]["part"]] if m["to"].get("part") else None
         if m["type"] == "concentric":
             z = _mate_axis(q)[1]
             v = (a[2], a[5], a[8])
             d = (-z[0], -z[1], -z[2]) if m.get("flip") else z
+        elif m.get("edge"):                          # along the other's edge (0.110.0)
+            z = _mate_edge(q, m["to"]["edge"])[1]
+            v = _apply(a, _edge_own(m["edge"], mid, half)[1])
+            d = (-z[0], -z[1], -z[2]) if m.get("flip") else z
         else:
-            nq = _mate_plane(q, m["to"]["face"])[1]
+            nq = MATE_PLANES[m["to"]["plane"]][1] if m["to"].get("plane") else _mate_plane(q, m["to"]["face"])[1]
             v = _apply(a, FACE_FRAMES[m["face"]][0])
             d = nq if m.get("flip") else (-nq[0], -nq[1], -nq[2])
         t = None
@@ -1911,21 +2008,23 @@ def _solve_mates(p: dict, mates: list, to: dict, problems: list | None) -> dict:
     for m, i in mates:
         if i in skipped:
             continue
-        q = to[m["to"]["part"]]
-        if m["type"] == "concentric":
-            pt, dr = _mate_axis(q)
+        q = to[m["to"]["part"]] if m["to"].get("part") else None
+        if m["type"] == "concentric" or m.get("edge"):    # its axis - or its edge (0.110.0) - on the other's line
+            pt, dr = _mate_edge(q, m["to"]["edge"]) if m.get("edge") else _mate_axis(q)
+            own = _edge_own(m["edge"], mid, half)[0] if m.get("edge") else mid
             for u in _across(dr):
-                e = place(mid)
+                e = place(own)
                 if not push(m, i, u, -_dot((e[0] - pt[0], e[1] - pt[1], e[2] - pt[2]), u)):
                     break
         else:
-            pt, nq = _mate_plane(q, m["to"]["face"])
+            pt, nq = MATE_PLANES[m["to"]["plane"]] if m["to"].get("plane") else _mate_plane(q, m["to"]["face"])
             n = FACE_FRAMES[m["face"]][0]
             e = place((mid[0] + n[0] * half[0], mid[1] + n[1] * half[1], mid[2] + n[2] * half[2]))
-            # a solid's face on another solid's (or flush with a hole's) a hair into it: one piece, however turned
+            # a solid's face on another solid's (or flush with a hole's) a hair into it: one piece, however turned -
+            # on a plane of the design, on it
             if m["type"] == "distance":
                 want = m.get("mm", 0.0)
-            elif p.get("hole"):
+            elif q is None or p.get("hole"):
                 want = 0.0
             elif q.get("hole"):
                 want = MATE_JOIN if m.get("flip") else 0.0

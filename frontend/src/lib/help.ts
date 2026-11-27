@@ -798,7 +798,12 @@ export const SECTIONS: HelpSection[] = [
           + "top, then its left side flush with the box's, then its front. It moves as little as its mates need, and "
           + "goes with the part of its first mate when that one is moved or turned. The mates menu lists them: any of "
           + "the six faces (the hidden ones too), Apart - so many mm, a Distance - Flip, and Delete; Free it takes "
-          + "them all off. One its others leave no room for is not made, and says why.",
+          + "them all off. One its others leave no room for is not made, and says why. A face can go on the plate: "
+          + "click it, then the plate - or On the plate (Mates) stands the part on it with its face looking most down; "
+          + "it stays there when it is moved. Click right by an edge of a part, then by an edge of another, and the "
+          + "edges go on one line (its front and top flush with the other's, say). The parts list shows each part's "
+          + "mates under it, in words - Delete on the line takes one off. A part mated onto another one that is on the "
+          + "plate stands there too: mate the lowest part to the plate and the others onto it.",
           "Pattern repeats a part or a group round a point or in a row: one arm of a snowflake becomes six, one hole "
           + "a ring of holes. The assistant can also draw flat outlines of its own - stars, leaves, letters' shapes.",
           "Lines works on a part's own lines, picked first: click one on the model - Pick lines to pick several - or "

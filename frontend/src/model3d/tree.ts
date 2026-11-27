@@ -1,5 +1,5 @@
 // Parts in a design's tree (0.87.0): finding, changing, adding and taking them out without touching the rest.
-import { allIds, extent, extentOf, freshId, type Box3, type Part, type Vec3 } from "./geometry";
+import { allIds, extent, extentOf, freshId, type Box3, type Mate, type Part, type Vec3 } from "./geometry";
 
 export interface Found { part: Part; siblings: Part[]; index: number; top: Part; parent: Part | null }
 
@@ -58,8 +58,9 @@ export function copy(p: Part, seen: Set<string>, ids?: Map<string, string>): Par
 export function onCopies(parts: Part[], ids: Map<string, string>): Part[] {
   return parts.map((p) => {
     let q = p.on && ids.has(p.on.part) ? { ...p, on: { ...p.on, part: ids.get(p.on.part)! } } : p;
-    if (q.mates?.some((m) => ids.has(m.to.part))) {
-      q = { ...q, mates: q.mates.map((m) => (ids.has(m.to.part) ? { ...m, to: { ...m.to, part: ids.get(m.to.part)! } } : m)) };
+    const copied = (m: Mate) => m.to.part !== undefined && ids.has(m.to.part);   // a plane's (0.110.0): as it is
+    if (q.mates?.some(copied)) {
+      q = { ...q, mates: q.mates.map((m) => (copied(m) ? { ...m, to: { ...m.to, part: ids.get(m.to.part!)! } } : m)) };
     }
     return q.parts ? { ...q, parts: onCopies(q.parts, ids) } : q;
   });
