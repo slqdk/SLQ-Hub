@@ -4,7 +4,20 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## Next session - start here (written 2026-11-27, at 0.106.0)
+## Next session - start here (written 2026-11-27, at 0.107.0)
+
+**0.107.0 (2026-11-27): a sketch on an imported mesh's flat face - pushed, not yet installed.** Søren, 11:41: "det
+skal være muligt at ændre en importeret stl fil til en part, så jeg kan redigere den... Tag lysestagen som et
+eksempel"; asked (sketch on its faces / a hole or boss dimensioned on a face / rounded edges / cutting it in a plane),
+he chose a sketch on its faces. Built (DESIGN §8 "The 3D editor", A sketch on an imported mesh's flat face): a click
+on a mesh's flat face in Select opens the Face tab with Sketch (`flatFaceAt`, `Hit.tri`, `FlatBand`, `SketchPlane`
+"flat"); Extrude stands out of the face, Cut goes into the mesh; the face's straight edges are snapped and measured
+to; from below the plate only its lines show. Checked on chat 335's candle holder STL in node: its bottom is one flat
+face (1,192 mm2, 40 x 40, found in ~60 ms of its 300k triangles). Tests: a 20 x 20 x 10 block's top - frame, area, four
+20 mm edges - a cut, a cut through all, a boss (volumes), a wall's frame, a sphere's facet not flat, a distance to the
+face's edge, hub3d building the same. Not seen in a browser: clicking the face, the view turning to it, the plate from
+below. The parts are not kept on the face: moving the mesh leaves them (told in Help).
+
 
 **0.106.0 (2026-11-27): chats started in Settings -> Usage; minutes; last month - pushed, not yet installed.** Søren,
 11:03: "Bagefter skal vi lave noget statistik over brugere i hubben. (antal chats started, antal minutter, og kosten i

@@ -770,6 +770,11 @@ export const SECTIONS: HelpSection[] = [
           + "or so deep; Add boss a round or square boss so high; Text here a text. Each stays on the face: move, turn "
           + "or resize the box and it goes with it, the distances kept. Picked, its Part tab has On the face - its "
           + "distances, depth or height, and Free it.",
+          "An imported STL, 3MF or OBJ has a Face tab too: click a flat face of it in Select - its outline shows - and "
+          + "Sketch draws on that face. Extrude stands what you draw out of the face, joined to the mesh; Cut cuts it "
+          + "into the mesh, so deep or through all. To reach a face underneath, turn the view below the plate with the "
+          + "middle button: from there the plate shows only its lines. The parts stay where the face was when you made "
+          + "them - move the mesh and they stay behind.",
           "On a face (Part's Arrange, and Text) puts the part on a face you click - a new text asks for its face at once: "
           + "its letters lie on it, upright on a wall, a little into it so the two print as one; a hole text sinks in "
           + "and is cut. On a box's face it stays there, as a part from the Face tab does. Turn (Arrange) turns what "

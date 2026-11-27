@@ -20,14 +20,15 @@ import { useApp } from "../state";
 import { ConfirmButton, MenuButton } from "../components/ui";
 import type { DesignFolder } from "./folder";
 import { allIds, build, buildPart, COLORS, edgeLength, edgeLines, edgePlan, EDGES, edgesOf, extent, extentOf, FACE_FRAMES,
-  faceAngle, faceAt, faceFrame, FACES, faceMarks, fitMeshes, FONT_FAMILIES, fontFile, follows, freshId, holeEdges, joined,
+  faceAngle, faceAt, faceFrame, FACES, faceMarks, fitMeshes, flatFaceAt, FONT_FAMILIES, fontFile, follows, freshId, holeEdges,
+  joined,
   lettersApart, lettersSide, mateAt, mateAxis, mateMark, matePlane, MAX_COPIES, meshExtent, MIN_SIZE, mirrorPart,
   nearestEdge, nearestToRay, newDesign,
   onFace, partSize, placedBy, placeOn, readDesign, repeatAround, respot, retext, settle, SPACING, spotAt, spotXY, stl, textGlyphs,
   textMeasure, threeMf, toPart, fromPart, transformPart, treatEdges, turned90, withCapitals, withEdgeLength, writeDesign,
   type Align,
   type Anchor, type Box3, type Built, type Design, type EdgeKind, type FaceName, type FontData, type FontIndex, type Fonts,
-  type Kit, type Mat3, type Mate, type MeshData, type OwnSize, type Part, type Point2, type Repeat, type Shape,
+  type FlatFace, type Kit, type Mat3, type Mate, type MeshData, type OwnSize, type Part, type Point2, type Repeat, type Shape,
   type Vec3, type Wasm } from "./geometry";
 import { baseName, dirOf, fmt, joinPath, MESH_FILE, pointMark, relativePath } from "./files";
 import { parseMesh } from "./meshio";
@@ -262,6 +263,8 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
   const [several, setSeveral] = useState(false);                               // Select multiple: a click adds
   // A box's face clicked (0.98.0): the spot on it, and what the Face tab puts there - kept from one face to the next.
   const [faceSel, setFaceSel] = useState<FacePick | null>(null);
+  const [flatSel, setFlatSel] = useState<FlatFace | null>(null);   // a mesh's flat face, picked (0.107.0)
+  useEffect(() => setFlatSel(null), [design]);       // where the face was: a change to the design lets it go
   const [feature, setFeature] = useState<Feature>({ round: true, size: 6, through: true, depth: 5, height: 5 });
   // A sketch being drawn (0.100.0): its plane, its shapes, the tool, what is half drawn - and the point a click would
   // put down, snapped; and what Extrude and Cut make of it, kept from one sketch to the next.
@@ -682,6 +685,8 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
       const f = at.f, w3 = (pts: Point2[]) => pts.map((q) => to3d(f, q));
       if (at.box && sketch.plane.kind === "face") {
         list.push({ lines: [faceMarks(at.box, sketch.plane.face, undefined, true, 0).outline], face: 1.5 });
+      } else if (sketch.plane.kind === "flat") {       // a mesh's flat face (0.107.0): its outline
+        list.push({ lines: sketch.plane.outline, face: 1.5 });
       } else if (sketch.plane.kind !== "top") {        // the front or right plane: a frame to draw in, on the plate
         list.push({ lines: [w3([[-110, 0], [110, 0], [110, 110], [-110, 110], [-110, 0]])], face: 1 });
       }
@@ -771,6 +776,7 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
         if (round !== null) words.push({ at: ring[Math.round(ring.length / 8)], text: round ? `Ø${fmt(size)}` : `${fmt(size)} x ${fmt(size)}` });
       };
       if (facing && faceBox && faceSel) dimension(faceBox, faceSel.face, faceSel.from, feature.round, feature.size);
+      if (tab === "face" && flatSel && !faceBox) list.push({ lines: flatSel.outline, face: 4 });   // (0.107.0)
       // A part on a face, picked: where it is kept, as the Face tab showed it (0.98.0)
       const kept = !facing && tab === "part" && selected.length === 1 ? find(design.parts, selected[0])?.part : null;
       const on = kept?.on, box = on ? find(design.parts, on.part)?.part : null;
@@ -796,8 +802,8 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
     }
     v.setMarks(list);
     v.setLabels(words);
-  }, [design, edgeSel, hoverEdge, ready, facing, faceBox, faceSel, feature.round, feature.size, tab, selected, sketch, hoverPt,
-    tool, mating]);
+  }, [design, edgeSel, hoverEdge, ready, facing, faceBox, faceSel, flatSel, feature.round, feature.size, tab, selected, sketch,
+    hoverPt, tool, mating]);
 
   // What Extrude would make of the sketch (0.100.0): the closed shapes, filled - flat on the plane (0.103.0 - Søren:
   // "så er det som om den extrudere alt man tegner, inden man er færdig": 50 mm high, seen from above, it stood out past
@@ -986,6 +992,7 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
     setMating({ part: box.id, face: faceSel.face, point: F.at(x, y) });
     setSelected([box.id]);
     setFaceSel(null);
+    setFlatSel(null);
     setTab("part");
     host.current?.focus({ preventScroll: true });
   };
@@ -1012,6 +1019,7 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
       setSelected([p.id]);
       setEdgeSel({});
       setFaceSel(null);
+      setFlatSel(null);
       setTab("part");
       return;
     }
@@ -1067,6 +1075,13 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
     return d && p && p.shape === "box" && !p.repeat && !cuts(d.parts, p.id) ? p : null;
   };
 
+  /** The imported mesh a click is on, as a solid of the design (not a hole) - a sketch can go on its flat faces. */
+  const meshPart = (id: string): Part | null => {
+    const d = designRef.current;
+    const p = d ? find(d.parts, id)?.part : null;
+    return p && p.shape === "mesh" && !p.hole ? p : null;
+  };
+
   /** Cut hole, Add boss, Text here (0.98.0, the Face tab): a part kept on the picked face, at its spot - beside the box
    *  in the tree, so a hole cuts what the box is in - then picked, its tab open. */
   const onTheFace = (kind: "hole" | "boss" | "text") => {
@@ -1103,6 +1118,7 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
     setSelected([id]);
     setEdgeSel({});
     setFaceSel(null);
+    setFlatSel(null);
     setTab(kind === "text" ? "text" : "part");
     host.current?.focus({ preventScroll: true });     // its button is gone: Esc and the arrow keys work on
   };
@@ -1122,6 +1138,7 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
   const startSketch = (plane: SketchPlane) => {
     const d = designRef.current, v = vp.current, k = kit.current;
     const box = plane.kind === "face" && d ? find(d.parts, plane.part)?.part ?? null : null;
+    const mesh = plane.kind === "flat" && d ? find(d.parts, plane.part)?.part ?? null : null;
     const f = d ? planeFrame(plane, box) : null;
     if (!d || !f) return;
     let n = 0;                                         // Sketch 1, 2 ... as SolidWorks numbers them
@@ -1136,12 +1153,14 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
     setSelected([]);
     setEdgeSel({});
     setFaceSel(null);
+    setFlatSel(null);
     setTool(null);
     setHoverEdge(null);
     setMode("select");
     setTab("sketch");
     if (v) {
       if (box && k) v.lookFrom(f.N, buildPart(box, k).box);
+      else if (plane.kind === "flat") v.lookFrom(f.N, mesh && k ? buildPart(mesh, k).box : built?.box ?? null);
       else v.view(plane.kind === "face" ? "top" : plane.kind, built?.box ?? extentOf(d.parts));
     }
     host.current?.focus({ preventScroll: true });
@@ -1162,6 +1181,10 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
     else if (s.draft?.kind === "circle") near.push(s.draft.c);
     const w = (at.f.W ?? 0) / 2, h = (at.f.H ?? 0) / 2;
     if (at.f.W) near.push([0, 0], [-w, -h], [w, -h], [w, h], [-w, h], [0, -h], [0, h], [-w, 0], [w, 0]);
+    if (at.f.edges) {                                  // a mesh's flat face (0.107.0): its corners, edge middles, middle
+      near.push([0, 0]);
+      for (const [a, b] of at.f.edges) near.push(a, b, [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]);
+    }
     let best: Point2 | null = null, gap = 10;
     for (const c of near) {
       const sp = v.toScreen(to3d(at.f, c));
@@ -1533,6 +1556,7 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
     if (now && (!add || !had)) setEdgeSize(now.size);
     setSelected([part.id]);
     setFaceSel(null);
+    setFlatSel(null);
     setTab("lines");
   };
 
@@ -1717,6 +1741,7 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
         setSelected([]);
         setEdgeSel({});
         setFaceSel(null);
+        setFlatSel(null);
       }
       return;
     }
@@ -1727,6 +1752,7 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
     }
     const id = topOf(hit.part);                        // a part: it, and the Part tab
     setFaceSel(null);
+    setFlatSel(null);
     if (e.shiftKey || several) {
       const cur = selectedRef.current;
       setSelected(cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]);
@@ -1741,6 +1767,15 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
         setTab("face");
         return;
       }
+      // An imported mesh's flat face (0.107.0, Søren: "det skal være muligt at ændre en importeret stl fil til en
+      // part, så jeg kan redigere den" - a sketch on its faces): the Face tab, with Sketch.
+      const flat = mode === "select" && hit.tri !== undefined && built && meshPart(hit.part) ? flatFaceAt(built, hit.tri)
+        : null;
+      if (flat) {
+        setFlatSel(flat);
+        setTab("face");
+        return;
+      }
     }
     const text = designRef.current ? find(designRef.current.parts, id)?.part.shape === "text" : false;
     setTab(text ? "text" : "part");                    // a text: its font and size first (0.96.0), as in Office
@@ -1751,6 +1786,7 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
   const pickFromTree = (id: string, add: boolean) => {
     const cur = selectedRef.current;
     setFaceSel(null);
+    setFlatSel(null);
     if (add || several) setSelected(cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]);
     else {
       setSelected([id]);
@@ -1821,6 +1857,7 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
     setSelected([id]);
     setEdgeSel({});
     setFaceSel(null);
+    setFlatSel(null);
     if (shape === "text") {
       setTab("text");                              // its font and size, as Office shows them for a new text box (0.96.0)
       if (d.parts.some((x) => !x.hidden && !x.hole)) setTool("face");      // and the face it goes on (0.97.0)
@@ -1998,10 +2035,11 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
       Delete: del, Backspace: del, Escape: () => {
         if (host.current?.closest(".panel-3d")?.querySelector(".menu")) return;   // it closes the menu, nothing more
         if (tool) setTool(null);
-        else if (selectedRef.current.length || Object.keys(edgeSel).length || faceSel) {
+        else if (selectedRef.current.length || Object.keys(edgeSel).length || faceSel || flatSel) {
           setSelected([]);
           setEdgeSel({});
           setFaceSel(null);
+          setFlatSel(null);
         } else setMode("select");                     // nothing picked: back to Select
       },
       ArrowLeft: () => nudge([-step, 0, 0]), ArrowRight: () => nudge([step, 0, 0]),
@@ -2057,7 +2095,8 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
     error: "Not saved" }[status];
   const view = (name: ViewName) => vp.current?.view(name, built?.box ?? (design ? extentOf(design.parts) : null));
   const texts = items.length && items.every((p) => p.shape === "text") ? items : null;
-  const shownTab: Tab = sketch ? "sketch" : (tab === "text" && !texts) || (tab === "face" && !faceBox) || tab === "sketch"
+  const shownTab: Tab = sketch ? "sketch" : (tab === "text" && !texts) || (tab === "face" && !faceBox && !flatSel)
+    || tab === "sketch"
     ? "part" : tab;
   // What placing the parts says as they are now (0.101.0): the mates that cannot be met - the picked part's in Part.
   const placed = useMemo(() => (design ? placing(design) : []), [design]);
@@ -2167,6 +2206,10 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
               <button type="button" role="tab" aria-selected={shownTab === "face"} className={`v3d-tab context${shownTab === "face" ? " on" : ""}`}
                 onClick={() => setTab("face")} title={`The face picked - the ${faceSel.face} of ${label(faceBox)}: a hole, a boss or a text on it`}>Face</button>
             )}
+            {!faceBox && flatSel && (
+              <button type="button" role="tab" aria-selected={shownTab === "face"} className={`v3d-tab context${shownTab === "face" ? " on" : ""}`}
+                onClick={() => setTab("face")} title="The flat face picked on the imported mesh: sketch on it">Face</button>
+            )}
           </div>
         </div>
         <Band label={shownTab === "text" ? "Text" : shownTab === "face" ? "Face" : shownTab === "sketch" ? "Sketch"
@@ -2266,6 +2309,11 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
               onFrom={(from) => setFaceSel({ ...faceSel, from })} onMake={onTheFace}
               onSketch={() => startSketch({ kind: "face", part: faceBox.id, face: faceSel.face })} onMate={faceMate} />
           )}
+          {shownTab === "face" && !faceBox && flatSel && (() => {
+            const m = find(parts, flatSel.part)?.part, name = m ? label(m) : flatSel.part;
+            return <FlatBand face={flatSel} name={name} onSketch={() => startSketch({ kind: "flat", part: flatSel.part, name,
+              outline: flatSel.outline, f: { O: flatSel.O, U: flatSel.U, V: flatSel.V, N: flatSel.N, edges: flatSel.edges } })} />;
+          })()}
           {shownTab === "lines" && (
             <LinesBand part={one} many={items.length > 1} picked={pickedEdges} pickedOn={one ? edgeSel[one.id] ?? [] : []}
               size={edgeSize} picking={tool === "edge"} onPicking={() => setTool(tool === "edge" ? null : "edge")}
@@ -3069,6 +3117,25 @@ function FaceBand({ box, spot, feature, onFeature, onFrom, onMake, onSketch, onM
       <Grp label="Mate">
         <Big icon={<Magnet size={20} />} label="Mate" onClick={onMate}
           title={`Mate ${label(box)} by this face, as in SolidWorks: then click the face of the part it goes against - ${label(box)} moves there`} />
+      </Grp>
+    </>
+  );
+}
+
+/** The Face tab for an imported mesh's flat face (0.107.0): which face, how big - and Sketch on it. */
+function FlatBand({ face, name, onSketch }: { face: FlatFace; name: string; onSketch: () => void }) {
+  return (
+    <>
+      <Grp label="Face" fold={1} icon={<Box size={20} />}>
+        <Stack>
+          <span className="v3d-col-strong v3d-clip">Flat face</span>
+          <small className="v3d-col-note v3d-clip" title={name}>of {name}</small>
+          <small className="v3d-col-note num">{fmt(face.W)} x {fmt(face.H)} mm, {fmt(face.area)} mm²</small>
+        </Stack>
+      </Grp>
+      <Grp label="Cut or add">
+        <Big tone="violet" icon={<PencilRuler size={20} />} label="Sketch" onClick={onSketch}
+          title="Draw on this face - lines, rectangles, circles - then Extrude them out of it or Cut them into the mesh" />
       </Grp>
     </>
   );

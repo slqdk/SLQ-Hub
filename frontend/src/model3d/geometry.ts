@@ -391,6 +391,154 @@ export function meshExtent(m: MeshData): Vec3 {
   return [0, 1, 2].map((i) => (hi[i] >= lo[i] ? hi[i] - lo[i] : 0)) as Vec3;
 }
 
+/** A flat face of a part on the built solid (0.107.0 - Søren: "det skal være muligt at ændre en importeret stl fil til
+ *  en part, så jeg kan redigere den", then: a sketch on its faces): the triangles of the clicked one's part that lie in
+ *  its plane and join it along their edges. Its middle (O), which way is out of it (N), across (U) and up it (V: world
+ *  up on a wall; on a floor or a ceiling U is world X), its area, its outline for drawing, its straight edges in its
+ *  own terms (for snapping and distances, as a box face's four) and how wide and high it is. Null when the spot is not
+ *  flat: less than MIN_FLAT mm2 in one plane - a curved surface's facet. */
+export interface FlatFace { part: string; O: Vec3; U: Vec3; V: Vec3; N: Vec3; area: number; outline: Vec3[][];
+  edges: [Point2, Point2][]; W: number; H: number }
+export const MIN_FLAT = 4;                          // mm2
+const FLAT_COS = Math.cos((0.5 * Math.PI) / 180);   // normals within half a degree
+const FLAT_GAP = 0.02;                              // corners this far from the plane (mm) lie in it
+const STRAIGHT = Math.cos((1 * Math.PI) / 180);     // an outline's turn below a degree: still the same edge
+const SHORTEST_EDGE = 1;                            // mm: shorter straight bits of an outline are no edge to snap to
+const sub3 = (a: Vec3, b: Vec3): Vec3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+const scale3 = (a: Vec3, k: number): Vec3 => [a[0] * k, a[1] * k, a[2] * k];
+
+export function flatFaceAt(b: Built, tri: number): FlatFace | null {
+  const T = b.triangles, P = b.positions, n = T.length / 3, nv = P.length / 3;
+  if (!Number.isInteger(tri) || tri < 0 || tri >= n) return null;
+  const part = b.triPart[tri];
+  const at = (i: number): Vec3 => [P[i * 3], P[i * 3 + 1], P[i * 3 + 2]];
+  const facing = (t: number): [Vec3, number] => {                 // a triangle's outward normal, and its area
+    const a = at(T[t * 3]), c = cross3(sub3(at(T[t * 3 + 1]), a), sub3(at(T[t * 3 + 2]), a));
+    const len = Math.hypot(c[0], c[1], c[2]);
+    return len > 1e-12 ? [[c[0] / len, c[1] / len, c[2] / len], len / 2] : [[0, 0, 1], 0];
+  };
+  const [N, first] = facing(tri);
+  if (!first) return null;
+  const d0 = dot3(N, at(T[tri * 3]));
+  const inPlane = new Uint8Array(n), areas = new Float64Array(n);
+  for (let t = 0; t < n; t++) {
+    if (b.triPart[t] !== part) continue;
+    const [m, a] = facing(t);
+    if (!a || dot3(m, N) < FLAT_COS) continue;
+    let ok = true;
+    for (let k = 0; k < 3 && ok; k++) ok = Math.abs(dot3(N, at(T[t * 3 + k])) - d0) <= FLAT_GAP;
+    if (ok) {
+      inPlane[t] = 1;
+      areas[t] = a;
+    }
+  }
+  const byEdge = new Map<number, number[]>();                     // an edge (its corners, smaller first) -> triangles
+  const key = (u: number, v: number) => (u < v ? u * nv + v : v * nv + u);
+  for (let t = 0; t < n; t++) {
+    if (!inPlane[t]) continue;
+    for (let k = 0; k < 3; k++) {
+      const e = key(T[t * 3 + k], T[t * 3 + (k + 1) % 3]);
+      const list = byEdge.get(e);
+      if (list) list.push(t);
+      else byEdge.set(e, [t]);
+    }
+  }
+  const region = new Set<number>([tri]), queue = [tri];             // joined to the one clicked
+  while (queue.length) {
+    const t = queue.pop()!;
+    for (let k = 0; k < 3; k++) {
+      for (const o of byEdge.get(key(T[t * 3 + k], T[t * 3 + (k + 1) % 3])) ?? []) {
+        if (!region.has(o)) {
+          region.add(o);
+          queue.push(o);
+        }
+      }
+    }
+  }
+  let area = 0;
+  const mid: Vec3 = [0, 0, 0];
+  for (const t of region) {
+    const a = areas[t];
+    area += a;
+    for (let k = 0; k < 3; k++) {
+      const v = at(T[t * 3 + k]);
+      mid[0] += (v[0] * a) / 3; mid[1] += (v[1] * a) / 3; mid[2] += (v[2] * a) / 3;
+    }
+  }
+  if (area < MIN_FLAT) return null;
+  const O: Vec3 = [mid[0] / area, mid[1] / area, mid[2] / area];
+  let U: Vec3, V: Vec3;
+  if (Math.abs(N[2]) < 0.9) {                                     // a wall: up it is world up
+    V = unit(sub3([0, 0, 1], scale3(N, N[2])));
+    U = cross3(V, N);
+  } else {                                                        // a floor or a ceiling: across it is world X
+    U = unit(sub3([1, 0, 0], scale3(N, N[0])));
+    V = cross3(N, U);
+  }
+  // Its outline: the edges of its triangles that no other of them has, in their triangles' order (round the face
+  // the one way), chained into loops.
+  const next = new Map<number, number[]>();
+  for (const t of region) {
+    for (let k = 0; k < 3; k++) {
+      const u = T[t * 3 + k], v = T[t * 3 + (k + 1) % 3];
+      if ((byEdge.get(key(u, v)) ?? []).filter((o) => region.has(o)).length !== 1) continue;
+      const list = next.get(u);
+      if (list) list.push(v);
+      else next.set(u, [v]);
+    }
+  }
+  const loops: number[][] = [];
+  for (const start of [...next.keys()]) {
+    while ((next.get(start) ?? []).length) {
+      const loop = [start];
+      let cur = start;
+      for (let guard = 0; guard <= nv; guard++) {
+        const outs = next.get(cur);
+        if (!outs || !outs.length) break;
+        const v = outs.pop()!;
+        if (v === start) break;
+        loop.push(v);
+        cur = v;
+      }
+      if (loop.length >= 3) loops.push(loop);
+    }
+  }
+  const flat = (i: number): Point2 => {
+    const d = sub3(at(i), O);
+    return [dot3(d, U), dot3(d, V)];
+  };
+  const edges: [Point2, Point2][] = [];
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const loop of loops) {
+    const pts = loop.map(flat);
+    for (const [x, y] of pts) {
+      x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y);
+    }
+    const dir = (i: number): Point2 => {                          // the way from point i to the next, as a unit
+      const a = pts[i], c = pts[(i + 1) % pts.length], l = Math.hypot(c[0] - a[0], c[1] - a[1]) || 1;
+      return [(c[0] - a[0]) / l, (c[1] - a[1]) / l];
+    };
+    const corner = (i: number) => {                               // the outline turns at point i
+      const a = dir((i - 1 + pts.length) % pts.length), c = dir(i);
+      return a[0] * c[0] + a[1] * c[1] < STRAIGHT;
+    };
+    const corners = pts.map((_, i) => i).filter(corner);
+    for (let j = 0; j < corners.length; j++) {                    // from corner to corner - straight all the way
+      const i0 = corners[j], i1 = corners[(j + 1) % corners.length], a = pts[i0], c = pts[i1];
+      const len = Math.hypot(c[0] - a[0], c[1] - a[1]);
+      if (len < SHORTEST_EDGE) continue;
+      let straight = true;
+      for (let i = (i0 + 1) % pts.length; i !== i1 && straight; i = (i + 1) % pts.length) {
+        const q = pts[i];                                         // (small turns that add up: a curve)
+        straight = Math.abs((c[0] - a[0]) * (q[1] - a[1]) - (c[1] - a[1]) * (q[0] - a[0])) / len <= FLAT_GAP * 2.5;
+      }
+      if (straight) edges.push([a, c]);
+    }
+  }
+  const outline = loops.map((loop) => [...loop, loop[0]].map(at));
+  return { part, O, U, V, N, area, outline, edges, W: x1 - x0, H: y1 - y0 };
+}
+
 /** The mesh parts whose sizes still have 0s that `own` can now work out, worked out - the rest as they were; null when
  *  there are none (0.104.0: the editor, once a file is loaded, for a design changed since it was read). */
 export function fitMeshes(parts: Part[], own: (file: string) => Vec3 | null): Part[] | null {

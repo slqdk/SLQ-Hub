@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.107.0 - 2026-11-27
+
+- 3D editor: sketch on an imported STL, 3MF or OBJ. Click a flat face of
+  it and the Face tab opens with Sketch: draw on the face, then Extrude
+  out of it or Cut into the mesh - so deep or through all. Distances can
+  be measured to the face's straight edges.
+- Seen from below, the plate shows only its lines, so you can click the
+  underside of what stands on it.
+
 ## 0.106.0 - 2026-11-27
 
 - Settings, Usage: how many chats each one started - you and each

@@ -3740,6 +3740,25 @@ into the Hub, Tinkercad's level, his printer a Bambu Lab P2S but chosen per desi
     holes that leave a solid in more pieces than it was ("hole candle_hole cuts cone into 2 pieces (z 0 to 8.6, z 15
     to 100)" - the same hole on the cone at its real size, through its tapering wall). At most three said. Only in
     `hub3d design` - in the editor a stretched part or a cut is the user's own doing.
+- **A sketch on an imported mesh's flat face (0.107.0).** Søren, 11:41: "det skal være muligt at ændre en importeret
+  stl fil til en part, så jeg kan redigere den... Tag lysestagen som et eksempel"; asked what editing, he chose a
+  sketch on its faces (of: a sketch on its faces, a hole or boss dimensioned on a face, rounded edges, cutting it in a
+  plane). In Select a click on an imported mesh (a solid, not a hole) that lands on a flat face opens the Face tab:
+  `flatFaceAt(built, tri)` takes the clicked triangle (`Hit.tri`, the solid's own) and gathers the triangles of its
+  part in its plane - normals within half a degree, corners within 0.02 mm - joined to it along their edges; at least
+  4 mm2 (`MIN_FLAT`), else it is a curved surface's facet and the click picks the part as before. Its middle is the
+  area-weighted one, N its outward normal, V world up on a wall (U = V x N), U world X on a floor or ceiling (V = N x
+  U); its outline (the edges no other of its triangles has, chained) is drawn, and its straight edges - corner to
+  corner, every point within 0.05 mm of the line, at least 1 mm - are the face's edges in the sketch (`PlaneFrame.edges`,
+  `faceEdges`): snapped to with their middles and the face's middle, and measured to by Dimension. The Face tab
+  (`FlatBand`) says its size and area and has Sketch: a `SketchPlane` of kind "flat" carries the frame and outline as
+  picked, and the view turns straight at it (`lookFrom`). Extrude stands each region out of the face from 0.2 mm
+  inside the mesh (one piece); Cut goes into the mesh from 0.2 mm outside, so deep or through all (`reach`). The parts
+  are outlines placed where the face was - unlike a box face's, not kept on it (a mesh's face has no name to keep):
+  the mesh moved, they stay; a change to the design lets a picked flat face go. To reach a face underneath, the
+  plate's sheet is hidden while the camera is below it (`Viewport.render`), its lines left. The candle holder of chat
+  335: its bottom is one flat face, 1,192 mm2, 40 x 40 mm (round: no straight edges), found in about 60 ms among its
+  300,000 triangles.
 
 ### Workflows (0.67.0)
 

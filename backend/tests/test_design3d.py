@@ -1889,3 +1889,80 @@ def test_both_read_mates_the_same_and_say_the_same(h3):
     assert "mates" not in by["m6"] and "mates" not in by["tt"] and "mates" not in by["g"]
     assert by["m8"]["mates"][0]["type"] == "distance" and by["m8"]["at"] == [30, 15, 2]      # its type: from mm
     assert by["m7"]["at"] == pytest.approx([0, 0, 11 - h3.MATE_JOIN]) and by["m7"]["rotate"] == [180, 0, 0]   # on its top
+
+
+# 0.107.0 - Søren: "det skal være muligt at ændre en importeret stl fil til en part, så jeg kan redigere den" - and his
+# answer: a sketch on its faces. A flat face of a mesh on the built solid, its frame and edges, and the parts a sketch
+# on it makes: cut into the mesh, extruded out of it.
+FLAT_JS = """
+const files = new Map();
+for (const [name, b64] of Object.entries(input.files)) files.set(name, G.readStl(Buffer.from(b64, "base64")));
+const kit = { wasm, fonts, meshes: files };
+const read = (parts) => G.readDesign(JSON.stringify({ parts })).design;
+const block = read([{ id: "m", shape: "mesh", file: "block.stl", at: [0, 0, 5] }]);
+const b = G.build(block, kit);
+const normal = (t) => {
+  const p = (i) => [b.positions[i * 3], b.positions[i * 3 + 1], b.positions[i * 3 + 2]];
+  const [a, c, d] = [p(b.triangles[t * 3]), p(b.triangles[t * 3 + 1]), p(b.triangles[t * 3 + 2])];
+  const u = [c[0] - a[0], c[1] - a[1], c[2] - a[2]], v = [d[0] - a[0], d[1] - a[1], d[2] - a[2]];
+  const n = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]], l = Math.hypot(...n);
+  return n.map((x) => x / l);
+};
+let top = -1, side = -1;
+for (let t = 0; t < b.triangles.length / 3; t++) {
+  const n = normal(t);
+  if (n[2] > 0.99 && top < 0) top = t;
+  if (n[0] > 0.99 && side < 0) side = t;
+}
+const face = G.flatFaceAt(b, top), wall = G.flatFaceAt(b, side);
+const plane = { kind: "flat", part: face.part, name: "block", outline: face.outline,
+  f: { O: face.O, U: face.U, V: face.V, N: face.N, edges: face.edges } };
+let n = 0;
+const make = (shapes, how) => S.sketchParts(plane, shapes, null, { through: false, reach: 40, ...how }, () => `s${++n}`, "Sketch 1");
+const cut = make([{ kind: "circle", c: [0, 0], r: 5 }], { cut: true, depth: 3 });
+const through = make([{ kind: "circle", c: [0, 0], r: 5 }], { cut: true, depth: 3, through: true });
+const boss = make([{ kind: "rect", a: [-2, -2], b: [2, 2] }], { cut: false, depth: 4 });
+const withCut = G.build({ ...block, parts: [...block.parts, ...cut] }, kit);
+const withThrough = G.build({ ...block, parts: [...block.parts, ...through] }, kit);
+const withBoss = G.build({ ...block, parts: [...block.parts, ...boss] }, kit);
+const ball = G.build(read([{ id: "s", shape: "mesh", file: "ball.stl", at: [0, 0, 10] }]), kit);
+const dist = S.measure([{ kind: "circle", c: [3, 4], r: 2 }], plane.f, { shape: 0, to: { edge: 0 } });
+process.stdout.write(JSON.stringify({ face: { ...face, outline: face.outline.length }, wall: { N: wall.N, U: wall.U, V: wall.V },
+  cut: cut[0], through: through[0], boss: boss[0], volumes: [b.volume, withCut.volume, withThrough.volume, withBoss.volume],
+  bossTop: withBoss.box[1][2], ball: G.flatFaceAt(ball, 0), name: S.planeName(plane), dist: dist && dist.value,
+  file: G.writeDesign({ ...block, parts: [...block.parts, ...cut, ...boss] }) }));
+"""
+
+
+def test_a_sketch_on_a_flat_face_of_a_mesh(h3, tmp_path):
+    pytest.importorskip("manifold3d")
+    import base64
+
+    import trimesh
+    block = trimesh.creation.box(extents=(20, 20, 10))
+    write_stl(tmp_path / "block.stl", np.asarray(block.vertices), np.asarray(block.faces))
+    ball = trimesh.creation.icosphere(subdivisions=3, radius=10)
+    write_stl(tmp_path / "ball.stl", np.asarray(ball.vertices), np.asarray(ball.faces))
+    files = {n: base64.b64encode((tmp_path / n).read_bytes()).decode() for n in ("block.stl", "ball.stl")}
+    out = run_js(f"import * as S from {node_module(tmp_path, 'sketch.ts')};\n" + FLAT_JS, {"files": files})
+    face = out["face"]
+    assert face["part"] == "m" and face["area"] == pytest.approx(400) and face["N"] == pytest.approx([0, 0, 1])
+    assert face["O"] == pytest.approx([0, 0, 10], abs=1e-6) and (face["W"], face["H"]) == pytest.approx((20, 20))
+    assert face["U"] == pytest.approx([1, 0, 0]) and face["V"] == pytest.approx([0, 1, 0]) and face["outline"] == 1
+    assert len(face["edges"]) == 4 and all(math.dist(a, b) == pytest.approx(20) for a, b in face["edges"])
+    assert out["wall"] == {"N": pytest.approx([1, 0, 0]), "U": pytest.approx([0, 1, 0]), "V": pytest.approx([0, 0, 1])}
+    cut, through, boss = out["cut"], out["through"], out["boss"]
+    assert cut["hole"] and cut["size"] == [0, 0, 3.2] and cut["at"] == [0, 0, 8.6]          # z 7 to 10.2: into it
+    assert through["size"] == [0, 0, 40.2] and through["at"] == [0, 0, -9.9]                  # all the way through
+    assert boss["size"] == [0, 0, 4.2] and boss["at"] == [0, 0, 11.9] and not boss.get("hole")   # 0.2 mm into it
+    base, with_cut, with_through, with_boss = out["volumes"]
+    circle = 0.5 * 64 * 25 * math.sin(2 * math.pi / 64)                                     # the 64-sided circle
+    assert base == pytest.approx(4000) and with_cut == pytest.approx(4000 - 3 * circle, rel=1e-5)   # (points to 0.001)
+    assert with_through == pytest.approx(4000 - 10 * circle, rel=1e-5)
+    assert with_boss == pytest.approx(4000 + 16 * 4, rel=1e-6) and out["bossTop"] == pytest.approx(14)
+    assert out["ball"] is None                                                              # a curved facet: not flat
+    assert out["name"] == 'a face of "block"'
+    assert any(out["dist"] == pytest.approx(v) for v in (4, 5, 11, 12))   # a circle to the face's edge, as to a box's
+    design, _ = h3.read_design(out["file"], tmp_path)                                      # hub3d builds the same
+    built = h3.build_design(design, tmp_path)
+    assert built.solid.volume() == pytest.approx(4000 - 3 * circle + 16 * 3.8, rel=1e-5)   # the hole cuts the boss too

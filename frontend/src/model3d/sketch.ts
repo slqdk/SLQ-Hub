@@ -5,20 +5,24 @@
 // made into outline parts: extruded out of the plane, or cut into what is there. The regions are read as SolidWorks
 // reads a sketch: a closed shape inside another is a hole in it, one inside that hole an island again; shapes that
 // cross or lie apart are each a part of their own (they join where they meet). On a box's face each part is kept on
-// it (its "on", 0.98.0), so it goes with the box. The sketch itself is the editor's while it is drawn: the design gets
-// the parts.
+// it (its "on", 0.98.0), so it goes with the box. On a flat face of an imported mesh (0.107.0) the parts are placed
+// where the face is when they are made. The sketch itself is the editor's while it is drawn: the design gets the
+// parts.
 
 import { angles, faceFrame, MIN_SIZE, spotFrom, type FaceName, type Part, type Point2, type Vec3 } from "./geometry";
 
-export type SketchPlane = { kind: "top" | "front" | "right" } | { kind: "face"; part: string; face: FaceName };
+export type SketchPlane = { kind: "top" | "front" | "right" } | { kind: "face"; part: string; face: FaceName }
+  // a flat face of an imported mesh (0.107.0, geometry's flatFaceAt): its frame and outline as it was picked
+  | { kind: "flat"; part: string; name: string; f: PlaneFrame; outline: Vec3[][] };
 export type SketchShape =
   | { kind: "line"; pts: Point2[]; closed: boolean }   // clicked corners - closed when the last click met the first
   | { kind: "rect"; a: Point2; b: Point2 }               // two opposite corners
   | { kind: "circle"; c: Point2; r: number };
 
 /** A plane in the design: its origin, which way is across it (U), up it (V) and out of it (N) - U x V = N; a box's
- *  face's middle and its frame (faceFrame), with its width and height. */
-export interface PlaneFrame { O: Vec3; U: Vec3; V: Vec3; N: Vec3; W?: number; H?: number }
+ *  face's middle and its frame (faceFrame), with its width and height; a mesh's flat face's middle and its straight
+ *  edges in its own terms (0.107.0). */
+export interface PlaneFrame { O: Vec3; U: Vec3; V: Vec3; N: Vec3; W?: number; H?: number; edges?: [Point2, Point2][] }
 
 export const CIRCLE_SIDES = 64;
 
@@ -35,11 +39,13 @@ export function planeFrame(plane: SketchPlane, box?: Part | null): PlaneFrame | 
       const F = faceFrame(box, plane.face);
       return { O: F.at(0, 0), U: F.U, V: F.V, N: F.N, W: F.W, H: F.H };
     }
+    case "flat": return plane.f;
   }
 }
 
 /** What a plane is called in the editor: "the plate", "the front of Lid". */
 export function planeName(plane: SketchPlane, box?: Part | null): string {
+  if (plane.kind === "flat") return `a face of "${plane.name}"`;
   if (plane.kind !== "face") return { top: "the plate", front: "the front plane", right: "the right plane" }[plane.kind];
   return `the ${plane.face} of ${box?.name ? `"${box.name}"` : `box ${plane.part}`}`;
 }
@@ -162,6 +168,7 @@ export function sidesOf(s: SketchShape): [Point2, Point2][] {
 
 /** A face's edges in its plane (its middle at 0,0): bottom, right, top, left - none on the plate or a plane. */
 export function faceEdges(f: PlaneFrame): [Point2, Point2][] {
+  if (f.edges) return f.edges;                     // a mesh's flat face: its straight edges (0.107.0)
   if (!f.W || !f.H) return [];
   const w = f.W / 2, h = f.H / 2;
   return [[[-w, -h], [w, -h]], [[w, -h], [w, h]], [[w, h], [-w, h]], [[-w, h], [-w, -h]]];
@@ -386,7 +393,8 @@ export interface Make { cut: boolean; depth: number; through: boolean; reach: nu
 /** The parts a sketch makes: an outline for each region, its points about the region's middle. On a box's face each
  *  is kept on it ("on", 0.98.0: so many mm from the face's edges, as deep or as high as `how` says, placed by settle);
  *  on the plate it stands on it, on the front or right plane it stands out of it toward you - or, cut, goes into what
- *  is there. Named `name`, then "name (2)", "name (3)" ... for more than one; `id` gives each its id. */
+ *  is there; on a mesh's flat face it stands out of the face, or is cut into the mesh. Named `name`, then
+ *  "name (2)", "name (3)" ... for more than one; `id` gives each its id. */
 export function sketchParts(plane: SketchPlane, shapes: SketchShape[], box: Part | null, how: Make, id: () => string,
   name: string, color?: string): Part[] {
   const f = planeFrame(plane, box);
@@ -411,6 +419,16 @@ export function sketchParts(plane: SketchPlane, shapes: SketchShape[], box: Part
       const from = spotFrom(plane.face, box.mirror ? -c[0] : c[0], c[1], f.W ?? 0, f.H ?? 0, {}, 0);
       p.on = { part: box.id, face: plane.face, ...(from ? { from } : {}),
         ...(how.cut && how.through ? { through: true } : { depth }) };
+      return p;
+    }
+    if (plane.kind === "flat") {
+      // on a mesh's flat face (0.107.0): out of the face, 0.2 mm into the mesh so the two are one piece - or, cut,
+      // into the mesh from 0.2 mm outside the face, as deep as asked or through all of it (`reach`)
+      const [lo, hi] = how.cut ? [how.through ? -how.reach : -depth, 0.2] : [-0.2, depth];
+      const o = to3d(f, c), mid = (lo + hi) / 2;
+      p.size = [0, 0, r3(hi - lo)];
+      p.at = [r3(o[0] + f.N[0] * mid), r3(o[1] + f.N[1] * mid), r3(o[2] + f.N[2] * mid)];
+      p.rotate = angles([f.U[0], f.V[0], f.N[0], f.U[1], f.V[1], f.N[1], f.U[2], f.V[2], f.N[2]]);
       return p;
     }
     // on a plane of the design: out of it toward you; a cut from 0.2 mm behind it - or through all both ways

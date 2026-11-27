@@ -12,7 +12,7 @@ import type { Box3, Built, MeshData, Vec3 } from "./geometry";
 
 THREE.Object3D.DEFAULT_UP.set(0, 0, 1);
 
-export interface Hit { part: string; point: Vec3; normal: Vec3 }
+export interface Hit { part: string; point: Vec3; normal: Vec3; tri?: number }   // tri: the solid's triangle (0.107.0)
 export type ViewName = "home" | "top" | "front" | "right";
 
 const EDGE_LIMIT = 150_000;               // triangles above which the solid's edges are not drawn (slow to find)
@@ -63,6 +63,7 @@ export class Viewport {
   readonly gizmo: TransformControls;
   readonly proxy = new THREE.Object3D();
   private plate = new THREE.Group();
+  private sheet: THREE.Mesh | null = null;            // the plate's own surface (hidden from below)
   private result = new THREE.Group();
   private ghosts = new THREE.Group();
   private outline = new THREE.Group();
@@ -160,6 +161,9 @@ export class Viewport {
     if (this.frame) return;
     this.frame = requestAnimationFrame(() => {
       this.frame = 0;
+      // Seen from below the plate (0.107.0: an imported mesh's bottom, to sketch on it), the plate's sheet would hide
+      // what stands on it: only its lines then.
+      if (this.sheet) this.sheet.visible = this.camera.position.z >= 0;
       this.renderer.render(this.scene, this.camera);
       if (this.labels.length || this.pinned) this.placeLabels();
     });
@@ -177,6 +181,7 @@ export class Viewport {
     plate.position.z = -0.02;
     plate.renderOrder = -1;
     this.plate.add(plate);
+    this.sheet = plate;
     const minor: number[] = [], major: number[] = [];
     for (let x = 0; x <= w / 2; x += 10) for (const s of x ? [-1, 1] : [1]) (x % 50 === 0 ? major : minor).push(s * x, -d / 2, 0, s * x, d / 2, 0);
     for (let y = 0; y <= d / 2; y += 10) for (const s of y ? [-1, 1] : [1]) (y % 50 === 0 ? major : minor).push(-w / 2, s * y, 0, w / 2, s * y, 0);
@@ -398,7 +403,8 @@ export class Viewport {
       const part = own ? this.triPart[h.faceIndex ?? -1] : h.object.userData.part;
       if (!part || skip?.has(part)) continue;           // (0.97.0: the part put on a face is not that face)
       const n = h.face?.normal ?? new THREE.Vector3(0, 0, 1);
-      const hit: Hit = { part, point: [h.point.x, h.point.y, h.point.z], normal: [n.x, n.y, n.z] };
+      const hit: Hit = { part, point: [h.point.x, h.point.y, h.point.z], normal: [n.x, n.y, n.z],
+        ...(own && h.faceIndex != null ? { tri: h.faceIndex } : {}) };
       front ??= hit;
       if (own) return { front, solid: hit };
     }
