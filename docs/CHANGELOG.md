@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.102.0 - 2026-11-27
+
+- Sketch: set distances in mm, as SolidWorks' Smart Dimension. Pick
+  Dimension (D), click the shape that should move, then the line it is
+  measured to - a side of another shape or the edge of the face - and type
+  the distance and press Enter. The shape moves to it; a second distance
+  keeps the first, so two place it exactly.
+- Distances are measured from a circle's edge (or a shape's nearest
+  corner); "From its middle" measures from its middle instead. Pick a
+  distance to change or delete it; Undo brings it back.
+- Fixed: Delete on a picked item could act twice when the button that had
+  the focus went away.
+
 ## 0.101.1 - 2026-11-27
 
 - Sketch: the view no longer turns when the mouse button is held. Line,

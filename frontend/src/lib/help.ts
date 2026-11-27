@@ -756,9 +756,12 @@ export const SECTIONS: HelpSection[] = [
           + "(its middle, then its edge) - or drag from the first point to the next; points snap to whole mm and to "
           + "corners near the pointer, and a number typed while drawing - a length, width;height or a diameter - with "
           + "Enter makes it exact. The sketch stays flat in front of you: with Pick a drag moves the view, the middle "
-          + "button turns it, the wheel zooms. Pick a shape to change its size or delete it. Extrude makes the closed "
-          + "shapes a part so thick - a shape inside another is a hole in it - and Cut cuts them into what is there; on "
-          + "a box's face they stay on the face.",
+          + "button turns it, the wheel zooms. Pick a shape to change its size or delete it. Dimension (D) sets a "
+          + "distance in mm, as SolidWorks' Smart Dimension: click the shape that moves, then the line it is measured "
+          + "to - a side of another shape or the face's edge - type the mm and Enter; a second distance keeps the "
+          + "first. It measures from a circle's edge or a shape's nearest corner, or From its middle. Extrude makes "
+          + "the closed shapes a part so thick - a shape inside another is a hole in it - and Cut cuts them into what "
+          + "is there; on a box's face they stay on the face.",
           "Click a box's face in Select and the Face tab opens, as SolidWorks lets you sketch on a face: the spot you "
           + "clicked, so many mm from two of the face's edges - the distances show on the model, and From left, From "
           + "right or Middle and a number move it. Cut hole puts a round or square hole there, through all of the box "

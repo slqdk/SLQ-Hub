@@ -1442,6 +1442,70 @@ def test_a_sketch_makes_parts(h3, tmp_path):
     assert out["volume"] == pytest.approx(h3.build_design(py).solid.volume(), rel=1e-9)
 
 
+
+SKETCH_DIMS_JS = """
+const plate = { O: [0, 0, 0], U: [1, 0, 0], V: [0, 1, 0], N: [0, 0, 1] }, face = { ...plate, W: 80, H: 40 };
+const shape = { kind: "line", pts: [[0, 0], [60, 0], [60, 50], [0, 50], [-5, 25]], closed: true };
+const circle = { kind: "circle", c: [15, 30], r: 5 };
+const top = { shape: 1, to: { shape: 0, seg: 2 } }, left = { shape: 1, to: { shape: 0, seg: 3 } };
+const v = (shapes, d, f = plate) => Math.round(S.measure(shapes, f, d).value * 1e6) / 1e6;
+const out = {};
+let shapes = [shape, circle];
+out.sides = [S.sidesOf(shape).length, S.sidesOf({ kind: "rect", a: [0, 0], b: [1, 1] }).length, S.sidesOf(circle).length];
+out.first = [v(shapes, top), v(shapes, left), v(shapes, { ...top, middle: true })];
+let dims = [top];
+shapes = S.setDim(shapes, plate, dims, 0, 10);
+out.top10 = shapes[1].c;
+dims = [top, left];
+shapes = S.setDim(shapes, plate, dims, 1, 4);
+out.left4 = [shapes[1].c, v(shapes, left), v(shapes, top)];
+shapes = S.setDim(shapes, plate, dims, 0, 6);
+out.top6 = [v(shapes, top), v(shapes, left)];
+out.shapeUntouched = shapes[0] === shape;
+out.picks = [S.sideAt(shapes, plate, [30, 50.3], 1, 1), S.sideAt(shapes, plate, [30, 50.3], 1, 0),
+  S.sideAt(shapes, plate, [30, 45], 1, 1), S.dimAt(shapes, plate, dims, S.measure(shapes, plate, left).from, 0.5)];
+out.without = [S.dimsWithout(dims, 0), S.dimsWithout([{ shape: 2, to: { shape: 0, seg: 1 } }, { shape: 1, to: { edge: 1 } },
+  { shape: 0, to: { shape: 2, seg: 0 } }], 1)];
+// a rectangle on a box's face: from its nearest corner to the face's right edge, and its middle to the bottom edge
+const rect = { kind: "rect", a: [10, 5], b: [20, 12] }, right = { shape: 0, to: { edge: 1 } }, bottom = { shape: 0, to: { edge: 0 }, middle: true };
+out.faceEdge = [S.sideAt([rect], face, [39.8, 3], 1, 0), v([rect], right, face), v([rect], bottom, face)];
+let r2 = S.setDim([rect], face, [right, bottom], 0, 3);
+r2 = S.setDim(r2, face, [right, bottom], 1, 20);
+out.faceSet = [r2[0], v(r2, right, face), v(r2, bottom, face)];
+// a line moved as one, its nearest corner measured; a distance to a side gone is null
+const tri = { kind: "line", pts: [[0, 0], [10, 0], [5, 8]], closed: true }, wall = { kind: "line", pts: [[30, -10], [30, 20]], closed: false };
+const td = { shape: 0, to: { shape: 1, seg: 0 } };
+out.tri = [v([tri, wall], td), S.setDim([tri, wall], plate, [td], 0, 2)[0].pts, S.measure([tri], plate, td)];
+process.stdout.write(JSON.stringify(out));
+"""
+
+
+def test_a_sketch_distance_moves_its_shape(tmp_path):
+    """Distances in a sketch (0.102.0, Smart Dimension - Søren: "set distances in mm (the red lines)"): from a circle's
+    edge (or its middle) square to a side of the shape round it; set, the circle moves square to that side - the
+    other distance of it held, so the second slides along the first's side; a rectangle on a box's face from its
+    nearest corner to the face's edge; a line shape moved as one; sides and distances found near a point; the
+    distances re-numbered when a shape is taken away."""
+    out = run_js(f"import * as S from {node_module(tmp_path, 'sketch.ts')};\n" + SKETCH_DIMS_JS, {})
+    assert out["sides"] == [5, 4, 0]
+    assert out["first"] == [15, pytest.approx(13.631033), 20]          # its edge 15 below the top; its middle 20
+    assert out["top10"] == [15, 35]                                     # straight up: nothing else held
+    centre, left, top = out["left4"]
+    assert left == 4 and top == 10 and centre[1] == pytest.approx(35)   # along the top side: the top distance kept
+    assert out["top6"] == [6, 4] and out["shapeUntouched"]              # along the slanted left side: the left kept
+    near_top, own_side, nothing, picked = out["picks"]
+    assert near_top == {"shape": 0, "seg": 2} and own_side is None and nothing is None and picked == 1
+    assert out["without"] == [[], [{"shape": 1, "to": {"shape": 0, "seg": 1}}, {"shape": 0, "to": {"shape": 1, "seg": 0}}]]
+    edge, right, bottom = out["faceEdge"]
+    assert edge == {"edge": 1} and right == 20 and bottom == pytest.approx(28.5)
+    rect, right, bottom = out["faceSet"]
+    assert right == pytest.approx(3) and bottom == pytest.approx(20)
+    assert rect == {"kind": "rect", "a": [pytest.approx(27), pytest.approx(-3.5)], "b": [pytest.approx(37), pytest.approx(3.5)]}
+    tri_v, moved, gone = out["tri"]
+    assert tri_v == 20 and gone is None
+    assert moved == [[18, 0], [28, 0], [23, 8]]                         # its nearest corner 2 mm from the wall
+
+
 # ---------------------------------------------------------------- mates (0.101.0)
 
 def mated_design(box_rotate) -> dict:

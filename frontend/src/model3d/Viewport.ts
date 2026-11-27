@@ -286,7 +286,7 @@ export class Viewport {
    *  blue - and the one under the pointer thinner, amber: drawn over everything, so an edge behind shows too. `face`
    *  (0.98.0): the picked face, what goes on it and its distances - in the picked part's blue, that many px wide.
    *  `tone` and `width` (0.101.0, a mate's faces): green or amber whatever the part's colour, that many px wide. */
-  setMarks(list: { lines: Vec3[][]; hover?: boolean; face?: number; tone?: "run" | "wait"; width?: number }[]): void {
+  setMarks(list: { lines: Vec3[][]; hover?: boolean; face?: number; tone?: "run" | "wait" | "fault"; width?: number }[]): void {
     disposeGroup(this.marks);
     this.lineMats = [];
     const w = Math.max(1, this.host.clientWidth), h = Math.max(1, this.host.clientHeight);
@@ -298,6 +298,7 @@ export class Viewport {
       g.setPositions(pos);
       // tone (0.101.0, a mate's faces): green as a picked line is, or amber as one pointed at - so wide
       const color = m.tone === "run" ? css("--run", "#2f9e44") : m.tone === "wait" ? css("--wait", "#d99a00")
+        : m.tone === "fault" ? css("--fault", "#c22b2b")                    // a sketch's distances (0.102.0)
         : m.face ? css("--act", "#1c64b4") : m.hover ? css("--wait", "#d99a00") : css("--run", "#2f9e44");
       const mat = new LineMaterial({ color: color.getHex(), linewidth: m.width ?? m.face ?? (m.hover ? 3 : 6), depthTest: false,
         transparent: true, opacity: m.hover ? 0.85 : 0.95 });
@@ -313,12 +314,12 @@ export class Viewport {
   /** Words over the model where points of it are (0.98.0: a face's distances, as SolidWorks writes its dimensions):
    *  moved with the view, each time it is drawn. `kind` (0.100.0, a sketch): "dot" a corner's dot (filled: the one
    *  a click snaps to), "typed" what is typed for the next length. */
-  setLabels(list: { at: Vec3; text: string; kind?: "dot" | "snap" | "typed" }[]): void {
+  setLabels(list: { at: Vec3; text: string; kind?: "dot" | "snap" | "typed" | "dim" | "dimon" }[]): void {
     for (const l of this.labels) l.el.remove();
     this.labels = list.map(({ at, text, kind }) => {
       const el = document.createElement("span");
       el.className = kind === "dot" || kind === "snap" ? `v3d-sdot${kind === "snap" ? " snap" : ""}`
-        : `v3d-dim num${kind === "typed" ? " typed" : ""}`;
+        : `v3d-dim num${kind === "typed" ? " typed" : kind === "dim" ? " sdim" : kind === "dimon" ? " sdim on" : ""}`;
       el.textContent = text;
       this.labelBox.appendChild(el);
       return { at, el };

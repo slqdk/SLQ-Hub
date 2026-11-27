@@ -1476,6 +1476,9 @@ div.tests-result-head { cursor: default; }
 .v3d-sdot.snap { width: 11px; height: 11px; background: var(--act); }
 .v3d-sdot[hidden] { display: none; }
 .v3d-dim.typed { margin: -22px 0 0 36px; background: var(--act); color: var(--sheet); font-weight: 600; }
+/* A sketch's distances (0.102.0): red, as SolidWorks draws a dimension being set; the picked one filled */
+.v3d-dim.sdim { border-color: var(--fault); color: var(--fault); }
+.v3d-dim.sdim.on { background: var(--fault); color: var(--sheet); font-weight: 600; }
 .v3d-ribbon .v3d-from .select { width: 102px; padding-right: 18px; }
 .v3d-clip { max-width: 132px; overflow: hidden; text-overflow: ellipsis; }
 /* A part's mates (0.101.0): one row each in the Mates menu */

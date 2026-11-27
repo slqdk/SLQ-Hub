@@ -3449,9 +3449,27 @@ into the Hub, Tinkercad's level, his printer a Bambu Lab P2S but chosen per desi
     box's colour. Nothing closed: said, the sketch stays. Cancel throws the sketch away (asked once when there is
     something drawn). The sketch is the editor's: the design gets outline parts, which hub3d reads and builds as it
     always has (the parity test: a turned, mirrored box's face cut and extruded).
-  - **Not yet**: arcs, splines, dimensions and relations kept with the sketch (Smart Dimension, horizontal,
-    parallel...), editing the sketch after Extrude (the outline's points are what is kept), sketching on the faces
-    of other shapes.
+  - **Distances (0.102.0, SolidWorks' Smart Dimension).** Søren, 06:52, with a circle in a freehand shape and two red
+    lines from it to the shape's top and slanted left side: "i need to be able to set distances in mm (the red
+    lines)". Dimension (D; the pill and the Draw group): click the shape that moves, then a line - a side of another
+    shape (a line's or a rectangle's; a circle has none) or an edge of the face sketched on - and a distance is made
+    and picked: red, square to the line (an extension along it when the line ends short of the foot), its mm at its
+    middle; type a number and Enter (or the Distance field) and the shape moves square to the line. It is measured
+    from the shape's nearest point - a circle's edge, as he drew them; a rectangle's or a line's nearest corner - or,
+    "From its middle", from its middle. Set, it holds the latest other distance of the same shape that runs another
+    way (a 2 x 2 solve: the edited normal's equation and the held one's at 0), so the second slides along the
+    first's side and two fix the shape, as in SolidWorks; a third does not hold (along the same line both cannot).
+    `sketch.ts`: `SketchDim` {shape, to: {shape, seg} | {edge}, middle}, `measure`, `setDim`, `sideAt`, `dimAt`,
+    `dimsWithout` (a shape deleted: its distances go, the others re-numbered). Kept with the sketch (Undo goes back
+    to shapes and distances); Pick picks one by its line or its mm (before the shapes), Delete takes it away (the
+    shape stays). A distance is what the shapes are when it is set, not a constraint: a shape changed afterwards
+    leaves the shape it was set for where it is (its mm shown as they are). The left button draws with Dimension,
+    so a drag from the shape to the line makes one too. Found with it: the editor's fallback for keys with nothing
+    focused (0.97.0) handled a key again when the editor's own handling took the focused button away - a Delete on a
+    picked distance deleted its shape too; it now leaves keys the editor took (`defaultPrevented`).
+  - **Not yet**: arcs, splines, relations (horizontal, parallel...), distances kept as constraints, between two
+    circles or along a line (its length), editing the sketch after Extrude (the outline's points are what is kept),
+    sketching on the faces of other shapes.
 - **On a face of a box, kept there (0.98.0).** Søren, 13:57: "Hvad gør jeg hvis jeg gerne vil lave en 2D cirkel et sted
   på kassen, og derefter skære hullet ud hele vejen igennem kassen ? Ligesom i solid works ? Hvor jeg tegner en cirkel
   på den side jeg ønsker, og så låser afstandene til kanterne? Og så Boss Extrude ?" - and, asked whether the distances

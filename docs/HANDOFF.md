@@ -4,7 +4,19 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## Next session - start here (written 2026-11-27, at 0.101.1)
+## Next session - start here (written 2026-11-27, at 0.102.0)
+
+**0.102.0 (2026-11-27): distances in a sketch - pushed, not yet installed.** Søren, 06:52, a circle in a freehand
+shape with two red lines to its sides: "i need to be able to set distances in mm (the red lines)". Built (DESIGN §8
+"The sketch", Distances): Dimension (D) - click the shape that moves, then a line (another shape's side or the face's
+edge), type the mm and Enter; the shape moves square to the line, holding its other distance, so two fix it. From the
+circle's edge as he drew them, "From its middle" switchable; Pick picks a distance, Delete takes it away, Undo brings
+it back. Found and fixed with it: a key the editor took could be taken again by its no-focus fallback (0.97.0) - one
+Delete on a picked distance deleted the circle too. Seen in the dev server: his picture - a five-cornered shape with
+a slanted left side, a Ø4 circle near its top left - top distance typed 5, left typed 4 (the top stayed 5), picked by
+its mm, From its middle (7), Delete, Undo, Extrude: the part with its hole - no console errors; tests: the
+distances, the hold along a slanted side, a rectangle on a face's edges, a line moved as one. Not seen: his mouse;
+a distance's mm over a tiny one at the plate's zoom crowd each other (zoom in).
 
 **0.101.1 (2026-11-27): a sketch stays flat - pushed, not yet installed.** Søren, trying the sketch on the card
 (06:50-06:52): "remove the text on the plate.. it is in the way" (the empty design's hint, over his drawing); "if i
@@ -2596,6 +2608,13 @@ flow, see "Next session". |
       converter's cases are ComfyUI 0.42.3's own templates; files from other sites (Civitai, OpenArt) are
       untried - an export is the way to see what went wrong. When COMFYUI_REF changes, the editor's format may
       too: tools/workflow_oracle/ (convert.js, compare.py) is how the converter was checked - run it again.
+121. **Sketch: drag, flat view, distances (0.101.1, 0.102.0)** - in the tests and the dev server's headless Chromium:
+    - **His hand**: does drawing by dragging (SolidWorks' click-drag) feel right, and Pick moving the view with the left
+      button, the middle button turning it? A click with a little jitter (over 4 px) with a drawing tool now draws a
+      short segment instead of nothing - too eager?
+    - **Distances**: is the circle's edge the right default (SolidWorks measures to the middle; his red lines started at
+      the edge)? Does he want them kept as constraints (the circle following when the shape changes) - not now: the
+      sketch's shapes cannot be changed after drawing, except a rectangle's and a circle's size and place.
 120. **Mates (0.101.0)** - in the tests and the dev server's headless Chromium:
     - **His hand**: does two clicks - a face of the part that moves, then the one it goes against - feel like
       SolidWorks' Mate? Is it right that the first mate lands the part where he clicked (SolidWorks leaves it beside),

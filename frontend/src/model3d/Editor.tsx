@@ -14,7 +14,7 @@ import { AlignCenter, AlignLeft, AlignRight, ArrowDownToLine, ArrowDownUp, Bold,
   MessageSquareShare, Minimize2, MousePointer2, MousePointerClick, Move3d, PanelBottom, Printer as PrinterIcon,
   Redo2, Repeat2, Rotate3d, RotateCcw, RotateCw, Ruler, Scaling, Shapes, Split, SquareDashed, SquareMousePointer,
   SquareRoundCorner, Stamp, Trash2,
-  TriangleAlert, Triangle, Type, Undo2, Ungroup, Unlink, Upload, X } from "lucide-react";
+  TriangleAlert, Triangle, Type, Undo2, Ungroup, Unlink, Upload, X, RulerDimensionLine } from "lucide-react";
 import fontIndex from "./fonts/index.json";
 import { useApp } from "../state";
 import { ConfirmButton, MenuButton } from "../components/ui";
@@ -33,8 +33,9 @@ import { parseMesh } from "./meshio";
 import { lastPrinter, PRINTERS, printerOf, rememberPrinter, type Printer } from "./printers";
 import { centre, copy, cuts, cutters, find, group, insertAfter, label, onCopies, pick, remove, replaceWith, riders, ungroup,
   update } from "./tree";
-import { distanceTo, loopOf, planeFrame, planeName, rayOnPlane, sketchParts, sketchRegions, snapPoints, strokesOf, to3d,
-  type PlaneFrame, type SketchPlane, type SketchShape } from "./sketch";
+import { dimAt, dimsWithout, distanceTo, loopOf, measure, planeFrame, planeName, rayOnPlane, setDim, sideAt, sketchParts,
+  sketchRegions, snapPoints, strokesOf, to3d, type PlaneFrame, type SketchDim, type SketchPlane,
+  type SketchShape } from "./sketch";
 import { Viewport, type Hit, type ViewName } from "./Viewport";
 
 // Select (0.96.0): a click only picks - no handles, nothing moves; Move, Turn and Size show their handles.
@@ -648,8 +649,8 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
   useEffect(() => {
     const v = vp.current;
     if (!v || !ready) return;
-    const list: { lines: Vec3[][]; hover?: boolean; face?: number; tone?: "run" | "wait"; width?: number }[] = [];
-    const words: { at: Vec3; text: string; kind?: "dot" | "snap" | "typed" }[] = [];
+    const list: { lines: Vec3[][]; hover?: boolean; face?: number; tone?: "run" | "wait" | "fault"; width?: number }[] = [];
+    const words: { at: Vec3; text: string; kind?: "dot" | "snap" | "typed" | "dim" | "dimon" }[] = [];
     const at = sketch ? sketchFrame(sketch) : null;
     if (sketch && at) {                                // a sketch (0.100.0): its shapes in blue, an open line amber
       const f = at.f, w3 = (pts: Point2[]) => pts.map((q) => to3d(f, q));
@@ -690,7 +691,25 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
       if (sh?.kind === "rect") words.push({ at: mid(sh.a, sh.b), text: `${fmt(Math.abs(sh.b[0] - sh.a[0]))} x ${fmt(Math.abs(sh.b[1] - sh.a[1]))}` });
       if (sh?.kind === "circle") words.push({ at: to3d(f, sh.c), text: `Ø${fmt(2 * sh.r)}` });
       if (to) words.push({ at: to3d(f, to), text: "", kind: hoverPt?.snapped ? "snap" : "dot" });
-      if (sketch.typed && to) words.push({ at: to3d(f, to), text: `${sketch.typed}|`, kind: "typed" });
+      // Distances (0.102.0): red, square to their lines - an extension along the line when it ends short of the foot -
+      // their mm at the middle; the picked one wider, what is typed beside it.
+      const dimLines: Vec3[][] = [], dimPicked: Vec3[][] = [];
+      sketch.dims.forEach((dd, i) => {
+        const m = measure(sketch.shapes, f, dd);
+        if (!m) return;
+        const lines = i === sketch.dim ? dimPicked : dimLines;
+        lines.push(w3([m.from, m.foot]));
+        const t = (m.foot[0] - m.a[0]) * (m.b[0] - m.a[0]) + (m.foot[1] - m.a[1]) * (m.b[1] - m.a[1]);
+        const len2 = (m.b[0] - m.a[0]) ** 2 + (m.b[1] - m.a[1]) ** 2;
+        if (t < 0) lines.push(w3([m.a, m.foot]));
+        else if (t > len2) lines.push(w3([m.b, m.foot]));
+        const at3 = mid(m.from, m.foot);
+        words.push({ at: at3, text: fmt(m.value), kind: i === sketch.dim ? "dimon" : "dim" });
+        if (i === sketch.dim && sketch.typed) words.push({ at: at3, text: `${sketch.typed}|`, kind: "typed" });
+      });
+      if (dimLines.length) list.push({ lines: dimLines, tone: "fault", width: 1.5 });
+      if (dimPicked.length) list.push({ lines: dimPicked, tone: "fault", width: 3 });
+      if (sketch.typed && to && sketch.dim === null) words.push({ at: to3d(f, to), text: `${sketch.typed}|`, kind: "typed" });
     } else if (design) {
       for (const [id, edges] of Object.entries(edgeSel)) {
         const f = find(design.parts, id);
@@ -1069,7 +1088,7 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
       if (p.parts) count(p.parts);
     });
     count(d.parts);
-    setSketch({ plane, shapes: [], tool: "line", draft: null, picked: null, typed: "", past: [], n: n + 1 });
+    setSketch({ plane, shapes: [], tool: "line", draft: null, picked: null, typed: "", past: [], n: n + 1, dims: [], dim: null });
     setHoverPt(null);
     setSelected([]);
     setEdgeSel({});
@@ -1088,7 +1107,7 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
   /** The point on the sketch's plane under the pointer, as a click would put it down: a corner, an end or a middle
    *  within 10 px (a face's corners and middle too) - else the nearest whole millimetre (on a face, from its lower
    *  left corner, so its distances from the edges are whole). */
-  const sketchAt = (x: number, y: number): { p: Point2; snapped: boolean } | null => {
+  const sketchAt = (x: number, y: number): { p: Point2; snapped: boolean; raw: Point2 } | null => {
     const v = vp.current, s = sketchRef.current, at = sketchFrame(s), r = host.current?.getBoundingClientRect();
     if (!v || !s || !at || !r) return null;
     const { origin, dir } = v.rayAt(x, y);
@@ -1096,7 +1115,8 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
     if (!raw) return null;
     const near: Point2[] = [...snapPoints(s.shapes)];
     if (s.draft?.kind === "line") near.push(...s.draft.pts);
-    else if (s.draft) near.push(s.draft.kind === "rect" ? s.draft.a : s.draft.c);
+    else if (s.draft?.kind === "rect") near.push(s.draft.a);
+    else if (s.draft?.kind === "circle") near.push(s.draft.c);
     const w = (at.f.W ?? 0) / 2, h = (at.f.H ?? 0) / 2;
     if (at.f.W) near.push([0, 0], [-w, -h], [w, -h], [w, h], [-w, h], [0, -h], [0, h], [-w, 0], [w, 0]);
     let best: Point2 | null = null, gap = 10;
@@ -1108,31 +1128,49 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
         best = c;
       }
     }
-    if (best) return { p: best, snapped: true };
-    return { p: [Math.round(raw[0] + w) - w + 0, Math.round(raw[1] + h) - h + 0], snapped: false };
+    if (best) return { p: best, snapped: true, raw };
+    return { p: [Math.round(raw[0] + w) - w + 0, Math.round(raw[1] + h) - h + 0], snapped: false, raw };
   };
 
   /** A shape added: what it was kept for Undo, nothing half drawn any more. */
   const withShape = (s: SketchState, shape: SketchShape): SketchState =>
-    ({ ...s, shapes: [...s.shapes, shape], past: [...s.past, s.shapes], draft: null, typed: "", picked: null });
+    ({ ...s, shapes: [...s.shapes, shape], past: [...s.past, snapOf(s)], draft: null, typed: "", picked: null, dim: null });
 
-  /** A click in the sketch: the tool's next point - or, with no tool, the shape there picked. */
-  const sketchClick = (pt: Point2) => {
+  /** A click in the sketch: the tool's next point - or, with no tool, the distance or shape there picked. `raw`: where
+   *  the pointer was, not snapped - what a line is picked by. */
+  const sketchClick = (pt: Point2, raw: Point2 = pt) => {
     const s = sketchRef.current, v = vp.current, at = sketchFrame(s);
     if (!s || !v || !at) return;
     const same = (a: Point2, b: Point2) => Math.abs(a[0] - b[0]) < 1e-6 && Math.abs(a[1] - b[1]) < 1e-6;
-    const d = s.draft;
-    if (!s.tool) {                                     // within 8 px of a shape's lines: that one
-      const tol = 8 * v.mmPerPx(to3d(at.f, pt));
+    const d = s.draft, tol = 8 * v.mmPerPx(to3d(at.f, raw));
+    const shapeAt = (p: Point2): number | null => {    // within 8 px of a shape's lines: that one
       let picked: number | null = null, gap = tol;
       s.shapes.forEach((sh, i) => {
-        const g = distanceTo(sh, pt);
+        const g = distanceTo(sh, p);
         if (g < gap) {
           gap = g;
           picked = i;
         }
       });
-      setSketch({ ...s, picked });
+      return picked;
+    };
+    if (!s.tool) {                                     // a distance's line first (0.102.0), then a shape
+      const dim = dimAt(s.shapes, at.f, s.dims, raw, tol);
+      setSketch(dim !== null ? { ...s, dim, picked: s.dims[dim].shape, typed: "" }
+        : { ...s, picked: shapeAt(raw), dim: null, typed: "" });
+      return;
+    }
+    if (s.tool === "dim") {                            // Dimension (0.102.0): the shape that moves, then a line
+      const to = d?.kind === "dim" ? sideAt(s.shapes, at.f, raw, tol, d.shape) : null;
+      if (d?.kind === "dim" && to) {
+        const made: SketchDim = { shape: d.shape, to };
+        const had = s.dims.findIndex((x) => x.shape === made.shape && JSON.stringify(x.to) === JSON.stringify(to));
+        if (had >= 0) return setSketch({ ...s, draft: null, dim: had, picked: d.shape, typed: "" });
+        return setSketch({ ...s, dims: [...s.dims, made], dim: s.dims.length, draft: null, picked: d.shape, typed: "",
+          past: [...s.past, snapOf(s)] });
+      }
+      const k = shapeAt(raw);
+      if (k !== null) setSketch({ ...s, draft: { kind: "dim", shape: k }, picked: k, dim: null, typed: "" });
       return;
     }
     if (s.tool === "line") {
@@ -1160,6 +1198,11 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
    *  diameter. */
   const sketchTyped = (s: SketchState): SketchState | null => {
     const nums = s.typed.split(/[;x* ]+/i).filter(Boolean).map((t) => Number(t.replace(",", ".")));
+    if (!s.draft && s.dim !== null) {                  // a distance picked (0.102.0): its shape moved to it
+      const f = sketchFrame(s)?.f, shapes = f && nums.length && nums[0] >= 0 ? setDim(s.shapes, f, s.dims, s.dim, nums[0]) : null;
+      return shapes ? { ...s, shapes, typed: "", past: [...s.past, snapOf(s)] } : null;
+    }
+    if (s.draft?.kind === "dim") return null;
     if (!nums.length || nums.some((x) => !Number.isFinite(x) || x <= 0) || !s.draft) return null;
     const to = hoverRef.current?.p;
     const d = s.draft;
@@ -1185,11 +1228,23 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
   const sketchEscape = (s: SketchState): SketchState => {
     if (s.draft?.kind === "line" && s.draft.pts.length >= 2) return withShape(s, { kind: "line", pts: s.draft.pts, closed: false });
     if (s.draft || s.typed) return { ...s, draft: null, typed: "" };
+    if (s.dim !== null) return { ...s, dim: null, picked: null };
     if (s.tool) return { ...s, tool: null };
     return { ...s, picked: null };
   };
 
-  /** The keys while sketching: L, R and C draw lines, rectangles and circles; numbers are typed for the next length;
+  /** Undo in the sketch: the shapes and distances as they were before the last change. */
+  const undoSketch = (s: SketchState): SketchState | null => {
+    const before = s.past[s.past.length - 1];
+    return before ? { ...s, ...before, past: s.past.slice(0, -1), draft: null, typed: "", picked: null, dim: null } : null;
+  };
+  /** Delete in the sketch: the picked distance - or the picked shape, with the distances from and to it. */
+  const deleteInSketch = (s: SketchState): SketchState => s.dim !== null
+    ? { ...s, dims: s.dims.filter((_, i) => i !== s.dim), dim: null, typed: "", past: [...s.past, snapOf(s)] }
+    : s.picked === null ? s : { ...s, shapes: s.shapes.filter((_, i) => i !== s.picked), dims: dimsWithout(s.dims, s.picked),
+      past: [...s.past, snapOf(s)], picked: null };
+
+  /** The keys while sketching: L, R and C draw lines, rectangles and circles, D dimensions (0.102.0); numbers are typed for the next length;
    *  Enter puts that down (or ends a line); Backspace takes back what was typed, or a line's last corner, or the
    *  shape picked, as Delete does; Ctrl+Z undoes the last shape. The editor's other keys wait. */
   const sketchKey = (e: React.KeyboardEvent | KeyboardEvent, s: SketchState): void => {
@@ -1198,12 +1253,10 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
       e.preventDefault();
       if (next) setSketch(next);
     };
-    if (ctrl && k.toLowerCase() === "z") {
-      const before = s.past[s.past.length - 1];
-      return set(before ? { ...s, shapes: before, past: s.past.slice(0, -1), draft: null, typed: "", picked: null } : null);
-    }
+    if (ctrl && k.toLowerCase() === "z") return set(undoSketch(s));
     if (ctrl || e.altKey) return;
-    if (s.draft && /^[0-9.,;x* ]$/i.test(k)) return set({ ...s, typed: s.typed + k });
+    if ((s.draft && s.draft.kind !== "dim") && /^[0-9.,;x* ]$/i.test(k)) return set({ ...s, typed: s.typed + k });
+    if (!s.draft && s.dim !== null && /^[0-9.,]$/.test(k)) return set({ ...s, typed: s.typed + k });
     if (k === "Enter") {
       if (s.typed) return set(sketchTyped(s) ?? { ...s, typed: "" });
       return set(s.draft?.kind === "line" ? sketchEscape(s) : null);
@@ -1213,11 +1266,9 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
     if (k === "Backspace" && s.draft?.kind === "line") {
       return set({ ...s, draft: s.draft.pts.length > 1 ? { kind: "line", pts: s.draft.pts.slice(0, -1) } : null });
     }
-    if ((k === "Delete" || k === "Backspace") && s.picked !== null) {
-      return set({ ...s, shapes: s.shapes.filter((_, i) => i !== s.picked), past: [...s.past, s.shapes], picked: null });
-    }
-    const tools: Record<string, SketchTool> = { l: "line", r: "rect", c: "circle" };
-    if (tools[k.toLowerCase()]) return set({ ...s, tool: tools[k.toLowerCase()], draft: null, typed: "", picked: null });
+    if ((k === "Delete" || k === "Backspace") && (s.dim !== null || s.picked !== null)) return set(deleteInSketch(s));
+    const tools: Record<string, SketchTool> = { l: "line", r: "rect", c: "circle", d: "dim" };
+    if (tools[k.toLowerCase()]) return set({ ...s, tool: tools[k.toLowerCase()], draft: null, typed: "", picked: null, dim: null });
   };
 
   /** Extrude or Cut: the sketch's regions made into parts - on a box's face kept on it, beside it in the tree so a cut
@@ -1282,7 +1333,7 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
         if (at && end && Math.abs(at.p[0] - end[0]) < 1e-6 && Math.abs(at.p[1] - end[1]) < 1e-6) press = at.p;
         else if (at) {
           setHoverPt(at);
-          sketchClick(at.p);
+          sketchClick(at.p, at.raw);
         }
         (e.target as Element).setPointerCapture?.(e.pointerId);
       }
@@ -1548,10 +1599,10 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
       // Sketching (0.101.1): a drawing tool's drag ends at its next point; its click was put down when pressed - on a
       // line's end, now (it ends the line). Pick: a click picks; a drag moved the view.
       if (s.tool ? !moved && !p.press : moved) return;
-      const at = s.tool && !moved && p.press ? { p: p.press, snapped: true } : sketchAt(e.clientX, e.clientY);
+      const at = s.tool && !moved && p.press ? { p: p.press, snapped: true, raw: p.press } : sketchAt(e.clientX, e.clientY);
       if (at) {
         setHoverPt(at);
-        sketchClick(at.p);
+        sketchClick(at.p, at.raw);
       }
       return;
     }
@@ -1898,7 +1949,8 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
   useEffect(() => {
     let inside = false;
     const down = (e: PointerEvent) => { inside = !!panel.current && e.target instanceof Node && panel.current.contains(e.target); };
-    const on = (e: KeyboardEvent) => {
+    const on = (e: KeyboardEvent) => {               // not one the editor took already: what it did may have taken
+      if (e.defaultPrevented) return;                 // the focused button away (0.102.0 - a Delete deleted twice)
       if (inside && (!document.activeElement || document.activeElement === document.body)) keys.current(e);
     };
     window.addEventListener("pointerdown", down, true);
@@ -1936,7 +1988,8 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
   // What the band shows: a change folds its groups afresh to the room there is (0.94.0).
   const fitKey = [shownTab, faceSel?.face, feature.round, feature.through, one?.on ? `${one.on.face}${one.on.through ? "t" : ""}` : "",
     one?.mates?.length ?? 0, mateNotes.length,
-    sketch ? `${sketch.picked !== null ? sketch.shapes[sketch.picked]?.kind : "-"}${sketchMake.through}${sketch.shapes.length > 0}` : "",
+    sketch ? `${sketch.picked !== null ? sketch.shapes[sketch.picked]?.kind : "-"}${sketchMake.through}${sketch.shapes.length > 0}`
+      + `${sketch.dim !== null ? "d" : ""}` : "",
     selected.join(","), items.map((x) => `${x.shape}${x.radius ? "r" : ""}${x.repeat ? (x.repeat.step ? "s" : "a")
     : ""}${x.hole ? "h" : ""}`).join(","), pickedEdges, one ? (edgeSel[one.id] ?? []).length : 0, oneLine ? 1 : 0].join("|");
   // A mate that cannot be met (0.101.0) as it is now - not as it was when the file was read.
@@ -2013,13 +2066,18 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
           {shownTab === "sketch" && sketch && (
             <SketchBand sketch={sketch} where={planeName(sketch.plane, sketchFrame(sketch)?.box)} make={sketchMake}
               onMake={(m) => setSketchMake((cur) => ({ ...cur, ...m }))} closed={sketchRegions(sketch.shapes).length}
-              onTool={(t) => setSketch({ ...sketch, tool: t, draft: null, typed: "", picked: null })}
-              onDelete={() => sketch.picked !== null && setSketch({ ...sketch, shapes: sketch.shapes.filter((_, i) => i !== sketch.picked),
-                past: [...sketch.past, sketch.shapes], picked: null })}
-              onUndo={() => sketch.past.length && setSketch({ ...sketch, shapes: sketch.past[sketch.past.length - 1],
-                past: sketch.past.slice(0, -1), draft: null, typed: "", picked: null })}
+              onTool={(t) => setSketch({ ...sketch, tool: t, draft: null, typed: "", picked: null, dim: null })}
+              onDelete={() => setSketch(deleteInSketch(sketch))}
+              onUndo={() => { const u = undoSketch(sketch); if (u) setSketch(u); }}
               onShape={(sh) => sketch.picked !== null && setSketch({ ...sketch, shapes: sketch.shapes.map((x, i) => (i === sketch.picked ? sh : x)),
-                past: [...sketch.past, sketch.shapes] })}
+                past: [...sketch.past, snapOf(sketch)] })}
+              measured={sketch.dim !== null ? measure(sketch.shapes, sketchFrame(sketch)!.f, sketch.dims[sketch.dim])?.value ?? null : null}
+              onDim={(v) => {
+                const f = sketchFrame(sketch)?.f, shapes = f && sketch.dim !== null ? setDim(sketch.shapes, f, sketch.dims, sketch.dim, v) : null;
+                if (shapes) setSketch({ ...sketch, shapes, typed: "", past: [...sketch.past, snapOf(sketch)] });
+              }}
+              onDimMiddle={() => sketch.dim !== null && setSketch({ ...sketch, dims: sketch.dims.map((x, i) => (i === sketch.dim
+                ? { ...x, middle: !x.middle || undefined } : x)), past: [...sketch.past, snapOf(sketch)] })}
               onExtrude={() => endSketch(false)} onCut={() => endSketch(true)} onCancel={cancelSketch} />
           )}
           {shownTab === "insert" && (
@@ -2144,11 +2202,14 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
                 <Tool icon={<MousePointer2 size={16} />} title="Pick a shape: Delete takes it away, its size in the Sketch tab - a drag moves the view (Esc)"
                   active={!sketch.tool} onClick={() => setSketch({ ...sketch, tool: null, draft: null, typed: "" })}><span>Pick</span></Tool>
                 <Tool icon={<PenLine size={16} />} title="Line: click each corner - or drag from one to the next (L)" active={sketch.tool === "line"}
-                  onClick={() => setSketch({ ...sketch, tool: "line", draft: null, typed: "", picked: null })}><span>Line</span></Tool>
+                  onClick={() => setSketch({ ...sketch, tool: "line", draft: null, typed: "", picked: null, dim: null })}><span>Line</span></Tool>
                 <Tool icon={<RectangleHorizontal size={16} />} title="Rectangle: two corners across - clicked or dragged (R)" active={sketch.tool === "rect"}
-                  onClick={() => setSketch({ ...sketch, tool: "rect", draft: null, typed: "", picked: null })}><span>Rectangle</span></Tool>
+                  onClick={() => setSketch({ ...sketch, tool: "rect", draft: null, typed: "", picked: null, dim: null })}><span>Rectangle</span></Tool>
                 <Tool icon={<Circle size={16} />} title="Circle: its middle, then its edge - clicked or dragged (C)" active={sketch.tool === "circle"}
-                  onClick={() => setSketch({ ...sketch, tool: "circle", draft: null, typed: "", picked: null })}><span>Circle</span></Tool>
+                  onClick={() => setSketch({ ...sketch, tool: "circle", draft: null, typed: "", picked: null, dim: null })}><span>Circle</span></Tool>
+                <Tool icon={<RulerDimensionLine size={16} />} title="Dimension: click the shape that moves, then the line it is measured to - then type the mm (D)"
+                  active={sketch.tool === "dim"} onClick={() => setSketch({ ...sketch, tool: "dim", draft: null, typed: "", picked: null, dim: null })}>
+                  <span>Dimension</span></Tool>
                 <span className="v3d-sep" />
                 <Tool icon={<Crosshair size={16} />} title="Look straight at the sketch again" onClick={() => {
                   const at = sketchFrame(sketch), v = vp.current, k = kit.current;
@@ -2248,10 +2309,15 @@ type Feature = { round: boolean; size: number; through: boolean; depth: number; 
 /** A sketch (0.100.0): its plane and shapes; the tool drawing (none: a click picks a shape); what is half drawn - a
  *  line's corners so far, a rectangle's first corner, a circle's middle; the shape picked; what is typed for the next
  *  length; what it was before each shape (Undo); its number, for its parts' names. */
-type SketchTool = "line" | "rect" | "circle";
-type Draft = { kind: "line"; pts: Point2[] } | { kind: "rect"; a: Point2 } | { kind: "circle"; c: Point2 };
+type SketchTool = "line" | "rect" | "circle" | "dim";
+type Draft = { kind: "line"; pts: Point2[] } | { kind: "rect"; a: Point2 } | { kind: "circle"; c: Point2 }
+  | { kind: "dim"; shape: number };                     // Dimension's first click: the shape that moves (0.102.0)
+/** What Undo goes back to: the shapes and their distances. */
+type SketchSnap = { shapes: SketchShape[]; dims: SketchDim[] };
 type SketchState = { plane: SketchPlane; shapes: SketchShape[]; tool: SketchTool | null; draft: Draft | null;
-  picked: number | null; typed: string; past: SketchShape[][]; n: number };
+  picked: number | null; typed: string; past: SketchSnap[]; n: number;
+  dims: SketchDim[]; dim: number | null };              // its distances, and the one picked - typed values go to it
+const snapOf = (s: SketchState): SketchSnap => ({ shapes: s.shapes, dims: s.dims });
 /** What Extrude and Cut make of a sketch: so high out of its plane; a cut through all, or so deep. */
 type SketchMake = { height: number; through: boolean; depth: number };
 const TABS: [Tab, string][] = [["insert", "Insert"], ["part", "Part"], ["lines", "Lines"]];
@@ -2920,17 +2986,26 @@ function sketchHint(s: SketchState, where: string): string {
   }
   if (s.tool === "rect") return s.draft ? `Rectangle: click the corner across - or type width;height and Enter.${typed}` : `Rectangle on ${where}: click a corner - or drag from corner to corner.`;
   if (s.tool === "circle") return s.draft ? `Circle: click its edge - or type its diameter and Enter.${typed}` : `Circle on ${where}: click its middle - or drag from its middle to its edge.`;
-  return "Click a shape to pick it - Delete takes it away; L, R and C draw. Drag to move the view (the middle button turns "
-    + "it). Extrude or Cut makes the closed shapes into parts.";
+  if (s.tool === "dim") {
+    return s.draft ? "Dimension: now click the line it is measured to - a side of another shape, or the face's edge."
+      : s.dim !== null ? `Distance picked: type it in mm and Enter - or click the next shape to dimension.${typed}`
+        : "Dimension: click the shape that moves - then the line it is measured to - then type the mm and Enter.";
+  }
+  if (s.dim !== null) return `Distance picked: type it in mm and Enter - Delete takes it away (the shape stays).${typed}`;
+  return "Click a shape or a distance to pick it - Delete takes it away; L, R and C draw, D dimensions. Drag to move the view "
+    + "(the middle button turns it). Extrude or Cut makes the closed shapes into parts.";
 }
 
 /** The Sketch tab (0.100.0): what draws - Line, Rectangle, Circle; Pick, Delete, Undo; the picked shape's size; and
  *  what leaves the sketch - Extrude (so high), Cut (through all or so deep), Cancel. */
-function SketchBand({ sketch, where, make, onMake, closed, onTool, onDelete, onUndo, onShape, onExtrude, onCut, onCancel }: {
+function SketchBand({ sketch, where, make, onMake, closed, onTool, onDelete, onUndo, onShape, onExtrude, onCut, onCancel,
+  measured, onDim, onDimMiddle }: {
   sketch: SketchState; where: string; make: SketchMake; onMake: (m: Partial<SketchMake>) => void; closed: number;
   onTool: (t: SketchTool | null) => void; onDelete: () => void; onUndo: () => void; onShape: (s: SketchShape) => void;
-  onExtrude: () => void; onCut: () => void; onCancel: () => void }) {
-  const sh = sketch.picked !== null ? sketch.shapes[sketch.picked] : null;
+  onExtrude: () => void; onCut: () => void; onCancel: () => void; measured: number | null; onDim: (mm: number) => void;
+  onDimMiddle: () => void }) {
+  const dim = sketch.dim !== null ? sketch.dims[sketch.dim] : null;
+  const sh = sketch.picked !== null && !dim ? sketch.shapes[sketch.picked] : null;
   const rect = sh?.kind === "rect" ? { c: [(sh.a[0] + sh.b[0]) / 2, (sh.a[1] + sh.b[1]) / 2], w: Math.abs(sh.b[0] - sh.a[0]),
     h: Math.abs(sh.b[1] - sh.a[1]) } : null;
   const box = (c: number[], w: number, h: number): SketchShape => ({ kind: "rect", a: [r3(c[0] - w / 2), r3(c[1] - h / 2)],
@@ -2945,12 +3020,15 @@ function SketchBand({ sketch, where, make, onMake, closed, onTool, onDelete, onU
           title="Rectangle: two corners across - clicked or dragged (R)" />
         <Big icon={<Circle size={20} />} label="Circle" active={sketch.tool === "circle"} onClick={() => onTool("circle")}
           title="Circle: its middle, then its edge - clicked or dragged (C)" />
+        <Big icon={<RulerDimensionLine size={20} />} label="Dimension" active={sketch.tool === "dim"} onClick={() => onTool("dim")}
+          title="Smart Dimension: click the shape that moves, then the line it is measured to - a side of another shape or the face's edge - then type the mm and Enter (D)" />
       </Grp>
       <Grp label="Change" fold={1} icon={<Undo2 size={20} />}>
         <Stack>
           <Small icon={<MousePointer2 size={16} />} label="Pick" active={!sketch.tool} onClick={() => onTool(null)}
             title="Click a shape to pick it (Esc)" />
-          <Small icon={<Trash2 size={16} />} label="Delete" disabled={!sh} onClick={onDelete} title="Take the picked shape away (Delete)" />
+          <Small icon={<Trash2 size={16} />} label="Delete" disabled={!sh && !dim} onClick={onDelete}
+            title={dim ? "Take the picked distance away - the shape stays (Delete)" : "Take the picked shape away, and its distances (Delete)"} />
           <Small icon={<Undo2 size={16} />} label="Undo" disabled={!sketch.past.length} onClick={onUndo} title="Undo the last shape (Ctrl+Z)" />
         </Stack>
       </Grp>
@@ -2985,6 +3063,17 @@ function SketchBand({ sketch, where, make, onMake, closed, onTool, onDelete, onU
               <small className="v3d-col-note">{sh.closed ? "Closed: it makes a part" : "Open: close it to make a part"}</small>
             </Stack>
           )}
+        </Grp>
+      )}
+      {dim && measured !== null && (
+        <Grp label="Distance" fold={2} icon={<RulerDimensionLine size={20} />}>
+          <Stack>
+            <Field label="Distance" unit="mm" value={r3(measured)} min={0} step={1} width={52} onSet={(v) => onDim(Math.max(0, v))}
+              title="How far the shape is from the line, mm - set, the shape moves square to the line (another distance of it stays)" />
+            <Small icon={<Crosshair size={16} />} label="From its middle" active={!!dim.middle} onClick={onDimMiddle}
+              title={dim.middle ? "Measured from the shape's middle - click: from its nearest point, a circle's edge"
+                : "Measured from the shape's nearest point - a circle's edge; click: from its middle"} />
+          </Stack>
         </Grp>
       )}
       <Grp label={closed ? `Make - ${closed} ${closed > 1 ? "shapes" : "shape"} closed` : "Make - nothing closed yet"}>
