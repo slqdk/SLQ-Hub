@@ -3473,6 +3473,9 @@ into the Hub, Tinkercad's level, his printer a Bambu Lab P2S but chosen per desi
     man klikker første målepunkt i smart dimention, så man kan se at man er i gang med at måle"): after the first
     click a red line runs from the shape (a circle's edge toward the pointer, another shape's middle) to the pointer;
     over a side it can go to, the distance it would make is drawn instead, with its mm, and the side lights amber.
+    The line to the pointer is gone since 0.103.1 (Søren, 10:22, his shape's top side clicked with 0.103.0, the
+    line running from the shape's middle past the box: "den streg fra midten af skal ikke være der") - the side's
+    size, drawn wide as it is set, shows the measuring now; the distance over a side it can go to stays.
     Marks are drawn in the order given, a later one over an earlier (`setMarks` renderOrder) - before, the
     see-through sort put a side's amber under its shape's blue. Found with it: the editor's fallback for keys with nothing
     focused (0.97.0) handled a key again when the editor's own handling took the focused button away - a Delete on a
@@ -3494,7 +3497,7 @@ into the Hub, Tinkercad's level, his printer a Bambu Lab P2S but chosen per desi
     side clicked. The box is the page's - an input in the stage, kept over its 3D point as the view moves
     (`Viewport.pin`, placed with the labels); it takes the focus after the press that opened it has focused the view
     (a timeout: the press's own focusing comes after React's commit), and digits typed with the view focused go to
-    it. While the pointer is still on the shape clicked, no line runs to it (0.102.1's line: once it leaves).
+    it. No line runs to the pointer (0.103.1; 0.103.0 still drew 0.102.1's once the pointer left the shape).
   - **Not yet**: arcs, splines, relations (horizontal, parallel...), distances kept as constraints (a size or a
     distance holds what is set when it is set; another shape's distance to a side that moved is not re-solved),
     between two circles, an angle, editing the sketch after Extrude (the outline's points are what is kept),

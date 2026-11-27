@@ -33,7 +33,7 @@ import { parseMesh } from "./meshio";
 import { lastPrinter, PRINTERS, printerOf, rememberPrinter, type Printer } from "./printers";
 import { centre, copy, cuts, cutters, find, group, insertAfter, label, onCopies, pick, remove, replaceWith, riders, ungroup,
   update } from "./tree";
-import { dimAt, dimLook, dimsWithout, distanceTo, isDistance, loopOf, measure, middleOf, planeFrame, planeName, rayOnPlane,
+import { dimAt, dimLook, dimsWithout, distanceTo, isDistance, loopOf, measure, planeFrame, planeName, rayOnPlane,
   sameSize, setDim, sideAt, sideOf, sketchParts, sketchRegions, snapPoints, strokesOf, to3d, type PlaneFrame, type SketchDim,
   type SketchDistance, type SketchPlane, type SketchShape, type SketchSize } from "./sketch";
 import { Viewport, type Hit, type ViewName } from "./Viewport";
@@ -710,9 +710,8 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
       if (dimLines.length) list.push({ lines: dimLines, tone: "fault", width: 1.5 });
       if (dimPicked.length) list.push({ lines: dimPicked, tone: "fault", width: 3 });
       // Being made (0.102.1 - Søren: "Vis gerne en streg når man klikker første målepunkt ... så man kan se at man er i
-      // gang med at måle"): over a side it can go to, the distance it would make and that side; else a line from the
-      // shape - a circle's edge toward the pointer, another's middle - to the pointer: once it is off the shape
-      // (0.103.0: on it, its size is in the box).
+      // gang med at måle"): over a side it can go to, the distance it would make and that side. No line to the pointer
+      // any more (0.103.1 - Søren, 10:22: "den streg fra midten af skal ikke være der"): the side clicked shows its size.
       const first = d?.kind === "dim" ? sketch.shapes[d.shape] : null;
       const raw = hoverPt ? hoverPt.raw ?? hoverPt.p : null, near = raw ? 8 * v.mmPerPx(to3d(f, raw)) : 0;
       if (d?.kind === "dim" && first && raw) {
@@ -725,13 +724,6 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
           else if (t > (m.b[0] - m.a[0]) ** 2 + (m.b[1] - m.a[1]) ** 2) lines.push(w3([m.b, m.foot]));
           list.push({ lines, tone: "fault", width: 2 }, { lines: [w3([m.a, m.b])], hover: true });
           words.push({ at: mid(m.from, m.foot), text: fmt(m.value), kind: "dim" });
-        } else if (distanceTo(first, raw) > near) {
-          let start = middleOf(first);
-          if (first.kind === "circle") {
-            const gx = raw[0] - first.c[0], gy = raw[1] - first.c[1], gl = Math.hypot(gx, gy);
-            if (gl > first.r) start = [first.c[0] + (gx / gl) * first.r, first.c[1] + (gy / gl) * first.r];
-          }
-          list.push({ lines: [w3([start, raw])], tone: "fault", width: 1.5 });
         }
       }
       if (sketch.typed && to && sketch.dim === null) words.push({ at: to3d(f, to), text: `${sketch.typed}|`, kind: "typed" });

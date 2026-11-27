@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.103.1 - 2026-11-27
+
+- Fixed: Sketch, Dimension - after clicking a side, a red line no longer
+  runs from the middle of the shape to the pointer. The side's length and
+  its box show the measuring; over another shape's side the distance it
+  would make is still shown.
+
 ## 0.103.0 - 2026-11-27
 
 - Sketch, Dimension: click a line and a box appears beside it with its
