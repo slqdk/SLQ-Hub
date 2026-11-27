@@ -1966,3 +1966,62 @@ def test_a_sketch_on_a_flat_face_of_a_mesh(h3, tmp_path):
     design, _ = h3.read_design(out["file"], tmp_path)                                      # hub3d builds the same
     built = h3.build_design(design, tmp_path)
     assert built.solid.volume() == pytest.approx(4000 - 3 * circle + 16 * 3.8, rel=1e-5)   # the hole cuts the boss too
+
+
+# 0.108.0 - Søren, a rectangle sketched in front of a box: "Man skal kunne lave en dimention til den anden del" - the
+# other parts' edges as a sketch's plane sees them, a distance to one; and a flat face of any part, not only a mesh's.
+EDGES_JS = """
+const kit = { wasm, fonts, meshes: new Map() };
+const d = G.readDesign(JSON.stringify({ parts: [{ id: "b", shape: "box", size: [20, 10, 10], at: [30, 0, 5] },
+  { id: "g", shape: "group", parts: [{ id: "c", shape: "cylinder", size: [40, 40, 6], at: [-30, 60, 3] },
+    { id: "e", shape: "box", size: [4, 4, 4], at: [-30, 100, 2] }] }] })).design;
+const b = G.build(d, kit);
+const refs = (f) => S.modelEdges(b, f, S.ownEdges(f));
+const front = S.planeFrame({ kind: "front" }), top = S.planeFrame({ kind: "top" });
+const onFace = S.planeFrame({ kind: "face", part: "b", face: "front" }, d.parts[0]);
+const f = { ...front, refs: refs(front) };
+const left = f.refs.findIndex(([p, q]) => Math.abs(p[0] - 20) < 1e-6 && Math.abs(q[0] - 20) < 1e-6);
+const rect = { kind: "rect", a: [0, 0], b: [10, 5] }, dist = { shape: 0, to: { edge: left } };
+const m = S.measure([rect], f, dist);
+let cap = -1, facet = -1;
+for (let t = 0; t < b.triangles.length / 3; t++) {
+  const z = [0, 1, 2].map((k) => b.positions[b.triangles[t * 3 + k] * 3 + 2]);
+  if (b.triPart[t] !== "c") continue;
+  if (cap < 0 && z.every((v) => Math.abs(v - 6) < 1e-4)) cap = t;
+  if (facet < 0 && Math.max(...z) - Math.min(...z) > 5) facet = t;                  // the round side
+}
+const face = G.flatFaceAt(b, cap), side = G.flatFaceAt(b, facet);
+process.stdout.write(JSON.stringify({ front: f.refs, top: refs(top), onFace: refs(onFace), value: m && m.value,
+  moved: S.setDim([rect], f, [dist], 0, 15), cap: face && { part: face.part, N: face.N, O: face.O, area: face.area,
+    corners: G.outlineCorners(face.outline[0]) }, side: side && G.outlineCorners(side.outline[0]),
+  plane: face && S.flatPlane(face, "Peg"), around: G.boxOfPoints(face.outline[0]) }));
+"""
+
+
+def test_a_sketch_sees_the_other_parts_edges(tmp_path):
+    out = run_js(f"import * as S from {node_module(tmp_path, 'sketch.ts')};\n" + EDGES_JS, {})
+
+    def lines(refs):
+        return sorted(tuple(round(v, 3) + 0 for v in sorted([tuple(p), tuple(q)])[0] + sorted([tuple(p), tuple(q)])[1])
+                      for p, q in refs)
+    # from the front: the box's outline, the cylinder's top and bottom (its round side has no edge) - the small box
+    # behind it, its 4 mm sides, too
+    assert lines(out["front"]) == [(-50, 0, -10, 0), (-50, 6, -10, 6), (-32, 0, -32, 4), (-32, 4, -28, 4),
+                                   (-28, 0, -28, 4), (20, 0, 20, 10), (20, 0, 40, 0), (20, 10, 40, 10), (40, 0, 40, 10)]
+    # from above: the boxes - not the cylinder's 64 sides, 2 mm each
+    assert lines(out["top"]) == [(-32, 98, -32, 102), (-32, 98, -28, 98), (-32, 102, -28, 102), (-28, 98, -28, 102),
+                                 (20, -5, 20, 5), (20, -5, 40, -5), (20, 5, 40, 5), (40, -5, 40, 5)]
+    # on the big box's own front: its edges are the face's - left out; the others', in the face's terms
+    assert lines(out["onFace"]) == [(-80, -5, -40, -5), (-80, 1, -40, 1), (-62, -5, -62, -1), (-62, -1, -58, -1),
+                                    (-58, -5, -58, -1)]
+    assert out["value"] == pytest.approx(10)                       # the rectangle's right side to the box's left
+    moved = out["moved"][0]
+    assert moved["a"] == pytest.approx([-5, 0]) and moved["b"] == pytest.approx([5, 5])        # set to 15: moved left
+    cap = out["cap"]
+    assert cap["part"] == "c" and cap["N"] == pytest.approx([0, 0, 1]) and cap["O"] == pytest.approx([-30, 60, 6], abs=1e-4)
+    assert cap["area"] == pytest.approx(0.5 * 64 * 400 * math.sin(2 * math.pi / 64), rel=1e-4) and cap["corners"] == 64
+    assert out["side"] == 4                                        # a facet of the round side: four corners
+    plane = out["plane"]
+    assert plane["kind"] == "flat" and plane["part"] == "c" and plane["name"] == "Peg"
+    assert plane["f"]["N"] == pytest.approx([0, 0, 1]) and len(plane["outline"]) == 1
+    assert out["around"] == [pytest.approx([-50, 40, 6], abs=1e-4), pytest.approx([-10, 80, 6], abs=1e-4)]   # to zoom to

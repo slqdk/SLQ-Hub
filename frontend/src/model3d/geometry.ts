@@ -407,6 +407,19 @@ const SHORTEST_EDGE = 1;                            // mm: shorter straight bits
 const sub3 = (a: Vec3, b: Vec3): Vec3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 const scale3 = (a: Vec3, k: number): Vec3 => [a[0] * k, a[1] * k, a[2] * k];
 
+/** How many corners an outline has (0.108.0): where it turns by more than a degree - a round part's flat end has as
+ *  many as its sides, a facet of its round side four (three on a cone). */
+export function outlineCorners(ring: Vec3[]): number {
+  const pts = ring.filter((p, i) => Math.hypot(...sub3(p, ring[(i + 1) % ring.length])) > 1e-6);   // one point twice: once
+  let n = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[(i + pts.length - 1) % pts.length], b = pts[i], c = pts[(i + 1) % pts.length];
+    const u = sub3(b, a), v = sub3(c, b);
+    if (dot3(u, v) / (Math.hypot(...u) * Math.hypot(...v)) < STRAIGHT) n++;
+  }
+  return n;
+}
+
 export function flatFaceAt(b: Built, tri: number): FlatFace | null {
   const T = b.triangles, P = b.positions, n = T.length / 3, nv = P.length / 3;
   if (!Number.isInteger(tri) || tri < 0 || tri >= n) return null;
@@ -831,7 +844,8 @@ export function copyOf(p: Part, i: number, v: Vec3): Vec3 {
   return [ax + c * x - s * y, ay + s * x + c * y, v[2]];
 }
 
-function boxOfPoints(points: Vec3[]): Box3 | null {
+/** The box round some points (0.108.0: a sketched face's corners, to zoom to it), or null for none. */
+export function boxOfPoints(points: Vec3[]): Box3 | null {
   if (!points.length) return null;
   const lo: Vec3 = [Infinity, Infinity, Infinity], hi: Vec3 = [-Infinity, -Infinity, -Infinity];
   for (const c of points) for (let i = 0; i < 3; i++) {

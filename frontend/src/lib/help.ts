@@ -751,7 +751,8 @@ export const SECTIONS: HelpSection[] = [
           + "at a time. The arrow keys move what is picked 1 mm (Shift: 10). Fit, Top, Front and Right, at the right, "
           + "turn the camera.",
           "A hole cuts the solids beside it. Group parts (Ctrl+G) to keep a hole to them.",
-          "Sketch (Insert - on the plate, the front or the right plane; or Sketch in a box face's Face tab) draws as "
+          "Sketch (Insert - on the plate, the front or the right plane, or On a part's face and then click the face; "
+          + "or Sketch in a face's Face tab) draws as "
           + "SolidWorks does: Line (click each corner - the first again closes it), Rectangle (two corners) and Circle "
           + "(its middle, then its edge) - or drag from the first point to the next; points snap to whole mm and to "
           + "corners near the pointer, and a number typed while drawing - a length, width;height or a diameter - with "
@@ -759,22 +760,26 @@ export const SECTIONS: HelpSection[] = [
           + "button turns it, the wheel zooms. Pick a shape to change its size or delete it. Dimension (D) sets mm "
           + "as SolidWorks' Smart Dimension: click a line and a box beside it has its length - a circle: its diameter "
           + "- type the mm and Enter (Esc closes it). Or click the shape that moves, then the line it is measured to - "
-          + "a side of another shape or the face's edge - for a distance; a second distance keeps the first, and a "
+          + "a side of another shape, the face's edge or an edge of another part as the sketch sees it (the parts' "
+          + "corners snap too) - for a distance; a second distance keeps the first, and a "
           + "size set keeps the shape's distances. A distance measures from a circle's edge or a shape's nearest "
           + "corner, or From its middle. Click a dimension to set it again. Extrude makes the closed shapes a part so "
           + "thick - a shape inside another is a hole in it - and Cut cuts them into what is there; on a box's face "
-          + "they stay on the face. Either way the view goes to Fit, the whole design.",
+          + "they stay on the face. Either way the view goes to Fit, the whole design. Undo right after Extrude or "
+          + "Cut takes the part away and opens the sketch again, as it was - change it and Extrude again; in the "
+          + "sketch Undo undoes its own lines, and Redo puts the part back.",
           "Click a box's face in Select and the Face tab opens, as SolidWorks lets you sketch on a face: the spot you "
           + "clicked, so many mm from two of the face's edges - the distances show on the model, and From left, From "
           + "right or Middle and a number move it. Cut hole puts a round or square hole there, through all of the box "
           + "or so deep; Add boss a round or square boss so high; Text here a text. Each stays on the face: move, turn "
           + "or resize the box and it goes with it, the distances kept. Picked, its Part tab has On the face - its "
           + "distances, depth or height, and Free it.",
-          "An imported STL, 3MF or OBJ has a Face tab too: click a flat face of it in Select - its outline shows - and "
-          + "Sketch draws on that face. Extrude stands what you draw out of the face, joined to the mesh; Cut cuts it "
-          + "into the mesh, so deep or through all. To reach a face underneath, turn the view below the plate with the "
-          + "middle button: from there the plate shows only its lines. The parts stay where the face was when you made "
-          + "them - move the mesh and they stay behind.",
+          "Any part's flat face has a Face tab too - a part made from a sketch, a wedge, a cylinder's ends, an imported "
+          + "STL, 3MF or OBJ: click the face in Select - its outline shows - and Sketch draws on that face. Extrude "
+          + "stands what you draw out of the face, joined to the part; Cut cuts it into the part, so deep or through "
+          + "all. To reach a face underneath, turn the view below the plate with the middle button: from there the "
+          + "plate shows only its lines. The parts stay where the face was when you made them - move the part and "
+          + "they stay behind (on a box's face they go with the box).",
           "On a face (Part's Arrange, and Text) puts the part on a face you click - a new text asks for its face at once: "
           + "its letters lie on it, upright on a wall, a little into it so the two print as one; a hole text sinks in "
           + "and is cut. On a box's face it stays there, as a part from the Face tab does. Turn (Arrange) turns what "

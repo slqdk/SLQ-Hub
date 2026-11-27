@@ -19,12 +19,12 @@ import fontIndex from "./fonts/index.json";
 import { useApp } from "../state";
 import { ConfirmButton, MenuButton } from "../components/ui";
 import type { DesignFolder } from "./folder";
-import { allIds, build, buildPart, COLORS, edgeLength, edgeLines, edgePlan, EDGES, edgesOf, extent, extentOf, FACE_FRAMES,
+import { allIds, boxOfPoints, build, buildPart, COLORS, edgeLength, edgeLines, edgePlan, EDGES, edgesOf, extent, extentOf, FACE_FRAMES,
   faceAngle, faceAt, faceFrame, FACES, faceMarks, fitMeshes, flatFaceAt, FONT_FAMILIES, fontFile, follows, freshId, holeEdges,
   joined,
   lettersApart, lettersSide, mateAt, mateAxis, mateMark, matePlane, MAX_COPIES, meshExtent, MIN_SIZE, mirrorPart,
   nearestEdge, nearestToRay, newDesign,
-  onFace, partSize, placedBy, placeOn, readDesign, repeatAround, respot, retext, settle, SPACING, spotAt, spotXY, stl, textGlyphs,
+  onFace, outlineCorners, partSize, placedBy, placeOn, readDesign, repeatAround, respot, retext, settle, SPACING, spotAt, spotXY, stl, textGlyphs,
   textMeasure, threeMf, toPart, fromPart, transformPart, treatEdges, turned90, withCapitals, withEdgeLength, writeDesign,
   type Align,
   type Anchor, type Box3, type Built, type Design, type EdgeKind, type FaceName, type FontData, type FontIndex, type Fonts,
@@ -35,8 +35,9 @@ import { parseMesh } from "./meshio";
 import { lastPrinter, PRINTERS, printerOf, rememberPrinter, type Printer } from "./printers";
 import { centre, copy, cuts, cutters, find, group, insertAfter, label, onCopies, pick, remove, replaceWith, riders, ungroup,
   update } from "./tree";
-import { dimAt, dimLook, dimsWithout, distanceTo, isDistance, loopOf, measure, planeFrame, planeName, rayOnPlane,
-  sameSize, setDim, sideAt, sideOf, sketchParts, sketchRegions, snapPoints, strokesOf, to3d, type PlaneFrame, type SketchDim,
+import { dimAt, dimLook, dimsWithout, distanceTo, flatPlane, isDistance, loopOf, measure, modelEdges, ownEdges, planeFrame, planeName,
+  rayOnPlane, sameSize, setDim, sideAt, sideOf, sketchParts, sketchRegions, snapPoints, strokesOf, to3d, type PlaneFrame,
+  type SketchDim,
   type SketchDistance, type SketchPlane, type SketchShape, type SketchSize } from "./sketch";
 import { Viewport, type Hit, type ViewName } from "./Viewport";
 
@@ -253,7 +254,7 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
   const [status, setStatus] = useState<Status>("loading");
   const [problems, setProblems] = useState<string[]>([]);
   const [outside, setOutside] = useState<string | null>(null);
-  const [tool, setTool] = useState<null | "point" | "flat" | "edge" | "face" | "mate">(null);
+  const [tool, setTool] = useState<null | "point" | "flat" | "edge" | "face" | "mate" | "sketchon">(null);
   // Mate (0.101.0): the face (none: the axis) of the part that moves, clicked first - and where.
   const [mating, setMating] = useState<{ part: string; face?: FaceName; point: Vec3 } | null>(null);
   const [edgeSize, setEdgeSize] = useState(2);
@@ -297,6 +298,11 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
   const loading = useRef(new Set<string>());
   const past = useRef<Design[]>([]);
   const future = useRef<Design[]>([]);
+  // The sketch an Extrude or Cut was made from, kept with the design it was made on (0.108.0, Søren: "Når jeg trykker
+  // undo efter jeg extruder, så skal den gå tilbage til sketchen"): Undo back to that design opens the sketch again,
+  // Redo past it closes the sketch.
+  const sketchBefore = useRef(new WeakMap<Design, SketchState>());
+  const reopenSketch = useRef<(s: SketchState | null) => void>(() => undefined);
   const saved = useRef("");                     // the file's text as this page last read or wrote it
   const inFlight = useRef<string | null>(null);  // a save on its way
   const dirty = useRef(false);                  // changes made here that are not saved yet
@@ -385,14 +391,20 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
     future.current.push(designRef.current);
     setDesign(prev);
     later();
+    const s = sketchBefore.current.get(prev);           // an Extrude or Cut undone: back in its sketch
+    if (s) reopenSketch.current(s);
   }, [setDesign, later]);
   const redo = useCallback(() => {
     const next = future.current.pop();
-    if (!next || !designRef.current) return;
-    past.current.push(designRef.current);
+    const cur = designRef.current;
+    if (!next || !cur) return;
+    past.current.push(cur);
     setDesign(next);
     later();
+    if (sketchBefore.current.has(cur)) reopenSketch.current(null);   // the Extrude or Cut again: the sketch over
   }, [setDesign, later]);
+  /** Redo, sketching: only the Extrude or Cut undone back to this sketch - the sketch closes, its parts come back. */
+  const redoesSketch = () => future.current.length > 0 && !!designRef.current && sketchBefore.current.has(designRef.current);
 
   useEffect(() => {
     alive.current = true;
@@ -1075,11 +1087,31 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
     return d && p && p.shape === "box" && !p.repeat && !cuts(d.parts, p.id) ? p : null;
   };
 
-  /** The imported mesh a click is on, as a solid of the design (not a hole) - a sketch can go on its flat faces. */
-  const meshPart = (id: string): Part | null => {
+  /** The part a click is on, as a solid of the design (not a hole) - a sketch can go on its flat faces: an imported
+   *  mesh's (0.107.0), any part's (0.108.0, Søren: "Hvorfor kan on a box surface ikke vælges her?" - on a part made
+   *  from a sketch). */
+  const solidPart = (id: string): Part | null => {
     const d = designRef.current;
     const p = d ? find(d.parts, id)?.part : null;
-    return p && p.shape === "mesh" && !p.hole ? p : null;
+    return p && !p.hole && p.shape !== "group" ? p : null;
+  };
+
+  /** The flat face of a part a click is on (geometry's flatFaceAt) - not a facet of a round side: a cylinder's, a
+   *  cone's or a sphere's with more than 12 sides is a round part, its Part tab its own; their flat ends are faces. */
+  const flatAt = (hit: Hit): { p: Part; flat: FlatFace } | null => {
+    const p = solidPart(hit.part), flat = p && hit.tri !== undefined && built ? flatFaceAt(built, hit.tri) : null;
+    if (!p || !flat) return null;
+    const round = (p.shape === "cylinder" || p.shape === "cone" || p.shape === "sphere") && (p.sides ?? 64) > 12;
+    return round && flat.outline.every((ring) => outlineCorners(ring) <= 4) ? null : { p, flat };
+  };
+
+  /** A flat face a click is on, as a sketch's plane: a box's face (kept on it, as its Face tab's Sketch), else any
+   *  part's flat face - or null, the spot not flat (a round side). */
+  const sketchPlaneAt = (hit: Hit): SketchPlane | null => {
+    const box = solidBox(hit.part), face = box ? faceAt(box, hit.point, hit.normal) : null;
+    if (box && face) return { kind: "face", part: box.id, face };
+    const at = flatAt(hit);
+    return at ? flatPlane(at.flat, label(at.p)) : null;
   };
 
   /** Cut hole, Add boss, Text here (0.98.0, the Face tab): a part kept on the picked face, at its spot - beside the box
@@ -1131,14 +1163,13 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
     if (!s || !d) return null;
     const box = s.plane.kind === "face" ? find(d.parts, s.plane.part)?.part ?? null : null;
     const f = planeFrame(s.plane, box);
-    return f ? { f, box } : null;
+    return f ? { f: s.refs.length ? { ...f, refs: s.refs } : f, box } : null;
   };
 
   /** Sketch on a plane: nothing picked, the view turned straight at it, Line ready to draw. */
   const startSketch = (plane: SketchPlane) => {
-    const d = designRef.current, v = vp.current, k = kit.current;
+    const d = designRef.current;
     const box = plane.kind === "face" && d ? find(d.parts, plane.part)?.part ?? null : null;
-    const mesh = plane.kind === "flat" && d ? find(d.parts, plane.part)?.part ?? null : null;
     const f = d ? planeFrame(plane, box) : null;
     if (!d || !f) return;
     let n = 0;                                         // Sketch 1, 2 ... as SolidWorks numbers them
@@ -1148,7 +1179,34 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
       if (p.parts) count(p.parts);
     });
     count(d.parts);
-    setSketch({ plane, shapes: [], tool: "line", draft: null, picked: null, typed: "", past: [], n: n + 1, dims: [], dim: null });
+    // the parts' edges as the plane sees them, for distances to the other parts (0.108.0)
+    const refs = built ? modelEdges(built, f, ownEdges(f)) : [];
+    const s: SketchState = { plane, shapes: [], tool: "line", draft: null, picked: null, typed: "", past: [], n: n + 1,
+      dims: [], dim: null, refs };
+    openSketch(s);
+    lookAtSketch(s);
+  };
+
+  /** The view turned straight at a sketch's plane, from out of it: on a face, zoomed in to the face (0.108.0, Søren:
+   *  "så skal den zoome up til den flade, og så skal man kunne tegne på den"); on the plate or a plane of the design,
+   *  as Top, Front or Right. */
+  const lookAtSketch = (s: SketchState) => {
+    const at = sketchFrame(s), v = vp.current, d = designRef.current;
+    if (!at || !v || !d) return;
+    const plane = s.plane, f = at.f;
+    if (plane.kind === "top" || plane.kind === "front" || plane.kind === "right") {
+      v.view(plane.kind, built?.box ?? extentOf(d.parts));
+      return;
+    }
+    const w = (f.W ?? 0) / 2, h = (f.H ?? 0) / 2;
+    const corners = plane.kind === "flat" ? plane.outline.flat()
+      : [to3d(f, [-w, -h]), to3d(f, [w, -h]), to3d(f, [w, h]), to3d(f, [-w, h])];
+    v.lookFrom(f.N, boxOfPoints(corners) ?? built?.box ?? null);
+  };
+
+  /** A sketch open - a new one, or (0.108.0) the one an Extrude or Cut undone was made from: nothing picked, Select. */
+  const openSketch = (s: SketchState) => {
+    setSketch(s);
     setHoverPt(null);
     setSelected([]);
     setEdgeSel({});
@@ -1158,12 +1216,19 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
     setHoverEdge(null);
     setMode("select");
     setTab("sketch");
-    if (v) {
-      if (box && k) v.lookFrom(f.N, buildPart(box, k).box);
-      else if (plane.kind === "flat") v.lookFrom(f.N, mesh && k ? buildPart(mesh, k).box : built?.box ?? null);
-      else v.view(plane.kind === "face" ? "top" : plane.kind, built?.box ?? extentOf(d.parts));
-    }
     host.current?.focus({ preventScroll: true });
+  };
+  reopenSketch.current = (s) => {                      // Undo of an Extrude or Cut (0.108.0) - and Redo past it
+    if (s) {
+      const again: SketchState = { ...s, draft: null, typed: "", picked: null, dim: null, tool: s.tool ?? "line" };
+      openSketch(again);
+      lookAtSketch(again);
+    } else {
+      setSketch(null);
+      setHoverPt(null);
+      vp.current?.setPreview(null);
+      setTab("part");
+    }
   };
 
   /** The point on the sketch's plane under the pointer, as a click would put it down: a corner, an end or a middle
@@ -1185,6 +1250,7 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
       near.push([0, 0]);
       for (const [a, b] of at.f.edges) near.push(a, b, [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]);
     }
+    for (const [a, b] of at.f.refs ?? []) near.push(a, b);   // the other parts' corners (0.108.0)
     let best: Point2 | null = null, gap = 10;
     for (const c of near) {
       const sp = v.toScreen(to3d(at.f, c));
@@ -1351,6 +1417,11 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
       e.preventDefault();
       if (next) setSketch(next);
     };
+    if (ctrl && (k.toLowerCase() === "y" || (k.toLowerCase() === "z" && e.shiftKey))) {
+      e.preventDefault();                              // Redo: the Extrude or Cut undone back to this sketch (0.108.0)
+      if (redoesSketch()) redo();
+      return;
+    }
     if (ctrl && k.toLowerCase() === "z") return set(undoSketch(s));
     if (ctrl || e.altKey) return;
     if ((s.draft && s.draft.kind !== "dim") && /^[0-9.,;x* ]$/i.test(k)) return set({ ...s, typed: s.typed + k });
@@ -1400,6 +1471,7 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
     else ps = [...ps, ...made];
     shown3d.current = null;
     fitNext.current = true;                            // then the Fit view, the part made in 3D (0.103.0)
+    sketchBefore.current.set(d, s);                    // Undo opens it again (0.108.0)
     commit({ ...d, parts: ps });
     setSketch(null);
     setHoverPt(null);
@@ -1728,6 +1800,12 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
       placeOnFace(e.clientX, e.clientY);
       return;
     }
+    if (tool === "sketchon") {                         // Insert, Sketch, On a part's face (0.108.0): the face clicked
+      const plane = hit ? sketchPlaneAt(hit) : null;
+      if (plane) startSketch(plane);
+      else if (hit) toast("That is not a flat face: click a flat side of a part - not a round one. Esc stops.", "fault");
+      return;
+    }
     if (tool === "mate") {
       mateClick(e.clientX, e.clientY);
       return;
@@ -1767,10 +1845,9 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
         setTab("face");
         return;
       }
-      // An imported mesh's flat face (0.107.0, Søren: "det skal være muligt at ændre en importeret stl fil til en
-      // part, så jeg kan redigere den" - a sketch on its faces): the Face tab, with Sketch.
-      const flat = mode === "select" && hit.tri !== undefined && built && meshPart(hit.part) ? flatFaceAt(built, hit.tri)
-        : null;
+      // A flat face of an imported mesh (0.107.0, Søren: "det skal være muligt at ændre en importeret stl fil til en
+      // part, så jeg kan redigere den" - a sketch on its faces) - of any part (0.108.0): the Face tab, with Sketch.
+      const flat = mode === "select" && solidPart(hit.part)?.shape !== "text" ? flatAt(hit)?.flat : null;   // a text: Text
       if (flat) {
         setFlatSel(flat);
         setTab("face");
@@ -2152,8 +2229,19 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
         <Box size={17} className="faint" />
         <h2 title={shown}>{baseName(shown) || "New design"}</h2>
         <span className={`tag${status === "error" ? " fault" : status === "saved" ? " ok" : ""}`} role="status">{saying}</span>
-        <button className="btn small quiet" onClick={undo} disabled={!past.current.length} title="Undo (Ctrl+Z)"><Undo2 size={15} /> Undo</button>
-        <button className="btn small quiet" onClick={redo} disabled={!future.current.length} title="Redo (Ctrl+Shift+Z)"><Redo2 size={15} /> Redo</button>
+        {sketch ? (                                 /* sketching: the sketch's own Undo - Redo, an Extrude undone (0.108.0) */
+          <>
+            <button className="btn small quiet" onClick={() => { const u = undoSketch(sketch); if (u) setSketch(u); }}
+              disabled={!sketch.past.length} title="Undo the last change in the sketch (Ctrl+Z)"><Undo2 size={15} /> Undo</button>
+            <button className="btn small quiet" onClick={redo} disabled={!redoesSketch()}
+              title="Redo the Extrude or Cut undone back to this sketch (Ctrl+Shift+Z)"><Redo2 size={15} /> Redo</button>
+          </>
+        ) : (
+          <>
+            <button className="btn small quiet" onClick={undo} disabled={!past.current.length} title="Undo (Ctrl+Z)"><Undo2 size={15} /> Undo</button>
+            <button className="btn small quiet" onClick={redo} disabled={!future.current.length} title="Redo (Ctrl+Shift+Z)"><Redo2 size={15} /> Redo</button>
+          </>
+        )}
         <MenuButton right className="btn small" title="Files for the slicer" disabled={!built}
           label={<><Download size={15} /> Export <ChevronDown size={13} /></>}>
           {(close) => (
@@ -2208,7 +2296,7 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
             )}
             {!faceBox && flatSel && (
               <button type="button" role="tab" aria-selected={shownTab === "face"} className={`v3d-tab context${shownTab === "face" ? " on" : ""}`}
-                onClick={() => setTab("face")} title="The flat face picked on the imported mesh: sketch on it">Face</button>
+                onClick={() => setTab("face")} title="The flat face picked: sketch on it">Face</button>
             )}
           </div>
         </div>
@@ -2249,7 +2337,8 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
                   onClick={() => add("cylinder", true)} />
               </Grp>
               <Grp label="Sketch" fold={3} icon={<PencilRuler size={20} />}>
-                <SketchButton onPick={startSketch} />
+                <SketchButton onPick={startSketch} onFace={() => setTool(tool === "sketchon" ? null : "sketchon")}
+                  picking={tool === "sketchon"} />
               </Grp>
               <Grp label="From a file" fold={1} icon={<Upload size={20} />}>
                 <MenuButton fixed className="btn v3d-big tone-green" title="An STL, 3MF or OBJ into the design" menuClassName="wide"
@@ -2311,8 +2400,7 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
           )}
           {shownTab === "face" && !faceBox && flatSel && (() => {
             const m = find(parts, flatSel.part)?.part, name = m ? label(m) : flatSel.part;
-            return <FlatBand face={flatSel} name={name} onSketch={() => startSketch({ kind: "flat", part: flatSel.part, name,
-              outline: flatSel.outline, f: { O: flatSel.O, U: flatSel.U, V: flatSel.V, N: flatSel.N, edges: flatSel.edges } })} />;
+            return <FlatBand face={flatSel} name={name} onSketch={() => startSketch(flatPlane(flatSel, name))} />;
           })()}
           {shownTab === "lines" && (
             <LinesBand part={one} many={items.length > 1} picked={pickedEdges} pickedOn={one ? edgeSel[one.id] ?? [] : []}
@@ -2384,10 +2472,8 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
                   active={sketch.tool === "dim"} onClick={() => setSketch({ ...sketch, tool: "dim", draft: null, typed: "", picked: null, dim: null })}>
                   <span>Dimension</span></Tool>
                 <span className="v3d-sep" />
-                <Tool icon={<Crosshair size={16} />} title="Look straight at the sketch again" onClick={() => {
-                  const at = sketchFrame(sketch), v = vp.current, k = kit.current;
-                  if (at && v) v.lookFrom(at.f.N, at.box && k ? buildPart(at.box, k).box : built?.box ?? null);
-                }}><span>Look at it</span></Tool>
+                <Tool icon={<Crosshair size={16} />} title="Look straight at the sketch again" onClick={() => lookAtSketch(sketch)}>
+                  <span>Look at it</span></Tool>
               </div>
             )}
             {!sketch && (
@@ -2483,7 +2569,8 @@ type Draft = { kind: "line"; pts: Point2[] } | { kind: "rect"; a: Point2 } | { k
 type SketchSnap = { shapes: SketchShape[]; dims: SketchDim[] };
 type SketchState = { plane: SketchPlane; shapes: SketchShape[]; tool: SketchTool | null; draft: Draft | null;
   picked: number | null; typed: string; past: SketchSnap[]; n: number;
-  dims: SketchDim[]; dim: number | null };              // its distances, and the one picked - typed values go to it
+  dims: SketchDim[]; dim: number | null;                // its distances, and the one picked - typed values go to it
+  refs: [Point2, Point2][] };                           // the other parts' edges in its plane (modelEdges, 0.108.0)
 const snapOf = (s: SketchState): SketchSnap => ({ shapes: s.shapes, dims: s.dims });
 /** What Extrude and Cut make of a sketch: so high out of its plane; a cut through all, or so deep. */
 type SketchMake = { height: number; through: boolean; depth: number };
@@ -3135,16 +3222,18 @@ function FlatBand({ face, name, onSketch }: { face: FlatFace; name: string; onSk
       </Grp>
       <Grp label="Cut or add">
         <Big tone="violet" icon={<PencilRuler size={20} />} label="Sketch" onClick={onSketch}
-          title="Draw on this face - lines, rectangles, circles - then Extrude them out of it or Cut them into the mesh" />
+          title="Draw on this face - lines, rectangles, circles - then Extrude them out of it or Cut them into the part" />
       </Grp>
     </>
   );
 }
 
-/** Insert's Sketch (0.100.0): on the plate, the front plane or the right plane - on a box's face from its Face tab. */
-function SketchButton({ onPick }: { onPick: (plane: SketchPlane) => void }) {
+/** Insert's Sketch (0.100.0): on the plate, the front plane or the right plane - or on a part's face, clicked next
+ *  (0.108.0; a box's face from its Face tab too, any part's flat face from the Face tab a click on it opens). */
+function SketchButton({ onPick, onFace, picking }: { onPick: (plane: SketchPlane) => void; onFace: () => void; picking: boolean }) {
   return (
-    <MenuButton fixed className="btn v3d-big tone-violet" title="Sketch: draw lines, rectangles and circles on a plane, then Extrude or Cut them"
+    <MenuButton fixed className={`btn v3d-big tone-violet${picking ? " on" : ""}`}
+      title={picking ? "Click the flat face of a part to draw on - Esc stops" : "Sketch: draw lines, rectangles and circles on a plane, then Extrude or Cut them"}
       label={<><PencilRuler size={20} /><span>Sketch <ChevronDown size={11} /></span></>}>
       {(close) => (
         <>
@@ -3154,8 +3243,8 @@ function SketchButton({ onPick }: { onPick: (plane: SketchPlane) => void }) {
             <span>On the front plane<small>Seen from the front - it stands up, out toward you</small></span></button>
           <button className="menu-item" onClick={() => { close(); onPick({ kind: "right" }); }}><ViewIcon face="right" />
             <span>On the right plane<small>Seen from the right - out toward you</small></span></button>
-          <div className="menu-item faint"><Box size={15} /><span>On a box's face<small>Click the face in Select, then Sketch in
-            its Face tab</small></span></div>
+          <button className="menu-item" role="menuitemcheckbox" aria-checked={picking} onClick={() => { close(); onFace(); }}>
+            <Box size={15} /><span>On a part's face<small>Then click the flat face to draw on - Esc stops</small></span></button>
         </>
       )}
     </MenuButton>

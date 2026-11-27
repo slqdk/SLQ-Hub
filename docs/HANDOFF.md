@@ -4,7 +4,26 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## Next session - start here (written 2026-11-27, at 0.107.0)
+## Next session - start here (written 2026-11-27, at 0.108.0)
+
+**0.108.0 (2026-11-27): dimensions to other parts, Undo back to the sketch, a sketch on any part's face - pushed, not
+yet installed.** Søren, 17:13-17:20, with 0.107.0 on the card: "Man skal kunne lave en dimention til den anden del..
+der hvor feks den røde streg er" (a rectangle sketched in front of a box); "Når jeg trykker undo efter jeg extruder, så
+skal den gå tilbage til sketchen"; "Hvorfor kan on a box surface ikke vælges her?" (Sketch, On a box's face - a greyed
+hint - over two parts made from sketches). Built (DESIGN §8 "The 3D editor", The other parts' edges in a sketch...):
+`modelEdges` lays the built solid's sharp edges into the sketch's plane (`PlaneFrame.refs`; Dimension, drawing and
+snapping take them as face edges); `sketchBefore`/`reopenSketch`/`lookAtSketch` - Undo after Extrude or Cut opens the
+sketch again, Redo closes it, the header's Undo/Redo are the sketch's while sketching (Ctrl+Shift+Z in a sketch used
+to undo); any solid part's flat face opens the Face tab (`solidPart`, `flatAt`, a round side's facet excepted by
+`outlineCorners`), and Insert, Sketch, On a part's face waits for the face's click (tool "sketchon",
+`sketchPlaneAt`); a sketch on a face fills the view with the face (17:32: "så skal den zoome up til den flade").
+Tests: a box, a 40 mm cylinder and a small box in a group - the edges from the front, from above and
+on the box's own front face; a distance of 10 to the box's side set to 15; the cylinder's cap as a flat face (64
+corners) and a side facet (4); `flatPlane`; the box round the cap to zoom to. Not seen in a browser: the reference edges drawn
+and snapped to, the Undo/Redo round trip, the Face tab on a sketch part, the Sketch button lit while waiting for the
+face. Next, as told to him: mate to the plate ("Man skal kunne mate til pladen så den ikke hænger oppe i luften"),
+edge to edge mates between two parts ("Man skal kunne mate streger ... streger på 2 forskellige parter") and the
+mates shown in the Parts list ("Man skal kunne se i parts listen hvordan de er mated") - 0.109.0.
 
 **0.107.0 (2026-11-27): a sketch on an imported mesh's flat face - pushed, not yet installed.** Søren, 11:41: "det
 skal være muligt at ændre en importeret stl fil til en part, så jeg kan redigere den... Tag lysestagen som et

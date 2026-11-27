@@ -5,24 +5,31 @@
 // made into outline parts: extruded out of the plane, or cut into what is there. The regions are read as SolidWorks
 // reads a sketch: a closed shape inside another is a hole in it, one inside that hole an island again; shapes that
 // cross or lie apart are each a part of their own (they join where they meet). On a box's face each part is kept on
-// it (its "on", 0.98.0), so it goes with the box. On a flat face of an imported mesh (0.107.0) the parts are placed
-// where the face is when they are made. The sketch itself is the editor's while it is drawn: the design gets the
+// it (its "on", 0.98.0), so it goes with the box. On a flat face of an imported mesh (0.107.0) - of any part (0.108.0)
+// - the parts are placed where the face is when they are made. The sketch itself is the editor's while it is drawn: the design gets the
 // parts.
 
-import { angles, faceFrame, MIN_SIZE, spotFrom, type FaceName, type Part, type Point2, type Vec3 } from "./geometry";
+import { angles, faceFrame, MIN_SIZE, spotFrom, type Built, type FaceName, type FlatFace, type Part, type Point2, type Vec3 } from "./geometry";
 
 export type SketchPlane = { kind: "top" | "front" | "right" } | { kind: "face"; part: string; face: FaceName }
-  // a flat face of an imported mesh (0.107.0, geometry's flatFaceAt): its frame and outline as it was picked
+  // a flat face of an imported mesh (0.107.0) or any part (0.108.0), geometry's flatFaceAt: its frame and outline as
+  // it was picked
   | { kind: "flat"; part: string; name: string; f: PlaneFrame; outline: Vec3[][] };
 export type SketchShape =
   | { kind: "line"; pts: Point2[]; closed: boolean }   // clicked corners - closed when the last click met the first
   | { kind: "rect"; a: Point2; b: Point2 }               // two opposite corners
   | { kind: "circle"; c: Point2; r: number };
 
+/** A flat face clicked (0.107.0: an imported mesh's; 0.108.0: any part's) as a sketch's plane - of the part called
+ *  `name`. */
+export const flatPlane = (flat: FlatFace, name: string): SketchPlane => ({ kind: "flat", part: flat.part, name,
+  outline: flat.outline, f: { O: flat.O, U: flat.U, V: flat.V, N: flat.N, edges: flat.edges } });
+
 /** A plane in the design: its origin, which way is across it (U), up it (V) and out of it (N) - U x V = N; a box's
  *  face's middle and its frame (faceFrame), with its width and height; a mesh's flat face's middle and its straight
- *  edges in its own terms (0.107.0). */
-export interface PlaneFrame { O: Vec3; U: Vec3; V: Vec3; N: Vec3; W?: number; H?: number; edges?: [Point2, Point2][] }
+ *  edges in its own terms (0.107.0); the other parts' edges as the plane sees them (`refs`, modelEdges, 0.108.0). */
+export interface PlaneFrame { O: Vec3; U: Vec3; V: Vec3; N: Vec3; W?: number; H?: number; edges?: [Point2, Point2][];
+  refs?: [Point2, Point2][] }
 
 export const CIRCLE_SIDES = 64;
 
@@ -166,12 +173,98 @@ export function sidesOf(s: SketchShape): [Point2, Point2][] {
   return out;
 }
 
-/** A face's edges in its plane (its middle at 0,0): bottom, right, top, left - none on the plate or a plane. */
+/** The edges a distance can go to besides the sketch's own shapes: the face's (its middle at 0,0) - a box face's
+ *  bottom, right, top, left, a mesh's flat face's straight ones (0.107.0) - then the other parts' as the plane sees
+ *  them (`refs`, 0.108.0). None of the face's on the plate or a plane. */
 export function faceEdges(f: PlaneFrame): [Point2, Point2][] {
-  if (f.edges) return f.edges;                     // a mesh's flat face: its straight edges (0.107.0)
+  return [...ownEdges(f), ...(f.refs ?? [])];
+}
+
+/** The face's own edges alone (see faceEdges). */
+export function ownEdges(f: PlaneFrame): [Point2, Point2][] {
+  if (f.edges) return f.edges;
   if (!f.W || !f.H) return [];
   const w = f.W / 2, h = f.H / 2;
   return [[[-w, -h], [w, -h]], [[w, -h], [w, h]], [[w, h], [-w, h]], [[-w, h], [-w, -h]]];
+}
+
+const SHARP = Math.cos((20 * Math.PI) / 180);       // faces meeting at more than 20 degrees: an edge
+const REF_EDGE = 3;                                  // mm: shorter ones (a round part's facets) are no edge to measure to
+const REFS_MOST = 400;
+
+/** The edges of the design's parts as a sketch's plane sees them (0.108.0 - Søren, a sketched rectangle in front of a
+ *  box: "Man skal kunne lave en dimention til den anden del"): the built solid's sharp edges - its faces meeting at
+ *  more than 20 degrees - and open ones, laid flat into the plane along N; those on one line joined into one; at
+ *  least REF_EDGE mm, the longest REFS_MOST; none on the face's own edges (`own`). A Dimension goes to them as to the
+ *  face's edge, and their ends are corners to snap to. */
+export function modelEdges(b: Built, f: PlaneFrame, own: [Point2, Point2][] = []): [Point2, Point2][] {
+  const T = b.triangles, P = b.positions, n = T.length / 3, nv = P.length / 3;
+  if (!n) return [];
+  const nrm = new Float64Array(n * 3);
+  for (let t = 0; t < n; t++) {
+    const a = T[t * 3] * 3, c = T[t * 3 + 1] * 3, d = T[t * 3 + 2] * 3;
+    const ux = P[c] - P[a], uy = P[c + 1] - P[a + 1], uz = P[c + 2] - P[a + 2];
+    const vx = P[d] - P[a], vy = P[d + 1] - P[a + 1], vz = P[d + 2] - P[a + 2];
+    const x = uy * vz - uz * vy, y = uz * vx - ux * vz, z = ux * vy - uy * vx, l = Math.hypot(x, y, z) || 1;
+    nrm[t * 3] = x / l; nrm[t * 3 + 1] = y / l; nrm[t * 3 + 2] = z / l;
+  }
+  const flat = (i: number): Point2 => {
+    const x = P[i * 3] - f.O[0], y = P[i * 3 + 1] - f.O[1], z = P[i * 3 + 2] - f.O[2];
+    return [x * f.U[0] + y * f.U[1] + z * f.U[2], x * f.V[0] + y * f.V[1] + z * f.V[2]];
+  };
+  // Each edge on one line (its direction to 0.1 degree, its place to 0.02 mm): the stretches along it it covers.
+  const lines = new Map<string, { d: Point2; off: number; spans: [number, number][] }>();
+  const add = (u: number, v: number) => {
+    const a = flat(u), c = flat(v);
+    let dx = c[0] - a[0], dy = c[1] - a[1];
+    const l = Math.hypot(dx, dy);
+    if (l < 1e-3) return;                              // straight across the plane: a point in it (a round part's
+                                                       // facets, seen edge on, are short bits of one line: kept)
+    dx /= l; dy /= l;
+    if (dx < -1e-9 || (Math.abs(dx) <= 1e-9 && dy < 0)) [dx, dy] = [-dx, -dy];
+    const off = -dy * a[0] + dx * a[1], t0 = dx * a[0] + dy * a[1], t1 = dx * c[0] + dy * c[1];
+    const key = `${Math.round((Math.atan2(dy, dx) * 1800) / Math.PI)}:${Math.round(off * 50)}`;
+    const line = lines.get(key);
+    if (line) line.spans.push([Math.min(t0, t1), Math.max(t0, t1)]);
+    else lines.set(key, { d: [dx, dy], off, spans: [[Math.min(t0, t1), Math.max(t0, t1)]] });
+  };
+  const first = new Map<number, number>();             // an edge -> the first triangle met with it
+  for (let t = 0; t < n; t++) {
+    for (let k = 0; k < 3; k++) {
+      const u = T[t * 3 + k], v = T[t * 3 + (k + 1) % 3], key = u < v ? u * nv + v : v * nv + u;
+      const o = first.get(key);
+      if (o === undefined) {
+        first.set(key, t);
+        continue;
+      }
+      first.delete(key);
+      const dot = nrm[t * 3] * nrm[o * 3] + nrm[t * 3 + 1] * nrm[o * 3 + 1] + nrm[t * 3 + 2] * nrm[o * 3 + 2];
+      if (dot < SHARP) add(u, v);
+    }
+  }
+  for (const key of first.keys()) add(Math.floor(key / nv), key % nv);   // an open edge (a mesh that is not closed)
+  const onOwn = (a: Point2, c: Point2) => own.some(([p, q]) => toSegment(a, p, q) <= 0.05 && toSegment(c, p, q) <= 0.05);
+  const out: [Point2, Point2][] = [];
+  for (const { d, off, spans } of lines.values()) {
+    spans.sort((x, y) => x[0] - y[0]);
+    let [s0, s1] = spans[0];
+    const flush = () => {
+      if (s1 - s0 < REF_EDGE) return;
+      const a: Point2 = [d[0] * s0 - d[1] * off, d[1] * s0 + d[0] * off];
+      const c: Point2 = [d[0] * s1 - d[1] * off, d[1] * s1 + d[0] * off];
+      if (!onOwn(a, c)) out.push([a, c]);
+    };
+    for (const [t0, t1] of spans.slice(1)) {
+      if (t0 <= s1 + 0.01) s1 = Math.max(s1, t1);
+      else {
+        flush();
+        [s0, s1] = [t0, t1];
+      }
+    }
+    flush();
+  }
+  const len = ([a, c]: [Point2, Point2]) => Math.hypot(c[0] - a[0], c[1] - a[1]);
+  return out.sort((x, y) => len(y) - len(x)).slice(0, REFS_MOST);
 }
 
 /** A shape's middle: a circle's, a rectangle's, the middle of the box round a line's corners. */

@@ -3759,6 +3759,36 @@ into the Hub, Tinkercad's level, his printer a Bambu Lab P2S but chosen per desi
   plate's sheet is hidden while the camera is below it (`Viewport.render`), its lines left. The candle holder of chat
   335: its bottom is one flat face, 1,192 mm2, 40 x 40 mm (round: no straight edges), found in about 60 ms among its
   300,000 triangles.
+- **The other parts' edges in a sketch, Undo back to the sketch, any part's face (0.108.0).** Søren, 17:13, a rectangle
+  sketched in front of a box with a red line toward it: "Man skal kunne lave en dimention til den anden del"; 17:15:
+  "Når jeg trykker undo efter jeg extruder, så skal den gå tilbage til sketchen"; 17:20, the Sketch menu's "On a box's
+  face" greyed out over two parts made from sketches: "Hvorfor kan on a box surface ikke vælges her?".
+  - *Edges of other parts.* When a sketch opens, `modelEdges(built, frame, ownEdges(frame))` takes the built solid's
+    sharp edges (faces meeting at more than 20 degrees) and open ones, lays them into the plane along N, joins the
+    bits on one line (direction to 0.1 degree, offset to 0.02 mm; spans 0.01 mm apart are one), drops those under
+    3 mm (`REF_EDGE` - a round part's facets seen from above) and those on the face's own edges, and keeps the 400
+    longest. They go in `PlaneFrame.refs`, after the face's own edges in `faceEdges`: Dimension measures to them as to
+    a face's edge (`SketchDistance.to.edge` counts own edges first, then refs), they are drawn as the face's edges are,
+    and their ends snap. Only straight edges: a cylinder seen from the side gives its top and bottom (its facets seen
+    edge on are bits of one line - kept since a bit only has to be longer than 0.001 mm to have a direction), not its
+    sides (smooth, no edge). Kept with the sketch: what the parts were when it opened.
+  - *Undo back to the sketch.* `endSketch` keeps the sketch with the design it was made on (`sketchBefore`, a WeakMap
+    keyed by that design object); `undo` landing on such a design opens the sketch again (`reopenSketch`: its shapes,
+    distances and own undo list, nothing picked, the view turned at it - `lookAtSketch`, shared with Start and Look at
+    it); `redo` from it closes the sketch (the parts come back). While sketching, the header's Undo is the sketch's
+    own (as Ctrl+Z always was) and Redo works only to put back the Extrude or Cut undone (`redoesSketch`; Ctrl+Shift+Z
+    and Ctrl+Y too - before, Ctrl+Shift+Z in a sketch undid).
+  - *Any part's face.* The Face tab's flat face (0.107.0) is no longer only an imported mesh's: any solid part's
+    (`solidPart`: not a hole, not a group), a text's excepted (its Text tab). A round part's round side is not a face:
+    for a cylinder, a cone or a sphere of more than 12 sides a flat face whose outline has at most four corners
+    (`outlineCorners`: turns of more than a degree, a point given twice counted once) is a facet - the click picks the
+    part as before; their flat ends (64 corners) are faces. Insert, Sketch has "On a part's face": the Sketch button
+    stays lit and the next click on a flat face starts a sketch there - a box's face as its Face tab does (kept on the
+    box), any other flat face as kind "flat" (`sketchPlaneAt`, `flatPlane`); a round side says so, Esc stops.
+  - *Zoomed to the face.* Søren, 17:32: "når man gør det, så skal den zoome up til den flade, og så skal man kunne
+    tegne på den". A sketch on a face - a box's, any flat one - turns the view straight at it and fills the view with
+    the face (`lookAtSketch`: the box round its corners or outline, `boxOfPoints`; at least 10 mm across, as
+    `lookFrom` has it), not with its part; on the plate and the planes it is Top, Front or Right as before.
 
 ### Workflows (0.67.0)
 

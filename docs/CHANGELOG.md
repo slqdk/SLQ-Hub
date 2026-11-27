@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.108.0 - 2026-11-27
+
+- 3D editor sketch: Dimension can measure to the edges of other parts as
+  the sketch sees them - a box standing beside the plane, the top and
+  bottom of a cylinder seen from the side - and their corners snap.
+- Undo right after Extrude or Cut takes the new part away and opens the
+  sketch again, as it was. In a sketch the Undo button undoes the
+  sketch's own lines; Redo puts the part back.
+- Sketch on any part's flat face, not only a box's or an imported
+  mesh's: a part made from a sketch, a wedge, a cylinder's ends. Click
+  the face in Select and Sketch in its Face tab - or Insert, Sketch, On a
+  part's face, then click the face.
+- A sketch on a face zooms in to that face.
+
 ## 0.107.0 - 2026-11-27
 
 - 3D editor: sketch on an imported STL, 3MF or OBJ. Click a flat face of
