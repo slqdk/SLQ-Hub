@@ -3435,7 +3435,10 @@ into the Hub, Tinkercad's level, his printer a Bambu Lab P2S but chosen per desi
     rectangle's Width, Height and middle, a circle's Diameter and middle can be typed. Ctrl+Z undoes a shape; L, R
     and C pick the tools; the editor's other keys wait. Drawn: closed shapes blue, an open line amber, the picked one
     green, corners as dots, the one a click would take filled, lengths and sizes beside what is drawn - and what
-    Extrude would make, standing as it would, the rest faded (`setPreview`).
+    Extrude would make, filled, the rest faded (`setPreview`): flat on the plane (0.103.0, 0.05 mm - Søren, 09:38:
+    "og når man har trykket extrude EN gang, og sletter parten igen, så er det som om den extrudere alt man tegner,
+    inden man er færdig" - it stood as thick as Thickness, 50 mm in his picture, its walls showing in perspective;
+    SolidWorks shades a sketch's closed contours, it does not extrude them before Extrude).
   - **Regions** (`sketchRegions`, SolidWorks' reading): a closed shape with every corner inside a bigger one lies in
     it - in an outline it is a hole, in a hole an island; shapes apart or crossing are a region each (as parts they
     join where they meet). An open line makes nothing.
@@ -3443,7 +3446,9 @@ into the Hub, Tinkercad's level, his printer a Bambu Lab P2S but chosen per desi
     "Sketch 1 (2)" (numbered on from the design's sketches). Extrude: so thick (Thickness) out of the plane - on the
     plate standing on it, on the front or right plane out toward you; Cut: a hole into what is there, through all or
     so deep (from 0.2 mm behind the plane; through all on a plane of the design: as far as the design reaches, both
-    ways). On a box's face each part is kept on it (`on`, 0.98.0: so many mm from the face's edges - the middle stays
+    ways). Either way the view then goes to Fit, the whole design from the front, right and above (0.103.0 - Søren,
+    09:36: "og når man trykker Extrude, så skal den skifte kamera vinkel til fit"; before, it stayed square to the
+    sketch). On a box's face each part is kept on it (`on`, 0.98.0: so many mm from the face's edges - the middle stays
     the middle - its depth, through for a cut through the box), beside the box in the tree so a cut cuts what the box
     is in; its spot is the face's own (a mirrored box's own x runs the other way: U = V x N). Extruded parts take the
     box's colour. Nothing closed: said, the sketch stays. Cancel throws the sketch away (asked once when there is
@@ -3472,8 +3477,27 @@ into the Hub, Tinkercad's level, his printer a Bambu Lab P2S but chosen per desi
     see-through sort put a side's amber under its shape's blue. Found with it: the editor's fallback for keys with nothing
     focused (0.97.0) handled a key again when the editor's own handling took the focused button away - a Delete on a
     picked distance deleted its shape too; it now leaves keys the editor took (`defaultPrevented`).
-  - **Not yet**: arcs, splines, relations (horizontal, parallel...), distances kept as constraints, between two
-    circles or along a line (its length), editing the sketch after Extrude (the outline's points are what is kept),
+  - **Sizes and the mm box (0.103.0).** Søren, 09:35, a line in his sketch: "Jeg burde kunne trykke på en linie, og
+    så definere længden på linien i et inputfelt ved siden af linien, når dimention er valgt". With Dimension the
+    first click is a side (`sideOf`: the shape's side nearest the click): its length - a circle's diameter - is drawn
+    as SolidWorks draws one, red, beside the side 20 px out from the shape (a line from each end, the dimension line
+    between, `dimLook`), a diameter up from the circle's top; and a box over its mm has them, focused and selected:
+    type and Enter sets it (Esc closes it, nothing changed). Clicked next, another shape's side or the face's edge
+    makes a distance from it instead (0.102.0 as before) - its box then. A distance or size clicked (by its line or
+    its mm, with Dimension or Pick) gets the box too; the band's group says Distance, Length or Diameter.
+    `SketchSize` {shape, side} - a `SketchDim` without `to` (`isDistance`); `setDim` sets one (`setSize`): a circle's
+    radius about its middle; a rectangle's width (sides 0, 2) or height (1, 3) from its first corner, drawn either
+    way; a line's side from the end no other size of the line holds - its second end, unless only that one is held -
+    the next side going with it (SolidWorks moves a line's free end). Then the shape's distances as they were: it
+    moves back to them, latest last (a rectangle drawn right to left keeps its distance from the left edge when made
+    narrower). One size per side: a rectangle's width on its other side is the same one (`sameSize`), moved to the
+    side clicked. The box is the page's - an input in the stage, kept over its 3D point as the view moves
+    (`Viewport.pin`, placed with the labels); it takes the focus after the press that opened it has focused the view
+    (a timeout: the press's own focusing comes after React's commit), and digits typed with the view focused go to
+    it. While the pointer is still on the shape clicked, no line runs to it (0.102.1's line: once it leaves).
+  - **Not yet**: arcs, splines, relations (horizontal, parallel...), distances kept as constraints (a size or a
+    distance holds what is set when it is set; another shape's distance to a side that moved is not re-solved),
+    between two circles, an angle, editing the sketch after Extrude (the outline's points are what is kept),
     sketching on the faces of other shapes.
 - **On a face of a box, kept there (0.98.0).** Søren, 13:57: "Hvad gør jeg hvis jeg gerne vil lave en 2D cirkel et sted
   på kassen, og derefter skære hullet ud hele vejen igennem kassen ? Ligesom i solid works ? Hvor jeg tegner en cirkel

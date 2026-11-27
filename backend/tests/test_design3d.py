@@ -1506,6 +1506,65 @@ def test_a_sketch_distance_moves_its_shape(tmp_path):
     assert moved == [[18, 0], [28, 0], [23, 8]]                         # its nearest corner 2 mm from the wall
 
 
+SKETCH_SIZES_JS = """
+const plate = { O: [0, 0, 0], U: [1, 0, 0], V: [0, 1, 0], N: [0, 0, 1] }, face = { ...plate, W: 80, H: 40 };
+const out = {};
+const L = { kind: "line", pts: [[0, 0], [20, 0], [20, 10]], closed: false };
+out.line = S.setDim([L], plate, [{ shape: 0, side: 0 }], 0, 30)[0].pts;
+out.held = S.setDim([L], plate, [{ shape: 0, side: 1 }, { shape: 0, side: 0 }], 1, 5)[0].pts;
+const R = { kind: "rect", a: [10, 5], b: [20, 12] }, back = { kind: "rect", a: [20, 12], b: [10, 5] };
+out.rect = [S.setDim([R], plate, [{ shape: 0, side: 0 }], 0, 25)[0], S.setDim([R], plate, [{ shape: 0, side: 3 }], 0, 4)[0],
+  S.setDim([back], plate, [{ shape: 0, side: 2 }], 0, 25)[0]];
+const C = { kind: "circle", c: [15, 30], r: 5 };
+out.circle = S.setDim([C], plate, [{ shape: 0, side: 0 }], 0, 16)[0];
+out.sizes = [S.sizeOf([R], { shape: 0, side: 1 }), S.sizeOf([C], { shape: 0, side: 0 }), S.sizeOf([R], { shape: 3, side: 0 })];
+out.bad = [S.setDim([C], plate, [{ shape: 0, side: 0 }], 0, 0), S.setDim([R], plate, [{ shape: 0, side: 0 }], 0, -2)];
+// its distance kept: a rectangle drawn right to left, 42 from the face's left edge - made 20 wide, it moves back to it
+const W = { kind: "rect", a: [10, 5], b: [2, 12] }, toLeft = { shape: 0, to: { edge: 3 } };
+const kept = S.setDim([W], face, [toLeft, { shape: 0, side: 0 }], 1, 20);
+out.kept = [kept[0], S.measure(kept, face, toLeft).value];
+out.look = [S.dimLook([L], plate, { shape: 0, side: 0 }, 5), S.dimLook([C], plate, { shape: 0, side: 0 }, 5),
+  S.dimLook([L, C], plate, { shape: 1, to: { shape: 0, seg: 0 } }, 5)];
+out.pick = [S.dimAt([L], plate, [{ shape: 0, side: 0 }], [10, -5.2], 0.5, 5), S.dimAt([L], plate, [{ shape: 0, side: 0 }], [10, 0.4], 0.5, 5)];
+out.same = [S.sameSize([R], { shape: 0, side: 0 }, { shape: 0, side: 2 }), S.sameSize([R], { shape: 0, side: 0 }, { shape: 0, side: 1 }),
+  S.sameSize([C], { shape: 0, side: 0 }, { shape: 0, side: 0 }), S.sameSize([L], { shape: 0, side: 0 }, { shape: 0, side: 1 })];
+out.without = S.dimsWithout([{ shape: 0, side: 1 }, { shape: 1, side: 0 }, { shape: 2, side: 0 }, { shape: 2, to: { shape: 1, seg: 0 } }], 1);
+out.side = [S.sideOf(R, [15, 11.5]), S.sideOf(R, [10.4, 8]), S.sideOf(C, [40, 40])];
+process.stdout.write(JSON.stringify(out));
+"""
+
+
+def test_a_sketch_size_sets_a_length_or_a_diameter(tmp_path):
+    """Sizes in a sketch (0.103.0 - Søren: "trykke på en linie, og så definere længden på linien i et inputfelt ved
+    siden af linien"): a line's side set to so long - its second end moves along it, or its first when only the second
+    is held by another size; a rectangle's width or height from its first corner, drawn either way; a circle's
+    diameter about its middle; 0 or less refused; the shape's distances kept; how each is drawn - a length beside its
+    side, out from the shape, a diameter up from the top - and picked by its line; the same size on either side of a
+    rectangle; sizes re-numbered when a shape is taken away."""
+    out = run_js(f"import * as S from {node_module(tmp_path, 'sketch.ts')};\n" + SKETCH_SIZES_JS, {})
+    assert out["line"] == [[0, 0], [30, 0], [20, 10]]
+    assert out["held"] == [[15, 0], [20, 0], [20, 10]]
+    wide, low, backwards = out["rect"]
+    assert wide == {"kind": "rect", "a": [10, 5], "b": [35, 12]}
+    assert low == {"kind": "rect", "a": [10, 5], "b": [20, 9]}
+    assert backwards == {"kind": "rect", "a": [20, 12], "b": [-5, 5]}
+    assert out["circle"] == {"kind": "circle", "c": [15, 30], "r": 8}
+    assert out["sizes"] == [7, 10, None] and out["bad"] == [None, None]
+    rect, left = out["kept"]
+    assert left == pytest.approx(42) and abs(rect["b"][0] - rect["a"][0]) == pytest.approx(20)
+    assert rect["a"] == [pytest.approx(22), 5] and rect["b"] == [pytest.approx(2), 12]
+    length, diameter, distance = out["look"]
+    assert length["what"] == "length" and length["value"] == 20 and length["label"] == [10, -5]
+    assert length["lines"] == [[[0, 0], [0, -6.5]], [[20, 0], [20, -6.5]], [[0, -5], [20, -5]]]
+    assert diameter == {"lines": [[[15, 35], [15, 40]]], "label": [15, 40], "value": 10, "what": "diameter",
+                        "pick": [[15, 35], [15, 40]]}
+    assert distance["what"] == "distance" and distance["value"] == 25 and distance["label"] == [15, 12.5]
+    assert out["pick"] == [0, None]
+    assert out["same"] == [True, False, True, False]
+    assert out["without"] == [{"shape": 0, "side": 1}, {"shape": 1, "side": 0}]
+    assert out["side"] == [2, 3, 0]
+
+
 # ---------------------------------------------------------------- mates (0.101.0)
 
 def mated_design(box_rotate) -> dict:

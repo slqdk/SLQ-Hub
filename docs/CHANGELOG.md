@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.103.0 - 2026-11-27
+
+- Sketch, Dimension: click a line and a box appears beside it with its
+  length - type the mm and press Enter (Esc closes it). Click a circle for
+  its diameter, a rectangle's side for its width or height. Click a
+  dimension again to change it. The shape's distances stay when its size
+  changes.
+- Clicking a shape and then another shape's side (or the face's edge)
+  still makes a distance; its mm are typed in the same box.
+- Extrude and Cut now switch the view to Fit, so you see the new part in
+  3D.
+- Fixed: while sketching, what Extrude would make is shown flat on the
+  plane - it no longer looks extruded before you press Extrude.
+
 ## 0.102.1 - 2026-11-27
 
 - Sketch, Dimension: after the first click a red line follows the pointer,

@@ -4,7 +4,23 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## Next session - start here (written 2026-11-27, at 0.102.1)
+## Next session - start here (written 2026-11-27, at 0.103.0)
+
+**0.103.0 (2026-11-27): a line's length in a box beside it; Fit after Extrude; a flat preview - pushed, not yet
+installed.** Søren, 09:35-09:38, three screenshots of 0.102.1: "Jeg burde kunne trykke på en linie, og så definere
+længden på linien i et inputfelt ved siden af linien, når dimention er valgt"; "og når man trykker Extrude, så skal
+den skifte kamera vinkel til fit"; "og når man har trykket extrude EN gang, og sletter parten igen, så er det som om
+den extrudere alt man tegner, inden man er færdig". Built (DESIGN §8 "The sketch", Sizes and the mm box): with
+Dimension a click on a side draws its length (a circle: its diameter) and opens a box over its mm, focused - type,
+Enter; a second click on another side still makes a distance, typed in the same box; a dimension clicked again gets
+the box; sizes keep the shape's distances. Extrude and Cut go to Fit. The preview of what Extrude makes is 0.05 mm,
+flat (it stood Thickness high - 50 in his picture - its walls showing in perspective). Seen in the dev server (light
+and dark): a 87 x 77 rectangle's bottom side - box "87", typed 40; a circle's edge - "Ø 17.03", then the
+rectangle's left side - the distance 34.98, typed 15; the circle again, typed 12 - the 15 kept; a line's first side
+50 typed with the view focused; the 40 clicked - its box, Esc - nothing changed; Extrude - Fit; the part deleted, a
+new sketch - flat; a box's top face: a side typed 12, turned - flat, no flicker; Cut - Fit. No console errors.
+Tests: lengths (a held end), widths and heights drawn either way, diameters, the distance kept, how each is drawn
+and picked. Not seen: his mouse and screen; a size at a zoom where 20 px is less than a mm crowds its side.
 
 **0.102.1 (2026-11-27): you see a distance being made - pushed, not yet installed.** Søren, 08:05, with 0.102.0 on
 the card (a Ø20.59 circle at 40 and 70 from his shape's sides): "Vis gerne en streg når man klikker første målepunkt i
@@ -2615,6 +2631,14 @@ flow, see "Next session". |
       converter's cases are ComfyUI 0.42.3's own templates; files from other sites (Civitai, OpenArt) are
       untried - an export is the way to see what went wrong. When COMFYUI_REF changes, the editor's format may
       too: tools/workflow_oracle/ (convert.js, compare.py) is how the converter was checked - run it again.
+122. **Sketch: sizes, the mm box, Fit after Extrude (0.103.0)** - in the tests and the dev server's headless Chromium:
+    - **His hand**: a click on a side opens the box at once, focused (SolidWorks opens its Modify box once the
+      dimension is placed, a click later) - right for him? Is 20 px out from the side a good place for the length and
+      its box, at his zoom?
+    - **Which end moves**: a line's side moves its free end (the end no other size holds), a rectangle's width its
+      second corner - does he expect the middle to stay instead? A shape's distances are kept; another shape's
+      distance to a side that moved is not.
+    - **Fit**: Extrude and Cut now show the whole design - or would he rather see the part made, zoomed on it?
 121. **Sketch: drag, flat view, distances (0.101.1, 0.102.0)** - in the tests and the dev server's headless Chromium:
     - **His hand**: does drawing by dragging (SolidWorks' click-drag) feel right, and Pick moving the view with the left
       button, the middle button turning it? A click with a little jitter (over 4 px) with a drawing tool now draws a

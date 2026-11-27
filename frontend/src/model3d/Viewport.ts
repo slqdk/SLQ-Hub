@@ -77,6 +77,7 @@ export class Viewport {
   private bed: Vec3 = [256, 256, 256];
   private raycaster = new THREE.Raycaster();
   private labels: { at: Vec3; el: HTMLElement }[] = [];
+  private pinned: { at: Vec3; el: HTMLElement } | null = null;
   private labelBox = document.createElement("div");
   onChange: (() => void) | null = null;
 
@@ -160,7 +161,7 @@ export class Viewport {
     this.frame = requestAnimationFrame(() => {
       this.frame = 0;
       this.renderer.render(this.scene, this.camera);
-      if (this.labels.length) this.placeLabels();
+      if (this.labels.length || this.pinned) this.placeLabels();
     });
   }
 
@@ -327,8 +328,15 @@ export class Viewport {
     this.render();
   }
 
+  /** An element of the page kept over a point of the model as the view moves, as a label is (0.103.0: a dimension's mm
+   *  box, beside its line) - null: none. */
+  pin(el: HTMLElement | null, at: Vec3 | null): void {
+    this.pinned = el && at ? { el, at } : null;
+    if (this.pinned) this.placeLabels();
+  }
+
   private placeLabels(): void {
-    for (const { at, el } of this.labels) {
+    for (const { at, el } of this.pinned ? [...this.labels, this.pinned] : this.labels) {
       const p = this.toScreen(at);
       el.hidden = !p;
       if (p) el.style.transform = `translate(${Math.round(p[0])}px, ${Math.round(p[1])}px) translate(-50%, -50%)`;

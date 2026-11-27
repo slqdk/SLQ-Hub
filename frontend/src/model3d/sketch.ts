@@ -144,7 +144,13 @@ function inside([x, y]: Point2, poly: Point2[]): boolean {
 
 /** A distance: from shape `shape` to a side of shape `to.shape` (its `seg`th, as strokesOf draws it) or to the face's
  *  edge `to.edge` (0 bottom, 1 right, 2 top, 3 left); `middle`: from the shape's middle, else its nearest point. */
-export interface SketchDim { shape: number; to: { shape: number; seg: number } | { edge: number }; middle?: boolean }
+export interface SketchDistance { shape: number; to: { shape: number; seg: number } | { edge: number }; middle?: boolean }
+/** A size (0.103.0 - Søren: "Jeg burde kunne trykke på en linie, og så definere længden på linien i et inputfelt ved
+ *  siden af linien"): the length of shape `shape`'s `side`th side - a line's or a rectangle's - or a circle's diameter
+ *  (side 0). */
+export interface SketchSize { shape: number; side: number }
+export type SketchDim = SketchDistance | SketchSize;
+export const isDistance = (d: SketchDim): d is SketchDistance => "to" in d;
 
 /** The sides of a shape a distance can go to: a line's (open or closed), a rectangle's - a circle has none. */
 export function sidesOf(s: SketchShape): [Point2, Point2][] {
@@ -173,6 +179,7 @@ export function middleOf(s: SketchShape): Point2 {
  *  unit direction from the line toward the shape - the one a value set moves it along. null: what it names is gone. */
 export function measure(shapes: SketchShape[], f: PlaneFrame, d: SketchDim):
   { value: number; from: Point2; foot: Point2; n: Point2; a: Point2; b: Point2 } | null {
+  if (!isDistance(d)) return null;                     // a size: dimLook, sizeOf
   const s = shapes[d.shape];
   const side = "edge" in d.to ? faceEdges(f)[d.to.edge] : shapes[d.to.shape] ? sidesOf(shapes[d.to.shape])[d.to.seg] : undefined;
   if (!s || !side) return null;
@@ -203,9 +210,10 @@ export function moveShape(s: SketchShape, by: Point2): SketchShape {
 }
 
 /** The shapes with distance `i` set to `value` mm: its shape moved square to its line - holding the latest other
- *  distance of that shape that runs another way. null when it names what is gone. */
+ *  distance of that shape that runs another way. A size: setSize. null when it names what is gone. */
 export function setDim(shapes: SketchShape[], f: PlaneFrame, dims: SketchDim[], i: number, value: number):
   SketchShape[] | null {
+  if (dims[i] && !isDistance(dims[i])) return setSize(shapes, f, dims, i, value);
   const d = dims[i], m = d ? measure(shapes, f, d) : null;
   if (!d || !m) return null;
   const want = value - m.value;
@@ -220,9 +228,104 @@ export function setDim(shapes: SketchShape[], f: PlaneFrame, dims: SketchDim[], 
   return shapes.map((s, k) => (k === d.shape ? moveShape(s, by) : s));
 }
 
+/** How long a size is: its side, or its circle's diameter - null when it is gone. */
+export function sizeOf(shapes: SketchShape[], d: SketchSize): number | null {
+  const s = shapes[d.shape];
+  if (!s) return null;
+  if (s.kind === "circle") return 2 * s.r;
+  const e = sidesOf(s)[d.side];
+  return e ? Math.hypot(e[1][0] - e[0][0], e[1][1] - e[0][1]) : null;
+}
+
+/** The shapes with size `i` set to `value` mm (more than 0): a circle's diameter; a rectangle's width or height, its
+ *  first corner where it is; a line's side from the end of it no other size holds - its second end, unless only that
+ *  one is held - the next side going with the end moved, as SolidWorks moves a line's free end. Then the shape's
+ *  distances as they were: it moved back to them, as SolidWorks keeps a sketch's dimensions. */
+function setSize(shapes: SketchShape[], f: PlaneFrame, dims: SketchDim[], i: number, value: number): SketchShape[] | null {
+  const d = dims[i] as SketchSize, s = shapes[d.shape];
+  if (!s || !(value > 0)) return null;
+  let next: SketchShape;
+  if (s.kind === "circle") next = { ...s, r: value / 2 };
+  else if (s.kind === "rect") {
+    const k = d.side % 2, b: Point2 = [s.b[0], s.b[1]];
+    b[k] = s.a[k] + (s.b[k] < s.a[k] ? -1 : 1) * value;
+    next = { ...s, b };
+  } else {
+    const n = s.pts.length, sides = sidesOf(s).length, A = d.side, B = (A + 1) % n;
+    if (A >= sides) return null;
+    const pa = s.pts[A], pb = s.pts[B], len = Math.hypot(pb[0] - pa[0], pb[1] - pa[1]);
+    if (len < 1e-9) return null;
+    const u: Point2 = [(pb[0] - pa[0]) / len, (pb[1] - pa[1]) / len];
+    const held = (v: number) => dims.some((o, j) => j !== i && !isDistance(o) && o.shape === d.shape && o.side < sides
+      && (o.side === v || (o.side + 1) % n === v));
+    const pts = [...s.pts];
+    if (held(B) && !held(A)) pts[A] = [pb[0] - u[0] * value, pb[1] - u[1] * value];
+    else pts[B] = [pa[0] + u[0] * value, pa[1] + u[1] * value];
+    next = { ...s, pts };
+  }
+  let out: SketchShape[] = shapes.map((x, k) => (k === d.shape ? next : x));
+  dims.forEach((o, j) => {                             // its distances held: the latest last, so it wins
+    const was = isDistance(o) && o.shape === d.shape ? measure(shapes, f, o)?.value : undefined;
+    if (was !== undefined) out = setDim(out, f, dims, j, was) ?? out;
+  });
+  return out;
+}
+
+/** Whether two sizes are the same one: of one shape - a rectangle's width (or height) on either of its sides, a
+ *  circle's diameter, a line's side. */
+export function sameSize(shapes: SketchShape[], a: SketchSize, b: SketchSize): boolean {
+  const s = shapes[a.shape];
+  if (!s || a.shape !== b.shape) return false;
+  return s.kind === "circle" || (s.kind === "rect" ? a.side % 2 === b.side % 2 : a.side === b.side);
+}
+
+/** The side of a shape nearest a point (a circle: 0, its diameter). */
+export function sideOf(s: SketchShape, p: Point2): number {
+  let best = 0, gap = Infinity;
+  sidesOf(s).forEach(([a, b], i) => {
+    const g = toSegment(p, a, b);
+    if (g < gap) [gap, best] = [g, i];
+  });
+  return best;
+}
+
+/** How a distance or a size is drawn: its lines, where its mm go, how many mm, what it is - and the line a click picks
+ *  it by. A length runs beside its side, `off` mm out from the shape, with a line from each end (as SolidWorks draws
+ *  one); a diameter from the circle's top up to its mm. */
+export function dimLook(shapes: SketchShape[], f: PlaneFrame, d: SketchDim, off: number): { lines: Point2[][]; label: Point2;
+  value: number; what: "distance" | "length" | "diameter"; pick: [Point2, Point2] } | null {
+  if (isDistance(d)) {
+    const m = measure(shapes, f, d);
+    if (!m) return null;
+    const lines: Point2[][] = [[m.from, m.foot]];
+    const t = (m.foot[0] - m.a[0]) * (m.b[0] - m.a[0]) + (m.foot[1] - m.a[1]) * (m.b[1] - m.a[1]);
+    if (t < 0) lines.push([m.a, m.foot]);
+    else if (t > (m.b[0] - m.a[0]) ** 2 + (m.b[1] - m.a[1]) ** 2) lines.push([m.b, m.foot]);
+    return { lines, label: [(m.from[0] + m.foot[0]) / 2, (m.from[1] + m.foot[1]) / 2], value: m.value, what: "distance",
+      pick: [m.from, m.foot] };
+  }
+  const s = shapes[d.shape];
+  if (!s) return null;
+  if (s.kind === "circle") {
+    const top: Point2 = [s.c[0], s.c[1] + s.r], at: Point2 = [s.c[0], s.c[1] + s.r + off];
+    return { lines: [[top, at]], label: at, value: 2 * s.r, what: "diameter", pick: [top, at] };
+  }
+  const e = sidesOf(s)[d.side];
+  if (!e) return null;
+  const [a, b] = e, len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+  if (len < 1e-9) return null;
+  let n: Point2 = [-(b[1] - a[1]) / len, (b[0] - a[0]) / len];
+  const mid = middleOf(s);
+  if (n[0] * (mid[0] - a[0]) + n[1] * (mid[1] - a[1]) > 1e-9) n = [-n[0], -n[1]];    // out, away from its middle
+  const o = (q: Point2, k: number): Point2 => [q[0] + n[0] * k, q[1] + n[1] * k];
+  return { lines: [[a, o(a, off * 1.3)], [b, o(b, off * 1.3)], [o(a, off), o(b, off)]],
+    label: [(a[0] + b[0]) / 2 + n[0] * off, (a[1] + b[1]) / 2 + n[1] * off], value: len, what: "length",
+    pick: [o(a, off), o(b, off)] };
+}
+
 /** The side nearest a point within `tol` mm - of a shape other than `not`, or the face's edge. */
-export function sideAt(shapes: SketchShape[], f: PlaneFrame, p: Point2, tol: number, not: number): SketchDim["to"] | null {
-  let best: SketchDim["to"] | null = null, gap = tol;
+export function sideAt(shapes: SketchShape[], f: PlaneFrame, p: Point2, tol: number, not: number): SketchDistance["to"] | null {
+  let best: SketchDistance["to"] | null = null, gap = tol;
   shapes.forEach((s, k) => {
     if (k !== not) sidesOf(s).forEach(([a, b], seg) => {
       const g = toSegment(p, a, b);
@@ -236,11 +339,12 @@ export function sideAt(shapes: SketchShape[], f: PlaneFrame, p: Point2, tol: num
   return best;
 }
 
-/** The distance whose line is nearest a point within `tol` mm - null when none is. */
-export function dimAt(shapes: SketchShape[], f: PlaneFrame, dims: SketchDim[], p: Point2, tol: number): number | null {
+/** The distance or size whose line or mm are nearest a point within `tol` mm - null when none is. `off`: as dimLook. */
+export function dimAt(shapes: SketchShape[], f: PlaneFrame, dims: SketchDim[], p: Point2, tol: number, off = 0): number | null {
   let best: number | null = null, gap = tol;
   dims.forEach((d, i) => {
-    const m = measure(shapes, f, d), g = m ? toSegment(p, m.from, m.foot) : Infinity;
+    const look = dimLook(shapes, f, d, off);
+    const g = look ? Math.min(toSegment(p, ...look.pick), Math.hypot(p[0] - look.label[0], p[1] - look.label[1])) : Infinity;
     if (g < gap) [gap, best] = [g, i];
   });
   return best;
@@ -248,9 +352,11 @@ export function dimAt(shapes: SketchShape[], f: PlaneFrame, dims: SketchDim[], p
 
 /** The distances once shape `k` is taken away: those from it or to it gone, the shapes after it one back. */
 export function dimsWithout(dims: SketchDim[], k: number): SketchDim[] {
-  return dims.filter((d) => d.shape !== k && !("shape" in d.to && d.to.shape === k)).map((d) => ({
-    ...d, shape: d.shape > k ? d.shape - 1 : d.shape,
-    to: "shape" in d.to && d.to.shape > k ? { ...d.to, shape: d.to.shape - 1 } : d.to }));
+  return dims.filter((d) => d.shape !== k && !(isDistance(d) && "shape" in d.to && d.to.shape === k)).map((d) => {
+    const shape = d.shape > k ? d.shape - 1 : d.shape;
+    if (!isDistance(d)) return { ...d, shape };
+    return { ...d, shape, to: "shape" in d.to && d.to.shape > k ? { ...d.to, shape: d.to.shape - 1 } : d.to };
+  });
 }
 
 /** The regions the closed shapes make: each one's outline and the holes in it. A shape with every corner inside a

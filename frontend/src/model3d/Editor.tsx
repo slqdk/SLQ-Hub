@@ -33,9 +33,9 @@ import { parseMesh } from "./meshio";
 import { lastPrinter, PRINTERS, printerOf, rememberPrinter, type Printer } from "./printers";
 import { centre, copy, cuts, cutters, find, group, insertAfter, label, onCopies, pick, remove, replaceWith, riders, ungroup,
   update } from "./tree";
-import { dimAt, dimsWithout, distanceTo, loopOf, measure, middleOf, planeFrame, planeName, rayOnPlane, setDim, sideAt, sketchParts,
-  sketchRegions, snapPoints, strokesOf, to3d, type PlaneFrame, type SketchDim, type SketchPlane,
-  type SketchShape } from "./sketch";
+import { dimAt, dimLook, dimsWithout, distanceTo, isDistance, loopOf, measure, middleOf, planeFrame, planeName, rayOnPlane,
+  sameSize, setDim, sideAt, sideOf, sketchParts, sketchRegions, snapPoints, strokesOf, to3d, type PlaneFrame, type SketchDim,
+  type SketchDistance, type SketchPlane, type SketchShape, type SketchSize } from "./sketch";
 import { Viewport, type Hit, type ViewName } from "./Viewport";
 
 // Select (0.96.0): a click only picks - no handles, nothing moves; Move, Turn and Size show their handles.
@@ -300,6 +300,7 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
   const dragging = useRef(false);
   const alive = useRef(true);
   const firstView = useRef(true);
+  const fitNext = useRef(false);                       // Extrude, Cut (0.103.0): the Fit view once it is built
   const skipOpen = useRef<string | null>(null);
   const shown3d = useRef<string[] | null>(null);      // parts just added: the view widens when they are out of it
   const designPath = useRef(path);              // where the design is saved (an STL's: <name>.3d.json beside it)
@@ -604,8 +605,9 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
       });
       walk(design.parts);
       v.setGhosts(holes);
-      if (firstView.current && (b.box || holes.length)) {
+      if ((firstView.current || fitNext.current) && (b.box || holes.length)) {
         firstView.current = false;
+        fitNext.current = false;
         shown3d.current = null;
         v.view("home", union([b.box, ...holes.map((h) => h.built.box)]));
       }
@@ -691,31 +693,30 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
       if (sh?.kind === "rect") words.push({ at: mid(sh.a, sh.b), text: `${fmt(Math.abs(sh.b[0] - sh.a[0]))} x ${fmt(Math.abs(sh.b[1] - sh.a[1]))}` });
       if (sh?.kind === "circle") words.push({ at: to3d(f, sh.c), text: `Ø${fmt(2 * sh.r)}` });
       if (to && sketch.tool !== "dim") words.push({ at: to3d(f, to), text: "", kind: hoverPt?.snapped ? "snap" : "dot" });
-      // Distances (0.102.0): red, square to their lines - an extension along the line when it ends short of the foot -
-      // their mm at the middle; the picked one wider, what is typed beside it.
+      // Distances (0.102.0) and sizes (0.103.0), red: a distance square to its line - an extension along the line when it
+      // ends short of the foot; a length beside its side, from a line at each end; a diameter up from the circle's top -
+      // their mm at the middle. The picked one, or the side Dimension clicked, wider - its mm in the box (below).
+      const off = dimOff(v, f), clicked: SketchSize | null = d?.kind === "dim" ? { shape: d.shape, side: d.side } : null;
       const dimLines: Vec3[][] = [], dimPicked: Vec3[][] = [];
       sketch.dims.forEach((dd, i) => {
-        const m = measure(sketch.shapes, f, dd);
-        if (!m) return;
-        const lines = i === sketch.dim ? dimPicked : dimLines;
-        lines.push(w3([m.from, m.foot]));
-        const t = (m.foot[0] - m.a[0]) * (m.b[0] - m.a[0]) + (m.foot[1] - m.a[1]) * (m.b[1] - m.a[1]);
-        const len2 = (m.b[0] - m.a[0]) ** 2 + (m.b[1] - m.a[1]) ** 2;
-        if (t < 0) lines.push(w3([m.a, m.foot]));
-        else if (t > len2) lines.push(w3([m.b, m.foot]));
-        const at3 = mid(m.from, m.foot);
-        words.push({ at: at3, text: fmt(m.value), kind: i === sketch.dim ? "dimon" : "dim" });
-        if (i === sketch.dim && sketch.typed) words.push({ at: at3, text: `${sketch.typed}|`, kind: "typed" });
+        if (clicked && !isDistance(dd) && sameSize(sketch.shapes, dd, clicked)) return;   // drawn as being set
+        const look = dimLook(sketch.shapes, f, dd, off);
+        if (!look) return;
+        (i === sketch.dim ? dimPicked : dimLines).push(...look.lines.map(w3));
+        if (i !== sketch.dim) words.push({ at: to3d(f, look.label), text: `${look.what === "diameter" ? "Ø" : ""}${fmt(look.value)}`, kind: "dim" });
       });
+      const sized = clicked ? dimLook(sketch.shapes, f, clicked, off) : null;
+      if (sized) dimPicked.push(...sized.lines.map(w3));
       if (dimLines.length) list.push({ lines: dimLines, tone: "fault", width: 1.5 });
       if (dimPicked.length) list.push({ lines: dimPicked, tone: "fault", width: 3 });
       // Being made (0.102.1 - Søren: "Vis gerne en streg når man klikker første målepunkt ... så man kan se at man er i
       // gang med at måle"): over a side it can go to, the distance it would make and that side; else a line from the
-      // shape - a circle's edge toward the pointer, another's middle - to the pointer.
+      // shape - a circle's edge toward the pointer, another's middle - to the pointer: once it is off the shape
+      // (0.103.0: on it, its size is in the box).
       const first = d?.kind === "dim" ? sketch.shapes[d.shape] : null;
-      if (d?.kind === "dim" && first && hoverPt) {
-        const raw = hoverPt.raw ?? hoverPt.p;
-        const side = sideAt(sketch.shapes, f, raw, 8 * v.mmPerPx(to3d(f, raw)), d.shape);
+      const raw = hoverPt ? hoverPt.raw ?? hoverPt.p : null, near = raw ? 8 * v.mmPerPx(to3d(f, raw)) : 0;
+      if (d?.kind === "dim" && first && raw) {
+        const side = sideAt(sketch.shapes, f, raw, near, d.shape);
         const m = side ? measure(sketch.shapes, f, { shape: d.shape, to: side }) : null;
         if (m) {
           const lines = [w3([m.from, m.foot])];
@@ -724,7 +725,7 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
           else if (t > (m.b[0] - m.a[0]) ** 2 + (m.b[1] - m.a[1]) ** 2) lines.push(w3([m.b, m.foot]));
           list.push({ lines, tone: "fault", width: 2 }, { lines: [w3([m.a, m.b])], hover: true });
           words.push({ at: mid(m.from, m.foot), text: fmt(m.value), kind: "dim" });
-        } else {
+        } else if (distanceTo(first, raw) > near) {
           let start = middleOf(first);
           if (first.kind === "circle") {
             const gx = raw[0] - first.c[0], gy = raw[1] - first.c[1], gl = Math.hypot(gx, gy);
@@ -782,7 +783,9 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
   }, [design, edgeSel, hoverEdge, ready, facing, faceBox, faceSel, feature.round, feature.size, tab, selected, sketch, hoverPt,
     tool, mating]);
 
-  // What Extrude would make of the sketch (0.100.0), shown as it would stand - the rest faded while there is any.
+  // What Extrude would make of the sketch (0.100.0): the closed shapes, filled - flat on the plane (0.103.0 - Søren:
+  // "så er det som om den extrudere alt man tegner, inden man er færdig": 50 mm high, seen from above, it stood out past
+  // what was drawn); the rest faded while there is any.
   useEffect(() => {
     const v = vp.current, k = kit.current;
     if (!v || !ready || !k || !sketch) return;
@@ -792,11 +795,11 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
       return;
     }
     let n = 0;
-    const made = sketchParts(sketch.plane, sketch.shapes, at.box, { cut: false, depth: sketchMake.height, through: false,
-      reach: 0 }, () => `preview${++n}`, "Sketch");
+    const made = sketchParts(sketch.plane, sketch.shapes, at.box, { cut: false, depth: 0.05, through: false, reach: 0 },
+      () => `preview${++n}`, "Sketch");
     v.setPreview(made.map((p) => ({ built: buildPart(p.on && at.box ? placeOn(p, at.box) : p, k),
       color: at.box?.color ?? "#e8a33d" })));
-  }, [sketch?.shapes, sketch?.plane, sketchMake.height, design, ready]);
+  }, [sketch?.shapes, sketch?.plane, design, ready]);
 
   useEffect(() => {                                   // a sketch is 2D (0.101.1): the left button draws or moves it
     vp.current?.setLeft(!sketch ? "turn" : sketch.tool ? "draw" : "pan");
@@ -1178,23 +1181,32 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
       });
       return picked;
     };
+    const off = dimOff(v, at.f);                       // a length's line beside its side (0.103.0), as drawn
     if (!s.tool) {                                     // a distance's line first (0.102.0), then a shape
-      const dim = dimAt(s.shapes, at.f, s.dims, raw, tol);
+      const dim = dimAt(s.shapes, at.f, s.dims, raw, tol, off);
       setSketch(dim !== null ? { ...s, dim, picked: s.dims[dim].shape, typed: "" }
         : { ...s, picked: shapeAt(raw), dim: null, typed: "" });
       return;
     }
-    if (s.tool === "dim") {                            // Dimension (0.102.0): the shape that moves, then a line
+    if (s.tool === "dim") {
+      // Dimension (0.102.0, 0.103.0): a line clicked - its length in a box beside it (a circle: its diameter), typed
+      // and Enter; or then another shape's side - a distance from it to that line. A distance or size clicked: its box.
       const to = d?.kind === "dim" ? sideAt(s.shapes, at.f, raw, tol, d.shape) : null;
       if (d?.kind === "dim" && to) {
-        const made: SketchDim = { shape: d.shape, to };
-        const had = s.dims.findIndex((x) => x.shape === made.shape && JSON.stringify(x.to) === JSON.stringify(to));
+        const made: SketchDistance = { shape: d.shape, to };
+        const had = s.dims.findIndex((x) => isDistance(x) && x.shape === made.shape && JSON.stringify(x.to) === JSON.stringify(to));
         if (had >= 0) return setSketch({ ...s, draft: null, dim: had, picked: d.shape, typed: "" });
         return setSketch({ ...s, dims: [...s.dims, made], dim: s.dims.length, draft: null, picked: d.shape, typed: "",
           past: [...s.past, snapOf(s)] });
       }
+      const dim = d ? null : dimAt(s.shapes, at.f, s.dims, raw, tol, off);
+      if (dim !== null) return setSketch({ ...s, dim, picked: s.dims[dim].shape, draft: null, typed: "" });
       const k = shapeAt(raw);
-      if (k !== null) setSketch({ ...s, draft: { kind: "dim", shape: k }, picked: k, dim: null, typed: "" });
+      if (k !== null) {
+        return setSketch({ ...s, draft: { kind: "dim", shape: k, side: sideOf(s.shapes[k], raw) }, picked: k, dim: null,
+          typed: "" });
+      }
+      if (d || s.dim !== null) setSketch({ ...s, draft: null, dim: null, picked: null });   // clicked away: nothing made
       return;
     }
     if (s.tool === "line") {
@@ -1222,11 +1234,7 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
    *  diameter. */
   const sketchTyped = (s: SketchState): SketchState | null => {
     const nums = s.typed.split(/[;x* ]+/i).filter(Boolean).map((t) => Number(t.replace(",", ".")));
-    if (!s.draft && s.dim !== null) {                  // a distance picked (0.102.0): its shape moved to it
-      const f = sketchFrame(s)?.f, shapes = f && nums.length && nums[0] >= 0 ? setDim(s.shapes, f, s.dims, s.dim, nums[0]) : null;
-      return shapes ? { ...s, shapes, typed: "", past: [...s.past, snapOf(s)] } : null;
-    }
-    if (s.draft?.kind === "dim") return null;
+    if (!s.draft || s.draft.kind === "dim") return null;   // a distance's or size's mm: its box (0.103.0)
     if (!nums.length || nums.some((x) => !Number.isFinite(x) || x <= 0) || !s.draft) return null;
     const to = hoverRef.current?.p;
     const d = s.draft;
@@ -1257,6 +1265,33 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
     return { ...s, picked: null };
   };
 
+  /** The mm box (0.103.0): Enter - the size clicked (made a size, kept) or the distance or size picked set to what is
+   *  in it; the shape moves. Esc closes it, nothing changed. Either way the view has the keys again. */
+  const boxDone = (apply: boolean, text: string) => {
+    const s = sketchRef.current, f = sketchFrame(s)?.f;
+    if (!s || !f) return;
+    const draft = s.draft?.kind === "dim" ? s.draft : null;
+    if (apply) {
+      const mm = Number(text.trim().replace(",", "."));
+      let dims = s.dims, i = s.dim;
+      if (draft) {                                     // the side clicked: its size - the one there (moved to that
+        const made: SketchSize = { shape: draft.shape, side: draft.side };   // side), or a new one
+        const had = dims.findIndex((x) => !isDistance(x) && sameSize(s.shapes, x, made));
+        i = had >= 0 ? had : dims.length;
+        dims = had >= 0 ? dims.map((x, k) => (k === had ? made : x)) : [...dims, made];
+      }
+      if (i === null || !dims[i]) return;
+      const size = !isDistance(dims[i]);
+      const shapes = Number.isFinite(mm) && (size ? mm > 0 : mm >= 0) && text.trim() ? setDim(s.shapes, f, dims, i, mm) : null;
+      if (!shapes) {
+        toast(size ? "A length or a diameter is a number of mm above 0." : "A distance is a number of mm, 0 or more.", "fault");
+        return;
+      }
+      setSketch({ ...s, shapes, dims, draft: null, dim: null, picked: null, typed: "", past: [...s.past, snapOf(s)] });
+    } else setSketch({ ...s, draft: draft ? null : s.draft, dim: null, typed: "" });
+    host.current?.focus({ preventScroll: true });
+  };
+
   /** Undo in the sketch: the shapes and distances as they were before the last change. */
   const undoSketch = (s: SketchState): SketchState | null => {
     const before = s.past[s.past.length - 1];
@@ -1280,7 +1315,13 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
     if (ctrl && k.toLowerCase() === "z") return set(undoSketch(s));
     if (ctrl || e.altKey) return;
     if ((s.draft && s.draft.kind !== "dim") && /^[0-9.,;x* ]$/i.test(k)) return set({ ...s, typed: s.typed + k });
-    if (!s.draft && s.dim !== null && /^[0-9.,]$/.test(k)) return set({ ...s, typed: s.typed + k });
+    const box = boxIn.current;                         // the mm box open, the view focused: what is typed goes in it
+    if (box && (s.draft?.kind === "dim" || s.dim !== null) && /^[0-9.,]$/.test(k)) {
+      e.preventDefault();
+      box.focus({ preventScroll: true });
+      box.value = k;
+      return;
+    }
     if (k === "Enter") {
       if (s.typed) return set(sketchTyped(s) ?? { ...s, typed: "" });
       return set(s.draft?.kind === "line" ? sketchEscape(s) : null);
@@ -1318,7 +1359,8 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
     let ps = d.parts;
     if (at.box) for (const p of [...made].reverse()) ps = insertAfter(ps, at.box.id, p);
     else ps = [...ps, ...made];
-    shown3d.current = made.map((p) => p.id);
+    shown3d.current = null;
+    fitNext.current = true;                            // then the Fit view, the part made in 3D (0.103.0)
     commit({ ...d, parts: ps });
     setSketch(null);
     setHoverPt(null);
@@ -2010,11 +2052,36 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
     const f = all.length === 1 ? find(parts, all[0][0]) : null;
     return f ? edgeLength(f.part, all[0][1]) : null;
   })();
+  // The mm box (0.103.0 - Søren: "Jeg burde kunne trykke på en linie, og så definere længden på linien i et inputfelt ved
+  // siden af linien, når dimention er valgt"): over the mm of the side Dimension clicked - its length, a circle's
+  // diameter - or of the distance or size picked. Enter sets it, Esc closes it.
+  const boxFor = (() => {
+    const v = vp.current, at = sketch ? sketchFrame(sketch) : null;
+    if (!sketch || !at || !v) return null;
+    const d = sketch.draft?.kind === "dim" ? sketch.draft : null;
+    const dd: SketchDim | undefined = d ? { shape: d.shape, side: d.side } : sketch.dim !== null ? sketch.dims[sketch.dim] : undefined;
+    const look = dd ? dimLook(sketch.shapes, at.f, dd, dimOff(v, at.f)) : null;
+    return look ? { key: `${d ? `s${d.shape}.${d.side}` : `d${sketch.dim}`}:${fmt(look.value)}`, at: to3d(at.f, look.label),
+      value: look.value, what: look.what } : null;
+  })();
+  const boxEl = useRef<HTMLSpanElement>(null), boxIn = useRef<HTMLInputElement>(null);
+  const boxPin = boxFor ? `${boxFor.key}@${boxFor.at.map((x) => x.toFixed(3)).join(",")}` : "";
+  useLayoutEffect(() => {                              // kept over its mm as the view moves, as the mm are
+    vp.current?.pin(boxPin ? boxEl.current : null, boxFor?.at ?? null);
+  }, [boxPin]);
+  useEffect(() => {                                    // it takes the keys - once the press that opened it has
+    if (!boxFor) return;                               // focused the view
+    const t = window.setTimeout(() => {
+      boxIn.current?.focus({ preventScroll: true });
+      boxIn.current?.select();
+    }, 0);
+    return () => window.clearTimeout(t);
+  }, [boxFor?.key]);
   // What the band shows: a change folds its groups afresh to the room there is (0.94.0).
   const fitKey = [shownTab, faceSel?.face, feature.round, feature.through, one?.on ? `${one.on.face}${one.on.through ? "t" : ""}` : "",
     one?.mates?.length ?? 0, mateNotes.length,
     sketch ? `${sketch.picked !== null ? sketch.shapes[sketch.picked]?.kind : "-"}${sketchMake.through}${sketch.shapes.length > 0}`
-      + `${sketch.dim !== null ? "d" : ""}` : "",
+      + `${sketch.dim !== null && sketch.dims[sketch.dim] ? dimWhat(sketch.shapes, sketch.dims[sketch.dim]) : ""}` : "",
     selected.join(","), items.map((x) => `${x.shape}${x.radius ? "r" : ""}${x.repeat ? (x.repeat.step ? "s" : "a")
     : ""}${x.hole ? "h" : ""}`).join(","), pickedEdges, one ? (edgeSel[one.id] ?? []).length : 0, oneLine ? 1 : 0].join("|");
   // A mate that cannot be met (0.101.0) as it is now - not as it was when the file was read.
@@ -2096,13 +2163,14 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
               onUndo={() => { const u = undoSketch(sketch); if (u) setSketch(u); }}
               onShape={(sh) => sketch.picked !== null && setSketch({ ...sketch, shapes: sketch.shapes.map((x, i) => (i === sketch.picked ? sh : x)),
                 past: [...sketch.past, snapOf(sketch)] })}
-              measured={sketch.dim !== null ? measure(sketch.shapes, sketchFrame(sketch)!.f, sketch.dims[sketch.dim])?.value ?? null : null}
+              measured={sketch.dim !== null && vp.current && sketchFrame(sketch)
+                ? dimLook(sketch.shapes, sketchFrame(sketch)!.f, sketch.dims[sketch.dim], 0) : null}
               onDim={(v) => {
                 const f = sketchFrame(sketch)?.f, shapes = f && sketch.dim !== null ? setDim(sketch.shapes, f, sketch.dims, sketch.dim, v) : null;
                 if (shapes) setSketch({ ...sketch, shapes, typed: "", past: [...sketch.past, snapOf(sketch)] });
               }}
               onDimMiddle={() => sketch.dim !== null && setSketch({ ...sketch, dims: sketch.dims.map((x, i) => (i === sketch.dim
-                ? { ...x, middle: !x.middle || undefined } : x)), past: [...sketch.past, snapOf(sketch)] })}
+                && isDistance(x) ? { ...x, middle: !x.middle || undefined } : x)), past: [...sketch.past, snapOf(sketch)] })}
               onExtrude={() => endSketch(false)} onCut={() => endSketch(true)} onCancel={cancelSketch} />
           )}
           {shownTab === "insert" && (
@@ -2197,6 +2265,22 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
           onPointerMove={onPointerMove} onPointerUp={onPointerUp} onDoubleClick={onDoubleClick}
           onPointerLeave={() => { cancelAnimationFrame(hoverFrame.current); setHoverEdge(null); }}
           aria-label="The design in 3D. Drag to turn the view, right-drag to pan, scroll to zoom. Click a part to pick it, a box's face to put something on it, a line to pick the line." />
+        {boxFor && (
+          <span ref={boxEl} className="v3d-dimbox">
+            {boxFor.what === "diameter" && <span aria-hidden="true">Ø</span>}
+            <input key={boxFor.key} ref={boxIn} className="num" defaultValue={fmt(boxFor.value)} inputMode="decimal"
+              aria-label={`${DIM_NAME[boxFor.what]}, mm - Enter sets it, Esc closes it`}
+              title={`${DIM_NAME[boxFor.what]}, mm - type it and Enter; Esc closes the box`}
+              onFocus={(e) => e.target.select()}
+              onKeyDown={(e) => {
+                if (e.key !== "Enter" && e.key !== "Escape") return;
+                e.preventDefault();
+                e.stopPropagation();
+                boxDone(e.key === "Enter", e.currentTarget.value);
+              }} />
+            <span aria-hidden="true">mm</span>
+          </span>
+        )}
         {resizing && (
           <div className="v3d-resize" style={{ left: resizing.x, top: resizing.y }} role="dialog" aria-label={`${resizing.what} of the line`}>
             <label>
@@ -2232,7 +2316,7 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
                   onClick={() => setSketch({ ...sketch, tool: "rect", draft: null, typed: "", picked: null, dim: null })}><span>Rectangle</span></Tool>
                 <Tool icon={<Circle size={16} />} title="Circle: its middle, then its edge - clicked or dragged (C)" active={sketch.tool === "circle"}
                   onClick={() => setSketch({ ...sketch, tool: "circle", draft: null, typed: "", picked: null, dim: null })}><span>Circle</span></Tool>
-                <Tool icon={<RulerDimensionLine size={16} />} title="Dimension: click the shape that moves, then the line it is measured to - then type the mm (D)"
+                <Tool icon={<RulerDimensionLine size={16} />} title="Dimension: click a line for its length, a circle for its diameter - or a shape, then the line it is measured to; type the mm in the box (D)"
                   active={sketch.tool === "dim"} onClick={() => setSketch({ ...sketch, tool: "dim", draft: null, typed: "", picked: null, dim: null })}>
                   <span>Dimension</span></Tool>
                 <span className="v3d-sep" />
@@ -2336,7 +2420,7 @@ type Feature = { round: boolean; size: number; through: boolean; depth: number; 
  *  length; what it was before each shape (Undo); its number, for its parts' names. */
 type SketchTool = "line" | "rect" | "circle" | "dim";
 type Draft = { kind: "line"; pts: Point2[] } | { kind: "rect"; a: Point2 } | { kind: "circle"; c: Point2 }
-  | { kind: "dim"; shape: number };                     // Dimension's first click: the shape that moves (0.102.0)
+  | { kind: "dim"; shape: number; side: number };       // Dimension's first click (0.102.0): the shape, its side clicked
 /** What Undo goes back to: the shapes and their distances. */
 type SketchSnap = { shapes: SketchShape[]; dims: SketchDim[] };
 type SketchState = { plane: SketchPlane; shapes: SketchShape[]; tool: SketchTool | null; draft: Draft | null;
@@ -3001,6 +3085,15 @@ function SketchButton({ onPick }: { onPick: (plane: SketchPlane) => void }) {
   );
 }
 
+/** What a sketch's distance or size is called - on its band group and in the hints. */
+const DIM_NAME = { distance: "Distance", length: "Length", diameter: "Diameter" } as const;
+const dimWhat = (shapes: SketchShape[], d: SketchDim): keyof typeof DIM_NAME =>
+  isDistance(d) ? "distance" : shapes[d.shape]?.kind === "circle" ? "diameter" : "length";
+
+/** How far a length is drawn out from its side (0.103.0): 20 px at the plane's 0,0 - the same for what is drawn and
+ *  what a click picks. */
+const dimOff = (v: Viewport, f: PlaneFrame): number => 20 * v.mmPerPx(to3d(f, [0, 0]));
+
 /** What to do next in a sketch, said under the bar. */
 function sketchHint(s: SketchState, where: string): string {
   const typed = s.typed ? ` Typed: ${s.typed} - Enter puts it down.` : "";
@@ -3011,12 +3104,19 @@ function sketchHint(s: SketchState, where: string): string {
   }
   if (s.tool === "rect") return s.draft ? `Rectangle: click the corner across - or type width;height and Enter.${typed}` : `Rectangle on ${where}: click a corner - or drag from corner to corner.`;
   if (s.tool === "circle") return s.draft ? `Circle: click its edge - or type its diameter and Enter.${typed}` : `Circle on ${where}: click its middle - or drag from its middle to its edge.`;
+  const what = s.dim !== null && s.dims[s.dim] ? dimWhat(s.shapes, s.dims[s.dim]) : "distance";
   if (s.tool === "dim") {
-    return s.draft ? "Dimension: now click the line it is measured to - a side of another shape, or the face's edge."
-      : s.dim !== null ? `Distance picked: type it in mm and Enter - or click the next shape to dimension.${typed}`
-        : "Dimension: click the shape that moves - then the line it is measured to - then type the mm and Enter.";
+    const d = s.draft?.kind === "dim" ? s.draft : null;
+    return d ? `Dimension: type the ${s.shapes[d.shape]?.kind === "circle" ? "diameter" : "length"} in the box and Enter - `
+      + "or click another shape's side, or the face's edge, for the distance to it."
+      : s.dim !== null ? `${DIM_NAME[what]} picked: type the mm in the box and Enter (Esc closes it) - or click the next line.`
+        : "Dimension: click a line for its length, a circle for its diameter - or a shape, then the line it is measured to. "
+          + "Type the mm in the box beside it and Enter.";
   }
-  if (s.dim !== null) return `Distance picked: type it in mm and Enter - Delete takes it away (the shape stays).${typed}`;
+  if (s.dim !== null) {
+    return `${DIM_NAME[what]} picked: type the mm in the box and Enter (Esc closes it) - Delete in the bar takes it away `
+      + "(the shape stays).";
+  }
   return "Click a shape or a distance to pick it - Delete takes it away; L, R and C draw, D dimensions. Drag to move the view "
     + "(the middle button turns it). Extrude or Cut makes the closed shapes into parts.";
 }
@@ -3027,7 +3127,8 @@ function SketchBand({ sketch, where, make, onMake, closed, onTool, onDelete, onU
   measured, onDim, onDimMiddle }: {
   sketch: SketchState; where: string; make: SketchMake; onMake: (m: Partial<SketchMake>) => void; closed: number;
   onTool: (t: SketchTool | null) => void; onDelete: () => void; onUndo: () => void; onShape: (s: SketchShape) => void;
-  onExtrude: () => void; onCut: () => void; onCancel: () => void; measured: number | null; onDim: (mm: number) => void;
+  onExtrude: () => void; onCut: () => void; onCancel: () => void;
+  measured: { value: number; what: "distance" | "length" | "diameter" } | null; onDim: (mm: number) => void;
   onDimMiddle: () => void }) {
   const dim = sketch.dim !== null ? sketch.dims[sketch.dim] : null;
   const sh = sketch.picked !== null && !dim ? sketch.shapes[sketch.picked] : null;
@@ -3046,7 +3147,7 @@ function SketchBand({ sketch, where, make, onMake, closed, onTool, onDelete, onU
         <Big icon={<Circle size={20} />} label="Circle" active={sketch.tool === "circle"} onClick={() => onTool("circle")}
           title="Circle: its middle, then its edge - clicked or dragged (C)" />
         <Big icon={<RulerDimensionLine size={20} />} label="Dimension" active={sketch.tool === "dim"} onClick={() => onTool("dim")}
-          title="Smart Dimension: click the shape that moves, then the line it is measured to - a side of another shape or the face's edge - then type the mm and Enter (D)" />
+          title="Smart Dimension: click a line for its length, a circle for its diameter - or a shape, then the line it is measured to (a side of another shape or the face's edge); type the mm in the box beside it and Enter (D)" />
       </Grp>
       <Grp label="Change" fold={1} icon={<Undo2 size={20} />}>
         <Stack>
@@ -3090,14 +3191,19 @@ function SketchBand({ sketch, where, make, onMake, closed, onTool, onDelete, onU
           )}
         </Grp>
       )}
-      {dim && measured !== null && (
-        <Grp label="Distance" fold={2} icon={<RulerDimensionLine size={20} />}>
+      {dim && measured && (
+        <Grp label={DIM_NAME[measured.what]} fold={2} icon={<RulerDimensionLine size={20} />}>
           <Stack>
-            <Field label="Distance" unit="mm" value={r3(measured)} min={0} step={1} width={52} onSet={(v) => onDim(Math.max(0, v))}
-              title="How far the shape is from the line, mm - set, the shape moves square to the line (another distance of it stays)" />
-            <Small icon={<Crosshair size={16} />} label="From its middle" active={!!dim.middle} onClick={onDimMiddle}
-              title={dim.middle ? "Measured from the shape's middle - click: from its nearest point, a circle's edge"
-                : "Measured from the shape's nearest point - a circle's edge; click: from its middle"} />
+            <Field label={DIM_NAME[measured.what]} unit="mm" value={r3(measured.value)} min={measured.what === "distance" ? 0 : 0.1}
+              step={1} width={52} onSet={(v) => onDim(measured.what === "distance" ? Math.max(0, v) : Math.max(0.1, v))}
+              title={measured.what === "distance" ? "How far the shape is from the line, mm - set, the shape moves square to the line (another distance of it stays)"
+                : measured.what === "length" ? "The side's length, mm - set, its free end moves; the shape's distances stay"
+                  : "The circle's diameter, mm - set, its middle stays (or its distances, when they are to its edge)"} />
+            {isDistance(dim) && (
+              <Small icon={<Crosshair size={16} />} label="From its middle" active={!!dim.middle} onClick={onDimMiddle}
+                title={dim.middle ? "Measured from the shape's middle - click: from its nearest point, a circle's edge"
+                  : "Measured from the shape's nearest point - a circle's edge; click: from its middle"} />
+            )}
           </Stack>
         </Grp>
       )}
