@@ -8,7 +8,7 @@ import { createContext, Fragment, useCallback, useContext, useEffect, useLayoutE
 import * as THREE from "three";
 import Module from "manifold-3d/manifold";
 import wasmUrl from "manifold-3d/manifold.wasm?url";
-import { AlignCenter, AlignLeft, AlignRight, ArrowDownToLine, ArrowDownUp, Bold, Box, ChevronDown, CircleDashed, CircleDot,
+import { AlignCenter, AlignLeft, AlignRight, ArrowDownToLine, ArrowDownUp, Bold, Box, Check, ChevronDown, CircleDashed, CircleDot,
   Columns3, Cone, Copy, Crosshair, Cylinder, Download, Eraser, Eye, EyeOff, FlipHorizontal2, FlipVertical2, Group, Italic,
   ListTree, Magnet, Maximize2, PencilRuler, PenLine, RectangleHorizontal, Circle, ArrowUpFromLine,
   MessageSquareShare, Minimize2, MousePointer2, MousePointerClick, Move3d, PanelBottom, Printer as PrinterIcon,
@@ -33,10 +33,10 @@ import { allIds, boxOfPoints, build, buildPart, COLORS, edgeLength, edgeLines, e
 import { baseName, dirOf, fmt, joinPath, MESH_FILE, pointMark, relativePath } from "./files";
 import { parseMesh } from "./meshio";
 import { lastPrinter, PRINTERS, printerOf, rememberPrinter, type Printer } from "./printers";
-import { centre, copy, cuts, cutters, find, group, insertAfter, label, onCopies, pick, remove, replaceWith, riders, ungroup,
+import { centre, copy, cuts, cutters, find, group, insertAfter, joinTo, label, onCopies, pick, remove, replaceWith, riders, ungroup,
   update } from "./tree";
-import { dimAt, dimLook, dimsWithout, distanceTo, flatPlane, isDistance, loopOf, measure, modelEdges, ownEdges, planeFrame, planeName,
-  rayOnPlane, sameSize, setDim, sideAt, sideOf, sketchParts, sketchRegions, snapPoints, strokesOf, to3d, type PlaneFrame,
+import { angledFrom, dimAt, dimLook, dimsWithout, distanceTo, flatPlane, isDistance, loopOf, measure, modelEdges, ownEdges, planeFrame, planeName,
+  lineNear, onLine, rayOnPlane, regionsBox, sameSize, setDim, sideAt, sideOf, sketchParts, sketchRegions, snapPoints, strokesOf, to3d, type PlaneFrame,
   type SketchDim,
   type SketchDistance, type SketchPlane, type SketchShape, type SketchSize } from "./sketch";
 import { Viewport, type Hit, type ViewName } from "./Viewport";
@@ -276,6 +276,12 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
   const hoverRef = useRef<{ p: Point2; snapped: boolean; raw?: Point2 } | null>(null);
   hoverRef.current = hoverPt;
   const [sketchMake, setSketchMake] = useState<SketchMake>({ height: 5, through: true, depth: 5 });
+  // Extrude or Cut asked (0.109.0, Søren: "Når man vælger Extrude, eller cut, så skal den spørge hvor meget den skal
+  // extrude"): how far, typed in a box over the sketch, the parts shown as they will be - and the tool to go back to.
+  const [asking, setAsking] = useState<Asking | null>(null);
+  const askingRef = useRef<Asking | null>(null);
+  askingRef.current = asking;
+  const askTool = useRef<SketchTool | null>(null);
   // The parts' tree over the view (0.96.1): open or folded, kept for next time - folded at first on a phone.
   const [treeOpen, setTreeOpenState] = useState(() => {
     try {
@@ -820,6 +826,7 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
   // What Extrude would make of the sketch (0.100.0): the closed shapes, filled - flat on the plane (0.103.0 - Søren:
   // "så er det som om den extrudere alt man tegner, inden man er færdig": 50 mm high, seen from above, it stood out past
   // what was drawn); the rest faded while there is any.
+  // Asked how far (0.109.0): what it will make, so thick or so deep - a cut grey.
   useEffect(() => {
     const v = vp.current, k = kit.current;
     if (!v || !ready || !k || !sketch) return;
@@ -829,11 +836,20 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
       return;
     }
     let n = 0;
-    const made = sketchParts(sketch.plane, sketch.shapes, at.box, { cut: false, depth: 0.05, through: false, reach: 0 },
-      () => `preview${++n}`, "Sketch");
+    const how = asking ? { cut: asking.cut, depth: asking.mm, through: asking.cut && asking.through, reach: reachOf() }
+      : { cut: false, depth: 0.05, through: false, reach: 0 };
+    const made = sketchParts(sketch.plane, sketch.shapes, at.box, how, () => `preview${++n}`, "Sketch");
     v.setPreview(made.map((p) => ({ built: buildPart(p.on && at.box ? placeOn(p, at.box) : p, k),
-      color: at.box?.color ?? "#e8a33d" })));
-  }, [sketch?.shapes, sketch?.plane, design, ready]);
+      color: asking?.cut ? GREY : sketchColor(sketch) ?? "#e8a33d" })));
+  }, [sketch?.shapes, sketch?.plane, design, ready, asking]);
+
+  useEffect(() => {                                   // the box asking how far goes with the sketch, with what is
+    if (asking && (!sketch || sketch.tool || !sketchRegions(sketch.shapes).length)) setAsking(null);   // closed, or when
+  }, [sketch, asking]);                                // a tool is taken to draw again
+
+  useEffect(() => {                                   // sketching, the view as good as square on (0.109.0)
+    if (ready) vp.current?.setFlat(!!sketch);
+  }, [ready, !!sketch]);                               // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {                                   // a sketch is 2D (0.101.1): the left button draws or moves it
     vp.current?.setLeft(!sketch ? "turn" : sketch.tool ? "draw" : "pan");
@@ -1224,9 +1240,11 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
       openSketch(again);
       lookAtSketch(again);
     } else {
+      setAsking(null);
       setSketch(null);
       setHoverPt(null);
       vp.current?.setPreview(null);
+      fitNext.current = true;                          // the part back: the Fit view, as Extrude left it
       setTab("part");
     }
   };
@@ -1261,6 +1279,10 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
       }
     }
     if (best) return { p: best, snapped: true, raw };
+    // On a line (0.109.0, Søren: "Jeg kan ikke ramme den eksisterende streg når jeg vil lave min sketch ovenpå den
+    // eksisterende part"): within 8 px of the face's edges, the other parts' or a shape's side, the point is on it.
+    const line = lineNear(s.shapes, at.f, raw, 8 * v.mmPerPx(to3d(at.f, raw)));
+    if (line) return { p: onLine(raw, line, [-w, -h]), snapped: true, raw };
     return { p: [Math.round(raw[0] + w) - w + 0, Math.round(raw[1] + h) - h + 0], snapped: false, raw };
   };
 
@@ -1446,42 +1468,100 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
     if (tools[k.toLowerCase()]) return set({ ...s, tool: tools[k.toLowerCase()], draft: null, typed: "", picked: null, dim: null });
   };
 
-  /** Extrude or Cut: the sketch's regions made into parts - on a box's face kept on it, beside it in the tree so a cut
-   *  cuts what the box is in - picked; the sketch over. */
-  const endSketch = (cut: boolean) => {
+  /** How far a cut through all goes (`reach`): past everything in the design, both ways. */
+  const reachOf = (): number => {
+    const d = designRef.current, b = built?.box ?? (d ? extentOf(d.parts) : null);
+    return b ? Math.max(...b[0].map(Math.abs), ...b[1].map(Math.abs)) + 10 : 100;
+  };
+  /** The colour what a sketch extrudes gets: that of the part whose face it is on, as it is drawn - one part with it
+   *  (0.109.0); on the plate or a plane, none (a colour of its own, made). */
+  const sketchColor = (s: SketchState): string | undefined => {
+    const d = designRef.current, plane = s.plane;
+    if (!d || (plane.kind !== "face" && plane.kind !== "flat")) return undefined;
+    return find(d.parts, plane.part)?.part.color ?? GREY;
+  };
+
+  /** Extrude or Cut, so thick or so deep (asked, 0.109.0): the sketch's regions made into parts - on a box's face kept
+   *  on it - picked; the sketch over. On a part's face they are one part with it (0.109.0, Søren: "Bagefter så skal
+   *  det hele ende med kun at være EN part"): beside it in its group, or in a group made of the two, named as it is -
+   *  a cut cuts that part alone (what is in its group). */
+  const endSketch = (how: Asking) => {
     const d = designRef.current, s = sketchRef.current, at = sketchFrame(s), v = vp.current;
     if (!d || !s || !at) return;
+    const { cut } = how;
     const seen = allIds(d.parts);
     const id = () => {
       const x = freshId(seen);
       seen.add(x);
       return x;
     };
-    const b = built?.box ?? extentOf(d.parts);
-    const reach = b ? Math.max(...b[0].map(Math.abs), ...b[1].map(Math.abs)) + 10 : 100;
-    const made = sketchParts(s.plane, s.shapes, at.box, { cut, depth: cut ? sketchMake.depth : sketchMake.height,
-      through: cut && sketchMake.through, reach }, id, `Sketch ${s.n}${cut ? " cut" : ""}`,
-    cut ? undefined : at.box?.color ?? COLORS[seen.size % COLORS.length]);
+    const made = sketchParts(s.plane, s.shapes, at.box, { cut, depth: how.mm, through: cut && how.through, reach: reachOf() },
+      id, `Sketch ${s.n}${cut ? " cut" : ""}`, cut ? undefined : sketchColor(s) ?? COLORS[seen.size % COLORS.length]);
     if (!made.length) {
       toast("Nothing closed to make yet - a line back to its first corner, a rectangle or a circle.", "fault");
       return;
     }
-    let ps = d.parts;
-    if (at.box) for (const p of [...made].reverse()) ps = insertAfter(ps, at.box.id, p);
-    else ps = [...ps, ...made];
+    const joined = s.plane.kind === "face" || s.plane.kind === "flat" ? joinTo(d.parts, s.plane.part, made) : null;
+    const ps = joined?.parts ?? [...d.parts, ...made], pick = joined?.pick ?? made.map((p) => p.id);
     shown3d.current = null;
     fitNext.current = true;                            // then the Fit view, the part made in 3D (0.103.0)
-    sketchBefore.current.set(d, s);                    // Undo opens it again (0.108.0)
+    sketchBefore.current.set(d, askingRef.current ? { ...s, tool: askTool.current } : s);   // Undo opens it again (0.108.0)
     commit({ ...d, parts: ps });
+    setAsking(null);
     setSketch(null);
     setHoverPt(null);
     v?.setPreview(null);
-    setSelected(made.map((p) => p.id));
+    setSelected(pick);
     setTab("part");
     host.current?.focus({ preventScroll: true });
   };
 
+  /** Extrude or Cut pressed (0.109.0): the box asking how far opens over the sketch, the last thickness or depth in
+   *  it; the view turns to show what it will make from an angle; nothing draws meanwhile. */
+  const askMake = (cut: boolean) => {
+    const s = sketchRef.current, at = sketchFrame(s), v = vp.current;
+    if (!s || !at || !sketchRegions(s.shapes).length) return;
+    const a: Asking = { cut, mm: cut ? sketchMake.depth : sketchMake.height, through: cut && sketchMake.through };
+    if (!askingRef.current) askTool.current = s.tool;
+    setSketch({ ...s, tool: null, draft: null, typed: "", picked: null, dim: null });
+    setAsking(a);
+    if (v) v.lookFrom(angledFrom(at.f.N), (a.cut && a.through ? null : regionsBox(s.shapes, at.f, a.cut ? -a.mm : a.mm))
+      ?? built?.box ?? null);
+  };
+  /** The box's OK or Enter: made, so far - remembered for the next time. */
+  const makeAsked = (typed?: string) => {
+    const a = askingRef.current;
+    if (!a) return;
+    const mm = typed === undefined ? a.mm : Number(typed.trim().replace(",", "."));
+    if (!(a.cut && a.through) && !(Number.isFinite(mm) && (mm > 0 || (mm < 0 && backOk(a))))) {
+      toast(a.cut ? "How deep: a number of mm above 0." : backOk({ ...a, mm: -1 })
+        ? "How thick: a number of mm - below 0 it goes backwards, behind the plane."
+        : "How thick: a number of mm above 0 - on a part's face Extrude stands out of it (Cut goes into it).", "fault");
+      return;
+    }
+    setSketchMake((cur) => (a.cut ? { ...cur, depth: a.through ? cur.depth : mm, through: a.through } : { ...cur, height: mm }));
+    endSketch({ ...a, mm: a.cut && a.through ? a.mm : mm });
+  };
+  /** Whether a thickness below 0 may be typed (0.109.0): Extrude on the plate or a plane goes backwards, behind it. */
+  const backOk = (a: Asking): boolean => {
+    const k = sketchRef.current?.plane.kind;
+    return !a.cut && (k === "top" || k === "front" || k === "right");
+  };
+
+  /** The box's Cancel or Esc: back in the sketch as it was, looking straight at it. */
+  const stopAsking = () => {
+    const s = sketchRef.current;
+    setAsking(null);
+    if (s) {
+      const back = { ...s, tool: askTool.current };
+      setSketch(back);
+      lookAtSketch(back);
+    }
+    host.current?.focus({ preventScroll: true });
+  };
+
   const cancelSketch = () => {
+    setAsking(null);
     setSketch(null);
     setHoverPt(null);
     vp.current?.setPreview(null);
@@ -2094,6 +2174,14 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
   const onKey = (e: React.KeyboardEvent | KeyboardEvent) => {
     const tag = (e.target as HTMLElement).tagName;
     if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || !designRef.current) return;
+    if (askingRef.current) {                           // asked how far (0.109.0): Enter makes it, Esc goes back
+      if (e.key === "Enter" || e.key === "Escape") {
+        e.preventDefault();
+        if (e.key === "Enter") makeAsked();
+        else stopAsking();
+      }
+      return;
+    }
     if (sketchRef.current) {                           // sketching: its keys only (0.100.0)
       sketchKey(e, sketchRef.current);
       return;
@@ -2209,10 +2297,31 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
     }, 0);
     return () => window.clearTimeout(t);
   }, [boxFor?.key]);
+  // The box asking how far (0.109.0): at the far corner of what is closed, on the plane - kept there as the view moves.
+  const askAt = (() => {
+    const at = asking && sketch ? sketchFrame(sketch) : null;
+    const pts = at && sketch ? sketchRegions(sketch.shapes).flatMap((r) => r.outer) : [];
+    if (!at || !pts.length) return null;
+    return to3d(at.f, [Math.max(...pts.map((q) => q[0])), Math.max(...pts.map((q) => q[1]))]);
+  })();
+  const askEl = useRef<HTMLDivElement>(null), askIn = useRef<HTMLInputElement>(null), askGo = useRef<HTMLButtonElement>(null);
+  const askPin = askAt ? askAt.map((x) => x.toFixed(3)).join(",") : "";
+  useLayoutEffect(() => {
+    if (askPin || !boxPin) vp.current?.pin(askPin ? askEl.current : null, askAt);
+  }, [askPin]);                                        // eslint-disable-line react-hooks/exhaustive-deps
+  const askOpen = asking ? `${asking.cut ? "cut" : "extrude"}${asking.cut && asking.through ? " all" : ""}` : "";
+  useEffect(() => {                                    // it takes the keys: its mm - through all, its button
+    if (!askOpen) return;
+    const t = window.setTimeout(() => {
+      (askIn.current ?? askGo.current)?.focus({ preventScroll: true });
+      askIn.current?.select();
+    }, 0);
+    return () => window.clearTimeout(t);
+  }, [askOpen]);
   // What the band shows: a change folds its groups afresh to the room there is (0.94.0).
   const fitKey = [shownTab, faceSel?.face, feature.round, feature.through, one?.on ? `${one.on.face}${one.on.through ? "t" : ""}` : "",
     one?.mates?.length ?? 0, mateNotes.length,
-    sketch ? `${sketch.picked !== null ? sketch.shapes[sketch.picked]?.kind : "-"}${sketchMake.through}${sketch.shapes.length > 0}`
+    sketch ? `${sketch.picked !== null ? sketch.shapes[sketch.picked]?.kind : "-"}${sketch.shapes.length > 0}`
       + `${sketch.dim !== null && sketch.dims[sketch.dim] ? dimWhat(sketch.shapes, sketch.dims[sketch.dim]) : ""}` : "",
     selected.join(","), items.map((x) => `${x.shape}${x.radius ? "r" : ""}${x.repeat ? (x.repeat.step ? "s" : "a")
     : ""}${x.hole ? "h" : ""}`).join(","), pickedEdges, one ? (edgeSel[one.id] ?? []).length : 0, oneLine ? 1 : 0].join("|");
@@ -2303,8 +2412,7 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
         <Band label={shownTab === "text" ? "Text" : shownTab === "face" ? "Face" : shownTab === "sketch" ? "Sketch"
           : TABS.find(([id]) => id === shownTab)?.[1]} fit={fitKey}>
           {shownTab === "sketch" && sketch && (
-            <SketchBand sketch={sketch} where={planeName(sketch.plane, sketchFrame(sketch)?.box)} make={sketchMake}
-              onMake={(m) => setSketchMake((cur) => ({ ...cur, ...m }))} closed={sketchRegions(sketch.shapes).length}
+            <SketchBand sketch={sketch} where={planeName(sketch.plane, sketchFrame(sketch)?.box)} closed={sketchRegions(sketch.shapes).length}
               onTool={(t) => setSketch({ ...sketch, tool: t, draft: null, typed: "", picked: null, dim: null })}
               onDelete={() => setSketch(deleteInSketch(sketch))}
               onUndo={() => { const u = undoSketch(sketch); if (u) setSketch(u); }}
@@ -2318,7 +2426,7 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
               }}
               onDimMiddle={() => sketch.dim !== null && setSketch({ ...sketch, dims: sketch.dims.map((x, i) => (i === sketch.dim
                 && isDistance(x) ? { ...x, middle: !x.middle || undefined } : x)), past: [...sketch.past, snapOf(sketch)] })}
-              onExtrude={() => endSketch(false)} onCut={() => endSketch(true)} onCancel={cancelSketch} />
+              onExtrude={() => askMake(false)} onCut={() => askMake(true)} asking={asking} onCancel={cancelSketch} />
           )}
           {shownTab === "insert" && (
             <>
@@ -2432,6 +2540,42 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
               }} />
             <span aria-hidden="true">mm</span>
           </span>
+        )}
+        {asking && askAt && (
+          <div ref={askEl} className={`v3d-askbox${asking.cut ? " cut" : ""}`} role="dialog"
+            aria-label={asking.cut ? "Cut: how deep" : "Extrude: how thick"}
+            title={asking.cut ? "How deep, mm - or Through all; Enter cuts, Esc goes back"
+              : backOk(asking) ? "How thick, mm - below 0 backwards, behind the plane; Enter makes it, Esc goes back"
+                : "How thick, mm, out of the face; Enter makes it, Esc goes back"}
+            onKeyDown={(e) => {
+              if (e.key !== "Enter" && e.key !== "Escape") return;
+              e.preventDefault();
+              e.stopPropagation();
+              if (e.key === "Escape") stopAsking();
+              else makeAsked(asking.cut && asking.through ? undefined : askIn.current?.value);
+            }}>
+            <b>{asking.cut ? "Cut" : "Extrude"}</b>
+            {!(asking.cut && asking.through) && (
+              <label className="v3d-askmm">
+                <input key={askOpen} ref={askIn} className="num" defaultValue={fmt(asking.mm)} inputMode="decimal"
+                  aria-label={asking.cut ? "How deep, mm" : "How thick, mm"} onFocus={(e) => e.target.select()}
+                  onChange={(e) => {
+                    const mm = Number(e.target.value.trim().replace(",", "."));
+                    if (Number.isFinite(mm) && (mm > 0 || (mm < 0 && backOk(asking)))) setAsking({ ...asking, mm });
+                  }} />
+                <span>mm</span>
+              </label>
+            )}
+            {asking.cut && (
+              <label className="v3d-check" title="Through all of it - a box's face: the box; another plane: everything, both ways">
+                <input type="checkbox" checked={asking.through} onChange={(e) => setAsking({ ...asking, through: e.target.checked })} />
+                Through all</label>
+            )}
+            <button ref={askGo} type="button" className="btn small primary"
+              onClick={() => makeAsked(asking.cut && asking.through ? undefined : askIn.current?.value)}>
+              <Check size={14} /> {asking.cut ? "Cut" : "Extrude"}</button>
+            <button type="button" className="btn small quiet" onClick={stopAsking}><X size={14} /> Cancel</button>
+          </div>
         )}
         {resizing && (
           <div className="v3d-resize" style={{ left: resizing.x, top: resizing.y }} role="dialog" aria-label={`${resizing.what} of the line`}>
@@ -2573,7 +2717,16 @@ type SketchState = { plane: SketchPlane; shapes: SketchShape[]; tool: SketchTool
   refs: [Point2, Point2][] };                           // the other parts' edges in its plane (modelEdges, 0.108.0)
 const snapOf = (s: SketchState): SketchSnap => ({ shapes: s.shapes, dims: s.dims });
 /** What Extrude and Cut make of a sketch: so high out of its plane; a cut through all, or so deep. */
+/** A group's own solids (0.109.0): its holes left out - a cut through all reaches far past the part it cuts - for its
+ *  size as the Part tab says it. */
+function solidsOf(ps: Part[]): Part[] {
+  return ps.filter((x) => !x.hole).map((x) => (x.shape === "group" ? { ...x, parts: solidsOf(x.parts ?? []) } : x));
+}
+
 type SketchMake = { height: number; through: boolean; depth: number };
+/** Extrude or Cut being asked (0.109.0): which, how far (mm) - a cut through all, all of it. */
+type Asking = { cut: boolean; mm: number; through: boolean };
+
 const TABS: [Tab, string][] = [["insert", "Insert"], ["part", "Part"], ["lines", "Lines"]];
 const ALIGNS: [string, string[]][] = [["X", ["Left", "Middle", "Right"]], ["Y", ["Front", "Middle", "Back"]],
   ["Z", ["Bottom", "Middle", "Top"]]];
@@ -2828,11 +2981,26 @@ function SizeCombo({ value, mixed, onSet }: { value: number; mixed: boolean; onS
 function PartTree({ parts, selected, open, onOpen, onPick, onHide, onPickAll }: { parts: Part[]; selected: string[];
   open: boolean; onOpen: (v: boolean) => void; onPick: (id: string, add: boolean) => void; onHide: (id: string) => void;
   onPickAll: () => void }) {
+  // A group is one part (0.109.0, Søren: "det hele ende med kun at være EN part"): its parts folded under it, shown
+  // with its count - one of them picked, it is marked.
+  const [unfolded, setUnfolded] = useState<ReadonlySet<string>>(() => new Set());
+  const fold = (id: string) => setUnfolded((cur) => {
+    const next = new Set(cur);
+    if (!next.delete(id)) next.add(id);
+    return next;
+  });
+  const within = (p: Part): boolean => !!p.parts?.some((c) => selected.includes(c.id) || within(c));
   const rows = (list: Part[], depth: number): ReactNode => list.map((p) => {
-    const on = selected.includes(p.id);
+    const on = selected.includes(p.id), kids = p.parts?.length ?? 0, shown = kids > 0 && unfolded.has(p.id);
     return (
-      <li key={p.id} role="treeitem" aria-selected={on}>
-        <div className={`v3d-tree-row${on ? " on" : ""}${p.hidden ? " hidden" : ""}`} style={{ paddingLeft: 2 + depth * 14 }}>
+      <li key={p.id} role="treeitem" aria-selected={on} aria-expanded={kids ? shown : undefined}>
+        <div className={`v3d-tree-row${on ? " on" : ""}${!on && kids && !shown && within(p) ? " within" : ""}${p.hidden ? " hidden" : ""}`}
+          style={{ paddingLeft: 2 + depth * 14 }}>
+          {kids > 0 && (
+            <button type="button" className="v3d-tree-fold" onClick={() => fold(p.id)}
+              title={shown ? "Fold its parts away" : `Show its ${kids} parts`}>
+              <ChevronDown size={12} className={shown ? undefined : "shut"} /><span>{kids}</span></button>
+          )}
           <button type="button" className="v3d-tree-name" onClick={(e) => onPick(p.id, e.shiftKey)}
             title={`${label(p)} - ${p.shape === "group" ? "a group" : p.hole ? `a ${p.shape} hole` : `a ${p.shape}`}${p.hidden ? ", hidden" : ""}. Click to pick it, Shift-click: one more`}>
             <ShapeIcon part={p} /><span>{label(p)}</span>
@@ -2843,7 +3011,7 @@ function PartTree({ parts, selected, open, onOpen, onPick, onHide, onPickAll }: 
             {p.hidden ? <EyeOff size={13} /> : <Eye size={13} />}<span>{p.hidden ? "Show" : "Hide"}</span>
           </button>
         </div>
-        {!!p.parts?.length && <ul role="group">{rows(p.parts, depth + 1)}</ul>}
+        {shown && <ul role="group">{rows(p.parts!, depth + 1)}</ul>}
       </li>
     );
   });
@@ -2852,7 +3020,7 @@ function PartTree({ parts, selected, open, onOpen, onPick, onHide, onPickAll }: 
       <div className="v3d-tree-head">
         <button type="button" className="v3d-tree-toggle" aria-expanded={open} onClick={() => onOpen(!open)}
           title={open ? "Fold the list of parts" : "The design's parts: pick one, hide or show it"}>
-          <ChevronDown size={13} className={open ? undefined : "shut"} /><ListTree size={14} /><span>Parts ({allIds(parts).size})</span>
+          <ChevronDown size={13} className={open ? undefined : "shut"} /><ListTree size={14} /><span>Parts ({parts.length})</span>
         </button>
         {open && parts.length > 1 && <button type="button" className="v3d-tree-all" onClick={onPickAll} title="Every part (Ctrl+A)">Pick all</button>}
       </div>
@@ -2884,7 +3052,7 @@ function PartBand({ part, fonts, lock, setLock, change, onDuplicate, onDelete, o
   onMirror: (axis: 0 | 1 | 2) => void; onFace: () => void; face: boolean; onTurn: (axis: 0 | 1 | 2, sign: 1 | -1) => void;
   box: Part | null; depth: number; parts: Part[]; onMate: () => void; mate: boolean; notes: string[] }) {
   const g = part.shape === "group";
-  const box = extent(part);
+  const box = g ? extentOf(solidsOf(part.parts ?? [])) ?? extent(part) : extent(part);   // a group: its solids' (0.109.0)
   return (
     <>
       <Grp label={<>{kindOf(part)} <span className="mono">{part.id}</span></>}>
@@ -3262,11 +3430,11 @@ const dimOff = (v: Viewport, f: PlaneFrame): number => 20 * v.mmPerPx(to3d(f, [0
 
 /** The Sketch tab (0.100.0): what draws - Line, Rectangle, Circle; Pick, Delete, Undo; the picked shape's size; and
  *  what leaves the sketch - Extrude (so high), Cut (through all or so deep), Cancel. */
-function SketchBand({ sketch, where, make, onMake, closed, onTool, onDelete, onUndo, onShape, onExtrude, onCut, onCancel,
+function SketchBand({ sketch, where, closed, onTool, onDelete, onUndo, onShape, onExtrude, onCut, asking, onCancel,
   measured, onDim, onDimMiddle }: {
-  sketch: SketchState; where: string; make: SketchMake; onMake: (m: Partial<SketchMake>) => void; closed: number;
+  sketch: SketchState; where: string; closed: number;
   onTool: (t: SketchTool | null) => void; onDelete: () => void; onUndo: () => void; onShape: (s: SketchShape) => void;
-  onExtrude: () => void; onCut: () => void; onCancel: () => void;
+  onExtrude: () => void; onCut: () => void; asking: Asking | null; onCancel: () => void;
   measured: { value: number; what: "distance" | "length" | "diameter" } | null; onDim: (mm: number) => void;
   onDimMiddle: () => void }) {
   const dim = sketch.dim !== null ? sketch.dims[sketch.dim] : null;
@@ -3348,17 +3516,11 @@ function SketchBand({ sketch, where, make, onMake, closed, onTool, onDelete, onU
       )}
       <Grp label={closed ? `Make - ${closed} ${closed > 1 ? "shapes" : "shape"} closed` : "Make - nothing closed yet"}>
         <Big tone="orange" icon={<ArrowUpFromLine size={20} />} label="Extrude" disabled={!closed} onClick={onExtrude}
-          title={`Boss extrude: what is closed, ${fmt(make.height)} mm thick out of ${where} - a part`} />
+          active={!!asking && !asking.cut}
+          title={`Boss extrude: what is closed, out of ${where} - a box over the sketch asks how thick`} />
         <Big tone="grey" icon={<SquareDashed size={20} />} label="Cut" disabled={!closed} onClick={onCut}
-          title={`Extruded cut: what is closed, cut into what is there - ${make.through ? "through all" : `${fmt(make.depth)} mm deep`}`} />
-        <Stack>
-          <Field label="Thickness" unit="mm" value={make.height} min={0.1} step={1} width={44}
-            title="Extrude: how thick the part is - how far out of the plane, mm" onSet={(v) => onMake({ height: Math.max(0.1, v) })} />
-          <label className="v3d-check" title="Cut through all of it - a box's face: the box; another plane: everything, both ways">
-            <input type="checkbox" checked={make.through} onChange={(e) => onMake({ through: e.target.checked })} /> Cut through all</label>
-          {!make.through && <Field label="Depth" unit="mm" value={make.depth} min={0.1} step={1} width={44} title="Cut: how far in, mm"
-            onSet={(v) => onMake({ depth: Math.max(0.1, v) })} />}
-        </Stack>
+          active={!!asking?.cut}
+          title="Extruded cut: what is closed, cut into what is there - a box over the sketch asks how deep, or through all" />
         {sketch.shapes.length || sketch.draft ? (
           <ConfirmButton className="btn v3d-big tone-red" confirmText="Throw away?" label="Leave the sketch - what is drawn is thrown away"
             onConfirm={onCancel}><X size={20} /><span>Cancel</span></ConfirmButton>

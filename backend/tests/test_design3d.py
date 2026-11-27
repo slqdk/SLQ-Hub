@@ -2025,3 +2025,87 @@ def test_a_sketch_sees_the_other_parts_edges(tmp_path):
     assert plane["kind"] == "flat" and plane["part"] == "c" and plane["name"] == "Peg"
     assert plane["f"]["N"] == pytest.approx([0, 0, 1]) and len(plane["outline"]) == 1
     assert out["around"] == [pytest.approx([-50, 40, 6], abs=1e-4), pytest.approx([-10, 80, 6], abs=1e-4)]   # to zoom to
+
+
+# 0.109.0 - Søren: "Når man vælger Extrude, eller cut, så skal den spørge hvor meget den skal extrude ... Bagefter så skal
+# det hele ende med kun at være EN part". What a sketch on a part's face makes is one part with it - a group, and a
+# cut in it cuts that part alone; the box the view takes in while asked, and the angle it looks from.
+JOIN_JS = """
+const box = { id: "a", shape: "box", name: "Lid", size: [20, 20, 10], at: [0, 0, 15], rotate: [0, 0, 0] };
+const under = { id: "b", shape: "box", size: [20, 20, 10], at: [0, 0, 5], rotate: [0, 0, 0] };
+const plane = { kind: "face", part: "a", face: "top" }, f = S.planeFrame(plane, box);
+const square = [{ kind: "rect", a: [-5, -5], b: [5, 5] }];
+let n = 0;
+const make = (how) => S.sketchParts(plane, square, box, { cut: false, depth: 4, through: false, reach: 100, ...how },
+  () => `s${++n}`, "Sketch 2", "#f80");
+const cut = make({ cut: true, depth: 15 }), boss = make({ depth: 4 });
+const kit = { wasm, fonts, meshes: new Map() };
+const vol = (parts) => G.build(G.readDesign(JSON.stringify({ parts })).design, kit).volume;
+const top = T.joinTo([box, under], "a", cut);
+const grouped = { id: "g", shape: "group", name: "Both", size: [0, 0, 0], at: [0, 0, 0], rotate: [0, 0, 0], parts: [box, under] };
+const inGroup = T.joinTo([grouped], "a", boss);
+const unit = (v) => { const l = Math.hypot(...v); return v.map((x) => x / l); };
+process.stdout.write(JSON.stringify({
+  top: { ids: top.parts.map((p) => p.id), group: top.parts[0], pick: top.pick },
+  volumes: [vol([box, under]), vol(top.parts), vol([box, under, ...cut])],
+  inGroup: { pick: inGroup.pick, ids: inGroup.parts[0].parts.map((p) => p.id), boss: boss[0].id }, none: T.joinTo([box], "zz", boss),
+  out: S.regionsBox(square, f, 4), into: S.regionsBox(square, f, -3), nothing: S.regionsBox([], f, 4),
+  angled: [[0, 0, 1], [0, -1, 0], unit([0.55, -1, 0.75])].map((N) => [N, S.angledFrom(N)]),
+  file: G.writeDesign(G.readDesign(JSON.stringify({ parts: top.parts })).design) }));
+"""
+
+
+def test_a_sketch_on_a_face_is_one_part_with_it(h3, tmp_path):
+    pytest.importorskip("manifold3d")
+    js = (f"import * as S from {node_module(tmp_path, 'sketch.ts')};\n"
+          f"import * as T from {node_module(tmp_path, 'tree.ts')};\n" + JOIN_JS)
+    out = run_js(js, {})
+    top = out["top"]
+    g = top["group"]
+    assert top["ids"] == [g["id"], "b"] and g["shape"] == "group" and g["name"] == "Lid" and top["pick"] == [g["id"]]
+    assert [p["id"] for p in g["parts"]] == ["a", "s1"] and g["parts"][1]["hole"]
+    # the cut 15 deep from the lid's top: through the lid, not into the box under it - which it cuts when loose
+    assert out["volumes"] == [pytest.approx(8000), pytest.approx(7000), pytest.approx(6500)]
+    inner = out["inGroup"]
+    assert inner["pick"] == ["g"] and inner["ids"] == ["a", inner["boss"], "b"]           # beside it in its group
+    assert out["none"] is None
+    assert out["out"] == [pytest.approx([-5, -5, 20]), pytest.approx([5, 5, 24])]
+    assert out["into"] == [pytest.approx([-5, -5, 17]), pytest.approx([5, 5, 20])] and out["nothing"] is None
+    for n, a in out["angled"]:                                     # 40 degrees off straight at the plane
+        assert math.hypot(*a) == pytest.approx(1) and sum(x * y for x, y in zip(n, a)) == pytest.approx(math.cos(math.radians(40)))
+    assert out["angled"][0][1] == pytest.approx([0.3098, -0.5632, 0.7660], abs=1e-4)   # the plate: front, right, above
+    assert out["angled"][1][1] == pytest.approx([0.3801, -0.7660, 0.5184], abs=1e-4)   # the front plane: right, above
+    design, _ = h3.read_design(out["file"], tmp_path)                                      # hub3d builds the same
+    assert h3.build_design(design, tmp_path).solid.volume() == pytest.approx(7000)
+
+
+# 0.109.0 - Søren, 17:57, a sketch on the front plane under a part's top edge: "Jeg kan ikke ramme den eksisterende
+# streg"; 17:58: "når man extruder skal man kunne taste et - tal ind hvis den skal extrudere bagud". A click near a
+# line lands on it; a thickness below 0 on a plane stands behind it.
+SNAP_JS = """
+const f = { ...S.planeFrame({ kind: "front" }), refs: [[[10, 0], [40, 0]], [[10, 20], [40, 20]], [[10, 0], [10, 20]]] };
+const rect = { kind: "rect", a: [-20, 0], b: [-10, 8] };
+const face = S.planeFrame({ kind: "face", part: "b", face: "front" }, { id: "b", shape: "box", size: [25, 10, 9], at: [0, 0, 4.5], rotate: [0, 0, 0] });
+let n = 0;
+const make = (plane, depth) => S.sketchParts(plane, [{ kind: "rect", a: [0, 0], b: [6, 6] }], null,
+  { cut: false, depth, through: false, reach: 100 }, () => `s${++n}`, "Sketch 1")[0];
+process.stdout.write(JSON.stringify({
+  top: S.onLine([17.4, 19.6], S.lineNear([rect], f, [17.4, 19.6], 0.5)),           // the top edge: on it, x whole
+  side: S.onLine([10.3, 7.6], S.lineNear([rect], f, [10.3, 7.6], 0.5)),            // the upright edge
+  own: S.onLine([-14.6, 7.8], S.lineNear([rect], f, [-14.6, 7.8], 0.5)),           // the rectangle's own top
+  none: S.lineNear([rect], f, [25, 10], 0.5),
+  slant: S.onLine([2, 0], [[0, 0], [4, 4]]),
+  grid: S.onLine([3.2, -4.3], S.lineNear([], face, [3.2, -4.3], 0.5), [-12.5, -4.5]),   // a 25 x 9 face's bottom edge
+  back: make({ kind: "front" }, -15), out: make({ kind: "front" }, 15), under: make({ kind: "top" }, -5) }));
+"""
+
+
+def test_a_sketch_snaps_onto_lines_and_extrudes_backwards(tmp_path):
+    out = run_js(f"import * as S from {node_module(tmp_path, 'sketch.ts')};\n" + SNAP_JS, {})
+    assert out["top"] == [17, 20] and out["side"] == [10, 8] and out["own"] == [-15, 8] and out["none"] is None
+    assert out["slant"] == pytest.approx([1, 1])                    # square to a slanted line from the point
+    assert out["grid"] == [3.5, -4.5]                               # whole mm from the face's lower left corner
+    back, front, under = out["back"], out["out"], out["under"]
+    assert back["size"] == [0, 0, 15] and back["at"] == [3, 7.5, 3]         # behind the front plane (it looks to -y)
+    assert front["size"] == [0, 0, 15] and front["at"] == [3, -7.5, 3]
+    assert under["size"] == [0, 0, 5] and under["at"] == [3, 3, -2.5]       # under the plate

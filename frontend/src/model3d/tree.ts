@@ -144,6 +144,21 @@ export function group(parts: Part[], ids: string[]): { parts: Part[]; id: string
   return { parts: replace(parts), id };
 }
 
+/** Parts made on a part's face (0.109.0, a sketch's Extrude or Cut - Søren: "Bagefter så skal det hele ende med kun at
+ *  være EN part"): one part with it. Beside it in its group - the group is the part - or, the part alone, in a group
+ *  made of them, named as the part is. A hole among them cuts what is in that group alone. What to pick: that group.
+ *  null when there is no such part. */
+export function joinTo(parts: Part[], base: string, made: Part[]): { parts: Part[]; pick: string[] } | null {
+  const on = find(parts, base);
+  if (!on) return null;
+  let out = parts;
+  for (const p of [...made].reverse()) out = insertAfter(out, base, p);
+  if (on.parent) return { parts: out, pick: [on.top.id] };
+  const g = group(out, [base, ...made.map((p) => p.id)]);
+  if (!g) return { parts: out, pick: made.map((p) => p.id) };
+  return { parts: g.parts.map((p) => (p.id === g.id ? { ...p, name: label(on.part) } : p)), pick: [g.id] };
+}
+
 /** The tree with one part replaced by others, where it was (Letters apart). */
 export function replaceWith(parts: Part[], id: string, by: Part[]): Part[] {
   return parts.flatMap((p) => (p.id === id ? by : p.parts ? [{ ...p, parts: replaceWith(p.parts, id, by) }] : [p]));

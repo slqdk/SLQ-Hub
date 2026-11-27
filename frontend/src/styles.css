@@ -1450,6 +1450,13 @@ div.tests-result-head { cursor: default; }
 .v3d-tree-row:hover { background: var(--rb-hover); border-color: var(--rb-hov-edge); }
 .v3d-tree-row.on { background: var(--rb-on); border-color: var(--rb-on-edge); }
 .v3d-tree-row.hidden .v3d-tree-name { opacity: 0.55; font-style: italic; }
+/* A group's parts folded under it (0.109.0): the fold with their count; one of them picked, the group marked */
+.v3d-tree-row.within { border-color: var(--rb-on-edge); border-style: dashed; }
+.v3d-tree-fold { flex: none; display: inline-flex; align-items: center; gap: 1px; height: 20px; padding: 0 3px 0 1px; border: 0;
+  border-radius: 3px; background: transparent; color: var(--ink-3); font: inherit; font-size: 11px; cursor: pointer; }
+.v3d-tree-fold:hover { background: light-dark(rgba(255, 255, 255, 0.7), rgba(255, 255, 255, 0.12)); color: var(--ink); }
+.v3d-tree-fold svg { flex: none; transition: transform 0.12s; }
+.v3d-tree-fold svg.shut { transform: rotate(-90deg); }
 .v3d-tree-name { flex: 1; min-width: 0; display: flex; align-items: center; gap: 5px; height: 22px; padding: 0 3px; border: 0;
   background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .v3d-tree-name > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1484,6 +1491,18 @@ div.tests-result-head { cursor: default; }
   border: 1.5px solid var(--fault); border-radius: 4px; background: var(--sheet); box-shadow: var(--pop); color: var(--fault);
   font-size: 12px; white-space: nowrap; }
 .v3d-dimbox[hidden] { display: none; }
+/* Extrude or Cut asked (0.109.0): how far, in a box over the sketch - orange as Extrude, grey as Cut */
+.v3d-askbox { position: absolute; left: 0; top: 0; z-index: 6; display: flex; align-items: center; gap: 7px; padding: 5px 7px;
+  border: 1.5px solid var(--rb-orange); border-radius: 7px; background: var(--sheet); box-shadow: var(--pop); color: var(--ink);
+  font-size: 12.5px; white-space: nowrap; }
+.v3d-askbox.cut { border-color: var(--rb-grey); }
+.v3d-askbox[hidden] { display: none; }
+.v3d-askbox b { font-weight: 600; color: var(--rb-orange); }
+.v3d-askbox.cut b { color: var(--rb-grey); }
+.v3d-askmm { display: inline-flex; align-items: center; gap: 3px; color: var(--ink-3); }
+.v3d-askmm input { width: 58px; height: 26px; padding: 0 4px; border: 1px solid var(--rule); border-radius: 5px;
+  background: var(--sheet); color: var(--ink); font: inherit; font-size: 14px; font-weight: 600; text-align: center; }
+.v3d-askmm input:focus { outline: 2px solid var(--act); outline-offset: -1px; }
 .v3d-dimbox input { width: 52px; height: 22px; padding: 0 2px; border: 0; outline: none; background: transparent;
   color: var(--ink); font: inherit; font-size: 13.5px; font-weight: 600; text-align: center; }
 @supports (field-sizing: content) {

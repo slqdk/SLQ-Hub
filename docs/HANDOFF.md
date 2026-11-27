@@ -4,7 +4,30 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## Next session - start here (written 2026-11-27, at 0.108.0)
+## Next session - start here (written 2026-11-27, at 0.109.0)
+
+**0.109.0 (2026-11-27): Extrude and Cut ask how far; on a face, one part; groups folded in the parts list - pushed, not
+yet installed.** Søren, 17:32: "Når man vælger Extrude, eller cut, så skal den spørge hvor meget den skal extrude ...
+Bagefter så skal det hele ende med kun at være EN part". Built (DESIGN §8 "The 3D editor", Extrude and Cut ask how
+far; on a face, one part): the band's Extrude/Cut open a box over the sketch (`asking`, `askMake`, `makeAsked`,
+`stopAsking`, `.v3d-askbox`) with the last mm, the view turned 40 degrees off the plane (`angledFrom`, `regionsBox`),
+the preview what will be made as typed; on a part's face what is made joins it (`joinTo`: beside it in its group, or a
+new group named as the part - a cut there cuts that part alone); the parts list folds groups (`PartTree`, chevron with
+the count). Tests: a lid on a box - a cut 15 deep from the lid's top joined to it takes 1,000 mm3 (loose: 1,500, into
+the box), the group named Lid and picked, hub3d's build the same; a part in a group joined beside it; the box round
+what is closed and out of / into the plane; the angle's 40 degrees from the plate and the front plane. Not seen in a
+browser: the box over the sketch (where it sits, its focus, Enter and Esc), the view turning, the live preview, the
+folded list. Also in 0.109.0, from 17:57-17:58 ("Jeg kan ikke ramme den eksisterende streg ..."; "... taste et - tal
+ind hvis den skal extrudere bagud"): the sketch is seen square on (`Viewport.setFlat`, 1.5 degree view), a point
+near a line lands on it (`lineNear`, `onLine`), and a thickness below 0 on a plane extrudes backwards. Seen in a
+headless Chrome (the editor alone on a page of its own, files in memory - outside the repo): a box face's sketch
+zoomed to it, a rectangle, Extrude asking (5 mm in the box, focused, the view turned), 12 typed + Enter - the group
+"Lid" picked and folded in the list; Ctrl+Z back in the sketch with the rectangle, Ctrl+Z in it, Ctrl+Y the part back;
+a plate part's face sketched on through Insert -> On a part's face, a circle cut through all - one group; Esc back to
+drawing with the tool kept, "7,5" taken; a rectangle snapped onto a box's top edge from the front plane and extruded
+-15: its bottom at the edge's z, behind the plane. 0.108.0's dimensions to another part were found not to work in
+perspective (the box's edge seen 2.4 mm off its ref) - the square-on view fixes it. Changed for him: the band has no
+Thickness/Depth fields any more. Still next: mates (to the plate, edge to edge, shown in the parts list) - 0.110.0.
 
 **0.108.0 (2026-11-27): dimensions to other parts, Undo back to the sketch, a sketch on any part's face - pushed, not
 yet installed.** Søren, 17:13-17:20, with 0.107.0 on the card: "Man skal kunne lave en dimention til den anden del..

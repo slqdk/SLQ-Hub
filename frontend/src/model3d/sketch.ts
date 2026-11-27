@@ -9,7 +9,8 @@
 // - the parts are placed where the face is when they are made. The sketch itself is the editor's while it is drawn: the design gets the
 // parts.
 
-import { angles, faceFrame, MIN_SIZE, spotFrom, type Built, type FaceName, type FlatFace, type Part, type Point2, type Vec3 } from "./geometry";
+import { angles, faceFrame, MIN_SIZE, spotFrom, type Box3, type Built, type FaceName, type FlatFace, type Part, type Point2,
+  type Vec3 } from "./geometry";
 
 export type SketchPlane = { kind: "top" | "front" | "right" } | { kind: "face"; part: string; face: FaceName }
   // a flat face of an imported mesh (0.107.0) or any part (0.108.0), geometry's flatFaceAt: its frame and outline as
@@ -267,6 +268,61 @@ export function modelEdges(b: Built, f: PlaneFrame, own: [Point2, Point2][] = []
   return out.sort((x, y) => len(y) - len(x)).slice(0, REFS_MOST);
 }
 
+/** A way to look at a sketch's plane from at an angle (0.109.0, Extrude or Cut asked): 40 degrees off straight at it,
+ *  toward the Fit view's front, right and above - so what Extrude stands out of it, or Cut takes into it, shows. */
+export function angledFrom(N: Vec3): Vec3 {
+  const home: Vec3 = [0.55, -1, 0.75], k = dot(home, N);
+  let t: Vec3 = [home[0] - k * N[0], home[1] - k * N[1], home[2] - k * N[2]];
+  let l = Math.hypot(t[0], t[1], t[2]);
+  if (l < 1e-6) {                                      // looking that way already: up it, or across
+    t = Math.abs(N[2]) < 0.9 ? [-N[2] * N[0], -N[2] * N[1], 1 - N[2] * N[2]] : [1 - N[0] * N[0], -N[0] * N[1], -N[0] * N[2]];
+    l = Math.hypot(t[0], t[1], t[2]);
+  }
+  const c = Math.cos((40 * Math.PI) / 180), sn = Math.sin((40 * Math.PI) / 180);
+  return [N[0] * c + (t[0] / l) * sn, N[1] * c + (t[1] / l) * sn, N[2] * c + (t[2] / l) * sn];
+}
+
+/** The box round a sketch's closed shapes on its plane and `out` mm out of it (less than 0: into it) - where Extrude
+ *  or Cut will be (0.109.0), for the view to take in. null when nothing is closed. */
+export function regionsBox(shapes: SketchShape[], f: PlaneFrame, out: number): Box3 | null {
+  const pts = sketchRegions(shapes).flatMap((r) => r.outer);
+  if (!pts.length) return null;
+  const xs = pts.map((q) => q[0]), ys = pts.map((q) => q[1]);
+  const lo: Vec3 = [Infinity, Infinity, Infinity], hi: Vec3 = [-Infinity, -Infinity, -Infinity];
+  for (const x of [Math.min(...xs), Math.max(...xs)]) for (const y of [Math.min(...ys), Math.max(...ys)]) {
+    const c = to3d(f, [x, y]);
+    for (const q of [c, [c[0] + f.N[0] * out, c[1] + f.N[1] * out, c[2] + f.N[2] * out]]) for (let a = 0; a < 3; a++) {
+      lo[a] = Math.min(lo[a], q[a]);
+      hi[a] = Math.max(hi[a], q[a]);
+    }
+  }
+  return [lo, hi];
+}
+
+/** The point on a line nearest `p` (0.109.0, a click snapped onto it): across an upright or level one exactly on it,
+ *  along it to the whole mm (`grid`: where whole mm are counted from - a box face's lower left corner); on a slanted one
+ *  square to it from `p`. Not kept within its ends: the line goes on. */
+export function onLine(p: Point2, [a, b]: [Point2, Point2], grid: Point2 = [0, 0]): Point2 {
+  const dx = b[0] - a[0], dy = b[1] - a[1], len2 = dx * dx + dy * dy;
+  const whole = (v: number, from: number) => Math.round(v - from) + from + 0;
+  if (len2 < 1e-18) return a;
+  if (Math.abs(dy) <= 1e-9 * Math.sqrt(len2)) return [whole(p[0], grid[0]), a[1]];
+  if (Math.abs(dx) <= 1e-9 * Math.sqrt(len2)) return [a[0], whole(p[1], grid[1])];
+  const t = ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / len2;
+  return [r3(a[0] + t * dx), r3(a[1] + t * dy)];
+}
+
+/** The line nearest `p` within `tol` mm of the face's edges (theirs, the other parts' - faceEdges) and the shapes'
+ *  sides - or null. */
+export function lineNear(shapes: SketchShape[], f: PlaneFrame, p: Point2, tol: number): [Point2, Point2] | null {
+  let best: [Point2, Point2] | null = null, gap = tol;
+  for (const side of [...faceEdges(f), ...shapes.flatMap((s) => sidesOf(s))]) {
+    const g = toSegment(p, side[0], side[1]);
+    if (g < gap) [gap, best] = [g, side];
+  }
+  return best;
+}
+
 /** A shape's middle: a circle's, a rectangle's, the middle of the box round a line's corners. */
 export function middleOf(s: SketchShape): Point2 {
   if (s.kind === "circle") return s.c;
@@ -493,7 +549,10 @@ export function sketchParts(plane: SketchPlane, shapes: SketchShape[], box: Part
   const f = planeFrame(plane, box);
   if (!f) return [];
   const regions = sketchRegions(shapes);
-  const depth = Math.max(MIN_SIZE, how.depth);
+  // Extruded backwards (0.109.0, Søren: "skal man kunne taste et - tal ind hvis den skal extrudere bagud"): on the plate
+  // or a plane, a thickness below 0 stands behind it - on a face it would only go into the part (the editor says so)
+  const back = !how.cut && how.depth < 0 && plane.kind !== "face" && plane.kind !== "flat";
+  const depth = Math.max(MIN_SIZE, back ? -how.depth : how.depth);
   return regions.map(({ outer, holes }, i) => {
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
     for (const [x, y] of outer) {
@@ -524,9 +583,10 @@ export function sketchParts(plane: SketchPlane, shapes: SketchShape[], box: Part
       p.rotate = angles([f.U[0], f.V[0], f.N[0], f.U[1], f.V[1], f.N[1], f.U[2], f.V[2], f.N[2]]);
       return p;
     }
-    // on a plane of the design: out of it toward you; a cut from 0.2 mm behind it - or through all both ways
+    // on a plane of the design: out of it toward you - backwards, behind it; a cut from 0.2 mm behind it - or through
+    // all both ways
     const h = how.cut ? (how.through ? 2 * how.reach + 0.4 : depth + 0.2) : depth;
-    const off = how.cut ? (how.through ? 0 : (depth - 0.2) / 2) : depth / 2;
+    const off = how.cut ? (how.through ? 0 : (depth - 0.2) / 2) : back ? -depth / 2 : depth / 2;
     const o = to3d(f, c);
     p.size = [0, 0, r3(h)];
     p.at = [r3(o[0] + f.N[0] * off), r3(o[1] + f.N[1] * off), r3(o[2] + f.N[2] * off)];

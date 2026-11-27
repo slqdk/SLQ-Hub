@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.109.0 - 2026-11-27
+
+- 3D editor sketch: Extrude and Cut ask how far. A box over the sketch
+  has the mm (a cut: or Through all), the view turns so you see what it
+  will make, and Enter makes it - Esc goes back to drawing.
+- What you extrude or cut on a part's face becomes one part with it: a
+  group named as the part. A cut on a face cuts only that part.
+- The parts list folds a group's parts under it; the arrow with their
+  number shows them.
+- On the plate or a plane, a thickness below 0 extrudes backwards,
+  behind the plane.
+- While sketching the view is square on (no perspective), so the edges of
+  parts in front of or behind the plane are where the sketch sees them,
+  and a point near a line - an edge of a part, a side already drawn -
+  lands on it.
+
 ## 0.108.0 - 2026-11-27
 
 - 3D editor sketch: Dimension can measure to the edges of other parts as

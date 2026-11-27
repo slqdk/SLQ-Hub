@@ -3768,8 +3768,10 @@ into the Hub, Tinkercad's level, his printer a Bambu Lab P2S but chosen per desi
     bits on one line (direction to 0.1 degree, offset to 0.02 mm; spans 0.01 mm apart are one), drops those under
     3 mm (`REF_EDGE` - a round part's facets seen from above) and those on the face's own edges, and keeps the 400
     longest. They go in `PlaneFrame.refs`, after the face's own edges in `faceEdges`: Dimension measures to them as to
-    a face's edge (`SketchDistance.to.edge` counts own edges first, then refs), they are drawn as the face's edges are,
-    and their ends snap. Only straight edges: a cylinder seen from the side gives its top and bottom (its facets seen
+    a face's edge (`SketchDistance.to.edge` counts own edges first, then refs; the one under the pointer lights up
+    with the distance it would make) and their ends snap. Not drawn on their own: the parts show - and from 0.109.0
+    the sketch is seen square on, so a part's edge is where its ref is (with 0.108.0's perspective a box 20 mm deep in
+    front of the plane showed its edge 2.4 mm off its ref - measured in the headless browser). Only straight edges: a cylinder seen from the side gives its top and bottom (its facets seen
     edge on are bits of one line - kept since a bit only has to be longer than 0.001 mm to have a direction), not its
     sides (smooth, no edge). Kept with the sketch: what the parts were when it opened.
   - *Undo back to the sketch.* `endSketch` keeps the sketch with the design it was made on (`sketchBefore`, a WeakMap
@@ -3789,6 +3791,40 @@ into the Hub, Tinkercad's level, his printer a Bambu Lab P2S but chosen per desi
     tegne på den". A sketch on a face - a box's, any flat one - turns the view straight at it and fills the view with
     the face (`lookAtSketch`: the box round its corners or outline, `boxOfPoints`; at least 10 mm across, as
     `lookFrom` has it), not with its part; on the plate and the planes it is Top, Front or Right as before.
+- **Extrude and Cut ask how far; on a face, one part (0.109.0).** Søren, 17:32: "Når man vælger Extrude, eller cut,
+  så skal den spørge hvor meget den skal extrude. ... og så skal man kunne extrude /cutte den nye del... Bagefter så
+  skal det hele ende med kun at være EN part".
+  - *Asked.* Extrude and Cut in the sketch's band no longer use fields beside them (Thickness, Cut through all, Depth
+    are gone from the band): pressed, they open a box over the sketch (`asking` {cut, mm, through}; `.v3d-askbox`,
+    pinned with `Viewport.pin` at the far corner of what is closed, on the plane - the dimension box's pin, never open
+    at the same time) holding the last thickness or depth (`sketchMake`, remembered when made). The view turns to look
+    at the plane 40 degrees off straight, toward the Fit view's front, right and above (`angledFrom`), taking in the
+    closed shapes and as far out of the plane (`regionsBox`) - looking straight at a plane an extrusion does not show,
+    so SolidWorks turns too. Meanwhile the preview is what will be made, so thick or so deep (`sketchParts` as Extrude
+    or Cut would call it, the rest faded; a cut grey); typing changes it. Enter or the box's Extrude/Cut makes it, Esc
+    or Cancel goes back to the sketch as it was (its tool, looking straight at it); nothing draws while it is open (the
+    tool is Pick; taking a tool closes the box, as does the sketch losing what is closed).
+  - *One part.* On a part's face (a box's, or any flat face) what Extrude or Cut makes joins that part (`joinTo`):
+    beside it in its group when it is in one - the group is the part - else the part and what is made go in a new
+    group named as the part (`group`, its name `label(part)`), placed where the part was; that group is picked. A hole
+    in a group cuts that group alone - so a Cut on a lid's top no longer cuts the box under it, as SolidWorks' cut is
+    a feature of its part. What is extruded takes the part's colour as drawn (grey when it has none). On the plate and
+    the planes nothing changes: new parts of their own, a cut cutting everything. hub3d builds the joined design the
+    same (the test builds both).
+  - *A group folded.* In the parts list a group's parts are folded under it - a chevron with their number (a button
+    with text, as Søren wants buttons) unfolds them; a part inside picked while folded, the group's row is marked
+    (dashed). The fold is the list's own state, all folded at first.
+  - *Square on, onto lines, backwards.* Søren, 17:57, a front-plane sketch over a part with the pointer on its top edge
+    and the point off it: "Jeg kan ikke ramme den eksisterende streg når jeg vil lave min sketch ovenpå den eksisterende
+    part"; 17:58: "når man extruder skal man kunne taste et - tal ind hvis den skal extrudere bagud". While a sketch is
+    open the camera's angle of view is 1.5 degrees instead of 38 (`Viewport.setFlat`; the camera moves along its line
+    so what is seen keeps its size) - as good as orthographic, as SolidWorks draws: a part in front of or behind the
+    plane shows its edges where they fall on it. A point within 10 px of a corner still takes the corner; else within
+    8 px of a line - the face's edges, the other parts' (refs), the shapes' sides (`lineNear`) - it lands on it
+    (`onLine`): across a level or upright line exactly on it, along it to the whole mm counted as the sketch counts
+    them (a box face's from its lower left corner); on a slanted one square to it. Extrude's box takes a thickness below
+    0 on the plate and the planes (`backOk`): `sketchParts` stands the part behind the plane (`back`); on a face it would
+    only go into the part, so the box says Extrude stands out of a face and Cut goes in.
 
 ### Workflows (0.67.0)
 

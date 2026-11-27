@@ -10,6 +10,9 @@ import { LineSegments2 } from "three/addons/lines/LineSegments2.js";
 import { LineSegmentsGeometry } from "three/addons/lines/LineSegmentsGeometry.js";
 import type { Box3, Built, MeshData, Vec3 } from "./geometry";
 
+const VIEW_FOV = 38;                                   // degrees, top to bottom
+const FLAT_FOV = 1.5;                                  // while sketching (0.109.0): next to no perspective
+
 THREE.Object3D.DEFAULT_UP.set(0, 0, 1);
 
 export interface Hit { part: string; point: Vec3; normal: Vec3; tri?: number }   // tri: the solid's triangle (0.107.0)
@@ -103,7 +106,7 @@ export class Viewport {
     this.labelBox.className = "v3d-dims";
     this.labelBox.setAttribute("aria-hidden", "true");
     host.appendChild(this.labelBox);
-    this.camera = new THREE.PerspectiveCamera(38, 1, 0.5, 20000);
+    this.camera = new THREE.PerspectiveCamera(VIEW_FOV, 1, 0.5, 20000);
     this.camera.up.set(0, 0, 1);
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = false;
@@ -434,6 +437,25 @@ export class Viewport {
     this.raycaster.set(cam, to.normalize());
     const hit = this.raycaster.intersectObject(this.solid, false)[0];
     return !hit || hit.distance >= far - slack;
+  }
+
+  /** The camera's angle of view (0.109.0): VIEW_FOV - while sketching FLAT_FOV, as good as square on (SolidWorks draws
+   *  orthographic): what stands in front of or behind a sketch's plane lines up with where it falls on the plane, so a
+   *  part's edge is seen where the sketch snaps and measures to it (Søren, 17:57: "Jeg kan ikke ramme den eksisterende
+   *  streg"). The camera moves along its line so what is seen stays the size it was. */
+  setFlat(on: boolean): void {
+    const fov = on ? FLAT_FOV : VIEW_FOV;
+    if (this.camera.fov === fov) return;
+    const t = this.controls.target, dir = this.camera.position.clone().sub(t);
+    const d = dir.length() || 1;
+    const k = Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2)) / Math.tan(THREE.MathUtils.degToRad(fov / 2));
+    this.camera.position.copy(t).addScaledVector(dir.normalize(), d * k);
+    this.camera.fov = fov;
+    this.camera.near = Math.max(0.1, (d * k) / 200);
+    this.camera.far = d * k * 50 + Math.max(...this.bed) * 4;
+    this.camera.updateProjectionMatrix();
+    this.controls.update();
+    this.render();
   }
 
   /** How many mm a pixel spans at a point of the design (0.94.0: a click a few pixels from an edge picks it). */
