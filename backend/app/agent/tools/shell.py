@@ -1,9 +1,15 @@
 """bash in the sandbox container."""
 from __future__ import annotations
 
+import re
+
 import httpx
 
-from .base import ABOUT, Tool, ToolContext, ToolResult, clip, obj, register
+from .base import ABOUT, WHOLE_CHARS, Tool, ToolContext, ToolResult, clip, obj, register
+
+# The Hub's own references the prompt sends the model to before it works: their output comes through whole, up to
+# WHOLE_CHARS (0.105.0, chat 335 - hub3d format lost its middle: flat things, standing things, the first example).
+REFERENCE = re.compile(r"^\s*hub3d\s+(?:format|recipe)\s*(?:2>&1\s*)?$")
 
 
 class SandboxError(RuntimeError):
@@ -64,6 +70,9 @@ async def bash(ctx: ToolContext, args: dict) -> ToolResult:
         return ToolResult(str(exc), is_error=True)
     wd.checkin("agent", "sandbox", f"bash: {cmd[:120]}")
     limit = int(ctx.settings.get("agent", "tool_output_chars") or 12000)
+    whole = bool(REFERENCE.match(cmd)) and res.get("exit_code") == 0
+    if whole:
+        limit = max(limit, WHOLE_CHARS)
     out, _ = clip(res.get("stdout") or "", limit)
     err, _ = clip(res.get("stderr") or "", limit // 2)
     parts = [f"exit code {res.get('exit_code')}" + (" (TIMED OUT - killed)" if res.get("timed_out") else "")
@@ -75,7 +84,7 @@ async def bash(ctx: ToolContext, args: dict) -> ToolResult:
     failed = bool(res.get("timed_out")) or res.get("exit_code") not in (0, None)
     if offline and failed:
         parts.append(OFFLINE_NOTE)
-    return ToolResult("\n".join(parts), is_error=failed)
+    return ToolResult("\n".join(parts), is_error=failed, whole=whole)
 
 
 OFFLINE_NOTE = ("(This command ran without the network - no connections, no DNS: the user has the assistant ask "

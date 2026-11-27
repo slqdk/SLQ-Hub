@@ -4,7 +4,24 @@ The state of SLQ Hub for whoever works on it next (a person or Claude).
 Read `docs/DESIGN.md` for the decisions; this file says what exists, what
 has been checked, and - honestly - what has not.
 
-## Next session - start here (written 2026-11-27, at 0.104.0)
+## Next session - start here (written 2026-11-27, at 0.105.0)
+
+**0.105.0 (2026-11-27): the same after a change; hub3d format whole; no hand-over to a smaller model; no blue bar in
+the sketch - pushed, not yet installed.** Søren, 11:03, to the rest of chat 335's findings: "ja gør det.." - and 11:09,
+a screenshot of the sketch: "og fjern den blå bjælke med instruktioner". Built (DESIGN §6 Loop guard, The same after
+a change, References whole; Hand-over): a look (`bash`, `view_image`, `read_file`) giving back exactly what an earlier
+look gave back, with a successful write_file/edit_file between (paths in its call and a command's seconds left out,
+images by hash), is told so at the end of its result; the second time to tell the user and ask; the third time the
+turn is stuck. `hub3d format`/`hub3d recipe` come through whole up to 24,000 characters (`ToolResult.whole`). A stuck
+turn is not handed to a smaller model (`Catalog.strength`: a mixture counts as the geometric mean of all and active
+parameters, so Qwen3.6 35B-A3B still hands over to Qwen3.8 27B); Settings shows sizes beside the names - his
+escalate_to (Qwen3.5 Special, 9B) is now ignored under gemma 4 31B: he should pick another there. The sketch's
+instruction bar is gone (the keys and typing are in Help); the tools' bars (Mate, Pick edges, Lay flat, Point at) stay
+- asked him. Tests: test_agent_guards.py (the reference whole and another command shortened, the note twice and the
+third time an answer, a smaller target not offered, the sizes). Not seen: a real model getting the note; the editor
+without the bar in a browser (a removed element; tsc, build).
+
+Next he asked for: statistics over the Hub's users - chats started, minutes, cost in kr.
 
 **0.104.0 (2026-11-27): a mesh keeps its own size; hub3d design says meshes and wrong cuts - pushed, not yet
 installed.** Søren, 10:18, chat 335's export (gemma 4 31B (U), "lav et hul i bunden, så der er plads til et

@@ -20,6 +20,12 @@ class ToolResult:
     # The card or ComfyUI failed, not the call: it does not count towards a hand-over (a stronger model would meet
     # the same card - the test run of 2026-10-25 handed a video turn over after three out-of-memory failures).
     hub_fault: bool = False
+    # A reference the prompt sends the model to before it works (hub3d format): kept whole up to WHOLE_CHARS
+    # (0.105.0, chat 335: the format's 13.8k characters lost 2.4k from their middle to the 12,000 limit).
+    whole: bool = False
+
+
+WHOLE_CHARS = 24_000
 
 
 OOM_NOTE = (" The graphics card ran out of memory: the same call fails the same way, so do not repeat it - ask for "

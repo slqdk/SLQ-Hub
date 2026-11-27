@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.105.0 - 2026-11-27
+
+- The assistant is told when a check gives back exactly the same result
+  as before its last change - the change made no difference. The second
+  time it is asked to tell you what it found; the third time the turn is
+  handed over, or it answers with what it has.
+- `hub3d format` now reaches the model whole; before, a long middle part
+  was cut away.
+- A stuck turn is no longer handed over to a smaller model than the one
+  working. Settings shows each model's size beside its name.
+- Sketch: the blue bar with instructions over the drawing is gone (the
+  keys and typing are in Help).
+
 ## 0.104.0 - 2026-11-27
 
 - 3D designs: a mesh part written without a size now keeps the size of

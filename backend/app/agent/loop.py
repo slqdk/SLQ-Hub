@@ -36,7 +36,7 @@ from . import gitserver, internet
 from .prompt import device_folder_text, folder_text, system_prompt
 from .runs import Run, RunRegistry
 from .tools import REGISTRY, Tool, ToolContext, ToolResult
-from .tools.base import clip
+from .tools.base import WHOLE_CHARS, clip
 
 log = logging.getLogger("hub.agent")
 Persist = Callable[[str, list[dict]], Awaitable[None]] | None
@@ -52,6 +52,17 @@ MUST_ANSWER = ("(SLQ Hub: you are repeating the same steps and getting the same 
 NO_ANSWER = "(The model kept repeating the same tool calls and gave no answer. Ask again, or try another model.)"
 LOOP_REPEATS = 3
 LOOP_SAME_STEPS = 3
+# Same again (0.105.0, chat 335): a look - a command, a picture, a file read - that gives back exactly what an earlier
+# look gave back, with an edit made in between, means the edit did not reach what it checks. Paths in the call (a
+# picture's new name each time) are left out of the comparison.
+SAME_AGAIN_TOOLS = ("bash", "view_image", "read_file")
+EDIT_TOOLS = ("write_file", "edit_file")
+SAME_AGAIN = ("(SLQ Hub: this is exactly what {what} gave back before your last change - the change made no "
+              "difference to it. Find out why before you change more: measure it with a script, or read again what "
+              "the tool or the format says.{more})")
+SAME_AGAIN_TWICE = " That is twice this turn: if you cannot see why, tell the user what you found and ask."
+SAME_AGAIN_STUCK = 3                    # the third time: stuck - handed over, or it answers with what it has
+PATH_LIKE = re.compile(r"[\w./-]+\.[A-Za-z0-9]{1,5}\b")
 # Effort (0.38.0, Søren): one choice for how hard a turn works, in the chat (the composer), its project and Settings
 # -> Assistant (plain chats / projects). quick: no thinking; think: thinking at the chosen level, half the thinking
 # budget a step; extra: thinking at the model's highest level, the whole budget, and the independent review.
@@ -151,13 +162,17 @@ def vision(model: dict) -> bool:
 
 
 def local_target(hub: Hub, current: dict) -> dict | None:
-    """The stronger model on this server a stuck turn is handed over to
-    (Settings -> Assistant), when it is downloaded and not the one already working."""
+    """The stronger model on this server a stuck turn is handed over to (Settings -> Assistant), when it is downloaded,
+    not the one already working, and not smaller than it (0.105.0, chat 335: gemma 4 31B would have handed its turn to
+    a 9B model its prompt called "a stronger model")."""
     want = str(hub.settings.get("agent", "escalate_to") or "").strip()
     if not want:
         return None
     entry = hub.catalog.get_llm(hub.catalog.resolve(want) or want)
     if not entry or entry["id"] == current["id"] or not hub.catalog.installed(entry):
+        return None
+    mine, theirs = Catalog.strength(current), Catalog.strength(entry)
+    if mine is not None and theirs is not None and theirs < mine:
         return None
     return entry
 
@@ -203,6 +218,10 @@ class Engine:
         # gave back, so a call refused as a repeat counts as giving that again (0.66.0)
         self.same_steps: dict[str, tuple[int, str]] = {}
         self.last_results: dict[str, str] = {}
+        # Same again (0.105.0): what each look gave back -> (the call that got it, the edits made by then).
+        self.looks: dict[str, tuple[str, int]] = {}
+        self.edits = 0
+        self.same_again = 0
         self.must_answer = ""
         # Hand-over (a loop, three failed calls, or the escalate tool): first to the stronger local model,
         # then - in projects that allow it - to the cloud. A note goes with the next answer.
@@ -257,8 +276,10 @@ class Engine:
     def handover_label(self) -> str:
         """Who takes over if this model gets stuck (for its prompt and the escalate tool); "" = nobody."""
         target = self.local_target()
-        if target is not None:
-            return f"{Catalog.label(target)}, a stronger model on this server"
+        if target is not None:              # bigger: stronger; the same size, or one not known: only another one
+            mine, theirs = Catalog.strength(self.model), Catalog.strength(target)
+            what = "a stronger model" if mine is not None and theirs is not None and theirs > mine else "another model"
+            return f"{Catalog.label(target)}, {what} on this server"
         if self.escalation and self.cloud is None:
             return "a stronger cloud model"
         return ""
@@ -458,6 +479,7 @@ class Engine:
                                                 "text": STOPPED, "images": [], "is_error": True}])
                     raise
                 got.append(self._came_back(c, result))
+                self._same_again(c, result)
                 messages.append({"role": "tool", "tool_call_id": c["id"], "content": result.text})
                 images += result.images
                 if persist:
@@ -849,7 +871,7 @@ class Engine:
                           waited=round(time.monotonic() - t0, 2), thinking=self.thinking)
 
     def _finish(self, name: str, cid: str, args: dict, result: ToolResult, t0: float) -> ToolResult:
-        result.text = self._store_long(cid, result.text or "(no output)")
+        result.text = self._store_long(cid, result.text or "(no output)", result.whole)
         secs = round(time.monotonic() - t0, 2)
         rec = {"type": "tool", "name": name, "ok": not result.is_error, "seconds": secs, "depth": self.depth}
         if self.depth:     # a subagent's or the reviewer's calls are kept nowhere else: the export shows them (0.32.0)
@@ -918,8 +940,10 @@ class Engine:
         self.steps.append({"type": "loop", "reason": reason, "depth": self.depth})
         self.emit("loop", reason=reason)
 
-    def _store_long(self, cid: str, text: str) -> str:
+    def _store_long(self, cid: str, text: str, whole: bool = False) -> str:
         limit = int(self.hub.settings.get("agent", "tool_output_chars") or 12000)
+        if whole:                                # a reference read before the work (hub3d format): whole (0.105.0)
+            limit = max(limit, WHOLE_CHARS)
         if len(text) <= limit:
             return text
         rel = f".hub/outputs/{cid}.txt"
@@ -972,6 +996,50 @@ class Engine:
         text = re.sub(r"^(exit code [^\n,]*), [\d.]+ s", r"\1", result.text)
         self.last_results[key] = f"{int(result.is_error)}{hashlib.sha1(text.encode('utf-8', 'replace')).hexdigest()}"
         return self.last_results[key]
+
+    def _same_again(self, call: dict, result: ToolResult) -> None:
+        """A look that gives back exactly what an earlier look gave back, with an edit made in between (0.105.0, chat
+        335: two checks of a design two edits apart drew the same picture, and the model went on moving a hole): it
+        is told so, at the end of the result; the third time the turn is stuck - handed over, or it answers."""
+        name = call["name"]
+        if name in EDIT_TOOLS:
+            self.edits += 0 if result.is_error else 1
+            return
+        if name not in SAME_AGAIN_TOOLS or result.text == REPEATED.format(name=name):
+            return
+        try:
+            args = json.loads(call.get("arguments") or "{}")
+        except ValueError:
+            args = {}
+        args = args if isinstance(args, dict) else {}
+        text = re.sub(r"^(exit code [^\n,]*), [\d.]+ s", r"\1", result.text)
+        for v in args.values():
+            if isinstance(v, str):
+                for path in sorted(set(PATH_LIKE.findall(v)), key=len, reverse=True):
+                    text = text.replace(path, "")
+        key = hashlib.sha1("\0".join([name, str(int(result.is_error)), text,
+                                      *(str(i.get("sha", "")) for i in result.images)]).encode("utf-8", "replace"))
+        before = self.looks.get(key.hexdigest())
+        self.looks[key.hexdigest()] = (self._look_label(name, args), self.edits)
+        if before is None or before[1] == self.edits:
+            return                                   # new, or nothing edited since: only a look again
+        self.same_again += 1
+        more = SAME_AGAIN_TWICE if self.same_again == 2 else ""
+        result.text += "\n\n" + SAME_AGAIN.format(what=before[0], more=more)
+        note = f"It was told a check gave back the same as before its last change ({before[0]})."
+        self.pending_notice = f"{self.pending_notice} {note}".strip()
+        self.steps.append({"type": "same_again", "times": self.same_again, "what": before[0], "depth": self.depth})
+        self.emit("same_again", times=self.same_again, what=before[0])
+        if self.same_again >= SAME_AGAIN_STUCK:
+            self._stuck(f"a check gave back the same as before a change {self.same_again} times", loop=True)
+
+    @staticmethod
+    def _look_label(name: str, args: dict) -> str:
+        if name == "bash":
+            cmd = " ".join(str(args.get("command") or "").split())
+            return f'the command "{cmd[:100]}{"..." if len(cmd) > 100 else ""}"'
+        path = str(args.get("path") or "")
+        return f"{name} of {path}" if path else name
 
     def _stuck(self, reason: str, loop: bool) -> None:
         """Hand the turn over if someone can take it; otherwise a loop ends in an answer without tools."""

@@ -2371,7 +2371,6 @@ export function Editor({ store, path, create, own = "", onPath, onClose, max, on
               <Tool icon={<ViewIcon face="right" />} title="From the right" onClick={() => view("right")}><span>Right</span></Tool>
             </div>
           </div>
-          {sketch && <div className="v3d-hint">{sketchHint(sketch, planeName(sketch.plane, sketchFrame(sketch)?.box))}</div>}
           {tool && <div className="v3d-hint">{tool === "face" ? "Click the face it should lie on - a text's letters on it, upright on a wall. Esc leaves it where it is."
             : tool === "mate" ? mateHint(mating, parts)
             : tool === "point" ? "Click the spot on the model to send it to the chat. Esc stops."
@@ -3109,33 +3108,6 @@ const dimWhat = (shapes: SketchShape[], d: SketchDim): keyof typeof DIM_NAME =>
 /** How far a length is drawn out from its side (0.103.0): 20 px at the plane's 0,0 - the same for what is drawn and
  *  what a click picks. */
 const dimOff = (v: Viewport, f: PlaneFrame): number => 20 * v.mmPerPx(to3d(f, [0, 0]));
-
-/** What to do next in a sketch, said under the bar. */
-function sketchHint(s: SketchState, where: string): string {
-  const typed = s.typed ? ` Typed: ${s.typed} - Enter puts it down.` : "";
-  if (s.tool === "line") {
-    return s.draft ? `Line: click the next corner (or drag to it) - the first one again closes it, the last one again (or `
-      + `Esc) ends it. Type a length and Enter for an exact one.${typed}` : `Line on ${where}: click its first corner - or `
-      + "drag a line. Points snap to whole millimetres, and to the corners and middles near the pointer.";
-  }
-  if (s.tool === "rect") return s.draft ? `Rectangle: click the corner across - or type width;height and Enter.${typed}` : `Rectangle on ${where}: click a corner - or drag from corner to corner.`;
-  if (s.tool === "circle") return s.draft ? `Circle: click its edge - or type its diameter and Enter.${typed}` : `Circle on ${where}: click its middle - or drag from its middle to its edge.`;
-  const what = s.dim !== null && s.dims[s.dim] ? dimWhat(s.shapes, s.dims[s.dim]) : "distance";
-  if (s.tool === "dim") {
-    const d = s.draft?.kind === "dim" ? s.draft : null;
-    return d ? `Dimension: type the ${s.shapes[d.shape]?.kind === "circle" ? "diameter" : "length"} in the box and Enter - `
-      + "or click another shape's side, or the face's edge, for the distance to it."
-      : s.dim !== null ? `${DIM_NAME[what]} picked: type the mm in the box and Enter (Esc closes it) - or click the next line.`
-        : "Dimension: click a line for its length, a circle for its diameter - or a shape, then the line it is measured to. "
-          + "Type the mm in the box beside it and Enter.";
-  }
-  if (s.dim !== null) {
-    return `${DIM_NAME[what]} picked: type the mm in the box and Enter (Esc closes it) - Delete in the bar takes it away `
-      + "(the shape stays).";
-  }
-  return "Click a shape or a distance to pick it - Delete takes it away; L, R and C draw, D dimensions. Drag to move the view "
-    + "(the middle button turns it). Extrude or Cut makes the closed shapes into parts.";
-}
 
 /** The Sketch tab (0.100.0): what draws - Line, Rectangle, Circle; Pick, Delete, Undo; the picked shape's size; and
  *  what leaves the sketch - Extrude (so high), Cut (through all or so deep), Cancel. */

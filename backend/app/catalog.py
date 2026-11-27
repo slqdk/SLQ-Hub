@@ -14,6 +14,7 @@ from __future__ import annotations
 import copy
 import json
 import os
+import re
 import threading
 from pathlib import Path
 
@@ -349,6 +350,21 @@ class Catalog:
 
     def get_llm(self, model_id: str) -> dict | None:
         return self.get("llm", model_id)
+
+    @staticmethod
+    def strength(entry: dict) -> float | None:
+        """A language model's size for telling which of two is the stronger, in billions of parameters (0.105.0): its
+        parameter_size ("27B", "30.7B"), else the size in its card's name or id ("qwen3.5-9b-..."); a mixture of
+        experts counts as the geometric mean of all and its active ones (35B-A3B: about 10B - Qwen3.8 27B is the
+        stronger of the two, as the Hub's own pair has it). None when nothing says."""
+        for text in (entry.get("parameter_size"), entry.get("name_card"), entry.get("id"), entry.get("name")):
+            s = str(text or "")
+            m = re.search(r"(?<![\d.])(\d+(?:\.\d+)?)\s*[bB](?![a-zA-Z])", s)
+            if m:
+                active = re.search(r"[aA](\d+(?:\.\d+)?)\s*[bB](?![a-zA-Z])", s[m.end():])
+                total = float(m.group(1))
+                return (total * float(active.group(1))) ** 0.5 if active else total
+        return None
 
     @staticmethod
     def label(entry: dict) -> str:

@@ -1434,9 +1434,12 @@ function AgentTab({ s }: { s: S }) {
             "and videos are checked before you get them (below)." },
         { key: "escalate_to", label: "When the model gets stuck, hand over to", type: "select",
           options: [{ value: "", label: "Nobody: it answers with what it has" },
-            ...(models?.llm ?? []).filter((m) => m.installed).map((m) => ({ value: m.id, label: m.name }))],
-          help: "Stuck: it repeats itself, three tool calls in a row fail, or it asks for help. The turn goes on with this " +
-            "model (the card switches, which takes a moment) and the chat says so. Not when this model is the one working." },
+            ...(models?.llm ?? []).filter((m) => m.installed).map((m) => ({ value: m.id,
+              label: m.parameter_size ? `${m.name} · ${m.parameter_size}` : m.name }))],
+          help: "Stuck: it repeats itself, three tool calls in a row fail, it gets the same result after each change, or " +
+            "it asks for help. The turn goes on with this model (the card switches, which takes a moment) and the chat " +
+            "says so. Not when this model is the one working, and not from a bigger one (the sizes are beside the " +
+            "names; a mixture such as 35B-A3B counts as about 10B): that turn answers with what it has." },
         { key: "review_model", label: "Who checks the work (Extra)", type: "select",
           options: [{ value: "", label: "The model it hands over to (else the model that did it)" },
             { value: "same", label: "The model that did the work" },

@@ -598,6 +598,30 @@ block (shown in the chat, never sent to a model). When someone can take
 over (below), the turn is handed over instead of forced to answer; a
 hand-over resets the guard.
 
+**The same after a change** (0.105.0, `Engine._same_again`). Chat 335's
+gemma 4 31B moved a hole round a mesh for 28 steps: every check a new call
+(the views had a new file name each time), every result a little different,
+none of it progress - and twice a check came back exactly as before the edit
+made between. A look (`bash`, `view_image`, `read_file`) whose result -
+without the seconds a command took, without the paths in its own call (the
+picture's new name), with its images' hashes - is exactly what an earlier look
+gave back, with a `write_file` or `edit_file` that worked made in between, gets
+a note at the end of its result: "this is exactly what <the earlier call> gave
+back before your last change - the change made no difference to it. Find out
+why before you change more"; the second time also "tell the user what you found
+and ask"; the third time the turn is stuck (hand-over, below, or an answer). The
+same look with no edit between is only a look again: nothing said. A `notice`
+says so in the chat ("It was told a check gave back the same ..."), a
+`same_again` event and step record it.
+
+**References whole** (0.105.0). `hub3d format` grew to 13.8k characters, and
+a tool's output is shortened to Settings' 12,000 (`tool_output_chars`) by
+keeping its head and tail: chat 335's model never saw its middle (flat things,
+things that stand, the first example). The references the system prompt sends
+the model to before it works - `hub3d format` and `hub3d recipe`, as the whole
+command (`shell.REFERENCE`) - come through whole up to 24,000 characters
+(`ToolResult.whole`, also past `_store_long`).
+
 **Cut-off calls** (0.16.2). An answer that ends at the end of the context, or
 at the limit for one answer (finish `length`), may stop inside a tool call.
 Chat 21: the model put a whole game into one `write_file` with 48,596 of
@@ -1592,7 +1616,15 @@ order:
 
 - **The stronger model on this server** (Settings → Assistant → "When the
   model gets stuck, hand over to", default Qwen3.8 27B), when it is
-  downloaded and is not the one already working. The turn goes on in the same
+  downloaded, is not the one already working and is not smaller than it
+  (0.105.0: chat 335's gemma 4 31B was told the 9B Qwen3.5 Special it would
+  hand over to was "a stronger model on this server"). Size is
+  `Catalog.strength`: the parameter size, else the one in the card's name or
+  id; a mixture of experts counts as the geometric mean of all and active
+  (35B-A3B: about 10B, so the Hub's own pair - Qwen3.6 35B-A3B to Qwen3.8 27B
+  - still hands over). A bigger one is "a stronger model" in the prompt and
+  the escalate tool, one of the same size or unknown "another model";
+  Settings shows each model's size beside its name. The turn goes on in the same
   lease: the card switches before the next step (`ticket.switch`), thinking
   and effort are resolved again for the new model, the other model's
   reasoning is dropped (and images, if the new model cannot see), the system
@@ -3426,7 +3458,9 @@ into the Hub, Tinkercad's level, his printer a Bambu Lab P2S but chosen per desi
     mouse button, i then start to move turn the place... That is not efficient in 2D"): a drawing tool has it, Pick
     moves the view with it, the middle button turns it (as in SolidWorks), the right moves it, the wheel zooms
     (`Viewport.setLeft`). The empty design's "Add a shape from Insert above..." over the plate is gone (Søren: "remove
-    the text on the plate.. it is in the way") - the status line says "Nothing to print yet". The pointer's ray meets the plane
+    the text on the plate.. it is in the way") - the status line says "Nothing to print yet". So is the blue bar of
+    what to do next under the pill (0.105.0, Søren, 11:09: "fjern den blå bjælke med instruktioner"): the keys and
+    typing are in Help. The pointer's ray meets the plane
     (`rayOnPlane`); the point snaps to a corner, end or middle within 10 px (a face's corners, edge middles and middle
     too), else to the whole millimetre - on a face from its lower left corner, so distances from its edges come out
     whole. Typed while drawing, as SketchUp's Measurements box: a line's next length toward the pointer (a whole 15°

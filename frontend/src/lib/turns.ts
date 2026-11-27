@@ -340,6 +340,9 @@ function applyStream(items: Item[], ev: RunEvent): void {
     case "notes_reminder":                   // NOTES.md in long work (0.31.0)
       items.push({ kind: "notice", tone: "info", text: `It was reminded to write what it found in ${d.name} (step ${d.step}).` });
       break;
+    case "same_again":                       // a check gave back the same after a change (0.105.0)
+      items.push({ kind: "notice", tone: "info", text: `It was told a check gave back the same as before its last change (${d.what}).` });
+      break;
     case "wrap_up": {                        // the reviewer near its end (0.32.0): told to finish, then a last step
       const limit = String(d.limit ?? ""), time = d.why === "time";
       items.push({ kind: "notice", tone: "info", text: d.last
